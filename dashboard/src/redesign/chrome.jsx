@@ -37,7 +37,7 @@ export function TopNav({ tab, setTab, busy }) {
     <header className="topnav">
       <div className="brand" aria-label="S6_cut home">
         <img src={logoMark} alt="" aria-hidden="true" />
-        <span>Clippy<span className="me">Me</span></span>
+        <span>S6_cut</span>
       </div>
       <nav className="tabs" aria-label="Primary navigation">
         {TABS.map((item) => (

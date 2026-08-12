@@ -53,7 +53,6 @@ h1, h2, h3, h4, h5, h6 {
 }
 .brand{display:flex;align-items:center;gap:9px;font-weight:800;font-size:var(--text-18);letter-spacing:-.03em;color:var(--fg-1)}
 .brand img{width:28px;height:28px;display:block}
-.brand .me{color:var(--brand-blue)}
 .tabs{display:flex;gap:2px;background:var(--bg-2);border:1px solid var(--line-1);border-radius:var(--r-pill);padding:4px}
 .tab{display:flex;align-items:center;gap:7px;font-size:var(--text-sm);font-weight:600;color:var(--fg-3);padding:7px 15px;border-radius:var(--r-pill);cursor:pointer;border:0;background:none;transition:color .15s,background .15s}
 .tab:hover{color:var(--fg-1)}

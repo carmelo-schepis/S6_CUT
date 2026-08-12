@@ -78,3 +78,4 @@ fonts/NotoColorEmoji.ttf
 
 # ruff cache
 .ruff_cache/
+.pytest-tmp/
