@@ -1,0 +1,61 @@
+from clippyme.pipeline.gemini_parser import drop_wordless_clips, cap_clips_by_score
+
+
+def test_cap_keeps_top_n_by_score():
+    clips = [{"viral_score": s, "id": s} for s in (81, 91, 85, 88, 70)]
+    out = cap_clips_by_score(clips, 3)
+    assert [c["viral_score"] for c in out] == [91, 88, 85]
+
+
+def test_cap_noop_when_under_limit_or_zero():
+    clips = [{"viral_score": 90}, {"viral_score": 80}]
+    assert cap_clips_by_score(clips, 5) == clips
+    assert cap_clips_by_score(clips, 0) == clips
+    assert cap_clips_by_score(clips, -1) == clips
+
+def test_min_score_floor_lets_the_count_follow_the_material():
+    clips = [{"viral_score": s} for s in (91, 88, 62, 55)]
+    # Auto selection: only the clips above the floor survive, ceiling untouched.
+    assert [c["viral_score"] for c in cap_clips_by_score(clips, 5, 70)] == [91, 88]
+    # A weak segment yields nothing rather than padding the quota.
+    assert cap_clips_by_score(clips, 5, 95) == []
+    # Floor + ceiling compose: floor first, then top-N of what is left.
+    assert [c["viral_score"] for c in cap_clips_by_score(clips, 1, 70)] == [91]
+
+
+WORDS = [{"start": 10.0, "end": 10.5, "word": "ciao"},
+         {"start": 11.0, "end": 11.4, "word": "mondo"}]
+
+
+def test_keeps_clip_overlapping_words():
+    clips = [{"start": 9.0, "end": 12.0}]
+    assert drop_wordless_clips(clips, WORDS) == clips
+
+
+def test_drops_clip_with_no_words_in_range():
+    clips = [{"start": 100.0, "end": 130.0}]   # hallucinated timestamp
+    assert drop_wordless_clips(clips, WORDS) == []
+
+
+def test_empty_words_drops_all():
+    assert drop_wordless_clips([{"start": 0, "end": 30}], []) == []
+
+
+# build_viral_prompt emits TOON-abbreviated words {"w","s","e"} — the ACTUAL
+# shape passed in the pipeline. Regression guard: this must not KeyError.
+TOON_WORDS = [{"w": "ciao", "s": 10.0, "e": 10.5},
+              {"w": "mondo", "s": 11.0, "e": 11.4}]
+
+
+def test_keeps_clip_overlapping_toon_words():
+    clips = [{"start": 9.0, "end": 12.0}]
+    assert drop_wordless_clips(clips, TOON_WORDS) == clips
+
+
+def test_drops_clip_no_toon_words_in_range():
+    assert drop_wordless_clips([{"start": 100.0, "end": 130.0}], TOON_WORDS) == []
+
+
+def test_words_missing_timing_are_skipped_not_raised():
+    words = [{"w": "x"}, {"s": 10.0, "e": 10.5, "w": "ciao"}]
+    assert drop_wordless_clips([{"start": 9.0, "end": 12.0}], words) == [{"start": 9.0, "end": 12.0}]

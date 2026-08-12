@@ -1,0 +1,204 @@
+"""Background job queue worker and cleanup loop.
+
+Uses a closure factory so shared state (``jobs``, queues, semaphores)
+stays owned by ``app.py`` — avoiding circular imports and
+module-level globals.
+"""
+import asyncio
+import logging
+import os
+import shutil
+import time
+from typing import Awaitable, Callable, Dict
+
+logger = logging.getLogger("clippyme")
+
+MAX_LOG_LINES = int(os.environ.get("MAX_LOG_LINES", "2000"))
+
+
+def enqueue_output(out, job_id: str, jobs: Dict[str, Dict]) -> None:
+    """Read lines from a subprocess stream and append them to the job's log list.
+
+    Intended to run inside a background thread.
+    """
+    try:
+        for line in iter(out.readline, b""):
+            # errors="replace": a single non-UTF-8 byte from ffmpeg/yt-dlp must
+            # not raise and kill this whole reader thread — that would freeze
+            # the job's visible log for the rest of the run while the
+            # subprocess keeps working, with no user-facing explanation.
+            decoded_line = line.decode("utf-8", errors="replace").strip()
+            if decoded_line:
+                logger.info("📝 [Job Output] %s", decoded_line)
+                if job_id in jobs:
+                    logs = jobs[job_id]["logs"]
+                    logs.append(decoded_line)
+                    if len(logs) > MAX_LOG_LINES:
+                        del logs[: len(logs) - MAX_LOG_LINES]
+    except Exception as e:
+        logger.error("Error reading output for job %s: %s", job_id, e)
+    finally:
+        out.close()
+
+
+def active_input_paths(jobs: Dict[str, Dict]) -> set[str]:
+    """Return canonical upload paths that are still owned by active jobs.
+
+    The retention sweep must never delete an uploaded source while its queued,
+    processing, or paused job can still read it.  Building the set in one pass
+    also avoids repeatedly scanning the job registry for every upload file.
+    """
+    from clippyme.domain.job_control import ACTIVE_STATES
+
+    protected = set()
+    for job in jobs.values():
+        if job.get("status") not in ACTIVE_STATES:
+            continue
+        path = job.get("input_path")
+        if path:
+            protected.add(os.path.abspath(os.fspath(path)))
+    return protected
+
+
+def make_workers(
+    *,
+    jobs: Dict[str, Dict],
+    job_queue: asyncio.Queue,
+    concurrency_semaphore: asyncio.Semaphore,
+    run_job: Callable[[str, Dict], Awaitable[None]],
+    output_dir: str,
+    upload_dir: str,
+    data_dir: str,
+    job_retention_seconds: int,
+    max_concurrent_jobs: int,
+):
+    """Build the ``cleanup_jobs``, ``process_queue`` and ``run_job_wrapper``
+    coroutines bound to the provided shared state.
+
+    Returns a tuple ``(cleanup_jobs, process_queue, run_job_wrapper)``.
+    """
+    active_job_tasks: set[asyncio.Task] = set()
+
+    async def cleanup_jobs() -> None:
+        """Background task to remove old jobs, uploads, and cache entries."""
+        logger.info("Cleanup task started")
+        while True:
+            try:
+                await asyncio.sleep(300)  # Check every 5 minutes
+                now = time.time()
+
+                # Retention <= 0 disables auto-purge entirely — the user
+                # is expected to delete clips explicitly from the
+                # History tab. Skip both OUTPUT_DIR and UPLOAD_DIR
+                # sweeps in that case so a stale mtime can't trigger
+                # a bulk delete behind the user's back.
+                if job_retention_seconds > 0:
+                    from clippyme.domain.history_service import is_valid_job_id
+                    from clippyme.domain.job_control import can_purge
+                    # OUTPUT_DIR: purge stale job folders. Only ever delete
+                    # directories whose name is a valid job id — never a
+                    # symlink, the thumbnails dir, or a hand-placed folder.
+                    for job_id in os.listdir(output_dir):
+                        job_path = os.path.join(output_dir, job_id)
+                        if not is_valid_job_id(job_id):
+                            continue
+                        if not can_purge(jobs.get(job_id, {}).get("status")):
+                            continue
+                        if os.path.isdir(job_path) and not os.path.islink(job_path):
+                            if now - os.path.getmtime(job_path) > job_retention_seconds:
+                                logger.info("Purging old job: %s", job_id)
+                                shutil.rmtree(job_path, ignore_errors=True)
+                                jobs.pop(job_id, None)
+
+                    # UPLOAD_DIR: purge stale uploads, except files still owned
+                    # by queued/processing/paused jobs.  A long-running or
+                    # paused job can legitimately outlive the retention window;
+                    # deleting its source here makes the pipeline fail halfway
+                    # through and can also destroy the only copy of an upload.
+                    protected_uploads = active_input_paths(jobs)
+                    for filename in os.listdir(upload_dir):
+                        file_path = os.path.join(upload_dir, filename)
+                        if os.path.abspath(file_path) in protected_uploads:
+                            continue
+                        try:
+                            if now - os.path.getmtime(file_path) > job_retention_seconds:
+                                os.remove(file_path)
+                        except Exception as exc:
+                            # warning, not debug: the app's INFO basicConfig
+                            # would swallow debug, hiding a systematically
+                            # failing cleanup (slow disk leak, no signal).
+                            logger.warning("Cleanup skipped upload %s: %s", filename, exc)
+
+                # Transcript cache (older than 7 days)
+                cache_dir = os.path.join(data_dir, "cache")
+                if os.path.isdir(cache_dir):
+                    for filename in os.listdir(cache_dir):
+                        cache_path = os.path.join(cache_dir, filename)
+                        try:
+                            if now - os.path.getmtime(cache_path) > 7 * 86400:
+                                os.remove(cache_path)
+                        except Exception as exc:
+                            logger.warning("Cleanup skipped cache %s: %s", filename, exc)
+
+            except Exception as e:
+                logger.warning("Cleanup error: %s", e)
+
+    async def run_job_wrapper(job_id: str) -> None:
+        """Run a single job and always release the concurrency slot."""
+        try:
+            job = jobs.get(job_id)
+            if job:
+                await run_job(job_id, job)
+        except Exception as e:
+            logger.error("Job wrapper error %s: %s", job_id, e)
+        finally:
+            concurrency_semaphore.release()
+            job_queue.task_done()
+            logger.info("Released slot for job: %s", job_id)
+
+    async def process_queue() -> None:
+        """Dispatch jobs and retain child tasks until they finish.
+
+        Keeping strong references follows asyncio's task-lifecycle contract and
+        the ``finally`` block guarantees that application shutdown cancels and
+        awaits every active job wrapper instead of leaving subprocess workers
+        running after the dispatcher itself has stopped.
+        """
+        logger.info("Job queue worker started with %d concurrent slots", max_concurrent_jobs)
+        try:
+            while True:
+                job_id = None
+                dispatched = False
+                slot_acquired = False
+                try:
+                    job_id = await job_queue.get()
+                    await concurrency_semaphore.acquire()
+                    slot_acquired = True
+                    logger.info("Acquired slot for job: %s", job_id)
+                    task = asyncio.create_task(
+                        run_job_wrapper(job_id), name=f"clippyme-job-{job_id}"
+                    )
+                    active_job_tasks.add(task)
+                    task.add_done_callback(active_job_tasks.discard)
+                    dispatched = True
+                except asyncio.CancelledError:
+                    if slot_acquired and not dispatched:
+                        concurrency_semaphore.release()
+                    if job_id is not None and not dispatched:
+                        job_queue.task_done()
+                    raise
+                except Exception as e:
+                    logger.exception("Queue dispatch error: %s", e)
+                    if slot_acquired and not dispatched:
+                        concurrency_semaphore.release()
+                    if job_id is not None and not dispatched:
+                        job_queue.task_done()
+                    await asyncio.sleep(1)
+        finally:
+            tasks = list(active_job_tasks)
+            for task in tasks:
+                task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+
+    return cleanup_jobs, process_queue, run_job_wrapper

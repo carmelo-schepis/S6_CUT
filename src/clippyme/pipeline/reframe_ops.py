@@ -1,0 +1,683 @@
+"""Pure reframe decision math — no cv2, no heavy CV runtime.
+
+Everything here operates on plain numbers, tuples, and numpy arrays so it can
+be unit-tested on any host. main.py owns the cv2 glue (frame capture, FaceMesh,
+saliency-map generation) and calls into these functions. Do NOT import cv2 here.
+
+Provides:
+- OneEuroFilter               — adaptive jitter-vs-lag camera smoothing
+- drift_to_center             — graceful lost-subject recovery
+- salient_crop_center         — content-aware crop window for faceless scenes
+- weighted_interest_center    — weighted-object centroid for faceless B-roll
+- savgol_1d                    — Savitzky-Golay smoothing for a future two-stage
+                                 global-trajectory pass
+"""
+from __future__ import annotations
+
+import math
+from typing import Optional
+
+import numpy as np
+
+
+# --- smoothing --------------------------------------------------------------
+
+class OneEuroFilter:
+    """1€ filter — adaptive low-pass that follows fast moves and damps jitter.
+
+    `min_cutoff` sets the floor smoothing (lower = smoother/laggier at rest);
+    `beta` raises the cutoff with speed (higher = snappier on fast moves).
+    State is O(1); call `filter(value, dt)` once per frame per axis.
+    """
+
+    def __init__(self, min_cutoff: float = 1.0, beta: float = 0.0, d_cutoff: float = 1.0):
+        self.min_cutoff = float(min_cutoff)
+        self.beta = float(beta)
+        self.d_cutoff = float(d_cutoff)
+        self.x_prev: Optional[float] = None
+        self.dx_prev: float = 0.0
+
+    @staticmethod
+    def _alpha(cutoff: float, dt: float) -> float:
+        tau = 1.0 / (2.0 * math.pi * cutoff)
+        return 1.0 / (1.0 + tau / dt)
+
+    def filter(self, x: float, dt: float) -> float:
+        x = float(x)
+        if dt <= 0:
+            dt = 1e-6
+        if self.x_prev is None:
+            self.x_prev = x
+            self.dx_prev = 0.0
+            return x
+        dx = (x - self.x_prev) / dt
+        a_d = self._alpha(self.d_cutoff, dt)
+        dx_hat = self.dx_prev + a_d * (dx - self.dx_prev)
+        cutoff = self.min_cutoff + self.beta * abs(dx_hat)
+        a = self._alpha(cutoff, dt)
+        x_hat = self.x_prev + a * (x - self.x_prev)
+        self.x_prev = x_hat
+        self.dx_prev = dx_hat
+        return x_hat
+
+    def reset(self) -> None:
+        self.x_prev = None
+        self.dx_prev = 0.0
+
+
+def drift_to_center(current: float, center: float, frames_since_seen: int,
+                    hold_frames: int = 90, drift_rate: float = 0.05) -> float:
+    """Lost-subject recovery: hold the last position for `hold_frames`, then
+    ease toward `center` by `drift_rate` per frame. Avoids freezing the camera
+    on empty space when the active speaker disappears.
+    """
+    if frames_since_seen <= hold_frames:
+        return current
+    return current + (center - current) * drift_rate
+
+
+# --- zoom control (ported from smart-reframe ZoomController) -----------------
+
+def zoom_for_face_height(face_h: float, max_crop_h: float,
+                         target_occupancy: float = 0.4,
+                         min_zoom: float = 1.0, max_zoom: float = 1.6) -> float:
+    """Continuous close-up correction: pick the zoom factor that makes the face
+    occupy ``target_occupancy`` of the crop height, clamped to [min, max].
+
+    Replaces the old 4-bucket step ladder (1.0/1.15/1.3/1.5), which snapped
+    visibly whenever a face crossed a bucket edge. In ClippyMe's convention the
+    crop height is ``max_crop_h / zoom`` (larger zoom ⇒ tighter crop), so a face
+    of height ``face_h`` occupies ``face_h * zoom / max_crop_h`` of the frame.
+    Solving ``occupancy == target_occupancy`` gives ``zoom = max_crop_h *
+    target_occupancy / face_h``. Adapted from smart-reframe's
+    ``needed_zoom_for_size`` (gauravzazz/smart-reframe, framing/zoom.py).
+    """
+    if face_h <= 0:
+        return min_zoom
+    zoom = max_crop_h * target_occupancy / face_h
+    return max(min_zoom, min(zoom, max_zoom))
+
+
+def advance_value_with_velocity(current: float, target: float, velocity: float,
+                                response: float, damping: float,
+                                max_velocity: float):
+    """Momentum / damped-spring smoother — returns ``(new_value, new_velocity)``.
+
+    ``velocity = velocity*damping + (target-current)*response``, clamped to
+    ``±max_velocity`` (a hard per-frame rate cap), then ``current + velocity``.
+    Unlike the EMA / 1€ smoothers this carries momentum, so it accelerates and
+    decelerates like a real operator and can never jump more than
+    ``max_velocity`` px/frame. Ported from KazKozDev/auto-vertical-reframe
+    (``advance_value_with_velocity``).
+    """
+    velocity = velocity * damping + (target - current) * response
+    if velocity > max_velocity:
+        velocity = max_velocity
+    elif velocity < -max_velocity:
+        velocity = -max_velocity
+    return current + velocity, velocity
+
+
+def limit_step(current: float, target: float, max_step: float) -> float:
+    """Clamp a move from ``current`` toward ``target`` to at most ``max_step``
+    per call — a hard per-frame pan-rate cap. Ported from
+    KazKozDev/auto-vertical-reframe (``limit_step``).
+    """
+    delta = target - current
+    if delta > max_step:
+        return current + max_step
+    if delta < -max_step:
+        return current - max_step
+    return target
+
+
+def asymmetric_zoom_step(current: float, target: float,
+                         rate_in: float, rate_out: float) -> float:
+    """Ease ``current`` toward ``target`` with direction-dependent speed.
+
+    Pull-back (target < current ⇒ a bigger crop) uses the fast ``rate_out`` so
+    the camera never lingers cropped-in while a face grows or a second person
+    enters; push-in (target > current) uses the slow ``rate_in`` for a
+    cinematic feel. Ported from smart-reframe's asymmetric zoom smoothing
+    (framing/zoom.py:117-130), translated into ClippyMe's inverted zoom
+    convention (smaller factor = wider crop = pull-back).
+    """
+    diff = target - current
+    rate = rate_in if diff > 0 else rate_out
+    return current + diff * rate
+
+
+# --- letterbox ("reframe off") geometry -------------------------------------
+
+# Bounds of the optional letterbox zoom, mirrored by the API schema and the
+# --letterbox-zoom CLI flag. 0 = off (the untouched frame); anything in
+# [MIN, MAX] crops that fraction off the WIDTH.
+LETTERBOX_ZOOM_MIN = 0.05
+LETTERBOX_ZOOM_MAX = 0.15
+
+
+def normalize_letterbox_zoom(value) -> float:
+    """Coerce a user-supplied letterbox zoom to 0.0 (off) or [0.05, 0.15].
+
+    Accepts either a fraction (0.1) or a percentage (10) — anything above 1 is
+    read as a percentage, which is how the dashboard slider sends it. Raises
+    ``ValueError`` on a non-numeric value; a numeric one is clamped, never
+    rejected, so a stale client can't fail a whole job over a slider.
+    """
+    if value is None or value == "":
+        return 0.0
+    z = float(value)          # ValueError on garbage — caller maps it to 400
+    if z > 1.0:
+        z /= 100.0
+    if z <= 0:
+        return 0.0
+    return min(max(z, LETTERBOX_ZOOM_MIN), LETTERBOX_ZOOM_MAX)
+
+
+def letterbox_plan(src_w: int, src_h: int, out_w: int, out_h: int,
+                   zoom: float = 0.0):
+    """Geometry for a reframe-OFF frame: the whole source inside black bars.
+
+    Reframe 'disabled' means exactly that — nothing is cropped away, the source
+    is scaled to the output width and the leftover height stays black (bars top
+    and bottom).
+
+    ``zoom`` (0 = off, otherwise 0.05–0.15) is the one deliberate exception: it
+    trims that fraction off the width (half per side), so scaling the remainder
+    to the same output width magnifies the picture by ``1/(1-zoom)`` and the
+    bars shrink by the same factor. Aspect is preserved, so this reads as a
+    fixed zoom, not a stretch.
+
+    Returns ``(crop, size, offset)``: ``crop`` = (x, y, w, h) in source pixels,
+    ``size`` = (w, h) to scale that crop to, ``offset`` = (x, y) of the scaled
+    image on the output canvas. All values are even and in-bounds.
+    """
+    def _even(n, lo=2):
+        n = int(n)
+        return max(lo, n - (n % 2))
+
+    z = min(max(float(zoom or 0.0), 0.0), 0.5)
+    crop_w = _even(round(src_w * (1.0 - z)))
+    crop_w = min(crop_w, _even(src_w))
+    crop_x = (src_w - crop_w) // 2
+
+    scale = out_w / crop_w
+    scaled_h = _even(round(src_h * scale))
+    crop_y, crop_h = 0, _even(src_h)
+    if scaled_h > out_h:
+        # Zoomed past the point where the frame still fits vertically — take the
+        # centre band instead of overflowing the canvas.
+        crop_h = _even(round(crop_h * out_h / scaled_h))
+        crop_y = (src_h - crop_h) // 2
+        scaled_h = _even(out_h)
+
+    return ((crop_x, crop_y, crop_w, crop_h),
+            (_even(out_w), scaled_h),
+            (0, max(0, (out_h - scaled_h) // 2)))
+
+
+# --- saliency-based crop selection (faceless scenes) ------------------------
+
+def salient_crop_center(column_energy, crop_w: float, frame_w: float,
+                        prev_x: Optional[float] = None,
+                        max_step: Optional[float] = None) -> float:
+    """Pick the crop-window center x that captures the most saliency energy.
+
+    `column_energy` is a 1-D array of per-column saliency (length == frame_w),
+    produced from a cv2 saliency map by the caller. Returns the window center,
+    clamped so the window stays in-bounds and optionally rate-limited against
+    `prev_x` for temporal stability.
+    """
+    energy = np.asarray(column_energy, dtype=float)
+    w = int(round(crop_w))
+    w = max(1, min(w, int(frame_w)))
+    half = crop_w / 2.0
+
+    csum = np.concatenate([[0.0], np.cumsum(energy)])
+    max_s = max(0, int(frame_w) - w)
+    best_s, best_val = 0, -1.0
+    for s in range(0, max_s + 1):
+        val = csum[s + w] - csum[s]
+        if val > best_val:
+            best_val = val
+            best_s = s
+    center = best_s + w / 2.0
+
+    center = min(max(center, half), frame_w - half)
+    if prev_x is not None and max_step is not None:
+        if center > prev_x + max_step:
+            center = prev_x + max_step
+        elif center < prev_x - max_step:
+            center = prev_x - max_step
+    return center
+
+
+def weighted_interest_center(boxes):
+    """Weighted centroid of detected interest objects for faceless reframing.
+
+    ``boxes`` is a sequence of ``(cx, cy, weight)`` where ``weight`` is already
+    the product of the object's class weight, pixel area, and confidence — so
+    larger, more important, higher-confidence objects pull the camera harder.
+    Returns the weighted-mean ``(cx, cy)``, or ``None`` when the list is empty
+    or the total weight is non-positive (the caller then falls back to its
+    existing salient/letterbox path).
+
+    Pure math (no cv2) — the YOLO box extraction lives in reframe.py glue. This
+    is the single-centroid analogue of FrameShift's
+    ``calculate_weighted_interest_region``: ClippyMe crops a fixed-AR window
+    around one point rather than fitting a variable region, so a centroid is the
+    right primitive. Only reached on faceless (GENERAL) scenes — people are
+    handled by the upstream face/person tracker — which is why following a
+    non-face subject here never competes with talking-head framing.
+    """
+    total = 0.0
+    sx = 0.0
+    sy = 0.0
+    for cx, cy, w in boxes:
+        if w <= 0:
+            continue
+        total += w
+        sx += cx * w
+        sy += cy * w
+    if total <= 0:
+        return None
+    return (sx / total, sy / total)
+
+
+class PanSmoother:
+    """Hysteresis pan smoother for the per-frame FrameShift (``subject``) crop.
+
+    Raw detections jitter by a few pixels every frame even on a static shot,
+    and cropping straight off the weighted centroid turns that noise into a
+    visible per-frame shake. The smoother keeps the crop centre in float space
+    and only moves it when the target has genuinely drifted:
+
+      HOLD — while ``|target - centre| <= deadband_frac * frame_width`` the
+             held centre is returned unchanged, so detection noise never
+             reaches the crop.
+      MOVE — once the deadband is breached the centre eases exponentially
+             toward the target (``alpha`` per frame) until it lands within
+             ``settle_frac`` of it, then locks again.
+
+    ``smooth(None, w)`` returns the held centre, bridging single-frame
+    detection dropouts so the caller doesn't flash its letterbox fallback.
+    ``reset()`` on scene cuts: the first target of a new scene snaps.
+    Pure math (no cv2) — host-tested.
+    """
+
+    def __init__(self, deadband_frac=0.04, settle_frac=0.005, alpha=0.2):
+        self.deadband_frac = float(deadband_frac)
+        self.settle_frac = float(settle_frac)
+        self.alpha = float(alpha)
+        self.center = None
+        self.moving = False
+
+    def reset(self):
+        self.center = None
+        self.moving = False
+
+    def smooth(self, target_x, frame_width):
+        """Feed this frame's raw target centre; get the centre to crop at.
+
+        Returns ``None`` only when there is no target AND no held centre yet.
+        """
+        if target_x is None:
+            return self.center
+        if self.center is None or frame_width <= 0:
+            self.center = float(target_x)
+            self.moving = False
+            return self.center
+        err = float(target_x) - self.center
+        if not self.moving:
+            if abs(err) <= self.deadband_frac * frame_width:
+                return self.center
+            self.moving = True
+        self.center += self.alpha * err
+        if abs(float(target_x) - self.center) <= self.settle_frac * frame_width:
+            self.moving = False
+        return self.center
+
+
+# --- Savitzky-Golay (future two-stage global smoothing) ---------------------
+
+def savgol_1d(values, window: int, polyorder: int):
+    """Savitzky-Golay smoothing of a 1-D signal, pure numpy (no scipy).
+
+    Preserves length and reproduces polynomials up to `polyorder` exactly.
+    Interior points use precomputed SG coefficients; edges fit a local
+    polynomial over the clipped window. Intended for smoothing a full crop
+    trajectory in a two-stage track-then-render pass.
+    """
+    v = np.asarray(values, dtype=float)
+    n = len(v)
+    if n == 0:
+        return v.copy()
+    if window % 2 == 0:
+        window += 1
+    if window > n:
+        window = n if n % 2 == 1 else max(1, n - 1)
+    half = window // 2
+    polyorder = min(polyorder, window - 1)
+
+    offsets = np.arange(-half, half + 1)
+    A = np.vander(offsets, polyorder + 1, increasing=True)
+    center_coeffs = np.linalg.pinv(A)[0]  # evaluates the fitted poly at t=0
+
+    out = np.empty(n)
+    for i in range(n):
+        lo, hi = i - half, i + half
+        if lo < 0 or hi >= n:
+            a, b = max(0, lo), min(n - 1, hi)
+            t = np.arange(a, b + 1) - i
+            order = min(polyorder, (b - a))
+            Aw = np.vander(t, order + 1, increasing=True)
+            cw, *_ = np.linalg.lstsq(Aw, v[a:b + 1], rcond=None)
+            out[i] = cw[0]
+        else:
+            out[i] = center_coeffs @ v[lo:hi + 1]
+    return out
+
+
+def smooth_and_clamp(values, window: int, polyorder: int,
+                     lo: float, hi: float):
+    """Savitzky-Golay smooth a full 1-D trajectory, then clamp into [lo, hi].
+
+    The wired entry point for the two-stage track-then-render reframe pass: a
+    cheap, deterministic analogue of smart-reframe's Viterbi ``PathSolver``.
+    Where they globally optimise the crop path with dynamic programming over
+    per-frame saliency maps, we record the per-frame camera targets in pass one
+    and globally low-pass them here before rendering in pass two — same goal
+    (a smooth, jitter-free global trajectory) at a fraction of the cost.
+    """
+    smoothed = savgol_1d(values, window, polyorder)
+    return np.clip(smoothed, lo, hi)
+
+
+# --- alternative global smoothers (ported from mfahsold/montage-ai) ----------
+
+def kalman_rts_smooth(values, process_noise: float = 1.0,
+                      measurement_noise: float = 10.0):
+    """Forward Kalman + backward RTS smoother over a 1-D camera-center path.
+
+    Constant-velocity model (state ``[position, velocity]``, observe position).
+    The forward pass filters causally; the Rauch–Tung–Striebel backward pass
+    then refines every estimate using future frames, so the result is a smooth,
+    non-causal trajectory that *extrapolates motion through detection gaps*
+    (where the input simply repeats the last center) instead of flat-lining —
+    something the Savitzky-Golay low-pass and the online EMA/1€/spring smoothers
+    can't do. Pure numpy. Direct port of mfahsold/montage-ai
+    ``SubjectKalmanFilter.smooth_sequence`` (auto_reframe.py).
+
+    Higher ``measurement_noise`` (relative to ``process_noise``) ⇒ the filter
+    trusts the model over the measurements ⇒ smoother output.
+    """
+    v = np.asarray(values, dtype=float)
+    n = len(v)
+    if n < 2:
+        return v.copy()
+
+    F = np.array([[1.0, 1.0], [0.0, 1.0]])
+    H = np.array([[1.0, 0.0]])
+    Q = np.array([[process_noise, 0.0], [0.0, process_noise * 0.1]])
+    R = np.array([[measurement_noise]])
+
+    x = np.array([v[0], 0.0])
+    P = np.eye(2) * 100.0
+    xf, Pf = [], []  # filtered state + covariance per step
+    for z in v:
+        # Predict
+        x = F @ x
+        P = F @ P @ F.T + Q
+        # Update
+        S = H @ P @ H.T + R
+        K = P @ H.T @ np.linalg.inv(S)
+        x = x + (K @ (np.array([z]) - H @ x)).flatten()
+        P = (np.eye(2) - K @ H) @ P
+        xf.append(x.copy())
+        Pf.append(P.copy())
+
+    smoothed = [None] * n
+    smoothed[-1] = xf[-1]
+    for i in range(n - 2, -1, -1):
+        P_pred = F @ Pf[i] @ F.T + Q
+        C = Pf[i] @ F.T @ np.linalg.inv(P_pred)
+        smoothed[i] = xf[i] + C @ (smoothed[i + 1] - F @ xf[i])
+    return np.array([s[0] for s in smoothed])
+
+
+def solve_camera_path_l2(values, lambda_smooth: float = 100.0,
+                         lambda_trend: float = 10.0, constraints=None):
+    """Global L2-convex camera-path optimiser over a 1-D center signal.
+
+    Minimises ``Σ(xₜ−cₜ)² + λ_smooth·Σ(xₜ−xₜ₋₁)² + λ_trend·Σ(xₜ−2xₜ₋₁+xₜ₋₂)²``
+    — i.e. stay near the detected subject, while penalising camera *velocity*
+    (shake) and *acceleration* (jerk). Setting the gradient to zero gives the
+    closed-form linear system ``(I + λ_smooth·D1ᵀD1 + λ_trend·D2ᵀD2)·x = c``,
+    solved here densely in pure numpy. This is a principled global optimiser —
+    the closed-form analogue of smart-reframe's Viterbi ``PathSolver`` that the
+    Savitzky-Golay pass only approximates. Direct port of mfahsold/montage-ai
+    ``CameraMotionOptimizer.solve`` (auto_reframe.py), with its scipy.sparse
+    solve replaced by a dense numpy solve to honour reframe_ops' no-scipy rule
+    (fine for clip-length paths; a banded/sparse solve is the O(n) upgrade).
+
+    ``constraints``: optional ``{frame_index: target_center}`` keyframes pulled
+    in with a strong penalty — manual overrides of the automatic path.
+    """
+    c = np.asarray(values, dtype=float)
+    n = len(c)
+    if n < 3:
+        return c.copy()
+
+    eye_n = np.eye(n)
+    d1 = np.eye(n - 1, n, k=1) - np.eye(n - 1, n, k=0)          # first difference
+    d2 = (np.eye(n - 2, n, k=0) - 2.0 * np.eye(n - 2, n, k=1)   # second difference
+          + np.eye(n - 2, n, k=2))
+    a = eye_n + lambda_smooth * (d1.T @ d1) + lambda_trend * (d2.T @ d2)
+    b = c.copy()
+
+    if constraints:
+        lam_c = 10000.0  # strong pull toward each keyframe
+        for idx, target in constraints.items():
+            if 0 <= idx < n:
+                a[idx, idx] += lam_c
+                b[idx] += lam_c * float(target)
+
+    try:
+        return np.linalg.solve(a, b)
+    except np.linalg.LinAlgError:
+        return c.copy()
+
+
+def _smooth_axis(values, method: str, window: int, polyorder: int,
+                 lo: float, hi: float):
+    """Smooth one 1-D camera axis with the selected global method, then clamp.
+
+    ``"savgol"`` (default) keeps the proven Savitzky-Golay behaviour;
+    ``"kalman"`` uses the RTS smoother; ``"l2"`` uses the convex path optimiser.
+    All three are clamped into ``[lo, hi]`` exactly like ``smooth_and_clamp``.
+    """
+    if method == "kalman":
+        out = kalman_rts_smooth(values)
+    elif method == "l2":
+        out = solve_camera_path_l2(values)
+    else:
+        out = savgol_1d(values, window, polyorder)
+    return np.clip(out, lo, hi)
+
+
+def stationary_lock(xs, ys, frame_w: float, frame_h: float,
+                    threshold: float = 0.15, snap_center_dist: float = 0.10):
+    """AutoFlip-style per-scene "stationary" decision for one scene segment.
+
+    Ported from Google AutoFlip's ``motion_stabilization_threshold_percent`` +
+    ``snap_center_max_distance_percent`` (see docs/reframe-improvements-research.md).
+    If the camera target barely moves across the whole scene — its span on *both*
+    axes stays within ``threshold`` of the frame dimension — the scene is treated
+    as a locked-tripod shot: every frame is pinned to the segment's median target
+    instead of micro-tracking detector jitter. If that lock point is also within
+    ``snap_center_dist`` of the frame centre on an axis, it snaps to exact centre
+    for cleaner framing.
+
+    ``xs``/``ys`` are the (already smoothed + clamped) per-frame target arrays for
+    one scene. Returns ``(xs2, ys2, locked)`` — when not locked the inputs are
+    returned unchanged so the streaming/smoothed path is byte-identical.
+    """
+    n = len(xs)
+    if n == 0:
+        return xs, ys, False
+    x_span = float(max(xs) - min(xs))
+    y_span = float(max(ys) - min(ys))
+    if x_span > threshold * frame_w or y_span > threshold * frame_h:
+        return xs, ys, False  # subject moves too much → keep tracking
+
+    lock_x = float(np.median(xs))
+    lock_y = float(np.median(ys))
+    if abs(lock_x - frame_w / 2.0) <= snap_center_dist * frame_w:
+        lock_x = frame_w / 2.0
+    if abs(lock_y - frame_h / 2.0) <= snap_center_dist * frame_h:
+        lock_y = frame_h / 2.0
+    return [lock_x] * n, [lock_y] * n, True
+
+
+def centroid_span(centers, frame_w: float, frame_h: float) -> float:
+    """Normalised travel of a subject's centre across a scene → motion measure.
+
+    ``centers`` is a list of ``(x, y)`` face/subject centres sampled across one
+    scene (``None`` entries — frames with no detection — are skipped). Returns
+    ``max(x_span / frame_w, y_span / frame_h)`` where each span is
+    ``max - min`` of the present centres: 0.0 = perfectly still subject, larger
+    = the subject roams further across the frame.
+
+    Used by the AUTO static-framing policy to promote a *moving* single-subject
+    scene from TRACK (which would have to pan to follow it) to WIDE (a locked,
+    zoomed-out crop that keeps the moving subject in frame without camera
+    motion). Pure-math → host-unit-tested.
+    """
+    pts = [c for c in centers if c is not None]
+    if len(pts) < 2 or frame_w <= 0 or frame_h <= 0:
+        return 0.0
+    xs = [float(p[0]) for p in pts]
+    ys = [float(p[1]) for p in pts]
+    x_span = (max(xs) - min(xs)) / frame_w
+    y_span = (max(ys) - min(ys)) / frame_h
+    return max(x_span, y_span)
+
+
+def collapse_scene_targets(targets, scene_ids, strategies, *,
+                           x_max: float, y_max: float,
+                           wide_zoom: float = 1.0,
+                           track_zoom_cap: float = 1.35,
+                           snap_center_dist: float = 0.10):
+    """Collapse each scene to ONE fixed ``(cx, cy, zoom)`` → fully static camera.
+
+    The AUTO static-framing policy: within a scene the camera never moves. This
+    is the deterministic alternative to ``build_smoothed_trajectory`` — instead
+    of low-passing a moving path, every frame of a scene is pinned to a single
+    viewpoint so there is zero pan and zero mid-shot zoom breathing.
+
+    ``targets[i]`` is the raw recorded per-frame target ``(cx, cy, zoom)`` (or
+    ``None`` for frames that bypass the cameraman, e.g. GENERAL/DISABLED).
+    ``scene_ids[i]`` is the scene index of frame ``i``; ``strategies[i]`` its
+    per-frame strategy string.
+
+      * ``TRACK`` — locked on the scene's *median* subject centre; zoom = the
+        median recorded zoom, capped at ``track_zoom_cap`` so a static subject
+        is framed but never aggressively pushed in.
+      * ``WIDE`` — locked on the scene's median centre (the mid-point between
+        speakers / a roaming subject's average position) with zoom forced to
+        ``wide_zoom`` (1.0 = widest 9:16 window → shows the most, no zoom-in on
+        any single face).
+      * anything else / ``None`` target → ``None`` (its own render path handles
+        the frame).
+
+    A lock point within ``snap_center_dist`` of frame centre snaps to exact
+    centre. Returns a per-frame list, constant within each scene. Pure-math →
+    host-unit-tested.
+    """
+    n = len(targets)
+    out = [None] * n
+    i = 0
+    while i < n:
+        if targets[i] is None:
+            i += 1
+            continue
+        j = i
+        sid = scene_ids[i]
+        while j < n and targets[j] is not None and scene_ids[j] == sid:
+            j += 1
+        seg = targets[i:j]
+        strat = strategies[i] if i < len(strategies) else 'TRACK'
+        cx = float(np.median([t[0] for t in seg]))
+        cy = float(np.median([t[1] for t in seg]))
+        if strat == 'WIDE':
+            zoom = float(wide_zoom)
+        else:
+            zoom = min(float(np.median([t[2] for t in seg])), float(track_zoom_cap))
+        if abs(cx - x_max / 2.0) <= snap_center_dist * x_max:
+            cx = x_max / 2.0
+        if abs(cy - y_max / 2.0) <= snap_center_dist * y_max:
+            cy = y_max / 2.0
+        for k in range(j - i):
+            out[i + k] = (cx, cy, zoom)
+        i = j
+    return out
+
+
+def build_smoothed_trajectory(targets, scene_ids, window: int, polyorder: int,
+                              x_max: float, y_max: float,
+                              min_zoom: float = 1.0, max_zoom: float = 1.6,
+                              method: str = "savgol",
+                              stationary_threshold: float = 0.0,
+                              snap_center_dist: float = 0.10,
+                              lock_zoom: bool = False):
+    """Smooth a recorded ``(cx, cy, zoom)`` camera trajectory, per scene segment.
+
+    ``targets[i]`` is the raw per-frame camera target (or ``None`` for frames
+    that bypass the cameraman, e.g. GENERAL/DISABLED). ``scene_ids[i]`` is the
+    scene index of frame ``i``. Each maximal run of consecutive non-None frames
+    that share a scene index is low-passed independently with ``savgol_1d`` —
+    so the smoother never pans across a hard cut — and clamped to the source
+    bounds. ``None`` entries pass through unchanged, preserving length.
+
+    This is the host-testable core of the two-stage track-then-render reframe
+    pass; the cv2 glue in ``reframe.py`` records ``targets`` in pass one and
+    renders from the smoothed result in pass two.
+    """
+    n = len(targets)
+    out = [None] * n
+    i = 0
+    while i < n:
+        if targets[i] is None:
+            i += 1
+            continue
+        # Extend a run while frames are non-None and in the same scene.
+        j = i
+        sid = scene_ids[i]
+        while j < n and targets[j] is not None and scene_ids[j] == sid:
+            j += 1
+        seg = targets[i:j]
+        # Pan axes (cx, cy) use the selected global method; zoom always uses
+        # savgol — the L2/Kalman optimisers are tuned for the pan *path*, not the
+        # narrow, slowly-varying zoom signal.
+        xs = _smooth_axis([t[0] for t in seg], method, window, polyorder, 0.0, x_max)
+        ys = _smooth_axis([t[1] for t in seg], method, window, polyorder, 0.0, y_max)
+        zs = smooth_and_clamp([t[2] for t in seg], window, polyorder, min_zoom, max_zoom)
+        # Per-scene zoom lock: pin the whole scene to one zoom level (the segment
+        # median) so the frame never breathes mid-shot. Continuous zoom is radial
+        # ("looming") optical flow and a top nausea trigger; a different zoom per
+        # scene is fine because a change across a hard cut reads as a new shot,
+        # not camera motion. Zoom still varies between scenes, never within one.
+        if lock_zoom and len(zs):
+            zlock = float(np.median(zs))
+            zs = [zlock] * len(zs)
+        # AutoFlip-style stationary lock: a near-static scene is pinned to a fixed
+        # viewpoint (tripod) instead of tracking jitter. Opt-in (threshold > 0);
+        # at 0.0 this is a no-op so the smoothed path stays byte-identical.
+        if stationary_threshold > 0.0:
+            xs, ys, _locked = stationary_lock(
+                list(xs), list(ys), x_max, y_max,
+                threshold=stationary_threshold, snap_center_dist=snap_center_dist)
+        for k in range(j - i):
+            out[i + k] = (float(xs[k]), float(ys[k]), float(zs[k]))
+        i = j
+    return out
