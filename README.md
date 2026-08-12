@@ -5,7 +5,7 @@
 
   <h1>S6_cut</h1>
 
-  <p><b>Self-hosted AI pipeline that turns long videos (YouTube or upload) into viral 9:16 vertical shorts.</b></p>
+  <p><b>Turn one long video into a folder of ready-to-post shorts—locally, without accounts, credits, watermarks, or artificial limits.</b></p>
 
   <p>
     <img src="https://img.shields.io/github/license/carmelo-schepis/S6_CUT?style=flat-square&color=3b82f6" alt="MIT license" />
@@ -19,67 +19,101 @@
   <p>
     <a href="#quick-start-docker">Quick start</a> ·
     <a href="#configuration">Configuration</a> ·
-    <a href="#api">API</a> ·
-    <a href="#security-posture">Security</a> ·
+    <a href="#local-first-and-optional-api-behaviour">Local-first</a> ·
+    <a href="#roadmap">Roadmap</a> ·
     <a href="https://github.com/carmelo-schepis/S6_CUT/issues">Report a bug</a>
   </p>
 </div>
 
-Fork of <a href="https://github.com/OpenShorts/OpenShorts">OpenShorts</a>, hardened and extended: cloud-or-local transcription, Gemini viral-moment detection, active-speaker 9:16 reframing, compose-on-download editing, and one-click multi-platform scheduling.
+### Three steps
 
-> Status: personal/self-hosted project. Both published ports bind to **loopback by default** (<code>S6CUT_BIND=127.0.0.1</code>); opening them to a LAN (<code>S6CUT_BIND=0.0.0.0</code>) is a deliberate choice — pair it with <code>S6CUT_API_TOKEN</code> so every API request needs the shared secret. **Do not expose it to the public internet** without a reverse proxy terminating TLS in front.
+1. **Drop** a YouTube link or video file.
+2. **Pick a style:** Funny, Serious, Educational, or Hype — or write your own instructions.
+3. **Download** every finished clip, one by one or all at once. A ZIP-all download is in development.
 
-<details>
-<summary><b>Table of contents</b></summary>
-
-- [What it does](#what-it-does)
-- [Stack](#stack)
-- [Quick start (Docker)](#quick-start-docker)
-- [Local development (no Docker)](#local-development-no-docker)
-- [Configuration](#configuration)
-- [Repository layout](#repository-layout)
-- [API](#api)
-- [Editing toggles (compose-on-download)](#editing-toggles-compose-on-download)
-- [Reframing](#reframing)
-- [Publishing (Zernio)](#publishing-zernio)
-- [Security posture](#security-posture)
-- [CPU vs GPU](#cpu-vs-gpu)
-- [Acknowledgements](#acknowledgements)
-
-</details>
+S6_cut transcribes speech, finds clean sentence boundaries, creates vertical clips, and burns in word-by-word subtitles. Its context-aware visual system is designed to match spoken phrases with relevant images, GIFs, memes, posters, and assets from your own library — a feature currently in development.
 
 ---
 
-## What it does
-
-Given a video URL or upload, S6_cut runs the following pipeline end-to-end:
-
-1. **Download** with `yt-dlp` (Deno-based JS runtime to bypass YouTube bot detection, optional cookies for age-gated content).
-2. **Transcribe** with one of three providers, chosen in Settings: **Deepgram Nova-3** by default (multi-language, code-switching EN/IT), **ElevenLabs Scribe** (emits `(laughter)`/`(applause)` audio-event tags that feed the viral prompt as a free emotional-payoff signal, with an optional Voice Isolator pre-pass for noisy sources), or local **Faster-Whisper**. Both cloud providers fall back to Faster-Whisper on any failure, so a bad key never breaks a job. The video is stripped to a mono-16 kHz FLAC first, so only audio is uploaded/decoded (a few MB instead of the full mp4). Cached on disk for 7 days keyed by URL hash.
-3. **Detect viral moments** with **Google Gemini** (`gemini-3.5-flash` by default). A 5-axis viral_score rubric (HOOK_STRENGTH, EMOTIONAL_PAYOFF, QUOTABILITY, SELF_CONTAINED, DENSITY) plus a 5-level robust JSON parser tolerates malformed model output. **No-AI fallback:** if no Gemini key is set or the call fails, the transcript is topic-segmented into several clips by dependency-light lexical **TextTiling** (ported from [ClipsAI](https://github.com/ClipsAI/clipsai)) instead of dumping the whole video as one clip, heuristic, not viral-ranked, but offline and free. **Clean clip edges:** each selected `[start, end]` is then snapped to transcript boundaries, first to the nearest **word** edge, then extended to the surrounding **sentence** (start back to the sentence onset, end forward to the sentence-final word) so a clip never opens or closes mid-word or mid-sentence. The sentence pass is asymmetric and clamped (≤60 s, no overlap with a neighbouring clip), guards against false sentence-ends (abbreviations, decimals, acronyms), and gracefully no-ops on unpunctuated transcripts, so it is never worse than the word-only snap. A final **waveform** pass then nudges each edge into the nearest actual audio **silence trough** (ffmpeg `silencedetect`) so a cut never clips a word's attack or release, moving only toward quiet, and a no-op when no silence sits near the edge.
-4. **Reframe to 9:16** with active-speaker tracking: YOLOv8 person detection + MediaPipe FaceMesh mouth-aspect-ratio (MAR) variance to pick who is speaking, then a smoothed cameraman that adapts speed and zoom per scene. Hardened against messy real-world inputs: variable-frame-rate normalization, audio `start_time` compensation (YouTube A/V desync), and corrupt-frame resilience, all no-ops on clean sources.
-5. **Post-process** each clip: Ken Burns auto-zoom (1.0→1.05×), EBU R128 audio normalization to −14 LUFS, automatic cover frame selection. Every rendered mp4 is written with a leading `moov` atom (`+faststart`), so it starts playing in the browser before the full file downloads and uploads cleanly to social. Every render and compose pass shares one near-visually-lossless libx264 setting (CRF 18, `S6CUT_X264_CRF`), so the stacked re-encodes don't compound into soft output; the final mux and download copy are stream-copy/lossless.
-6. **Optional editing** at download time (compose-on-demand): a **Colour grade** preset (warm_cinematic / cool_crisp / neutral_punch / vivid_pop), **Smart Cut** (filler-word + silence removal via auto-editor v3 timeline + audio polish, plus a separate manual transcript trim and a conversational AI trim), **Hook** text overlay (Pillow + emoji, with Instagram-Stories-style banner / colours / outline / font, defaulting to bannerless white Anton with a thin black outline), **Subtitles** (6 ASS karaoke presets or classic SRT with a live preview), and a **Brand logo** watermark. The per-clip editor is a tabbed modal; settings can be applied to one clip, copied to all clips, or staged across a multi-select. Custom subtitle/hook fonts and the logo are uploaded once in Settings.
-7. **Publish or schedule** to TikTok / Instagram / YouTube via **Zernio**, with a SmartScheduler that picks Italian-prime-time slots, avoids same-day collisions, and (when scheduling) spreads one clip per day to stay under per-platform daily caps. Any residual Zernio daily-limit 429 is surfaced verbatim per clip.
-
-While a job runs you stay in control:
-
-- **Edit clips as they finish**: completed clips stream into the full editor (toggles, disable/delete, publish) while later ones are still rendering; no need to wait for the whole job.
-- **Pause / Resume / Stop**: suspend and resume the running job, **Stop & keep** to end early but retain the clips finished so far, or **Discard** to kill and delete everything.
-- **Pick the AI model per job**: override the Gemini model for a single run from the Clip Options panel (or set the default, with live model discovery, in Settings).
+> **Project status:** S6_cut is a self-hosted project under active development. The core pipeline — transcribe, find moments, reframe, edit, download — works today. Several features described in this README are part of the product vision and are being built. Each section states whether the feature is available now or in development. See the [Roadmap](#roadmap) for the full picture.
 
 ---
 
-## Stack
+## Available now
 
-| Layer | Tech |
+The following features work in the current codebase. You can run them today with Docker Compose.
+
+- **YouTube, Twitch and Kick downloads** — paste a URL or upload a local video file. yt-dlp with Deno-based bot detection handles YouTube; Kick and Twitch have dedicated clients.
+- **Transcription** — Deepgram Nova-3 (default), ElevenLabs Scribe, or local Faster-Whisper. If a cloud provider is unavailable, S6_cut falls back to local Whisper automatically.
+- **Viral moment detection** — Google Gemini scores every segment on hook strength, emotional payoff, quotability, self-containedness, and density. No Gemini key? Falls back to lexical TextTiling topic segmentation, then to one whole-video clip as a last resort.
+- **Clean clip edges** — clips are snapped to word boundaries, then sentence boundaries, then waveform silence troughs. No clip opens or closes mid-word.
+- **Vertical reframe** — active-speaker tracking with YOLOv8 person detection and MediaPipe face analysis. Three modes: Auto (face tracking), Subject (interest-weighted centroid crop), and Off (letterbox). Comfort mode locks the camera per scene so it doesn't feel seasick.
+- **Per-clip editing** — colour grade presets, smart cut (filler-word and silence removal), hook text overlay, word-by-word karaoke subtitles (6 presets), brand logo watermark, and attribution banner. All settings are previewed before applying.
+- **Publishing** — upload and schedule to TikTok, Instagram, and YouTube via Zernio (optional). SmartScheduler picks Italian-prime-time slots and avoids same-day collisions.
+- **Live Monitor** — watch Twitch, Kick, or YouTube channels and auto-clip segments as they go live or upload. Multiple monitors run in parallel.
+- **CPU-only Docker image** — no NVIDIA GPU required. The standard build is explicitly CPU-only. An optional GPU profile exists for those who want it.
+- **No accounts, no credits, no watermark** — S6_cut adds no product watermark, requires no S6_cut account, and imposes no artificial limits. External API providers may have their own quotas and charges.
+
+---
+
+## Product vision / In development
+
+These features are part of the S6_cut product direction. Some are partially implemented; others are planned. Each is labelled clearly.
+
+### Long video to shorts
+
+*Available now — described above.*
+
+### Script to video
+
+*Planned — not yet implemented.*
+
+Upload or paste a script. S6_cut will analyse it, divide it into visual narration beats, and generate a finished video with subtitles. Every 2–3 seconds — or at a natural phrase boundary — a relevant image, GIF, poster, or library asset can appear on screen. ElevenLabs narration is optional. If ElevenLabs is missing or fails, the job continues without it.
+
+This workflow produces a new video rather than clipping from an existing source.
+
+### Context-aware images and GIFs
+
+*In development — core architecture exists for text overlays; timed image/GIF selection is planned.*
+
+S6_cut is designed to use timed subtitle and transcript context to select relevant visuals. If the speaker mentions the Beatles, for example, the app can select Beatles-related imagery and place it over the video at the relevant moment. You would not need to manually search for every visual.
+
+How it is intended to work:
+
+- Local library assets are searched first (see Asset Library below).
+- Optional web images and GIFs may be used when enabled.
+- Visuals are timed to words or semantic phrases.
+- You can review, replace, block, or remove automatic selections.
+- Externally sourced assets may carry licensing or attribution requirements — S6_cut will not imply that every web image is automatically free to reuse.
+
+### Asset Library
+
+*Planned — not yet implemented.*
+
+A local library where you add images, GIFs, posters, logos, advertisements, products, and other reusable assets. Each asset is labelled with tags describing what it represents. Assets can be marked Automatic, Preferred, Required, or Blocked.
+
+During video generation, S6_cut searches the library for labels relevant to the current sentence or narration beat. Ads and posters can be deliberately inserted through rules rather than selected randomly. Local library assets are preferred before any optional web search.
+
+---
+
+## Local-first and optional API behaviour
+
+S6_cut is designed to run on your own hardware. Most processing happens locally. Some features become available when you optionally provide API keys.
+
+| Configuration | Expected behaviour |
 |---|---|
-| Backend | Python 3.11, FastAPI, Pydantic v2, asyncio queue |
-| Pipeline | yt-dlp · Deepgram REST · ElevenLabs Scribe REST · Faster-Whisper · PySceneDetect · YOLOv8 (Ultralytics) · MediaPipe · ffmpeg · auto-editor (Nim binary) · Pillow |
-| AI | Google Gemini (viral detection) · Deepgram Nova-3 / ElevenLabs Scribe (transcription) |
-| Frontend | React 18 · Vite 6 · Tailwind CSS v4 · lucide-react · custom toasts/primitives |
-| Publishing | Zernio multi-platform API |
-| Deploy | Docker Compose (CPU multi-arch + optional NVIDIA GPU profile) |
+| No API keys | Local transcription (Whisper), local TextTiling clip finding, local reframe, local subtitles, all editing. A Gemini key is normally needed for AI-ranked clip selection; without it, the engine falls back to lexical topic segmentation. |
+| Gemini key only | AI-ranked viral moment detection, AI-assisted trim instructions, AI edit suggestions. |
+| Deepgram key | Cloud transcription (Nova-3) with multilingual code-switching. Falls back to local Whisper on failure. |
+| ElevenLabs key | Alternative cloud transcription with audio-event tags (laughter, applause). Optional Voice Isolator for noisy sources. Falls back to local Whisper on failure. |
+| Zernio credentials | Publish and schedule to TikTok, Instagram, and YouTube. |
+
+**Key principles:**
+
+- **Free and open source.** No S6_cut account, no credits system, no product watermark, no artificial limits.
+- **Local-first.** Media processing and storage run on your own computer or server. No dedicated NVIDIA GPU is required for the standard installation.
+- **No vendor lock-in.** Every optional API key has a documented local fallback. A missing key results in a skipped enhancement, never a fatal job error.
+- **External APIs.** When you enable a provider, text or audio may be processed on their servers. S6_cut is not responsible for how those providers handle your data.
 
 ---
 
@@ -94,9 +128,7 @@ docker compose up --build
 - Backend: http://localhost:8000
 - Frontend: http://localhost:5175
 
-**No dedicated GPU, CUDA installation, or NVIDIA Container Toolkit is required.** The standard image is CPU-only and uses local CPU implementations plus `libx264` software encoding.
-
-Open the dashboard, drop in a YouTube URL or upload a file, and watch the pipeline run live.
+**No GPU required.** The standard image is CPU-only. Open the dashboard, drop in a YouTube URL or upload a file, and watch the pipeline run live.
 
 > **First run after a pull** that touches `requirements.txt` or `package.json`: `docker compose down -v && docker compose up --build` to clear the stale anonymous volume on `/app/node_modules`.
 
@@ -112,7 +144,38 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build
 ```
 
-Swaps the dashboard from the Vite dev server to a static `vite build` served by **nginx** (same port 5175, same loopback default; the nginx proxy mirrors the dev proxy with 600 s timeouts for long composes and unbuffered upload/video streaming). The default `docker compose up` dev workflow (HMR + bind mount) is untouched. Requires Docker Compose ≥ 2.24.
+Swaps the dashboard from the Vite dev server to a static build served by nginx. Same port 5175, same loopback default. Requires Docker Compose ≥ 2.24.
+
+---
+
+## TrueNAS and Portainer
+
+S6_cut is designed for self-hosting on TrueNAS Scale and Portainer.
+
+### Portainer stack
+
+1. Create a new stack.
+2. Paste the contents of `docker-compose.yml`.
+3. Add `docker-compose.prod.yml` as an additional Compose file for the production frontend.
+4. Set the `S6CUT_BIND` environment variable to `0.0.0.0` if you want LAN access, and pair it with `S6CUT_API_TOKEN` for authentication.
+
+### TrueNAS custom app
+
+1. Use the "Custom App" or "Launch Docker Image" option.
+2. Set the image to your locally built `s6-cut-backend` image.
+3. Map host paths to these persistent volumes:
+
+| Host path | Container mount | Purpose |
+|---|---|---|
+| `/mnt/pool/s6-cut/data` | `/app/data` | Configuration, cookies, transcript cache |
+| `/mnt/pool/s6-cut/output` | `/app/output` | Finished clips and projects |
+| `/mnt/pool/s6-cut/uploads` | `/app/uploads` | Uploaded source videos |
+| `/mnt/pool/s6-cut/library` | `/app/library` | Asset Library (when implemented) |
+
+4. Port map `8000` for the backend API.
+5. Add the frontend as a separate container using the `s6-cut-frontend` image, port `5175`.
+
+Persistent storage documentation is in development. For now, review the Docker volumes in `docker-compose.yml`.
 
 ---
 
@@ -121,7 +184,7 @@ Swaps the dashboard from the Vite dev server to a static `vite build` served by 
 ```bash
 # Backend
 pip install -r requirements.txt
-pip install -e .                                       # registers the s6_cut src-layout package
+pip install -e .                                       # registers the s6_cut package
 python -m uvicorn s6_cut.api.app:app --reload --port 8000
 
 # Frontend (separate terminal)
@@ -137,306 +200,170 @@ python -m s6_cut.pipeline.main <url_or_path> [--instructions "focus on hooks"] \
 
 ## Configuration
 
-All API keys, model selection, and cookies are managed **from the dashboard Settings tab** and persisted to `data/config.json` (mode `0600`, git-ignored). No `.env` file required.
+API keys, model selection, and cookies are managed from the dashboard Settings tab and persisted to `data/config.json` (mode `0600`, git-ignored). No `.env` file is required for basic operation.
 
-| Key | Required for | Notes |
-|---|---|---|
-| `GEMINI_API_KEY` | Optional AI-ranked moment detection | Default model `gemini-3.5-flash`; when missing or unavailable, processing continues with local TextTiling (then whole-video fallback). |
-| `GEMINI_FALLBACK_MODELS` | Automatic quota fallback | Default: `gemini-3.1-flash-lite,gemini-3-flash-preview,gemini-2.5-flash,gemini-2.5-flash-lite`. Each new job retries the preferred `GEMINI_MODEL` first. |
-| `DEEPGRAM_API_KEY` | Cloud transcription (default) | Falls back to local Faster-Whisper if missing. |
-| `ELEVENLABS_API_KEY` | Alternative cloud transcription (Scribe) | Adds audio-event tags + optional Voice Isolator; also falls back to Faster-Whisper. |
-| `HUGGINGFACE_TOKEN` | Optional gated models for Whisper | |
-| Zernio | Social publishing | Per-platform account IDs auto-discovered via "Discover from Zernio". |
-| Cookies | YouTube age-gated / region-locked content | Upload a Netscape `cookies.txt` from the Settings tab. Stored at `data/cookies.txt`, mode `0600`, max 10 MB. |
-
-Runtime env overrides (rarely needed):
+<details>
+<summary><b>Runtime environment variables (click to expand)</b></summary>
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `S6CUT_BIND` | `127.0.0.1` | Host interface both published ports (8000/5175) bind to. `0.0.0.0` exposes the app to the LAN — deliberate choice only. |
-| `S6CUT_API_TOKEN` | _(unset)_ | Optional shared-secret auth: when set, every `/api` request must carry it (`X-API-Token` or `Authorization: Bearer`). The dashboard stores it in Settings → API token. Unset = no-op. |
-| `TRANSCRIPTION_PROVIDER` | `deepgram` | Or `elevenlabs` (Scribe), or `whisper` to force local. |
-| `ELEVENLABS_AUDIO_ISOLATION` | `false` | Run the ElevenLabs Voice Isolator before ASR to strip background noise/music on noisy sources. |
-| `S6CUT_TRANSCRIBE_AUDIO_ONLY` | `true` | Strip to audio-only FLAC before transcription; `false` sends the full video. |
-| `S6CUT_SILENCE_SNAP` | `1` | Refine clip edges to the nearest waveform silence trough (ffmpeg `silencedetect`); `0`/`false` keeps the transcript-derived edges. |
-| `DEEPGRAM_MODEL` | `nova-3` | |
-| `DEEPGRAM_LANGUAGE` | `multi` | |
-| `REFRAME_COMFORT` | `1` | Anti-nausea default (global-smooth + per-scene stationary + zoom lock). `0` = original single-pass tracker. |
-| `REFRAME_STATIC_AUTO` | on | Lock the camera per scene, zero pan, zero mid-shot zoom. `0` = eased-but-moving smoother. |
-| `REFRAME_MOTION_WIDE_THRESH` | `0.12` | How far a single subject may travel (fraction of frame) before TRACK is demoted to a static WIDE crop. |
-| `REFRAME_STATIONARY_THRESH` / `REFRAME_ZOOM_LOCK` | `0.30` / on | Comfort tuning: scene-lock threshold / one zoom level per scene. |
-| `REFRAME_SALIENT_GENERAL` | _(off)_ | Content-aware crop for faceless scenes instead of letterboxing. |
-| `REFRAME_OBJECT_WEIGHTS` | _(off)_ | Faceless scenes follow a weighted-object centroid (product/dog/car) by reusing the existing YOLO pass. `1` = curated defaults, or `dog:3,car:2` for custom weights. |
-| `REFRAME_FRAMESHIFT_WEIGHTS` | _(GUI defaults)_ | `object`-mode class weights. Defaults `face:1,person:0.8,default:0.5`; override any of those three or add a COCO class, e.g. `face:1,person:0.8,default:0.5,dog:3`. |
-| `YTDLP_PLAYER_CLIENTS` | `default,tv+tv_embedded,web_safari` | Comma-separated yt-dlp player-client fallback chain; each entry is `default` (no override) or a `+`-joined client list. On a 403 / format-negotiation failure the next entry is tried (5 s apart); page-level blocks (bot wall, private/removed, geo) stop the chain immediately. |
-| `S6CUT_X264_CRF` | `18` | Shared libx264 quality for every render/compose encode (near-visually-lossless; lower = higher quality + bigger files, 0–51). Stops the stacked re-encodes from compounding into soft output. |
-| `S6CUT_X264_PRESET` | `medium` | Shared libx264 preset; a faster preset (e.g. `fast`) trades a little quality/size for render speed. |
-| `ZERNIO_DEFAULT_TZ` | `Europe/Rome` | |
-| `ZERNIO_MIN_GAP_SECONDS` | `5400` | SmartScheduler min spacing between posts. |
-| `TWITCH_CLIENT_ID` / `TWITCH_CLIENT_SECRET` | _(unset)_ | Helix app creds ([dev.twitch.tv](https://dev.twitch.tv/console/apps)) for the Twitch content monitor. Also settable in Settings. Fallback only if not stored in `data/config.json`. |
-| `MAX_FILE_SIZE_MB` | `16384` | Max local-video upload size in MB (16 GB default — long stream VODs easily exceed the old 2 GB). Raising past 16 GB behind the prod nginx frontend also requires raising `client_max_body_size` in `dashboard/nginx.conf`. |
-| `REFRAME_SMOOTHER` | _(blank)_ | `euro` switches the speaker camera to the 1€ adaptive filter; blank keeps the two-speed EMA. |
-| `REFRAME_LOST_HOLD` | `90` | Frames a lost subject is held before the camera drifts back to center (~3 s @ 30 fps). |
-| `REFRAME_LOST_DRIFT` | `0.05` | Per-frame ease rate of the drift-to-center recovery. |
-| `REFRAME_EURO_MINCUTOFF` / `REFRAME_EURO_BETA` | `0.014` / `0.0008` | 1€ smoother tuning (only when `REFRAME_SMOOTHER=euro`): smoothness floor / speed responsiveness. |
-| `REFRAME_SPRING_RESPONSE` / `REFRAME_SPRING_DAMPING` | `0.18` / `0.82` | Damped-spring smoother tuning (only when `REFRAME_SMOOTHER=spring`): acceleration / velocity decay. |
-| `REFRAME_GLOBAL_SMOOTH` / `REFRAME_GLOBAL_METHOD` | _(off)_ / `savgol` | Opt-in 2-pass trajectory smoothing. ⚠️ `kalman`/`l2` only take effect with `REFRAME_STATIC_AUTO=0` — under the default static-auto policy each scene collapses to one locked crop and the trajectory smoother never runs. |
-| `REFRAME_SPEAKER_SWITCH_MARGIN` | `1.25` | Challenger/current score ratio required before the active-speaker camera switches identity (hysteresis against ping-pong cuts). |
-| `REFRAME_MIN_FACE_RATIO` | `0.10` | Ignore faces smaller than this share of the largest candidate — background heads never steal the frame. |
-| `REFRAME_DIALOGUE_GROUP` | `1` | Keep two similarly-active, separated participants in frame instead of cutting between them. |
-| `REFRAME_DIALOGUE_SCORE_RATIO` / `REFRAME_DIALOGUE_SEPARATION` | `0.88` / `0.28` | Group-framing thresholds: min second/first activity ratio, min horizontal separation (fraction of frame). |
-| `S6CUT_JOB_MAX_ATTEMPTS` | `3` | Worker attempts per queued job (bounded 1–10). Exit code `2` = deterministic rejection, never retried. |
-| `S6CUT_RENDER_QA_RETRIES` | `1` | Extra render attempts after a **critical** output-QA failure. |
-| `S6CUT_KEEP_CHECKPOINTS` | `0` | Keep the hidden transcript/phase checkpoints after a fully successful job. |
-| `S6CUT_MAX_DURATION_SECONDS` / `S6CUT_MAX_INPUT_GB` | _(disabled)_ | Preflight quotas: reject sources longer / larger than this before any expensive work. |
-| `S6CUT_MAX_ESTIMATED_COST_USD` | _(disabled)_ | Reject a job whose estimated Gemini spend exceeds this. Conservative estimate, not a billing promise. |
-| `S6CUT_MIN_FREE_DISK_GB` | `1` | Free space that must still remain after the estimated peak disk use. |
-| `S6CUT_MAX_CLIPS` | _(disabled)_ | Cap how many ranked candidates are actually rendered. |
-| `S6CUT_CREATOR_NAME` | _(unset)_ | Channel owner passed to the Gemini prompt so titles can name whose stream the clip is from. Set per-job by the Live Monitor; never used to attribute a quote. |
-| `S6CUT_MIN_VIRAL_SCORE` | _(disabled)_ | Drop clips scoring below this (1–100) before the cap — the clip count then follows the material (a weak segment can yield zero clips). Set by the Live Monitor's "Automatic" clip selection. |
-| `S6CUT_QA_SIGNAL` | `1` | `0` runs structural output QA only (skips black/freeze/loudness probes) on constrained hosts. |
+| `S6CUT_BIND` | `127.0.0.1` | Host interface both published ports bind to. `0.0.0.0` exposes the app to the LAN. |
+| `S6CUT_API_TOKEN` | _(unset)_ | Optional shared-secret auth for `/api` requests. |
+| `TRANSCRIPTION_PROVIDER` | `deepgram` | `deepgram`, `elevenlabs`, or `whisper` to force local. |
+| `S6CUT_TRANSCRIBE_AUDIO_ONLY` | `true` | Strip to audio-only FLAC before transcription. |
+| `S6CUT_SILENCE_SNAP` | `1` | Refine clip edges to the nearest waveform silence trough. |
+| `S6CUT_X264_CRF` | `18` | libx264 quality for all render passes (0–51). |
+| `S6CUT_X264_PRESET` | `medium` | libx264 speed preset. |
+| `S6CUT_JOB_MAX_ATTEMPTS` | `3` | Worker attempts per queued job. |
+| `S6CUT_RENDER_QA_RETRIES` | `1` | Extra render attempts after a critical QA failure. |
+| `S6CUT_KEEP_CHECKPOINTS` | `0` | Keep hidden transcript checkpoints after a successful job. |
+| `S6CUT_MAX_DURATION_SECONDS` | _(disabled)_ | Preflight quota: reject sources longer than this. |
+| `S6CUT_MAX_INPUT_GB` | _(disabled)_ | Preflight quota: reject inputs larger than this. |
+| `S6CUT_MAX_ESTIMATED_COST_USD` | _(disabled)_ | Reject a job whose estimated Gemini spend exceeds this. |
+| `S6CUT_MIN_FREE_DISK_GB` | `1` | Free space that must remain after estimated peak disk use. |
+| `S6CUT_MAX_CLIPS` | _(disabled)_ | Cap how many ranked candidates are rendered. |
+| `S6CUT_CREATOR_NAME` | _(unset)_ | Channel owner name passed to the Gemini prompt. |
+| `S6CUT_MIN_VIRAL_SCORE` | _(disabled)_ | Drop clips scoring below this (1–100). |
+| `S6CUT_QA_SIGNAL` | `1` | `0` runs structural output QA only. |
+| `REFRAME_COMFORT` | `1` | Anti-nausea camera lock. `0` = original single-pass tracker. |
+| `REFRAME_STATIC_AUTO` | on | Lock the camera per scene. `0` = eased-but-moving smoother. |
+| `REFRAME_MOTION_WIDE_THRESH` | `0.12` | Subject movement threshold before TRACK→WIDE demotion. |
+| `REFRAME_SMOOTHER` | _(blank)_ | `euro` or `spring` for alternative camera smoothers. |
+| `REFRAME_LOST_HOLD` | `90` | Frames to hold a lost subject before drifting to centre. |
+| `REFRAME_LOST_DRIFT` | `0.05` | Per-frame ease rate of drift-to-centre recovery. |
+| `REFRAME_SALIENT_GENERAL` | _(off)_ | Content-aware crop for faceless scenes. |
+| `REFRAME_OBJECT_WEIGHTS` | _(off)_ | Weighted-object centroid for faceless scenes. |
+| `REFRAME_FRAMESHIFT_WEIGHTS` | _(GUI defaults)_ | `object`-mode class weights. |
+| `REFRAME_GLOBAL_SMOOTH` | _(off)_ | Opt-in 2-pass trajectory smoothing. |
+| `REFRAME_GLOBAL_METHOD` | `savgol` | `savgol`, `kalman`, or `l2` (requires `STATIC_AUTO=0`). |
+| `REFRAME_SPEAKER_SWITCH_MARGIN` | `1.25` | Identity switch hysteresis. |
+| `REFRAME_MIN_FACE_RATIO` | `0.10` | Ignore faces smaller than this share of the largest candidate. |
+| `REFRAME_DIALOGUE_GROUP` | `1` | Keep two active participants in frame. |
+| `REFRAME_DIALOGUE_SCORE_RATIO` / `REFRAME_DIALOGUE_SEPARATION` | `0.88` / `0.28` | Group-framing thresholds. |
+| `YTDLP_PLAYER_CLIENTS` | `default,tv+tv_embedded,web_safari` | yt-dlp player-client fallback chain. |
+| `MAX_FILE_SIZE_MB` | `16384` | Max local-video upload size in MB. |
+| `ZERNIO_DEFAULT_TZ` | `Europe/Rome` | SmartScheduler timezone. |
+| `ZERNIO_MIN_GAP_SECONDS` | `5400` | Minimum gap between scheduled posts. |
+| `TWITCH_CLIENT_ID` / `TWITCH_CLIENT_SECRET` | _(unset)_ | Helix app credentials for Twitch monitor. |
+
+</details>
 
 ---
 
-## Runtime resilience & output QA
+## Runtime resilience and output QA
 
-Queued jobs run through `s6_cut.pipeline.orchestrator`, which wraps the proven `pipeline.main` stages with durability and verification. Full reference: [`docs/runtime-quality.md`](docs/runtime-quality.md).
+<details>
+<summary><b>Click to expand</b></summary>
 
-- **Durable lifecycle** — each job dir keeps `.s6_cut_runtime.json` (owner-only phase/progress/attempt state) and `.s6_cut_checkpoint/` (reusable transcript + phase artefacts). Writes are atomic and fsync'd; the `/videos` mount rejects both. A retry or a backend restart reuses the existing download, transcript, analysis and finished clips instead of redoing them.
-- **Bounded retries** — transient failures back off exponentially up to `S6CUT_JOB_MAX_ATTEMPTS`; exit code `2` (validation/preflight rejection) is terminal. Stop/cancel semantics are unchanged.
-- **Preflight** — before transcription or Gemini analysis, the source is probed and runtime, peak disk and Gemini tokens/cost are estimated, so a job that would blow a quota is rejected up front rather than halfway through.
-- **Output QA** — every temporary render is probed (size, duration, stream presence, aspect, black/frozen-frame ratio, mean/peak audio) *before* it atomically replaces the public clip. Structural defects trigger a bounded re-render; signal findings stay as warnings in metadata rather than deleting a usable clip.
-- **Telemetry** — `GET /api/status/{job_id}` may carry `result.operations` (phase, attempt, ETA, verified/failed clips, host CPU/RAM/disk, per-stage durations, QA summaries), surfaced in the processing view. The job log keeps a single replaceable `[runtime]` line so polling can't grow it without bound.
-- **Regression suites** — `python -m s6_cut.pipeline.quality_suite <manifest>.json --output report.json` replays the production QA policy over versioned fixture clips; exit `0` pass, `1` quality regression, `2` invalid/unsafe manifest. Manifest paths are confined to the manifest directory, so it is safe to run in CI.
+Queued jobs run through `s6_cut.pipeline.orchestrator`, which wraps the pipeline stages with durability and verification.
 
----
+- **Durable lifecycle** — each job directory keeps `.s6_cut_runtime.json` (phase, progress, attempt state) and `.s6_cut_checkpoint/` (reusable transcript and phase artefacts). Writes are atomic and fsync'd. A restart reuses completed work instead of starting over.
+- **Bounded retries** — transient failures back off exponentially up to `S6CUT_JOB_MAX_ATTEMPTS`. Exit code `2` (validation or preflight rejection) is never retried.
+- **Preflight** — before expensive work, the source is probed and runtime, disk, and Gemini cost are estimated. A job that would blow a quota is rejected up front.
+- **Output QA** — every temporary render is checked for size, duration, stream presence, aspect ratio, black/frozen-frame ratio, and audio levels. Structural defects trigger a bounded re-render; signal findings stay as warnings.
+- **Regression suites** — `python -m s6_cut.pipeline.quality_suite <manifest>.json --output report.json` replays the production QA policy over versioned fixture clips.
 
-## Repository layout
-
-Backend uses an **`src/`-layout** Python package; frontend is a separate Vite app. Tests live at the root.
-
-```
-src/s6_cut/
-  netutil.py          Bounded DNS resolution shared by the SSRF guards (no global socket state)
-  api/                FastAPI surface (thin: validate → domain helper → JSON)
-    app.py            Thin FastAPI layer: job-lifecycle routes, middleware, static mounts, lifespan
-    config_routes.py  Config-family APIRouter (keys/cookies/fonts/logo/zernio/models), include_router'ed by app.py
-    schemas.py        Pydantic request models (strict validation)
-    security.py       Trusted-origin / rate-limit / API-token gates, job-id validation
-  pipeline/           Heavy lifters (main.py imports cv2/torch → pure logic lives in the *_ops modules)
-    orchestrator.py   Entrypoint for queued jobs: preflight → checkpointed main.py stages → output QA
-    main.py           CLI orchestrator: download → transcribe → Gemini → reframe → postprocess
-    preflight.py      Pre-spend probe: duration/size/disk/Gemini-cost estimate + quota rejection
-    media_qa.py       ffprobe-backed clip verification (streams, aspect, black/freeze, loudness)
-    quality_suite.py  Manifest-driven regression runner replaying the production QA policy
-    run_ops.py        Pure entrypoint helpers (output-dir resolve, cut-command argv) → host-tested
-    gemini_request.py Pure Gemini prompt template + pricing + cost/retry classification → host-tested
-    gemini_parser.py  5-level JSON parsing chain + Pydantic validation + dedupe
-    gemini_service.py List available Gemini models (bounded timeout)
-    texttiling_ops.py Lexical TextTiling topic segmentation (no-AI clip fallback, no cv2/torch → host-tested)
-    reframe.py        cv2 render orchestrator: scene strategy, frame strategies, render loops
-    reframe_track.py  Pure tracking classes (SpeakerTracker / SmoothedCameraman, no cv2 → host-tested)
-    reframe_ops.py    Pure camera/decision math (no cv2 → host-tested): smoothers, zoom, crops
-    reframe_detect.py YOLO / MediaPipe detectors
-    cut_ops.py        Pure clip-edge snapping + neighbour-bounds / transcript-snap orchestration → host-tested
-    media_probe.py    cv2-free ffprobe + A/V-sync helpers (VFR, start_time, fps)
-  domain/             Endpoint-facing business logic (never imports FastAPI; raises errors.S6CutError)
-    errors.py         Domain exceptions (Validation/NotFound/Conflict) mapped to HTTP by one app handler
-    clip_resolve.py   Shared resolve_clip(): job dir → metadata → clip entry → path (used by every per-clip route)
-    job_submission.py · job_runner.py · job_worker.py   Submit + per-job subprocess loop + queue dispatch/cleanup
-    job_journal.py · job_control.py · job_actions.py    Crash-safe journal + recovery, status machine, cancel/stop
-    job_results.py · job_artifacts.py   Result loaders + orchestrator command builder; atomic metadata IO
-    runtime_state.py  Durable per-job phase/progress/attempt state + checkpoint dir (atomic, fsync'd)
-    uploads.py        Local-file upload intake (size cap, safe destination paths)
-    compose.py        Grade → Subtitles → Smart Cut → Hook → Logo compose pipeline (pass-fused)
-    smartcut.py       Two-stage filler-word + audio polish (auto-editor v3 timeline)
-    smartcut_ops.py   Pure silence/filler/timeline math (host-tested), re-exported by smartcut.py
-    clip_endpoints.py · clip_edit_ai.py · clip_qa.py   Smart-cut runner + NL→drop_ranges + QA self-eval
-    subtitles.py      ASS karaoke (6 presets) + SRT + ffmpeg burn (filtergraph-escape hardened)
-    hooks.py          Text overlay (Pillow + NotoColorEmoji) w/ IG-style banner/outline/font
-    logo.py · grade.py   Brand-logo / watermark overlay + colour-grade presets
-    encode.py         Single source of x264 settings for every render pass
-    publish_service.py · history_service.py   Zernio publish flow + disk-backed job history scan
-  integrations/       External clients
-    social_publisher.py      Zernio REST + SmartScheduler + publish_clip orchestrator
-    auto_editor_updater.py   Background daily updater for the auto-editor binary
-  storage/
-    config_store.py   data/config.json read/write (mode 0600)
-
-dashboard/
-  src/
-    main.jsx                Mounts redesign/RedesignApp
-    redesign/               The live UI. RedesignApp (top-level state wiring),
-                            create / results / publish / views (Settings + History) / processing,
-                            captions.jsx (EditClipModal shell) + editTabs.jsx (per-tab bodies),
-                            subtitleControls.jsx / layerControls.jsx / hookStyle.jsx (controls shared
-                            between Create and the edit modal), realApi.js (backend client),
-                            data.js (presets/options), primitives.jsx, icon.jsx
-    hooks/                  useJobSubmission (resilient batch poller), useJobPolling, useManualTrim,
-                            useHistory, useSessionPersistence, useBackendStatus, useClipStates
-    lib/                    Pure helpers (host-tested via `npm test`): applyEdit (reprocess orchestration),
-                            pipelineStep, bulkApply, seedClipParams, trimSelection, taste
-
-fonts/                Bundled TTF fonts served via /fonts (subtitle + hook rendering)
-data/                 Persisted config, cookies, transcript cache (git-ignored)
-```
+</details>
 
 ---
 
-## API
+## Architecture and technology stack
 
-All routes are JSON in / JSON out. Job IDs are strict UUID4. Config endpoints require a trusted-origin client (loopback or RFC1918).
+<details>
+<summary><b>Click to expand</b></summary>
 
-| Method | Path | Purpose |
-|---|---|---|
-| `POST` | `/api/process` | Single video (URL or upload). Accepts `reframe_mode`, per-job `model`. |
-| `POST` | `/api/batch` | Up to 20 URLs in one shot. |
-| `GET` | `/api/status/{job_id}` | Live status + logs + result (clips stream in as they finish). |
-| `POST` | `/api/pause/{job_id}` | Suspend the running job (resume-able). |
-| `POST` | `/api/resume/{job_id}` | Resume a paused job. |
-| `POST` | `/api/stop/{job_id}` | Stop early but **keep the clips finished so far**. |
-| `POST` | `/api/cancel/{job_id}` | Kill the subprocess **and discard all output**. |
-| `POST` | `/api/compose/{job_id}/{clip_index}` | Compose Grade + Subtitles + Smart Cut + Hook + Logo on demand. |
-| `POST` | `/api/smartcut/{job_id}/{clip_index}` | Smart Cut a single clip (optional `drop_ranges` for manual trim). |
-| `GET` | `/api/transcript/{job_id}/{clip_index}` | Per-clip transcript segments for the manual-trim UI. |
-| `POST` | `/api/edit-ai/{job_id}/{clip_index}` | Conversational trim: a plain-English instruction → Gemini → spans to cut. |
-| `POST` | `/api/reframe/{job_id}/{clip_index}` | Switch a clip's reframe mode. |
-| `GET` | `/api/history` | Past jobs from disk. |
-| `POST` | `/api/history/{job_id}/restore` | Reload a past job into memory. |
-| `DELETE` | `/api/history/{job_id}` | Delete from disk. |
-| `GET` | `/api/config/models` | List Gemini models (trusted origin). |
-| `POST` | `/api/config` | Persist API keys (trusted origin). |
-| `POST` | `/api/config/cookies` | Upload Netscape cookies file (trusted origin, 10 MB cap). |
-| `GET` | `/api/config/cookies/status` | Is a cookie file present? |
-| `DELETE` | `/api/config/cookies` | Remove the cookies file. |
-| `POST`/`GET`/`DELETE` | `/api/config/logo` | Upload / status / remove the brand logo PNG. |
-| `GET`/`POST`/`DELETE` | `/api/config/fonts` | List / upload / remove custom subtitle+hook fonts. |
-| `GET` | `/api/config/zernio` | Masked Zernio config. |
-| `POST` | `/api/config/zernio` | Save/update Zernio credentials. |
-| `GET` | `/api/zernio/accounts` | Discover accounts via Zernio. |
-| `POST` | `/api/publish/{job_id}/{clip_index}` | Upload + schedule a clip on TikTok/IG/YouTube. |
-| `POST` | `/api/live-monitor/start` | Start a channel monitor (kick/twitch/youtube, live/vod mode). |
-| `POST` | `/api/live-monitor/stop` | Stop one monitor (`{monitor_id}`) or all. |
-| `POST` | `/api/live-monitor/{id}/config` | Update a running monitor's settings (allow-listed fields; apply to future clips). |
-| `POST` | `/api/live-monitor/{id}/publishing` | Pause/resume Zernio auto-publish (`{"enabled": bool}`); pending clips drain on resume. |
-| `GET` | `/api/live-monitor/status` | All monitors: state, segments captured, backfill pending, clips published. |
+| Layer | Technology |
+|---|---|
+| Backend | Python 3.11, FastAPI, Pydantic v2, asyncio queue |
+| Pipeline | yt-dlp, Deepgram REST, ElevenLabs Scribe REST, Faster-Whisper, PySceneDetect, YOLOv8 (Ultralytics), MediaPipe, ffmpeg, auto-editor (Nim binary), Pillow |
+| AI | Google Gemini (viral detection), Deepgram Nova-3 / ElevenLabs Scribe (transcription) |
+| Frontend | React 18, Vite 6, Tailwind CSS v4, lucide-react |
+| Publishing | Zernio multi-platform API (optional) |
+| Deployment | Docker Compose (CPU multi-arch + optional NVIDIA GPU profile) |
 
-Static mounts: `/videos`, `/thumbnails`, `/fonts` (read-only).
+The backend uses an `src/`-layout Python package. The frontend is a separate Vite app. Tests live at the repository root.
 
-<p align="right">(<a href="#readme-top">back to top</a>)</p>
+</details>
 
 ---
 
-## Editing toggles (compose-on-download)
+## Security and privacy
 
-Every finished clip has an **Edit & reprocess** panel, one button on the clip card opens a **tabbed modal** (Reframe · Grade · Captions · Hook · Smart Cut · Trim · Logo) that gathers all the options in one place so you set everything first and apply once, instead of the clip reprocessing on every tweak. The compose layers:
+<details>
+<summary><b>Click to expand</b></summary>
 
-- **Colour grade**: one of four ffmpeg presets (warm_cinematic / cool_crisp / neutral_punch / vivid_pop). Runs first so the overlays below keep their authored colours.
-- **Smart Cut**: auto-removes silences and filler words via auto-editor v3 timeline; falls back to ffmpeg concat demuxer if the binary is missing.
-- **Trim** (its own tab): shows the clip's transcript as a tap-to-cut checklist for hand-removing specific lines, kept separate from the automatic pass. A plain-English **AI trim** box turns an instruction like "cut the intro" into the same spans. The picked spans (`drop_ranges`) ride through download and publish; dropping a line implies the Smart Cut compose stage.
-- **Hook**: text overlay, auto-prefilled from the Gemini hook suggestion. Beyond position/size it offers **Instagram-Stories-style text styling**: a toggleable coloured banner behind the text (colour + opacity), independent text colour, an outline/stroke (None/Thin/Thick + colour), and a font choice. The default look is bannerless white **Anton** with a thin black outline. A live WYSIWYG preview sits above the controls. Supports emoji.
-- **Subtitles**: 6 viral karaoke presets (`classic_white`, `hormozi_bold`, `neon_glow`, `mrbeast_box`, `minimal_clean`, `fire_impact`) or classic SRT with font/color/position controls. The Create-tab grid (`dashboard/src/redesign/data.js`) is a cosmetic CSS preview (system fonts; highlight colours match the backend), not pixel-faithful.
-- **Brand logo**: burns an uploaded transparent PNG onto the clip (7 anchor positions × S/M/L size × opacity). Upload it once in Settings → Brand assets.
-
-**Apply across clips.** Each card has an **Apply to all** button that copies that clip's settings to every other clip; in multi-select mode (with **Select all / Deselect all**) you can **Edit N** selected clips at once. Both bulk paths copy the shared config (reframe / Smart Cut / subtitles / hook style / logo) but keep each clip's own manual trim and hook text, and reprocess with a bounded concurrency so the box isn't flooded with subprocesses.
-
-**Custom fonts**: upload a `.ttf`/`.otf` (e.g. a licensed Stratos) in Settings → Brand assets and it appears in the classic-subtitle and hook font pickers, resolved at burn time from the writable `data/fonts/` dir alongside the bundled faces.
-
-Editing is staged: nothing runs while you toggle. **Apply & reprocess** re-renders the framing (only when the reframe mode changed) and then composes the active layers in one pass via `/api/compose/{job_id}/{clip_index}`: order is **Grade → Subtitles → Smart Cut → Hook → Logo** (grade first so the overlays keep their authored colour; subtitles burn next so their absolute timing never drifts when Smart Cut removes silences; the logo sits on top of everything). Adjacent layers are fused into shared ffmpeg passes (grade+subtitles in one, hook+logo in one), so a fully-toggled compose is 3 encodes instead of 5 — noticeably faster downloads with zero quality change. Reprocessing runs in the **background**: Apply closes the modal immediately and the clip card shows a *Reprocessing…* overlay, so you can edit other clips meanwhile. The preview updates to the composed result, and downloading runs the same compose, so what you see is what you get. Downloaded clips are named after the AI-suggested title (sanitized for Windows: forbidden characters and reserved device names are stripped, length-capped, falling back to `clip_N`).
-
-**Apply runs in the background.** Hitting Apply closes the modal immediately and the reframe/compose work runs without blocking the page, the clip card shows a *Reprocessing…* overlay while it renders, and you can edit, reprocess, and publish other clips at the same time. Each clip is an independent job, so several can render at once.
-
----
-
-## Reframing
-
-Pick one of three modes per job (and per clip after the fact, from the **Edit & reprocess** panel or `POST /api/reframe`):
-
-- **Auto**: face tracking. The default; runs the per-scene strategy picker below.
-- **Subject** (the CLI value is `subject`; `object` still works as a legacy alias): [FrameShift](https://github.com/fralapo/FrameShift) face-first crop. Computes a weighted-interest centroid over **every** detection in the frame — faces (weight 1.0), persons (0.8) and other on-screen objects (default 0.5, the FrameShift GUI sliders), each scaled by area and confidence — then crops a 9:16 window on it. A face pulls the camera hardest, so a talking head stays framed while relevant objects (a product, a dog, a car) still bias the crop; a shot with no detectable subject falls back to a black-padded letterbox. Tune the weights with `REFRAME_FRAMESHIFT_WEIGHTS`.
-- **Off**: no reframe: a 4:3 center crop inside the 9:16 frame with black bars.
-
-Inside **Auto**, three per-scene strategies are decided by sampling 7 frames per scene:
-
-- **TRACK**: a single, near-static speaker → a crop locked on the face. The camera holds still; it does not pan around with the subject. (`SpeakerTracker` MAR-variance selection and `SmoothedCameraman` still run in pass 1 to find the face; the static policy then pins the shot.)
-- **WIDE**: two or more faces in the scene, *or* a single subject that moves too far to hold without panning → a locked, zoomed-out crop that keeps everyone in frame with no camera motion. Movement is measured by how far the primary face travels across the sampled frames (`REFRAME_MOTION_WIDE_THRESH`, default 0.12 of the frame); past that, chasing the subject would cause the exact motion we're trying to avoid, so we pull back instead.
-- **GENERAL**: no faces → letterbox.
-
-**Static framing (`REFRAME_STATIC_AUTO`, default on):** the rule that ties the strategies together is that the camera never moves *within* a shot. Each scene collapses to a single fixed crop, TRACK locks on the face (zoom capped so it's framed, not shoved in your face), WIDE locks zoomed-out between the faces. Zoom can still change *across* a cut, which reads as a new shot rather than camera motion. This is the deterministic end-state of comfort mode; set `REFRAME_STATIC_AUTO=0` to go back to the eased-but-moving Savitzky-Golay smoother. The decision math (`centroid_span`, `collapse_scene_targets`) is pure and host-tested.
-
-**Lost-subject recovery:** in TRACK/WIDE, if no speaker is detected for `REFRAME_LOST_HOLD` frames (~3 s) the camera eases back to the source center and gently zooms out instead of freezing on empty space. The active-speaker camera can optionally use a 1€ adaptive filter (`REFRAME_SMOOTHER=euro`) or a momentum/damped-spring smoother (`REFRAME_SMOOTHER=spring`) in place of the default two-speed EMA, with an optional hard pan-rate cap (`REFRAME_MAX_STEP_PX`). The pure decision math lives in the cv2-free, host-tested `s6_cut.pipeline.reframe_ops` module; ffprobe-backed A/V-sync helpers (VFR detection, stream `start_time`, fps reconcile) live alongside in `media_probe.py`.
-
-**Comfort mode (`REFRAME_COMFORT`, default on):** continuous face-tracking is what makes auto-reframes feel like seasickness, the camera is always gently moving, and the changing velocity (plus a zoom that breathes mid-shot) is the actual nausea trigger, not pixel jitter. So the default render now biases toward a *still* camera the way [AutoFlip](https://research.google/blog/autoflip-an-open-source-framework-for-intelligent-video-reframing/) does: a two-pass global trajectory smoother Savitzky-Golay-smooths the whole camera path per scene (the alternative `REFRAME_GLOBAL_METHOD=kalman`/`l2` pan-path solvers are reachable only with `REFRAME_STATIC_AUTO=0` — the default static-auto policy collapses each scene to a single locked crop before they would run), a per-scene **stationary lock** (`REFRAME_STATIONARY_THRESH`, default `0.30`) pins near-static scenes to a locked tripod (with `REFRAME_SNAP_CENTER`), and **per-scene zoom lock** (`REFRAME_ZOOM_LOCK`) holds one zoom level per shot so the frame never breathes. It costs a second video decode; set `REFRAME_COMFORT=0` to fall back to the original single-pass streaming tracker. See [`docs/reframe-improvements-research.md`](docs/reframe-improvements-research.md) for the measured comparison.
-
-Override per job with `--reframe-mode auto|subject|disabled` (`subject` = the FrameShift face-first crop above, with `object` accepted as a legacy alias; `disabled` = 4:3 center crop with black bars).
-
-After a job completes, every clip can be flipped between all three modes post-hoc via `POST /api/reframe/{job_id}/{clip_index}` (the **Edit & reprocess** panel exposes the three modes and applies the switch on **Apply**). The original 16:9 source slice is preserved as `source_<clip>.mp4` to make this latency-tolerant. Legacy jobs without the preserved slice return HTTP 409.
-
----
-
-## Publishing (Zernio)
-
-`POST /api/publish/{job_id}/{clip_index}` uploads the clip to Zernio's presigned URL and schedules a post. Three scheduling modes:
-
-- `now`: immediate
-- `auto`: `SmartScheduler` picks the next free Italian-prime-time slot per weekday, with a 90-minute minimum gap and anti-collision against already-scheduled posts (3-step algorithm: free prime-time window → 15-min scan 07–23 → fallback)
-- `manual`: caller passes an ISO 8601 `scheduled_for`
-
-The dashboard's unified `PublishModal` publishes the selected clips concurrently in one click, each row showing live queued → uploading → live/error status. With `auto` it spreads one clip per day from a chosen start date (mirroring the original `tmp/programma_shorts.py` logic) to stay under per-platform daily caps; any residual Zernio daily-limit 429 is surfaced verbatim per clip instead of failing the whole batch.
-
----
-
-## Live monitor (auto clip & publish)
-
-The **Live Monitor** tab watches a channel and turns its content into published shorts hands-free. Multiple monitors run in parallel (one per platform+channel), state survives restarts (`data/live_monitor.json`).
-
-- **Platforms & modes**: **Kick** and **Twitch** in `live` mode (real-time: capture the ongoing stream in 30-min segments, clip each segment, auto-publish) or `vod` mode (process each new VOD as it's uploaded); **YouTube** watches the channel's long-form uploads via RSS (Shorts structurally excluded) and clips every new video from activation onward.
-- **Prelive skip**: the first 30 minutes of every stream (configurable) are skipped — anchored to the *stream's* start time, so a monitor started mid-stream doesn't wait a redundant window.
-- **Backfill**: starting a monitor on a channel that's already been live for hours doesn't lose the past. On **Twitch** the missed span is range-downloaded from the in-progress archive VOD (matched by `stream_id`) in parallel with the forward capture. **Kick** publishes no VOD until the stream ends, so missed windows are recorded and recovered from the replay right after the live finishes. Requires the streamer to have past-broadcast storage enabled.
-- **Auto layout**: monitor clips default to reframe off (letterbox), full-clip hook on top, attribution banner attached under the video band, left-aligned subtitles below — all overridable per monitor.
-- **Publishing**: no daily cap, but a global ≥15-minute gap between posts across *all* monitors; `{title}`/`{hook}` placeholders in the title/caption templates; optional per-monitor AI instructions feed the Gemini prompt.
-
----
-
-## Security posture
-
-This project has been audited; the current state is suitable for **trusted LAN deployment**. Notable hardening already in place:
-
-- Strict UUID4 validation on every `{job_id}` path parameter.
-- Trusted-origin guard on every config-mutation endpoint (cookies upload, Gemini key probe, Zernio config).
-- Pydantic patterns on all subtitle / hook fields (font name, hex colors, file names) to prevent FFmpeg filtergraph injection.
-- `_ffmpeg_filter_escape()` covers `\\ : ' , ; [ ]` and is re-applied even on direct internal callers.
-- Subprocess calls use list-form argv with whitelisted `reframe_mode` and bounded `instructions` length, no shell interpolation.
-- Uploaded media files are saved with a server-generated name (extension whitelisted): the client-supplied filename is discarded.
+- Published ports bind to `127.0.0.1` by default. LAN exposure is opt-in via `S6CUT_BIND=0.0.0.0`.
+- An optional API token (`S6CUT_API_TOKEN`) authenticates every `/api` request when set.
+- UUID4 validation on every `{job_id}` path parameter.
+- Trusted-origin guard on config-mutation endpoints.
+- Pydantic patterns on all subtitle and hook fields prevent FFmpeg filtergraph injection.
+- Uploaded media files are saved with server-generated names; the client-supplied filename is discarded.
 - `data/config.json` and `data/cookies.txt` are written with mode `0600`.
-- Internal exceptions never leak `str(e)` to API clients; full stack traces are logged server-side only.
-- `ZERNIO_BASE_URL` env override is allowlisted to `https://*.zernio.com`.
-- A secret-scan **pre-commit hook** (`.githooks/pre-commit`) blocks committing API keys, tokens, cookie files, `data/config.json`, and `.env`. Enable per clone: `git config core.hooksPath .githooks`.
-- **CSRF protection**: config-mutation endpoints reject any request whose `Sec-Fetch-Site` is `cross-site`/`same-site` (a browser-set forbidden header JS can't forge), then fall back to an `Origin` allowlist, so a cross-site `<form>` POST can't reach them.
-- **Per-client rate limiting** (`RATE_LIMIT_ENABLED`, default on): a dependency-free token bucket throttles the compute-heavy endpoints (`process` / `batch` / `publish`) per client IP; the bucket table is bounded against a unique-IP-flood memory DoS.
-- **Spoof-resistant client IP**: `X-Forwarded-For` / `X-Real-IP` are honoured only when `TRUST_PROXY=1` **and** the TCP peer is itself a private/loopback proxy, so a direct public client can't forge its address to dodge the rate limiter or the trusted-origin guard. Within `X-Forwarded-For` the backend reads the **last** hop — the address the proxy itself wrote — so it stays spoof-proof whether your proxy appends to the header (nginx's `$proxy_add_x_forwarded_for`, as shipped) or overwrites it. Exactly one trusted proxy is supported; don't enable it behind a proxy chain.
-- **SSRF hardening**: download + Zernio upload URLs are re-resolved and rejected when every resolved address is internal/loopback/link-local (DNS-rebinding-aware), with the DNS lookup bounded by a daemon-thread timeout (no process-global socket state).
-- **Loopback by default**: both published ports bind to `127.0.0.1` (`S6CUT_BIND`). The trust model treats every private-network peer as an authorized client for config/state endpoints, so LAN exposure is opt-in, not the default.
-- **Optional API token** (`S6CUT_API_TOKEN`): when set, an app middleware requires the shared secret on every `/api` request (`X-API-Token` or `Authorization: Bearer`, constant-time compare) — the auth layer for deliberate LAN deployments. Static media mounts stay IP-open (`<video>`/FontFace can't send custom headers).
+- Internal exceptions never leak stack traces to API clients.
+- SSRF hardening: download and Zernio upload URLs are re-resolved and rejected when every resolved address is internal or link-local.
+- A pre-commit hook blocks committing API keys, tokens, cookie files, and `.env`. Enable with `git config core.hooksPath .githooks`.
 
-**Not yet in place** (required before exposing publicly): a reverse proxy terminating TLS + security headers.
+**Not yet in place:** a reverse proxy with TLS termination and security headers. Required before exposing the application to the public internet.
+
+</details>
+
+---
+
+## Development and testing
+
+<details>
+<summary><b>Click to expand</b></summary>
+
+```bash
+# Backend host tests (fast, no CV stack) + lint
+pip install -e ".[host-tests]" && pip install pytest ruff
+pytest -m "not integration" -q
+python -m ruff check src/s6_cut tests --select E9,F63,F7,F82
+
+# Heavy integration tests (Docker only)
+docker compose run --rm -u root backend sh -lc "pip install -q pytest && pytest -m integration"
+
+# Frontend
+cd dashboard && npm ci && npm test && npm run lint && npm run build
+```
+
+</details>
+
+---
+
+## Roadmap
+
+- [x] **YouTube, Twitch, Kick download** — working with yt-dlp, bot-detection bypass, and cookie support.
+- [x] **Transcription** — Deepgram, ElevenLabs, and local Whisper with automatic fallback.
+- [x] **Viral moment detection** — Gemini ranking with TextTiling fallback.
+- [x] **Smart clip edges** — word, sentence, and silence snapping.
+- [x] **Vertical reframe** — Auto, Subject, and Off modes with comfort-mode camera lock.
+- [x] **Per-clip editing** — colour grade, smart cut, hook text, karaoke subtitles, brand logo, attribution banner.
+- [x] **Publishing** — Zernio integration for TikTok, Instagram, YouTube.
+- [x] **Live Monitor** — Twitch, Kick, YouTube auto-clip and publish.
+- [x] **CPU-only Docker image** — no GPU required.
+- [ ] **Style selector** — Funny, Serious, Educational, Hype presets map to AI instructions.
+- [ ] **ZIP-all download** — download every completed clip as a single ZIP file.
+- [ ] **Script to video** — paste a script, generate a finished video with subtitles and optional narration.
+- [ ] **Context-aware timed images and GIFs** — match spoken phrases with relevant visuals.
+- [ ] **Asset Library** — local repository of tagged, reusable images, GIFs, posters, and ads.
+- [ ] **OpenRouter support** — single-key LLM provider option alongside Gemini.
+- [ ] **PWA manifest and service worker** — installable as a desktop-style Progressive Web App.
+- [ ] **TrueNAS and Portainer deployment guides** — step-by-step self-hosting documentation.
+- [ ] **Persistent storage documentation** — volume layout for configuration, projects, cache, and asset library.
+
+---
+
+## Contributing
+
+Contributions are welcome. Please open an issue or pull request on [GitHub](https://github.com/carmelo-schepis/S6_CUT).
+
+---
+
+## License
+
+[MIT](LICENSE) — see the [`LICENSE`](LICENSE) file for details. Upstream copyright notices are retained, and the original S6_cut contributions are attributed there.
+
+Third-party components are listed in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md). S6_cut is a fork of [OpenShorts](https://github.com/OpenShorts/OpenShorts); the `subject` reframe mode ports an algorithm from [FrameShift](https://github.com/fralapo/FrameShift). Other third-party software includes yt-dlp, Faster-Whisper, Deepgram, Google Gemini, ElevenLabs, Ultralytics YOLO, MediaPipe, auto-editor, Zernio, React, Vite, Tailwind CSS, and others, each used under its respective licence.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
-
----
-
-## CPU vs GPU
-
-The standard image is explicitly CPU-only: `python:3.11-slim`, CPU PyTorch wheels, CPU CTranslate2/Faster-Whisper, CPU OpenCV/MediaPipe, and `libx264`. Its build includes an automated check that rejects NVIDIA/CUDA, TensorRT, NCCL, GPU ONNX Runtime, and Triton distributions or inherited libraries.
-
-The NVIDIA profile is a separate opt-in build (`Dockerfile.gpu` plus `docker-compose.gpu.yml`). CPU processing produces the same usable outputs; acceleration primarily changes processing time. Runtime selection is also opt-in: the base stack pins `S6CUT_DEVICE=cpu`; the GPU override requests `cuda`. If an opted-in accelerator is unavailable or model initialization fails, affected stages retry on CPU. `GET /api/health` reports the requested/selected device, fallback reason, RAM/VRAM, performance profile, and Whisper model without loading model weights.
-
----
-
-## Acknowledgements
-
-- [OpenShorts](https://github.com/SamurAIGPT/Open-Source-Shorts-Maker): original starting point.
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp), [Faster-Whisper](https://github.com/SYSTRAN/faster-whisper), [Deepgram](https://deepgram.com), [Google Gemini](https://ai.google.dev), [Ultralytics YOLO](https://github.com/ultralytics/ultralytics), [MediaPipe](https://github.com/google/mediapipe), [auto-editor](https://github.com/WyattBlue/auto-editor), [Zernio](https://zernio.com).
-- [ClipsAI](https://github.com/ClipsAI/clipsai): TextTiling topic-segmentation algorithm (the no-AI clip-finding fallback is a lexical port; see [`docs/clipsai-analysis.md`](docs/clipsai-analysis.md)).
-- [React](https://react.dev), [Vite](https://vitejs.dev), [Tailwind CSS](https://tailwindcss.com), [lucide](https://lucide.dev).
-- Reframe-algorithm research studied and selectively ported (see `docs/*-analysis.md`): [fralapo/FrameShift](https://github.com/fralapo/FrameShift) (weighted-object interest region → the `object` reframe mode), [gauravzazz/smart-reframe](https://github.com/gauravzazz/smart-reframe), [KazKozDev/auto-vertical-reframe](https://github.com/KazKozDev/auto-vertical-reframe), [obi19999/smart-video-reframe](https://github.com/obi19999/smart-video-reframe), [mfahsold/montage-ai](https://github.com/mfahsold/montage-ai), [kamilstanuch/Autocrop-vertical](https://github.com/kamilstanuch/Autocrop-vertical).

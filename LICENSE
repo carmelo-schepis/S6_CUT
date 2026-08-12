@@ -1,6 +1,9 @@
 MIT License
 
-Copyright (c) 2026 S6_cut
+Copyright (c) 2026 Carmelo Schepis
+
+Portions of this software are derived from OpenShorts (https://github.com/OpenShorts/OpenShorts),
+Copyright (c) 2024 SamurAI, and are used under the MIT License.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
