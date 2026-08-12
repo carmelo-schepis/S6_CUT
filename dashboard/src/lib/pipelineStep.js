@@ -45,7 +45,7 @@ export function detectPipelineStep(logs) {
  * the static PIPE meta for the rest.
  *
  * NOTE: the substrings matched below are a soft contract with the backend's
- * log wording (clippyme/pipeline/main.py + deepgram_transcribe.py). If a log
+ * log wording (s6_cut/pipeline/main.py + deepgram_transcribe.py). If a log
  * line is rephrased there, the affected key simply drops back to the static
  * PIPE meta — wrong-but-stable degrades to generic, never to a crash.
  *

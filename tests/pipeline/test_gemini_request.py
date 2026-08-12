@@ -2,7 +2,7 @@
 get_viral_clips (which itself lives in the non-host-importable main.py)."""
 import pytest
 
-from clippyme.pipeline.gemini_request import (
+from s6_cut.pipeline.gemini_request import (
     MODEL_PRICING,
     backoff_seconds,
     build_reformat_prompt,

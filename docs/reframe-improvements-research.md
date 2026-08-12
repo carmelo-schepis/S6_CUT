@@ -21,7 +21,7 @@ to catalogue research-validated next steps.
 | Change | Research check | Verdict |
 |---|---|---|
 | MAR fix | n/a — correctness bug | **Keep** (non-negotiable) |
-| Dead-band 0.05/0.08 | It is an *online* approximation of Google **AutoFlip's "stationary" mode** (lock the viewport when scene motion is small). No better online drop-in; the principled offline version already exists in ClippyMe as the opt-in global-smooth pass. | **Keep** |
+| Dead-band 0.05/0.08 | It is an *online* approximation of Google **AutoFlip's "stationary" mode** (lock the viewport when scene motion is small). No better online drop-in; the principled offline version already exists in S6_cut as the opt-in global-smooth pass. | **Keep** |
 | `REFRAME_DEBUG_EXC` + test | Standard "don't let a guard swallow real exceptions" hygiene. | **Keep** |
 
 The dead-band values were tuned empirically (not from a standard); the sweep
@@ -54,14 +54,14 @@ get a still camera, not micro-tracking.
 ### Medium value
 3. **Per-scene stationary-vs-track decision (AutoFlip's model).** AutoFlip
    buffers a whole scene, measures object motion, and picks **stationary / pan /
-   track** via `motion_stabilization_threshold_percent`. ClippyMe already buffers
+   track** via `motion_stabilization_threshold_percent`. S6_cut already buffers
    scenes (scene detection) and has a global-smooth pass — adding an explicit
    "lock the camera for this scene if subject motion < threshold" mode would beat
    the per-frame dead-band on near-static shots. The dead-band stays as the
    streaming fallback.
    Source: Google AutoFlip (research.google blog + MediaPipe docs).
 
-4. **L1-optimal camera path.** ClippyMe's global smoothers are savgol / Kalman /
+4. **L1-optimal camera path.** S6_cut's global smoothers are savgol / Kalman /
    **L2** (`reframe_ops.solve_camera_path_l2`). Google's L1-optimal path
    (Grundmann et al., the AutoFlip/stabilization basis) is *sparse* — it produces
    genuinely static segments joined by constant/linear/parabolic pans, which reads
@@ -72,7 +72,7 @@ get a still camera, not micro-tracking.
 ### Higher cost (only if accuracy demands it)
 5. **Audio-visual active-speaker detection / ASR fusion.** Visual-only MAR
    variance is weaker than SOTA audio-visual ASD (TalkNet, Light-ASD, LoCoNet).
-   ClippyMe **already produces Deepgram word timings + diarization**, so a cheap
+   S6_cut **already produces Deepgram word timings + diarization**, so a cheap
    win is to *bias* the MAR speaker score by which diarized speaker is talking in
    that time window — no new heavy model, reuses an existing pipeline output.
    A full TalkNet-style model is a large dependency and probably overkill.
@@ -88,7 +88,7 @@ get a still camera, not micro-tracking.
 
 ## How the current changes map to the field
 
-ClippyMe's reframer is, feature-for-feature, close to AutoFlip's design
+S6_cut's reframer is, feature-for-feature, close to AutoFlip's design
 (per-scene strategy, salient-subject detection, smoothing/stabilization, padding
 fallback) — and ahead of it in active-speaker selection (AutoFlip has none). The
 gaps are: (a) an explicit *stationary* scene mode, (b) L1 path option, (c)
@@ -113,9 +113,9 @@ Pulled the concrete AutoFlip configuration from the MediaPipe docs:
 | Padding | `blur_cv_size: 200` | blurred-frame fill when content can't be covered |
 
 Two corrections to the first-pass notes above: AutoFlip's reframer path is **L2
-polynomial**, which ClippyMe's savgol global-smooth already approximates (so the
+polynomial**, which S6_cut's savgol global-smooth already approximates (so the
 L1 idea is a *nice-to-have*, not a gap); and AutoFlip's face>human>object
-weighting matches ClippyMe's existing face-over-person-box priority.
+weighting matches S6_cut's existing face-over-person-box priority.
 
 **Implemented (this pass):** AutoFlip's stationary lock + center-snap, as the
 host-tested pure helper `reframe_ops.stationary_lock`, wired into

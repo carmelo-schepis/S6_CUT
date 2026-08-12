@@ -4,13 +4,13 @@ import sys
 
 def _reload_hardware(monkeypatch, device):
     monkeypatch.setenv("S6CUT_DEVICE", device)
-    sys.modules.pop("clippyme.pipeline.hardware", None)
-    return importlib.import_module("clippyme.pipeline.hardware")
+    sys.modules.pop("s6_cut.pipeline.hardware", None)
+    return importlib.import_module("s6_cut.pipeline.hardware")
 
 
 def test_cpu_default_does_not_import_torch(monkeypatch):
     monkeypatch.delenv("S6CUT_DEVICE", raising=False)
-    sys.modules.pop("clippyme.pipeline.hardware", None)
+    sys.modules.pop("s6_cut.pipeline.hardware", None)
     real_import = importlib.import_module
 
     def guarded_import(name, package=None):
@@ -19,7 +19,7 @@ def test_cpu_default_does_not_import_torch(monkeypatch):
         return real_import(name, package)
 
     monkeypatch.setattr(importlib, "import_module", guarded_import)
-    hardware = importlib.import_module("clippyme.pipeline.hardware")
+    hardware = importlib.import_module("s6_cut.pipeline.hardware")
 
     assert hardware.DEVICE == "cpu"
     assert hardware.runtime_diagnostics()["cpu_first"] is True

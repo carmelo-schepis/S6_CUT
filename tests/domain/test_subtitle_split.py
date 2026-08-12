@@ -1,11 +1,11 @@
 """Semantic subtitle line-splitting (VideoLingo-ported idea).
 
 Pure-function tests for the boundary-aware grouping in
-``clippyme.domain.subtitles`` — no ffmpeg, no model load, host-runnable.
+``s6_cut.domain.subtitles`` — no ffmpeg, no model load, host-runnable.
 The grouping helpers turn flat word lists (Deepgram/Whisper shape) into
 caption lines that break at sentence/clause boundaries instead of mid-phrase.
 """
-from clippyme.domain.subtitles import (
+from s6_cut.domain.subtitles import (
     _ends_sentence,
     _ends_soft,
     _group_words,

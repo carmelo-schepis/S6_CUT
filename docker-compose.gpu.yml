@@ -9,7 +9,7 @@
 # faster than CPU, so enabling ENABLE_WHISPER_DIARIZE=1 here is
 # significantly more practical than on the CPU image.
 
-name: clippyme
+name: s6-cut
 
 services:
   backend:

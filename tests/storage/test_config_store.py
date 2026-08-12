@@ -1,4 +1,4 @@
-"""Tests for clippyme.storage.config_store.
+"""Tests for s6_cut.storage.config_store.
 
 Covers core config round-trip, env-var fallback, HF_TOKEN aliasing, Zernio
 namespace isolation, masking, and corrupt/missing-file resilience. All I/O is
@@ -10,7 +10,7 @@ import os
 
 import pytest
 
-from clippyme.storage import config_store
+from s6_cut.storage import config_store
 
 
 @pytest.fixture

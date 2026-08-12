@@ -1,6 +1,6 @@
 # Testing
 
-ClippyMe splits its test suite into two tiers because the video pipeline pulls
+S6_cut splits its test suite into two tiers because the video pipeline pulls
 in a heavy CV/ML runtime (`cv2`, `mediapipe`, `scenedetect`, `ultralytics`,
 `torch`) that isn't practical to install on every contributor's host.
 
@@ -9,7 +9,7 @@ in a heavy CV/ML runtime (`cv2`, `mediapipe`, `scenedetect`, `ultralytics`,
 | Tier | Marker | Where it runs | What it covers |
 |------|--------|---------------|----------------|
 | Fast (host) | *unmarked* | any machine with `pip install -e .` + `pytest` | API schemas, domain logic, config/storage, Gemini parser, reframe math, Deepgram retry logic, social scheduler, history scanner, runtime state / retry / resume policy, preflight estimates, media-QA verdicts, quality-suite manifests |
-| Integration | `@pytest.mark.integration` | Docker image with the full runtime | `clippyme.pipeline.main` orchestration, scene detection, YOLO/MediaPipe tracking |
+| Integration | `@pytest.mark.integration` | Docker image with the full runtime | `s6_cut.pipeline.main` orchestration, scene detection, YOLO/MediaPipe tracking |
 
 `tests/conftest.py` automatically skips collecting the pipeline integration
 modules when the heavy runtime is absent, so the host command below stays green
@@ -37,7 +37,7 @@ docker compose run --rm backend pytest
 `.github/workflows/ci.yml` runs the fast host suite + `pip-audit` + the
 frontend build/lint on every push and PR. The integration tier is **not** run
 in CI yet (it needs the GPU/CV image); run it locally in Docker before merging
-changes to `src/clippyme/pipeline/`.
+changes to `src/s6_cut/pipeline/`.
 
 ## Frontend
 

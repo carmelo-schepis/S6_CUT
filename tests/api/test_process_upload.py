@@ -1,4 +1,4 @@
-"""Tests for the /api/process upload size-limit path in clippyme.api.app.
+"""Tests for the /api/process upload size-limit path in s6_cut.api.app.
 
 We drive the endpoint with Starlette's TestClient *without* entering its
 context manager, so the FastAPI lifespan (job workers, the auto-editor
@@ -15,7 +15,7 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
-from clippyme.api import app as app_module
+from s6_cut.api import app as app_module
 
 
 @pytest.fixture

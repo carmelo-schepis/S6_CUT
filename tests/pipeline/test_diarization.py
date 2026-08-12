@@ -1,5 +1,5 @@
-"""Tests for clippyme.pipeline.diarization (pure overlap logic, host-runnable)."""
-from clippyme.pipeline.diarization import assign_speakers_to_words
+"""Tests for s6_cut.pipeline.diarization (pure overlap logic, host-runnable)."""
+from s6_cut.pipeline.diarization import assign_speakers_to_words
 
 
 def test_no_words_or_turns_is_noop():

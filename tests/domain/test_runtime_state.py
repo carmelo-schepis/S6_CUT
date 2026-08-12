@@ -1,6 +1,6 @@
 import os
 
-from clippyme.domain.runtime_state import (
+from s6_cut.domain.runtime_state import (
     RuntimeState,
     format_runtime_log,
     is_resumable,
@@ -25,7 +25,7 @@ def test_runtime_state_roundtrip_and_stage_checkpoint(tmp_path):
     assert "transcribing" in loaded["completed_stages"]
     assert loaded["clips"] == {"ready": 1, "total": 2, "failed": 0}
     assert loaded["qa"]["ok"] == 1
-    assert os.path.exists(tmp_path / ".clippyme_runtime.json")
+    assert os.path.exists(tmp_path / ".s6_cut_runtime.json")
 
 
 def test_mark_clip_is_idempotent_when_replacing_status(tmp_path):
@@ -58,13 +58,13 @@ def test_resume_requires_checkpoint_and_recoverable_source(tmp_path):
     assert not is_resumable(str(tmp_path / "out"), input_path=str(upload), cmd=["python"])
 
     url_cmd = [
-        "python", "-u", "-m", "clippyme.pipeline.orchestrator",
+        "python", "-u", "-m", "s6_cut.pipeline.orchestrator",
         "-u", "https://youtu.be/example", "-o", str(tmp_path / "out"),
     ]
     assert is_resumable(str(tmp_path / "out"), cmd=url_cmd)
     assert not is_resumable(
         str(tmp_path / "out"),
-        cmd=["python", "-u", "-m", "clippyme.pipeline.main", "-i", "missing.mp4"],
+        cmd=["python", "-u", "-m", "s6_cut.pipeline.main", "-i", "missing.mp4"],
     )
 
 

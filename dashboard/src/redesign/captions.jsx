@@ -1,4 +1,4 @@
-// ClippyMe redesign — EditClipModal: one staged editing surface per clip,
+// S6_cut redesign — EditClipModal: one staged editing surface per clip,
 // organised into TABS (Reframe · Captions · Hook · Smart Cut · Trim · Logo ·
 // Grade). This file is the modal SHELL — header, live preview, tab bar,
 // footer and the staged state + apply() payload seam. The tab bodies live in

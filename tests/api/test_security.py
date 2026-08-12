@@ -1,4 +1,4 @@
-"""Tests for clippyme.api.security — trusted-origin / private-network gate.
+"""Tests for s6_cut.api.security — trusted-origin / private-network gate.
 
 These guard the config endpoints (API keys, Zernio creds, cookies). The
 functions are pure and dependency-free, so they run on the host without the
@@ -7,8 +7,8 @@ cv2/mediapipe/ffmpeg runtime stack.
 import pytest
 from fastapi import HTTPException
 
-from clippyme.api import security
-from clippyme.api.security import (
+from s6_cut.api import security
+from s6_cut.api.security import (
     DEFAULT_ALLOWED_ORIGINS,
     is_trusted_client_host,
     is_trusted_origin,

@@ -13,17 +13,17 @@ scratch, a backend restart abandoned the job, a bad render shipped as a public
 clip, and there was no way to reject an expensive job before paying for it.
 
 1. **Orchestrator entrypoint** (`pipeline/orchestrator.py`): queued jobs now run
-   `python -m clippyme.pipeline.orchestrator` instead of `pipeline.main`.
+   `python -m s6_cut.pipeline.orchestrator` instead of `pipeline.main`.
    `main.py` keeps the heavy algorithms (transcription, Gemini, cutting,
    reframe); the orchestrator wraps them with durability and verification.
 2. **Durable state** (`domain/runtime_state.py`): per-job phase/progress/attempt
-   state in `<job>/.clippyme_runtime.json` plus reusable artefacts in
-   `<job>/.clippyme_checkpoint/` — atomic, fsync'd, owner-only, and blocked on
+   state in `<job>/.s6_cut_runtime.json` plus reusable artefacts in
+   `<job>/.s6_cut_checkpoint/` — atomic, fsync'd, owner-only, and blocked on
    the `/videos` mount. Retries and post-restart resumes reuse the existing
    download, transcript, analysis and finished clips. Progressive metadata alone
    is deliberately not treated as a completion marker.
 3. **Bounded retries**: transient failures back off exponentially up to
-   `CLIPPYME_JOB_MAX_ATTEMPTS`; exit code `2` was reserved for deterministic
+   `S6CUT_JOB_MAX_ATTEMPTS`; exit code `2` was reserved for deterministic
    validation/preflight rejection and is never retried.
 4. **Preflight** (`pipeline/preflight.py`): the source is probed before
    transcription or Gemini analysis and runtime, peak disk and Gemini
@@ -79,9 +79,9 @@ Reference: `docs/runtime-quality.md`.
 ## Earlier milestones (pre-2026-07, summarised)
 
 - **8-round app.py extraction**: the original monolithic `app.py` was
-  progressively split into `clippyme.domain.*` (compose, clip_endpoints,
+  progressively split into `s6_cut.domain.*` (compose, clip_endpoints,
   job_results, job_artifacts, job_worker, history_service, …) and the src-layout
-  `clippyme` package was adopted (`pip install -e .`).
+  `s6_cut` package was adopted (`pip install -e .`).
 - **main.py pipeline extraction**: the 2216-line orchestrator was decomposed
   into `transcribe_cache/download/scene_detection/postprocess/diarization/
   hardware/reframe/reframe_ops/media_probe/texttiling_ops`.

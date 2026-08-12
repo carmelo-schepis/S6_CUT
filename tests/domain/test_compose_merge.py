@@ -15,10 +15,10 @@ assembly and the compose_layers wiring are pinned with fakes.
 import asyncio
 import os
 
-from clippyme.domain import compose
-from clippyme.domain import subtitles as subtitles_module
-from clippyme.domain.hooks import build_hook_logo_filter
-from clippyme.domain.logo import logo_filter_chain
+from s6_cut.domain import compose
+from s6_cut.domain import subtitles as subtitles_module
+from s6_cut.domain.hooks import build_hook_logo_filter
+from s6_cut.domain.logo import logo_filter_chain
 
 
 # --- pure filter builders ----------------------------------------------------
@@ -214,7 +214,7 @@ def test_apply_hook_duration_by_reframe_mode(tmp_path, monkeypatch):
         return True
 
     monkeypatch.setattr(
-        "clippyme.domain.hooks.add_hook_to_video", fake_add_hook_to_video,
+        "s6_cut.domain.hooks.add_hook_to_video", fake_add_hook_to_video,
     )
     clip = tmp_path / "clip.mp4"
     clip.write_bytes(b"in")

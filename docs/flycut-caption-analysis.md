@@ -2,7 +2,7 @@
 
 Source: [x007xyz/flycut-caption](https://github.com/x007xyz/flycut-caption) — "A complete video subtitle editing React component with AI-powered speech recognition and visual editing."
 
-Evaluated against ClippyMe to decide what (if anything) is worth porting. Verdict up front: **flycut is a strictly narrower, browser-only subset of what ClippyMe already does — with exactly one idea worth taking: interactive transcript-driven trimming.** That idea is now ported as a backend engine (see below).
+Evaluated against S6_cut to decide what (if anything) is worth porting. Verdict up front: **flycut is a strictly narrower, browser-only subset of what S6_cut already does — with exactly one idea worth taking: interactive transcript-driven trimming.** That idea is now ported as a backend engine (see below).
 
 ## What flycut is
 
@@ -16,28 +16,28 @@ Evaluated against ClippyMe to decide what (if anything) is worth porting. Verdic
 | Export | SRT, JSON, burned-in MP4 |
 | Scope | subtitles + trim only. No reframe, no AI moment selection, no publishing. |
 
-## Capability-by-capability vs ClippyMe
+## Capability-by-capability vs S6_cut
 
-| Capability | flycut | ClippyMe | Winner |
+| Capability | flycut | S6_cut | Winner |
 |---|---|---|---|
-| ASR | local browser Whisper (slow, device-bound, no diarization) | Deepgram Nova-3 cloud (EN+IT code-switch) + faster-whisper fallback, URL-cached, audio-only FLAC extraction | **ClippyMe** |
+| ASR | local browser Whisper (slow, device-bound, no diarization) | Deepgram Nova-3 cloud (EN+IT code-switch) + faster-whisper fallback, URL-cached, audio-only FLAC extraction | **S6_cut** |
 | Silence / filler removal | **manual** — user deletes segments by hand | **automatic** — `analyze_silences` (filler EN/IT/ES/FR/DE + gaps >0.8s) + auto-editor v3 timeline + audio-loudness polish pass | both — different axes |
 | Manual override of the cut | ✅ core feature | ❌ was auto-only (no way to hand-pick spans) | **flycut** → **ported** |
-| 9:16 reframe | none | YOLOv8 + MediaPipe, per-scene strategy, comfort mode, global-smooth | **ClippyMe** |
-| Viral moment detection | none | Gemini 5-axis rubric | **ClippyMe** |
-| Subtitle styling | font/color/position | 6 ASS karaoke presets + Instagram-Stories hook styling + custom fonts | **ClippyMe** |
-| Publishing | none | Zernio multi-platform + SmartScheduler | **ClippyMe** |
+| 9:16 reframe | none | YOLOv8 + MediaPipe, per-scene strategy, comfort mode, global-smooth | **S6_cut** |
+| Viral moment detection | none | Gemini 5-axis rubric | **S6_cut** |
+| Subtitle styling | font/color/position | 6 ASS karaoke presets + Instagram-Stories hook styling + custom fonts | **S6_cut** |
+| Publishing | none | Zernio multi-platform + SmartScheduler | **S6_cut** |
 | Render location | browser (WebCodecs) | server (ffmpeg / auto-editor) | tie — different deployment model |
 
 ### Why the browser bits are *not* worth porting
 
-- **Transformers.js Whisper**: a downgrade. ClippyMe's Deepgram path is faster, multilingual code-switching, and offloads the device. Porting browser ASR would duplicate worse.
-- **WebAV/WebCodecs cutting**: ClippyMe renders server-side with auto-editor's frame-accurate v3 timeline (+ ffmpeg-concat fallback). Re-implementing cutting in the browser would fork the render path for no gain and lose the audio-polish second pass.
-- **Undo/redo store (Zustand)**: ClippyMe already persists per-clip state in `useClipStates` (localStorage). A general history stack is a nice-to-have, not a gap.
+- **Transformers.js Whisper**: a downgrade. S6_cut's Deepgram path is faster, multilingual code-switching, and offloads the device. Porting browser ASR would duplicate worse.
+- **WebAV/WebCodecs cutting**: S6_cut renders server-side with auto-editor's frame-accurate v3 timeline (+ ffmpeg-concat fallback). Re-implementing cutting in the browser would fork the render path for no gain and lose the audio-polish second pass.
+- **Undo/redo store (Zustand)**: S6_cut already persists per-clip state in `useClipStates` (localStorage). A general history stack is a nice-to-have, not a gap.
 
 ## The one idea worth taking — interactive transcript trim
 
-flycut's genuine differentiator: the operator can **look at the transcript and hand-pick what to cut**, instead of trusting an automatic pass. ClippyMe's Smart Cut had no manual override — if it kept a flubbed line or removed a wanted phrase, the user was stuck.
+flycut's genuine differentiator: the operator can **look at the transcript and hand-pick what to cut**, instead of trusting an automatic pass. S6_cut's Smart Cut had no manual override — if it kept a flubbed line or removed a wanted phrase, the user was stuck.
 
 **Pros of adding it**
 - Real editorial control for client work (e.g. ASCENSORE): drop a specific sentence, keep a pause for emphasis.
@@ -46,13 +46,13 @@ flycut's genuine differentiator: the operator can **look at the transcript and h
 
 **Cons / why it stayed scoped**
 - A full transcript-editor UI (segment list, multi-select, live preview) is a sizable frontend feature.
-- Browser-side cutting (flycut's approach) is the wrong fit — ClippyMe must render server-side.
+- Browser-side cutting (flycut's approach) is the wrong fit — S6_cut must render server-side.
 
 **Decision:** port the *engine* now (pure, tested, API-reachable); leave the transcript-editor **UI** as a documented follow-up so it can be built deliberately rather than bolted on.
 
 ## What was ported
 
-`src/clippyme/domain/smartcut.py` — pure interval arithmetic, host-unit-tested (`tests/domain/test_smartcut_manual_trim.py`), no ffmpeg/cv2:
+`src/s6_cut/domain/smartcut.py` — pure interval arithmetic, host-unit-tested (`tests/domain/test_smartcut_manual_trim.py`), no ffmpeg/cv2:
 
 - `normalize_drop_ranges(raw)` — tolerant coercion of HTTP-supplied spans (`[[s,e],…]` or `[{"start","end"},…]`); discards garbage, caps count.
 - `subtract_ranges(keep, drops)` — removes hand-picked spans from the keep-segment list, splitting a kept span when a drop lands inside it.
@@ -65,4 +65,4 @@ flycut's genuine differentiator: the operator can **look at the transcript and h
 
 ### Frontend (shipped)
 
-The interactive trim lives in the Smart Cut section of `EditClipModal` (`redesign/captions.jsx`). When Smart Cut is toggled on it lazy-loads `GET /api/transcript`, renders the segments as a tap-to-cut checklist (strikethrough + scissors on dropped lines), and converts the dropped set into `drop_ranges`. The spans flow through `reprocessClip` (Edit), `exportClip` (download) and `PublishModal` (publish), and persist per-clip in `useClipStates` (`dropRanges`) so they survive a reload. So: auto Smart Cut removes silence + fillers, and the operator hand-cuts anything else — flycut's editorial control on top of ClippyMe's automation.
+The interactive trim lives in the Smart Cut section of `EditClipModal` (`redesign/captions.jsx`). When Smart Cut is toggled on it lazy-loads `GET /api/transcript`, renders the segments as a tap-to-cut checklist (strikethrough + scissors on dropped lines), and converts the dropped set into `drop_ranges`. The spans flow through `reprocessClip` (Edit), `exportClip` (download) and `PublishModal` (publish), and persist per-clip in `useClipStates` (`dropRanges`) so they survive a reload. So: auto Smart Cut removes silence + fillers, and the operator hand-cuts anything else — flycut's editorial control on top of S6_cut's automation.

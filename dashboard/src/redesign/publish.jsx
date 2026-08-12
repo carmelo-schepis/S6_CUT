@@ -1,4 +1,4 @@
-// ClippyMe redesign — PublishModal: real concurrent publish to Zernio.
+// S6_cut redesign — PublishModal: real concurrent publish to Zernio.
 // Every selected clip is published in parallel (Promise.allSettled) — the fix
 // for the old sequential stall — each row showing live queued→uploading→
 // live/error status. Per-clip compose_first honours the clip's toggles.

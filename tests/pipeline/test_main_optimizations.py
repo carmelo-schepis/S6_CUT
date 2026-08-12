@@ -9,7 +9,7 @@ import pytest
 pytest.importorskip("scenedetect")
 pytestmark = pytest.mark.integration
 
-from clippyme.pipeline import main as m
+from s6_cut.pipeline import main as m
 
 
 def test_whisper_model_is_cached_per_config(monkeypatch):

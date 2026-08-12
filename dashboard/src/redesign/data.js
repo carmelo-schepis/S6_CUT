@@ -1,4 +1,4 @@
-// ClippyMe redesign — shared constants (presets, fonts, languages, pipeline steps).
+// S6_cut redesign — shared constants (presets, fonts, languages, pipeline steps).
 
 export const PRESETS = [
   {
@@ -61,7 +61,7 @@ export const LOGO_POSITIONS = [
 export const LOGO_SIZES = [['S', 'S'], ['M', 'M'], ['L', 'L']];
 
 // Colour-grade looks — ids MUST match backend GRADE_PRESETS keys
-// (clippyme/domain/grade.py). 'none' is represented by the Grade toggle being
+// (s6_cut/domain/grade.py). 'none' is represented by the Grade toggle being
 // off, so it is not offered as a pickable look here.
 export const GRADE_PRESETS = [
   { id: 'warm_cinematic', label: 'Warm' },

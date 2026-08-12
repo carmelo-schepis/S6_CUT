@@ -1,4 +1,4 @@
-// ClippyMe redesign — SubtitleControls: the subtitle config drawer shared by
+// S6_cut redesign — SubtitleControls: the subtitle config drawer shared by
 // BOTH editing surfaces (the Create recipe's SubConfig adapter and the
 // EditClipModal Captions tab), following the hookStyle.jsx precedent.
 //

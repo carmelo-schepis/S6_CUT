@@ -1,6 +1,6 @@
 import pytest
 
-from clippyme.pipeline.preflight import (
+from s6_cut.pipeline.preflight import (
     PreflightInputs,
     PreflightRejected,
     build_preflight,
@@ -53,7 +53,7 @@ def test_duration_quota_rejected():
         free_disk_bytes=20 * 1024 ** 3,
     )
     with pytest.raises(PreflightRejected, match="duration"):
-        enforce_preflight(report, {"CLIPPYME_MAX_DURATION_SECONDS": "600", "CLIPPYME_MIN_FREE_DISK_GB": "0"})
+        enforce_preflight(report, {"S6CUT_MAX_DURATION_SECONDS": "600", "S6CUT_MIN_FREE_DISK_GB": "0"})
 
 
 def test_cost_quota_rejected():
@@ -64,8 +64,8 @@ def test_cost_quota_rejected():
     )
     with pytest.raises(PreflightRejected, match="cost"):
         enforce_preflight(report, {
-            "CLIPPYME_MAX_ESTIMATED_COST_USD": "0.000001",
-            "CLIPPYME_MIN_FREE_DISK_GB": "0",
+            "S6CUT_MAX_ESTIMATED_COST_USD": "0.000001",
+            "S6CUT_MIN_FREE_DISK_GB": "0",
         })
 
 
@@ -76,4 +76,4 @@ def test_disk_reserve_rejected():
         free_disk_bytes=1024 ** 3,
     )
     with pytest.raises(PreflightRejected, match="disk"):
-        enforce_preflight(report, {"CLIPPYME_MIN_FREE_DISK_GB": "0.5"})
+        enforce_preflight(report, {"S6CUT_MIN_FREE_DISK_GB": "0.5"})

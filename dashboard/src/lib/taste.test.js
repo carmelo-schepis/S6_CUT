@@ -63,9 +63,9 @@ test('recordTasteEvent trims to the 120-event rolling window', () => {
 });
 
 test('loadTasteEvents survives garbage in storage', () => {
-  store.set('clippyme_taste_v1', 'not json{{{');
+  store.set('s6_cut_taste_v1', 'not json{{{');
   assert.deepEqual(loadTasteEvents(), []);
-  store.set('clippyme_taste_v1', '{"an":"object"}');
+  store.set('s6_cut_taste_v1', '{"an":"object"}');
   assert.deepEqual(loadTasteEvents(), [], 'non-array JSON must not leak through');
 });
 

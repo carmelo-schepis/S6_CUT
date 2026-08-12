@@ -1,4 +1,4 @@
-// ClippyMe redesign — LogoControls + GradeControls: the logo/grade config
+// S6_cut redesign — LogoControls + GradeControls: the logo/grade config
 // pieces shared by the Create recipe and the EditClipModal (hookStyle.jsx
 // precedent: controlled values + partial-emitting onChange, UI only).
 import { Segmented } from './primitives';

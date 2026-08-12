@@ -29,7 +29,7 @@ export const LazyVideo = forwardRef(function LazyVideo({ src, rootMargin = '320p
   };
 
   return (
-    // Captions are burned into ClippyMe output pixels; there is no separate text track.
+    // Captions are burned into S6_cut output pixels; there is no separate text track.
     <video
       {...props}
       ref={assignRef}

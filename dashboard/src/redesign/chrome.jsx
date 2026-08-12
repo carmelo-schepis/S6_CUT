@@ -35,7 +35,7 @@ export function TopNav({ tab, setTab, busy }) {
   const status = !online ? 'Offline' : busy ? `Working · ${runtimeMode}` : `Local · ${runtimeMode}`;
   return (
     <header className="topnav">
-      <div className="brand" aria-label="ClippyMe home">
+      <div className="brand" aria-label="S6_cut home">
         <img src={logoMark} alt="" aria-hidden="true" />
         <span>Clippy<span className="me">Me</span></span>
       </div>

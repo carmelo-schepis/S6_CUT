@@ -7,7 +7,7 @@ import time
 
 import pytest
 
-from clippyme.domain import smartcut as sc
+from s6_cut.domain import smartcut as sc
 
 
 # --- LRU helper ------------------------------------------------------------

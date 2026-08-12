@@ -2,8 +2,8 @@
 import asyncio
 import json
 
-from clippyme.domain import job_journal as jj
-from clippyme.domain.runtime_state import RuntimeState
+from s6_cut.domain import job_journal as jj
+from s6_cut.domain.runtime_state import RuntimeState
 
 JOB_Q = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 JOB_P = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
@@ -70,7 +70,7 @@ def test_kill_stale_tree_refuses_on_cmd_mismatch(monkeypatch):
 
     import psutil
     monkeypatch.setattr(psutil, "Process", FakeProc)
-    assert jj.kill_stale_tree(4321, ["python", "-m", "clippyme.pipeline.orchestrator"]) is False
+    assert jj.kill_stale_tree(4321, ["python", "-m", "s6_cut.pipeline.orchestrator"]) is False
 
 
 def test_kill_stale_tree_kills_on_match(monkeypatch):
@@ -81,13 +81,13 @@ def test_kill_stale_tree_kills_on_match(monkeypatch):
             self.pid = pid
 
         def cmdline(self):
-            return ["python", "-m", "clippyme.pipeline.orchestrator", "url"]
+            return ["python", "-m", "s6_cut.pipeline.orchestrator", "url"]
 
     import psutil
     monkeypatch.setattr(psutil, "Process", FakeProc)
     monkeypatch.setattr(jj, "terminate_tree", lambda pid, timeout=5: killed.append((pid, timeout)) or 1)
     assert jj.kill_stale_tree(
-        4321, ["python", "-m", "clippyme.pipeline.orchestrator", "url"]
+        4321, ["python", "-m", "s6_cut.pipeline.orchestrator", "url"]
     ) is True
     assert killed == [(4321, 5.0)]
 
@@ -102,7 +102,7 @@ def test_kill_stale_tree_refuses_partial_command_match(monkeypatch):
 
     import psutil
     monkeypatch.setattr(psutil, "Process", FakeProc)
-    assert jj.kill_stale_tree(4321, ["python", "-m", "clippyme.pipeline.orchestrator"]) is False
+    assert jj.kill_stale_tree(4321, ["python", "-m", "s6_cut.pipeline.orchestrator"]) is False
 
 
 def test_kill_stale_tree_no_pid_is_noop():
@@ -157,7 +157,7 @@ def test_recover_resumes_checkpointed_url_job(tmp_path, monkeypatch):
     runtime = RuntimeState(str(output), job_id=JOB_P)
     runtime.start("transcribing")
     command = [
-        "python", "-u", "-m", "clippyme.pipeline.orchestrator",
+        "python", "-u", "-m", "s6_cut.pipeline.orchestrator",
         "-u", "https://youtu.be/example", "-o", str(output),
     ]
     jobs, queue, counts, _ = _recover(tmp_path, {

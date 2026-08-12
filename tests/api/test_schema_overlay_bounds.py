@@ -9,7 +9,7 @@ all rejected at the Pydantic boundary, while normal payloads pass.
 import pytest
 from pydantic import ValidationError
 
-from clippyme.api.schemas import ComposeRequest, PublishRequest
+from s6_cut.api.schemas import ComposeRequest, PublishRequest
 
 
 def test_compose_accepts_normal_overlay_params():

@@ -1,9 +1,9 @@
-"""Tests for clippyme.domain.job_results command/result helpers."""
+"""Tests for s6_cut.domain.job_results command/result helpers."""
 import json
 
 import pytest
 
-from clippyme.domain.job_results import (
+from s6_cut.domain.job_results import (
     MAX_INSTRUCTIONS_LEN,
     _build_clips,
     build_main_cmd,
@@ -13,7 +13,7 @@ from clippyme.domain.job_results import (
 
 def test_url_job_builds_expected_argv():
     cmd = build_main_cmd(url="https://youtu.be/abc", output_dir="output")
-    assert cmd[:4] == ["python", "-u", "-m", "clippyme.pipeline.orchestrator"]
+    assert cmd[:4] == ["python", "-u", "-m", "s6_cut.pipeline.orchestrator"]
     assert "-u" in cmd and "https://youtu.be/abc" in cmd
     assert cmd[cmd.index("-o") + 1] == "output"
 
@@ -102,7 +102,7 @@ def test_reframe_mode_subject_is_forwarded():
 
 
 def test_reframe_mode_object_legacy_alias_is_accepted():
-    from clippyme.domain.job_results import canonical_reframe_mode
+    from s6_cut.domain.job_results import canonical_reframe_mode
 
     cmd = build_main_cmd(url="https://x.com/v", output_dir="o", reframe_mode="object")
     assert cmd[cmd.index("--reframe-mode") + 1] == "object"
@@ -235,7 +235,7 @@ def test_load_final_result_surfaces_gemini_exhausted(tmp_path):
 
 
 def test_load_final_result_includes_runtime_operations(tmp_path):
-    from clippyme.domain.runtime_state import RuntimeState
+    from s6_cut.domain.runtime_state import RuntimeState
 
     RuntimeState(str(tmp_path), job_id="job1").start("quality", progress=92)
     (tmp_path / "vid_metadata.json").write_text(json.dumps({"shorts": []}))

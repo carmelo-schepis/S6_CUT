@@ -1,4 +1,4 @@
-# Comparative analysis: `aregrid/frame` → ClippyMe
+# Comparative analysis: `aregrid/frame` → S6_cut
 
 Date: 2026-06-17
 External repo: <https://github.com/aregrid/frame> @ `main` (single commit `38c5e2b`)
@@ -38,7 +38,7 @@ Full tracked tree (one `main` branch, one commit):
 
 Code files of any language (`.py/.js/.ts/.tsx/.go/.rs/…`): **none.**
 
-The README advertises features that overlap ClippyMe — "Auto-clip videos based
+The README advertises features that overlap S6_cut — "Auto-clip videos based
 on scene changes, audio peaks, or motion detection", "AI-driven color
 correction", "face detection", a chat "Video Agent" — but **none are
 implemented in the repo.** They describe the closed product at
@@ -46,9 +46,9 @@ implemented in the repo.** They describe the closed product at
 
 ---
 
-## 2. Comparison to ClippyMe
+## 2. Comparison to S6_cut
 
-There is nothing to compare structurally — ClippyMe ships a working FastAPI
+There is nothing to compare structurally — S6_cut ships a working FastAPI
 backend, a reframe pipeline with host-tested pure-math (`reframe_ops.py`), a
 React dashboard, Docker, and a real test suite; `aregrid/frame` ships a README.
 The only comparison worth recording is **product positioning**: both target
@@ -63,7 +63,7 @@ aspirational marketing, not shipped behaviour.
 | Pri | Improvement | Status | Notes |
 |---|---|---|---|
 | — | (none portable) | n/a | No source exists to adopt patterns from. |
-| Low | Idea-only: "auto-clip on audio peaks / motion" as a non-Gemini clip-finder | ⏸ noted | ClippyMe already detects viral moments via Gemini + PySceneDetect. An audio-peak/motion heuristic could be a cheap, offline pre-filter, but `frame` provides zero implementation guidance — this is a generic idea, not a port. Deferred. |
+| Low | Idea-only: "auto-clip on audio peaks / motion" as a non-Gemini clip-finder | ⏸ noted | S6_cut already detects viral moments via Gemini + PySceneDetect. An audio-peak/motion heuristic could be a cheap, offline pre-filter, but `frame` provides zero implementation guidance — this is a generic idea, not a port. Deferred. |
 
 No High/Medium items: a stub repo yields no concrete techniques, configs, error
 handling, or tests to learn from.
@@ -95,7 +95,7 @@ produces none.
    four required deliverables with invented improvements. *Applied here:* no
    code, test, or `CLAUDE.md` changes were made; this document is the deliverable.
 3. **Marketing features ≠ implemented features.** `frame`'s feature list reads
-   as a superset of ClippyMe, but none is backed by code. A feature comparison
+   as a superset of S6_cut, but none is backed by code. A feature comparison
    table built from a README alone would have been misleading.
 
 ---
@@ -105,6 +105,6 @@ produces none.
 - File census: `git ls-files` → 26 tracked files, 0 with a code extension; all
   `packages/*/README.md` are 5–9 bytes; `vercel.json` = `{}`.
 - Branches: only `main`; single commit `38c5e2b "chore: move some basic configs"`.
-- No ClippyMe files changed → existing test suite unaffected (host
+- No S6_cut files changed → existing test suite unaffected (host
   `pytest -m "not integration"` baseline remains **248 passed, 2 skipped** from
   the round-4 study; not re-run because nothing in the repo changed).

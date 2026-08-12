@@ -2,7 +2,7 @@
 
 Pure module (no cv2/ffmpeg), so these run in the fast `not integration` suite.
 """
-from clippyme.pipeline.cut_ops import (
+from s6_cut.pipeline.cut_ops import (
     audio_fade_filter,
     flatten_words,
     snap_clip_to_words,
@@ -241,7 +241,7 @@ def test_silence_refine_never_inverts():
 # --- stage-2 polish pre-screen helpers --------------------------------------
 
 def test_parse_margin_seconds_variants():
-    from clippyme.pipeline.cut_ops import parse_margin_seconds
+    from s6_cut.pipeline.cut_ops import parse_margin_seconds
 
     assert parse_margin_seconds("0.2sec") == 0.2
     assert parse_margin_seconds("0.2s") == 0.2
@@ -253,7 +253,7 @@ def test_parse_margin_seconds_variants():
 
 
 def test_predict_polish_saving_subtracts_double_margin():
-    from clippyme.pipeline.cut_ops import predict_polish_saving
+    from s6_cut.pipeline.cut_ops import predict_polish_saving
 
     # 1.0s silence with 0.2s margin → 0.6s removable; 0.3s silence → nothing.
     silences = [(0.0, 1.0), (5.0, 5.3)]
@@ -261,7 +261,7 @@ def test_predict_polish_saving_subtracts_double_margin():
 
 
 def test_predict_polish_saving_edge_cases():
-    from clippyme.pipeline.cut_ops import predict_polish_saving
+    from s6_cut.pipeline.cut_ops import predict_polish_saving
 
     assert predict_polish_saving([], 0.2) == 0.0
     assert predict_polish_saving(None, 0.2) == 0.0
@@ -276,7 +276,7 @@ def test_predict_polish_saving_edge_cases():
 # code in the pipeline entrypoint with zero unit coverage. These tests pin the
 # exact behaviours that mattered there.
 
-from clippyme.pipeline.cut_ops import (  # noqa: E402
+from s6_cut.pipeline.cut_ops import (  # noqa: E402
     compute_neighbor_bounds,
     snap_clips_to_transcript,
 )

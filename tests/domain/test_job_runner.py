@@ -1,5 +1,5 @@
 """merge_persistent_config precedence: Settings vs inherited process env."""
-from clippyme.domain.job_runner import merge_persistent_config
+from s6_cut.domain.job_runner import merge_persistent_config
 
 
 def test_settings_override_empty_env_values():
@@ -44,7 +44,7 @@ def test_cancelling_runner_terminates_process_tree(monkeypatch, tmp_path):
     import asyncio
     import io
 
-    from clippyme.domain import job_runner as module
+    from s6_cut.domain import job_runner as module
 
     class Proc:
         def __init__(self):

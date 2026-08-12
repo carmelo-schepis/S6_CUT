@@ -38,10 +38,10 @@ jobs:
           pip install pytest pytest-cov pytest-timeout pip-audit ruff bandit
 
       - name: Lint (ruff — bug-class rules)
-        run: ruff check src/clippyme tests --select E9,F63,F7,F82
+        run: ruff check src/s6_cut tests --select E9,F63,F7,F82
 
       - name: Static security scan (Bandit medium/high)
-        run: bandit -q -r src/clippyme -ll -ii
+        run: bandit -q -r src/s6_cut -ll -ii
 
       - name: Run host test suite (excludes integration)
         id: host_tests
@@ -51,7 +51,7 @@ jobs:
           set -o pipefail
           pytest -m "not integration" -vv \
             --timeout=120 --timeout-method=thread \
-            --cov=clippyme --cov-report=term \
+            --cov=s6_cut --cov-report=term \
             --junitxml=pytest-report.xml \
             2>&1 | tee pytest-output.log
 
@@ -169,21 +169,21 @@ jobs:
         with:
           context: .
           load: true
-          tags: clippyme-backend:latest
+          tags: s6-cut-backend:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Verify CPU image contains no GPU runtime
         run: |
-          docker run --rm --entrypoint python clippyme-backend:latest \
+          docker run --rm --entrypoint python s6-cut-backend:latest \
             scripts/verify_cpu_environment.py --installed --filesystem
-          docker run --rm --entrypoint python clippyme-backend:latest -c \
+          docker run --rm --entrypoint python s6-cut-backend:latest -c \
             "import torch; assert '+cpu' in torch.__version__; assert not torch.cuda.is_available()"
-          docker run --rm --entrypoint python clippyme-backend:latest -c \
-            "from clippyme.pipeline.hardware import runtime_diagnostics; d=runtime_diagnostics(); assert d['selected_device']=='cpu'; assert d['cpu_first']"
-          docker run --rm --entrypoint ffmpeg clippyme-backend:latest \
+          docker run --rm --entrypoint python s6-cut-backend:latest -c \
+            "from s6_cut.pipeline.hardware import runtime_diagnostics; d=runtime_diagnostics(); assert d['selected_device']=='cpu'; assert d['cpu_first']"
+          docker run --rm --entrypoint ffmpeg s6-cut-backend:latest \
             -hide_banner -f lavfi -i color=c=black:s=64x64:d=.1 -c:v libx264 -f null -
-          docker image inspect clippyme-backend:latest --format 'CPU image size: {{.Size}} bytes'
+          docker image inspect s6-cut-backend:latest --format 'CPU image size: {{.Size}} bytes'
 
       - name: Run integration suite in the backend image
         run: docker compose run --rm -u root backend sh -lc "pip install -q pytest && pytest -m integration -q"

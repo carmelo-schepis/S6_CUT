@@ -1,4 +1,4 @@
-from clippyme.pipeline.reframe_track import SmoothedCameraman, SpeakerTracker
+from s6_cut.pipeline.reframe_track import SmoothedCameraman, SpeakerTracker
 
 
 def _face(x, y, mar, size=120):

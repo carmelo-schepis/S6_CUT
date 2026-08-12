@@ -1,11 +1,11 @@
-"""Tests for clippyme.pipeline.transcribe_cache (stdlib-only, host-runnable)."""
+"""Tests for s6_cut.pipeline.transcribe_cache (stdlib-only, host-runnable)."""
 import json
 import os
 import time
 
 import pytest
 
-from clippyme.pipeline import transcribe_cache as tc
+from s6_cut.pipeline import transcribe_cache as tc
 
 
 @pytest.fixture

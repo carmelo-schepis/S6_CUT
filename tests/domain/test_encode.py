@@ -1,39 +1,39 @@
 """Host tests for the shared libx264 encode-settings helper."""
 import pytest
 
-from clippyme.domain.encode import x264_crf, x264_preset, x264_video_args
+from s6_cut.domain.encode import x264_crf, x264_preset, x264_video_args
 
 
 def test_defaults_are_near_visually_lossless(monkeypatch):
-    monkeypatch.delenv("CLIPPYME_X264_CRF", raising=False)
-    monkeypatch.delenv("CLIPPYME_X264_PRESET", raising=False)
+    monkeypatch.delenv("S6CUT_X264_CRF", raising=False)
+    monkeypatch.delenv("S6CUT_X264_PRESET", raising=False)
     assert x264_crf() == 18
     assert x264_preset() == "medium"
 
 
 def test_crf_env_override_clamped(monkeypatch):
-    monkeypatch.setenv("CLIPPYME_X264_CRF", "14")
+    monkeypatch.setenv("S6CUT_X264_CRF", "14")
     assert x264_crf() == 14
     # Out of range / garbage → default 18.
-    monkeypatch.setenv("CLIPPYME_X264_CRF", "99")
+    monkeypatch.setenv("S6CUT_X264_CRF", "99")
     assert x264_crf() == 18
-    monkeypatch.setenv("CLIPPYME_X264_CRF", "-3")
+    monkeypatch.setenv("S6CUT_X264_CRF", "-3")
     assert x264_crf() == 18
-    monkeypatch.setenv("CLIPPYME_X264_CRF", "notanint")
+    monkeypatch.setenv("S6CUT_X264_CRF", "notanint")
     assert x264_crf() == 18
 
 
 def test_preset_env_override_validated(monkeypatch):
-    monkeypatch.setenv("CLIPPYME_X264_PRESET", "slow")
+    monkeypatch.setenv("S6CUT_X264_PRESET", "slow")
     assert x264_preset() == "slow"
     # Unknown preset → default medium.
-    monkeypatch.setenv("CLIPPYME_X264_PRESET", "warpspeed")
+    monkeypatch.setenv("S6CUT_X264_PRESET", "warpspeed")
     assert x264_preset() == "medium"
 
 
 def test_video_args_shape(monkeypatch):
-    monkeypatch.delenv("CLIPPYME_X264_CRF", raising=False)
-    monkeypatch.delenv("CLIPPYME_X264_PRESET", raising=False)
+    monkeypatch.delenv("S6CUT_X264_CRF", raising=False)
+    monkeypatch.delenv("S6CUT_X264_PRESET", raising=False)
     args = x264_video_args()
     assert args == [
         "-c:v", "libx264",
@@ -64,15 +64,15 @@ def test_video_args_is_a_fresh_list_each_call():
 
 
 def test_ffmpeg_timeout_default_and_env(monkeypatch):
-    from clippyme.domain.encode import ffmpeg_timeout
+    from s6_cut.domain.encode import ffmpeg_timeout
 
-    monkeypatch.delenv("CLIPPYME_FFMPEG_TIMEOUT", raising=False)
+    monkeypatch.delenv("S6CUT_FFMPEG_TIMEOUT", raising=False)
     assert ffmpeg_timeout() == 600
 
-    monkeypatch.setenv("CLIPPYME_FFMPEG_TIMEOUT", "120")
+    monkeypatch.setenv("S6CUT_FFMPEG_TIMEOUT", "120")
     assert ffmpeg_timeout() == 120
 
     # Invalid / non-positive values fall back to the default.
     for bad in ("0", "-5", "abc", ""):
-        monkeypatch.setenv("CLIPPYME_FFMPEG_TIMEOUT", bad)
+        monkeypatch.setenv("S6CUT_FFMPEG_TIMEOUT", bad)
         assert ffmpeg_timeout() == 600

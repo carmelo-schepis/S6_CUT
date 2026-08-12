@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from clippyme.pipeline import quality_suite
+from s6_cut.pipeline import quality_suite
 
 
 def _manifest(tmp_path, cases):

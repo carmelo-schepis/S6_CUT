@@ -8,7 +8,7 @@ Settings UI request thread forever).
 """
 from types import SimpleNamespace
 
-import clippyme.pipeline.gemini_service as gs
+import s6_cut.pipeline.gemini_service as gs
 
 
 class _FakeClient:

@@ -3,12 +3,13 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "clippyme"
+name = "s6-cut"
 version = "0.0.0"
 requires-python = ">=3.11"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+include = ["s6_cut*"]
 
 # Light runtime subset needed by the host (non-integration) test suite.
 # The package's full runtime (requirements.txt) pulls the heavy CV/ML stack
@@ -43,7 +44,7 @@ python_files = ["test_*.py"]
 # backend image; the pure-logic suites (api, domain, integrations, parser)
 # run on the host with just `pip install -e .` + pytest.
 #
-# Tests that import clippyme.pipeline.main (pulls cv2/scenedetect/mediapipe)
+# Tests that import s6_cut.pipeline.main (pulls cv2/scenedetect/mediapipe)
 # or otherwise need the heavy runtime are marked `integration`. Run the fast
 # host suite with `pytest -m "not integration"`; run everything in Docker.
 markers = [

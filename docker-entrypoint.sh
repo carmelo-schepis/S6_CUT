@@ -1,5 +1,5 @@
 #!/bin/sh
-# ClippyMe container entrypoint.
+# S6_cut container entrypoint.
 #
 # The image runs as root ONLY long enough to normalize ownership of the
 # writable, bind-mountable dirs, then drops to the unprivileged appuser.

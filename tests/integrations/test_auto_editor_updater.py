@@ -1,4 +1,4 @@
-"""Unit tests for clippyme.integrations.auto_editor_updater.
+"""Unit tests for s6_cut.integrations.auto_editor_updater.
 
 Covers the pure/mockable helpers (no real GitHub calls, no real binary):
 asset-name detection per platform, local-version parsing, latest-tag fetch,
@@ -8,7 +8,7 @@ import subprocess
 
 import pytest
 
-import clippyme.integrations.auto_editor_updater as au
+import s6_cut.integrations.auto_editor_updater as au
 
 
 def test_auto_update_disabled_by_default(monkeypatch):

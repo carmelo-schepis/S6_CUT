@@ -7,7 +7,7 @@ the lifespan (same pattern as test_job_controls).
 """
 from fastapi.testclient import TestClient
 
-from clippyme.api import app as app_module
+from s6_cut.api import app as app_module
 
 JOB_ID = "22222222-2222-4222-8222-222222222222"
 ORIGIN = {"Origin": "http://localhost:5175"}

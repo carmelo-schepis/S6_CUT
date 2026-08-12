@@ -4,7 +4,7 @@ import subprocess
 
 import pytest
 
-from clippyme.pipeline.quality_suite import run_manifest
+from s6_cut.pipeline.quality_suite import run_manifest
 
 
 pytestmark = pytest.mark.integration

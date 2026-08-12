@@ -1,10 +1,10 @@
-"""Tests for clippyme.pipeline.download helpers (host-runnable; no network)."""
+"""Tests for s6_cut.pipeline.download helpers (host-runnable; no network)."""
 import os
 
 import pytest
 
-from clippyme import netutil
-from clippyme.pipeline import download as dl
+from s6_cut import netutil
+from s6_cut.pipeline import download as dl
 
 
 def _fake_getaddrinfo(*ips):

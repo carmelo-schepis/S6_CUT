@@ -42,4 +42,4 @@ ICIP 2021: 49.9% IoU (1:3), 71.4% IoU (3:1) at ~19-20% real-time. ISM 2021: 52.9
 - Apostolidis & Mezaris (2021), "A fast smart-cropping method and dataset for video retargeting," IEEE ICIP.
 - Apostolidis & Mezaris (2021), "A Web Service for Video Smart-Cropping," IEEE ISM.
 
-Saliency+clustering is an alternative to ClippyMe's face/MAR active-speaker approach — useful where there is no speaking face to track.
+Saliency+clustering is an alternative to S6_cut's face/MAR active-speaker approach — useful where there is no speaking face to track.

@@ -1,4 +1,4 @@
-// ClippyMe redesign — Create flow: presets + source + calm options recipe.
+// S6_cut redesign — Create flow: presets + source + calm options recipe.
 import { useState, useRef } from 'react';
 import { Icon, Btn, Panel, Segmented, Switch, Stepper } from './primitives';
 import { Hero } from './chrome';
@@ -268,13 +268,13 @@ function OptionsPanel({ opts, set }) {
   const [logoCfg, setLogoCfg] = useState(false);
   const [bannerCfg, setBannerCfg] = useState(false);
   return (
-    <Panel title="Recipe" sub="What ClippyMe makes from each video" icon="sliders-horizontal">
+    <Panel title="Recipe" sub="What S6_cut makes from each video" icon="sliders-horizontal">
       <div className="label" style={{ marginBottom: 4 }}>Output</div>
       <div className="opt">
         <div className="oico"><Icon n="scissors" /></div>
         <div className="otxt">
           <div className="ot">Clips per video</div>
-          <div className="od">{opts.clipsAuto ? 'Auto · ClippyMe picks the best number for the video' : 'Aim for a rough target (a hint, not a hard cap)'}</div>
+          <div className="od">{opts.clipsAuto ? 'Auto · S6_cut picks the best number for the video' : 'Aim for a rough target (a hint, not a hard cap)'}</div>
         </div>
         <div className="r" style={{ gap: 9 }}>
           {/* No ceiling: the number is a hint in the Gemini prompt, not a cap the
@@ -377,7 +377,7 @@ function SummaryBar({ opts, ready, count, onCreate, error }) {
   return (
     <div className="summary">
       <div>
-        <div className="s-main">{ready ? (opts.clipsAuto ? 'ClippyMe will pick the best clips' : `Aiming for about ${count} clip${count === 1 ? '' : 's'}`) : 'Add a source to get started'}</div>
+        <div className="s-main">{ready ? (opts.clipsAuto ? 'S6_cut will pick the best clips' : `Aiming for about ${count} clip${count === 1 ? '' : 's'}`) : 'Add a source to get started'}</div>
         <div className="s-sub">
           {chips.map((c) => <span key={c} className="chip">{c}</span>)}
         </div>
@@ -398,7 +398,7 @@ export function CreateView({ opts, set, onPickPreset, onCreate, presets, default
   return (
     <div className="container fade-in">
       <Hero eyebrow="Drop a link · get scroll-stopping shorts" line1="Long videos in." grad="Viral shorts out."
-        sub="Drop a link from YouTube, Twitch, or Kick (or upload a file) and ClippyMe does the rest: transcribes it, finds the best moments, reframes and trims them, and queues the top clips to post." />
+        sub="Drop a link from YouTube, Twitch, or Kick (or upload a file) and S6_cut does the rest: transcribes it, finds the best moments, reframes and trims them, and queues the top clips to post." />
       <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
         {/* Order: pick a source first, then optionally start from a preset,
             then fine-tune the recipe by hand. */}

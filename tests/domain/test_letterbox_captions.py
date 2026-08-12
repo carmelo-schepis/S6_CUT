@@ -1,7 +1,7 @@
 """Captions parked in the black band of a reframe-OFF (letterbox) clip."""
-from clippyme.domain.banner import letterbox_band_bottom
-from clippyme.domain.compose import CAPTION_BAND_PAD, _letterbox_caption_band_top
-from clippyme.domain.subtitles import generate_ass_karaoke
+from s6_cut.domain.banner import letterbox_band_bottom
+from s6_cut.domain.compose import CAPTION_BAND_PAD, _letterbox_caption_band_top
+from s6_cut.domain.subtitles import generate_ass_karaoke
 
 
 def _toy_transcript():
@@ -21,7 +21,7 @@ def _style_fields(ass_path):
 
 def test_band_top_only_for_bannerless_letterbox_bottom_captions(monkeypatch):
     monkeypatch.setattr(
-        "clippyme.pipeline.media_probe.probe_dimensions", lambda _p: (1080, 1920))
+        "s6_cut.pipeline.media_probe.probe_dimensions", lambda _p: (1080, 1920))
     letterbox = {"reframe_mode": "disabled"}
     subs = {"position": "bottom"}
 

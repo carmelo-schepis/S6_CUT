@@ -27,7 +27,7 @@ const CSP = [
 ].join('; ')
 
 const cspPlugin = () => ({
-  name: 'clippyme-inject-csp',
+  name: 's6-cut-inject-csp',
   apply: 'build',
   transformIndexHtml() {
     return [{

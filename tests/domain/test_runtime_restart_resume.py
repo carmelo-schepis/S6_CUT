@@ -1,8 +1,8 @@
 import asyncio
 import json
 
-from clippyme.domain import job_journal
-from clippyme.domain.runtime_state import RuntimeState
+from s6_cut.domain import job_journal
+from s6_cut.domain.runtime_state import RuntimeState
 
 
 JOB_ID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
@@ -20,7 +20,7 @@ def test_partial_metadata_is_resumed_not_restored(tmp_path, monkeypatch):
     runtime.start("reframing", "rendering first clip", progress=75)
 
     command = [
-        "python", "-u", "-m", "clippyme.pipeline.orchestrator",
+        "python", "-u", "-m", "s6_cut.pipeline.orchestrator",
         "-u", "https://youtu.be/example", "-o", str(output),
     ]
     journal = tmp_path / "jobs_journal.json"

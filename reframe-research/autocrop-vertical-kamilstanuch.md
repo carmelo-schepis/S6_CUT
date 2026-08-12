@@ -40,4 +40,4 @@ Input: any video (MP4, MKV). Output: MP4 at configurable aspect ratio (default 9
 - `--frame-skip` / `--downscale` speed-vs-accuracy tuning.
 - `--plan-only` dry-run previews decisions without encoding.
 
-Closely mirrors the ClippyMe reframe design (scene detection → per-scene TRACK/letterbox strategy → frame-accurate FFmpeg pipe).
+Closely mirrors the S6_cut reframe design (scene detection → per-scene TRACK/letterbox strategy → frame-accurate FFmpeg pipe).

@@ -32,4 +32,4 @@ Input: GoPro video (16:9, 8:7, etc.). Output: 9:16 with original audio preserved
 ## Trade-offs
 Speed vs accuracy (every-other-frame); CLIP slow on Apple Silicon; heuristic (not ML) subject classification; quality loss on 360-cam crops.
 
-The damping/easing camera and "hold-then-drift-to-center on lost subject" logic directly parallel ClippyMe's SmoothedCameraman; the two-stage (track then render) split mirrors ClippyMe's source-slice preservation for post-hoc reframe.
+The damping/easing camera and "hold-then-drift-to-center on lost subject" logic directly parallel S6_cut's SmoothedCameraman; the two-stage (track then render) split mirrors S6_cut's source-slice preservation for post-hoc reframe.

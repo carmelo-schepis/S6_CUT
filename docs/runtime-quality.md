@@ -1,7 +1,7 @@
 # Runtime resilience and media quality
 
-ClippyMe's queued backend jobs run through `clippyme.pipeline.orchestrator`. The
-legacy `clippyme.pipeline.main` module still owns transcription, Gemini analysis,
+S6_cut's queued backend jobs run through `s6_cut.pipeline.orchestrator`. The
+legacy `s6_cut.pipeline.main` module still owns transcription, Gemini analysis,
 cutting and reframe algorithms; the orchestrator adds durability and verification
 around those proven stages.
 
@@ -9,9 +9,9 @@ around those proven stages.
 
 Each job output directory contains two hidden internal resources:
 
-- `.clippyme_runtime.json`: owner-only operational state, phase, progress,
+- `.s6_cut_runtime.json`: owner-only operational state, phase, progress,
   attempts, timings, preflight and QA summaries;
-- `.clippyme_checkpoint/`: reusable transcript and phase artefacts while a job is
+- `.s6_cut_checkpoint/`: reusable transcript and phase artefacts while a job is
   incomplete.
 
 Writes are atomic and fsync'd. The static `/videos` mount rejects hidden JSON and
@@ -29,9 +29,9 @@ transcribing or analysing the source again.
 
 | Variable | Default | Meaning |
 | --- | ---: | --- |
-| `CLIPPYME_JOB_MAX_ATTEMPTS` | `3` | Total worker attempts, bounded to 1–10 |
-| `CLIPPYME_RENDER_QA_RETRIES` | `1` | Extra render attempts after critical QA failure |
-| `CLIPPYME_KEEP_CHECKPOINTS` | `0` | Keep hidden duplicate transcript checkpoints after full success |
+| `S6CUT_JOB_MAX_ATTEMPTS` | `3` | Total worker attempts, bounded to 1–10 |
+| `S6CUT_RENDER_QA_RETRIES` | `1` | Extra render attempts after critical QA failure |
+| `S6CUT_KEEP_CHECKPOINTS` | `0` | Keep hidden duplicate transcript checkpoints after full success |
 
 Exit code `2` is reserved for deterministic validation or preflight rejection and
 is never retried. Other non-zero exits retry with bounded exponential backoff.
@@ -39,7 +39,7 @@ Stopping/cancelling a job preserves the established user semantics.
 
 ## Preflight and quotas
 
-Before transcription or AI analysis, ClippyMe probes the source and estimates:
+Before transcription or AI analysis, S6_cut probes the source and estimates:
 
 - duration and input size;
 - likely clip count;
@@ -52,12 +52,12 @@ can reject jobs before expensive work with:
 
 | Variable | Default | Meaning |
 | --- | ---: | --- |
-| `CLIPPYME_MAX_DURATION_SECONDS` | disabled | Maximum source duration |
-| `CLIPPYME_MAX_INPUT_GB` | disabled | Maximum input size in GiB |
-| `CLIPPYME_MAX_ESTIMATED_COST_USD` | disabled | Maximum estimated Gemini cost |
-| `CLIPPYME_MIN_FREE_DISK_GB` | `1` | Free space that must remain after estimated peak use |
-| `CLIPPYME_MAX_CLIPS` | disabled | Maximum number of ranked candidates actually rendered |
-| `CLIPPYME_MIN_VIRAL_SCORE` | disabled | `viral_score` floor applied before the cap (auto clip selection) |
+| `S6CUT_MAX_DURATION_SECONDS` | disabled | Maximum source duration |
+| `S6CUT_MAX_INPUT_GB` | disabled | Maximum input size in GiB |
+| `S6CUT_MAX_ESTIMATED_COST_USD` | disabled | Maximum estimated Gemini cost |
+| `S6CUT_MIN_FREE_DISK_GB` | `1` | Free space that must remain after estimated peak use |
+| `S6CUT_MAX_CLIPS` | disabled | Maximum number of ranked candidates actually rendered |
+| `S6CUT_MIN_VIRAL_SCORE` | disabled | `viral_score` floor applied before the cap (auto clip selection) |
 
 `--skip-analysis` is modelled separately: it creates one whole-video output and
 estimates zero Gemini usage.
@@ -90,7 +90,7 @@ Every temporary render is checked before it atomically replaces the public clip:
 Structural defects are critical and trigger a bounded re-render. Signal findings
 are warnings and remain visible in metadata without deleting a usable clip.
 
-Set `CLIPPYME_QA_SIGNAL=0` to run structural probes only. This is useful on very
+Set `S6CUT_QA_SIGNAL=0` to run structural probes only. This is useful on very
 constrained systems, but the default full signal pass is recommended.
 
 ## Regression quality suites
@@ -119,7 +119,7 @@ Version a JSON manifest beside representative or synthetic clips:
 Run the same policy used by production:
 
 ```bash
-python -m clippyme.pipeline.quality_suite quality-manifest.json \
+python -m s6_cut.pipeline.quality_suite quality-manifest.json \
   --output quality-report.json
 ```
 

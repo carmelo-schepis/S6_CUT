@@ -1,4 +1,4 @@
-"""Smoke tests for clippyme.pipeline.postprocess (cv2-free, host-runnable).
+"""Smoke tests for s6_cut.pipeline.postprocess (cv2-free, host-runnable).
 
 These verify the module imports and that both stages fail safe (swallow errors,
 leave no temp file) when ffmpeg/ffprobe can't process the input — without
@@ -8,7 +8,7 @@ import os
 
 import pytest
 
-from clippyme.pipeline import postprocess as pp
+from s6_cut.pipeline import postprocess as pp
 
 
 def test_module_exposes_public_api():

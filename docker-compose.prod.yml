@@ -7,7 +7,7 @@
 # The backend service is unchanged: it already runs the same code in dev and
 # prod. This override only swaps how the dashboard is served. Ports/binding
 # carry over from docker-compose.yml (nginx listens on 5175, same
-# CLIPPYME_BIND loopback default and the same LAN-exposure caveat).
+# S6CUT_BIND loopback default and the same LAN-exposure caveat).
 #
 # Requires Docker Compose >= 2.24 for the !reset tag below.
 
@@ -16,7 +16,7 @@ services:
     build:
       context: ./dashboard
       dockerfile: Dockerfile.prod
-    image: clippyme-frontend-prod
+    image: s6-cut-frontend-prod
     # Drop the dev bind mounts: the built bundle lives inside the image, and
     # mounting the source tree over a static-serving container is pure noise.
     volumes: !reset []

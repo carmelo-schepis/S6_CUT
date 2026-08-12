@@ -1,4 +1,4 @@
-// ClippyMe redesign — Live Monitor: start/stop concurrent channel monitors
+// S6_cut redesign — Live Monitor: start/stop concurrent channel monitors
 // (Kick/Twitch live, or YouTube/Kick/Twitch VOD feeds) and show each one's
 // capture→process→publish state. Reuses the Zernio platform-picker pattern
 // from publish.jsx (same PLAT map + accounts source).

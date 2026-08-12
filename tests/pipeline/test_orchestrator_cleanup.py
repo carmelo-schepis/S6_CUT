@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from clippyme.pipeline.orchestrator import _cleanup_completed
+from s6_cut.pipeline.orchestrator import _cleanup_completed
 
 
 class _State:
@@ -11,12 +11,12 @@ class _State:
 def test_completed_cleanup_keeps_reframe_source_slice(tmp_path, monkeypatch):
     source_slice = tmp_path / "source_clip.mp4"
     source_slice.write_bytes(b"source")
-    checkpoint = tmp_path / ".clippyme_checkpoint"
+    checkpoint = tmp_path / ".s6_cut_checkpoint"
     checkpoint.mkdir()
     (checkpoint / "transcript.json").write_text("{}", encoding="utf-8")
     input_video = tmp_path / "upload.mp4"
     input_video.write_bytes(b"input")
-    monkeypatch.delenv("CLIPPYME_KEEP_CHECKPOINTS", raising=False)
+    monkeypatch.delenv("S6CUT_KEEP_CHECKPOINTS", raising=False)
 
     _cleanup_completed(
         output_dir=str(tmp_path),
@@ -35,9 +35,9 @@ def test_completed_cleanup_keeps_reframe_source_slice(tmp_path, monkeypatch):
 def test_url_source_removed_only_after_completed_cleanup(tmp_path, monkeypatch):
     input_video = tmp_path / "download.mp4"
     input_video.write_bytes(b"input")
-    checkpoint = tmp_path / ".clippyme_checkpoint"
+    checkpoint = tmp_path / ".s6_cut_checkpoint"
     checkpoint.mkdir()
-    monkeypatch.setenv("CLIPPYME_KEEP_CHECKPOINTS", "1")
+    monkeypatch.setenv("S6CUT_KEEP_CHECKPOINTS", "1")
 
     _cleanup_completed(
         output_dir=str(tmp_path),
@@ -53,11 +53,11 @@ def test_url_source_removed_only_after_completed_cleanup(tmp_path, monkeypatch):
 
 
 def test_partial_success_keeps_checkpoint_for_resume(tmp_path, monkeypatch):
-    checkpoint = tmp_path / ".clippyme_checkpoint"
+    checkpoint = tmp_path / ".s6_cut_checkpoint"
     checkpoint.mkdir()
     input_video = tmp_path / "upload.mp4"
     input_video.write_bytes(b"input")
-    monkeypatch.delenv("CLIPPYME_KEEP_CHECKPOINTS", raising=False)
+    monkeypatch.delenv("S6CUT_KEEP_CHECKPOINTS", raising=False)
 
     _cleanup_completed(
         output_dir=str(tmp_path),

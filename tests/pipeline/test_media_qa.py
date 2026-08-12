@@ -1,7 +1,7 @@
 import json
 import subprocess
 
-from clippyme.pipeline import media_qa
+from s6_cut.pipeline import media_qa
 
 
 def test_probe_media_normalizes_streams(monkeypatch, tmp_path):

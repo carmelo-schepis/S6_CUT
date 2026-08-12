@@ -1,15 +1,15 @@
 import asyncio
 import io
 
-from clippyme.domain import job_runner
-from clippyme.domain.job_submission import configured_max_attempts
+from s6_cut.domain import job_runner
+from s6_cut.domain.job_submission import configured_max_attempts
 
 
 def test_configured_max_attempts_is_bounded_and_tolerant():
     assert configured_max_attempts({}) == 3
-    assert configured_max_attempts({"CLIPPYME_JOB_MAX_ATTEMPTS": "bad"}) == 3
-    assert configured_max_attempts({"CLIPPYME_JOB_MAX_ATTEMPTS": "0"}) == 1
-    assert configured_max_attempts({"CLIPPYME_JOB_MAX_ATTEMPTS": "999"}) == 10
+    assert configured_max_attempts({"S6CUT_JOB_MAX_ATTEMPTS": "bad"}) == 3
+    assert configured_max_attempts({"S6CUT_JOB_MAX_ATTEMPTS": "0"}) == 1
+    assert configured_max_attempts({"S6CUT_JOB_MAX_ATTEMPTS": "999"}) == 10
 
 
 class _FinishedProcess:
@@ -50,7 +50,7 @@ def test_transient_failure_retries_to_limit(monkeypatch, tmp_path):
     calls = []
 
     def popen(*args, **kwargs):
-        calls.append(kwargs["env"]["CLIPPYME_ATTEMPT"])
+        calls.append(kwargs["env"]["S6CUT_ATTEMPT"])
         return _FinishedProcess(1)
 
     async def no_sleep(_seconds):
@@ -74,7 +74,7 @@ def test_exit_two_never_retries(monkeypatch, tmp_path):
     calls = []
 
     def popen(*args, **kwargs):
-        calls.append(kwargs["env"]["CLIPPYME_ATTEMPT"])
+        calls.append(kwargs["env"]["S6CUT_ATTEMPT"])
         return _FinishedProcess(2)
 
     monkeypatch.setattr(job_runner.subprocess, "Popen", popen)

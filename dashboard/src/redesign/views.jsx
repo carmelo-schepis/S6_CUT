@@ -1,4 +1,4 @@
-// ClippyMe redesign — HistoryView + SettingsView + ApiKeyModal, wired to the
+// S6_cut redesign — HistoryView + SettingsView + ApiKeyModal, wired to the
 // real backend (history list/restore/delete; config keys, cookies, Zernio).
 import { useState, useEffect, useRef } from 'react';
 import { useModalA11y } from './useModalA11y';
@@ -273,7 +273,7 @@ export function SettingsView({ apiKey, onApiKey, cookiesConfigured, onCookiesCha
         <KeyRow icon="rss" name="Twitch client secret" desc="Live Monitor: Twitch channel detection" value={twitchSecret} present={present.twitchSecret}
           onChange={setTwitchSecret} onSave={() => saveKeys({ TWITCH_CLIENT_SECRET: twitchSecret })}
           onClear={() => { setTwitchSecret(''); saveKeys({ TWITCH_CLIENT_SECRET: '' }); }} placeholder="Helix app client secret" />
-        <KeyRow icon="key-round" name="API token" desc="Only for LAN deploys with CLIPPYME_API_TOKEN set — stored in this browser, sent as X-API-Token" value={apiToken} present={!!getApiToken()}
+        <KeyRow icon="key-round" name="API token" desc="Only for LAN deploys with S6CUT_API_TOKEN set — stored in this browser, sent as X-API-Token" value={apiToken} present={!!getApiToken()}
           onChange={setApiTokenState} onSave={() => { setApiToken(apiToken); pushToast?.('success', apiToken.trim() ? 'API token saved' : 'API token cleared'); }} placeholder="Shared secret (leave empty + Save to clear)" />
         <div className="opt" style={{ borderBottom: 0 }}>
           <div className="oico"><Icon n="audio-lines" /></div>
@@ -398,7 +398,7 @@ export function ApiKeyModal({ onClose, onGoToSettings }) {
         <div className="modal-head"><h3 id="apikey-modal-title">Add your Gemini key</h3><button className="x" onClick={onClose} aria-label="Close"><Icon n="x" /></button></div>
         <div className="modal-body">
           <p style={{ color: 'var(--fg-2)', fontSize: 14, lineHeight: 1.55 }}>
-            ClippyMe needs a Gemini key to score the transcript and find viral moments. It&apos;s stored locally and never leaves your machine.
+            S6_cut needs a Gemini key to score the transcript and find viral moments. It&apos;s stored locally and never leaves your machine.
           </p>
         </div>
         <div className="modal-foot">

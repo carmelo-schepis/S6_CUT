@@ -27,4 +27,4 @@ Inputs: video (.mp4/.mov/.avi), images (.jpg/.png/.jpeg). Outputs: extracted key
 - Adjustable down-sampling for large images (>2000×2000).
 - Extensible Writer framework (v0.9.0+).
 
-Laplacian-variance best-frame selection mirrors ClippyMe's cover-frame scoring; Autoflip is Google's saliency reframing engine. Keyframe selection is reusable for cover/thumbnail picking.
+Laplacian-variance best-frame selection mirrors S6_cut's cover-frame scoring; Autoflip is Google's saliency reframing engine. Keyframe selection is reusable for cover/thumbnail picking.

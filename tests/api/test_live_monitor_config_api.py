@@ -7,7 +7,7 @@ real asyncio monitor task.
 """
 from fastapi.testclient import TestClient
 
-from clippyme.api import app as app_module
+from s6_cut.api import app as app_module
 
 ORIGIN = {"Origin": "http://localhost:5175"}
 

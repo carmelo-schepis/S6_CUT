@@ -2,7 +2,7 @@
 import pytest
 from pydantic import ValidationError
 
-from clippyme.api.schemas import (
+from s6_cut.api.schemas import (
     BatchRequest, LiveMonitorPublishingRequest, LiveMonitorStartRequest,
     LiveMonitorStopRequest, ProcessRequest,
 )

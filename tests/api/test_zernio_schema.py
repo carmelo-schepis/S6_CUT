@@ -9,7 +9,7 @@ payloads pass.
 import pytest
 from pydantic import ValidationError
 
-from clippyme.api.schemas import PublishRequest, ZernioConfigRequest
+from s6_cut.api.schemas import PublishRequest, ZernioConfigRequest
 
 
 def test_zernio_accepts_normal_config():

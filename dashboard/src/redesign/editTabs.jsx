@@ -1,4 +1,4 @@
-// ClippyMe redesign — the seven EditClipModal tab bodies as dumb components.
+// S6_cut redesign — the seven EditClipModal tab bodies as dumb components.
 // State stays lifted in EditClipModal (tabs are conditionally rendered, so a
 // tab owning state would lose it on every switch; apply() needs it all);
 // these render it and report edits up. Markup moved verbatim from the modal.

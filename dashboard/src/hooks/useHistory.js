@@ -27,8 +27,8 @@ export function useHistory() {
   }, []);
 
   const purgeJobStorage = useCallback((jobId) => {
-    removeStoredValue(`clippyme_clip_states_${jobId}`);
-    removeStoredValue(`clippyme_preselections_job_${jobId}`);
+    removeStoredValue(`s6_cut_clip_states_${jobId}`);
+    removeStoredValue(`s6_cut_preselections_job_${jobId}`);
   }, []);
 
   const deleteFromHistory = useCallback((jobId) => {

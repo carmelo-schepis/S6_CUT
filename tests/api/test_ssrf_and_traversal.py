@@ -7,9 +7,9 @@ Covers (all host-runnable, no heavy deps):
 """
 import pytest
 
-from clippyme.api.schemas import validate_public_url
-from clippyme.domain.url_utils import filename_from_video_url
-from clippyme.integrations.social_publisher import (
+from s6_cut.api.schemas import validate_public_url
+from s6_cut.domain.url_utils import filename_from_video_url
+from s6_cut.integrations.social_publisher import (
     ZernioError,
     _reject_internal_upload_url,
 )
@@ -76,7 +76,7 @@ def test_accept_public_https_upload_url():
 def test_security_headers_present():
     from fastapi.testclient import TestClient
 
-    from clippyme.api import app as app_module
+    from s6_cut.api import app as app_module
     tc = TestClient(app_module.app)
     r = tc.get("/api/health")
     assert r.headers.get("x-content-type-options") == "nosniff"
@@ -88,7 +88,7 @@ def test_video_static_mount_blocks_internal_sidecars(tmp_path):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
-    from clippyme.api.app import SafeStaticFiles
+    from s6_cut.api.app import SafeStaticFiles
 
     (tmp_path / "clip.mp4").write_bytes(b"video")
     (tmp_path / "job_metadata.json").write_text("{}")

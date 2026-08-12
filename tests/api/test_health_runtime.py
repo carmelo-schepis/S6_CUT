@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from clippyme.api.app import app
+from s6_cut.api.app import app
 
 
 def test_health_exposes_secret_free_runtime_diagnostics():

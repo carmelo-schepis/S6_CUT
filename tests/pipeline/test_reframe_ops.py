@@ -1,13 +1,13 @@
-"""Host-runnable TDD for clippyme.pipeline.reframe_ops.
+"""Host-runnable TDD for s6_cut.pipeline.reframe_ops.
 
 This module is intentionally cv2-free (pure numpy/math), so it imports and
 runs on the dev host with no heavy CV runtime — unlike the rest of
-clippyme.pipeline.main. Keep it that way.
+s6_cut.pipeline.main. Keep it that way.
 """
 import numpy as np
 import pytest
 
-from clippyme.pipeline import reframe_ops as ro
+from s6_cut.pipeline import reframe_ops as ro
 
 
 # --- OneEuroFilter ----------------------------------------------------------
@@ -139,7 +139,7 @@ def test_savgol_reduces_noise_variance():
 
 # --- zoom_for_face_height (continuous close-up correction) ------------------
 # Ported from smart-reframe ZoomController: target a constant face-occupancy of
-# the crop instead of ClippyMe's coarse 4-bucket zoom (which snaps visibly at
+# the crop instead of S6_cut's coarse 4-bucket zoom (which snaps visibly at
 # bucket edges). zoom = max_crop_h * target_occupancy / face_h, clamped.
 
 def test_zoom_for_face_tiny_face_hits_max_zoom():
@@ -168,7 +168,7 @@ def test_zoom_for_face_nonpositive_height_is_min_zoom():
 
 # --- asymmetric_zoom_step (fast pull-back / slow push-in) -------------------
 # smart-reframe's signature cinematic move: pull back FAST (never chop a face
-# that grew/added a person), push in SLOW (cinematic). In ClippyMe's zoom
+# that grew/added a person), push in SLOW (cinematic). In S6_cut's zoom
 # convention a *smaller* zoom factor = bigger crop = pulling back.
 
 def test_asym_zoom_push_in_uses_slow_rate():

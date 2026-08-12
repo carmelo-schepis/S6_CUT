@@ -1,4 +1,4 @@
-from clippyme.pipeline.preflight import PreflightInputs, build_preflight
+from s6_cut.pipeline.preflight import PreflightInputs, build_preflight
 
 
 def test_analysis_disabled_estimates_one_clip_and_no_gemini_cost():

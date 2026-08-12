@@ -1,19 +1,19 @@
 <a id="readme-top"></a>
 
 <div align="center">
-  <img src="dashboard/public/logo.svg" alt="ClippyMe logo" width="90" />
+  <img src="dashboard/public/s6-cut-logo.png" alt="S6_cut logo" width="90" />
 
-  <h1>ClippyMe</h1>
+  <h1>S6_cut</h1>
 
   <p><b>Self-hosted AI pipeline that turns long videos (YouTube or upload) into viral 9:16 vertical shorts.</b></p>
 
   <p>
-    <img src="https://img.shields.io/github/license/fralapo/clippyme?style=flat-square&color=3b82f6" alt="MIT license" />
+    <img src="https://img.shields.io/github/license/carmelo-schepis/S6_CUT?style=flat-square&color=3b82f6" alt="MIT license" />
     <img src="https://img.shields.io/badge/python-3.11-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.11" />
     <img src="https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI" />
     <img src="https://img.shields.io/badge/React-18-61DAFB?style=flat-square&logo=react&logoColor=black" alt="React 18" />
     <img src="https://img.shields.io/badge/Docker-ready-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker ready" />
-    <img src="https://img.shields.io/github/stars/fralapo/clippyme?style=flat-square&color=eab308" alt="GitHub stars" />
+    <img src="https://img.shields.io/github/stars/carmelo-schepis/S6_CUT?style=flat-square&color=eab308" alt="GitHub stars" />
   </p>
 
   <p>
@@ -21,13 +21,13 @@
     <a href="#configuration">Configuration</a> ·
     <a href="#api">API</a> ·
     <a href="#security-posture">Security</a> ·
-    <a href="https://github.com/fralapo/clippyme/issues">Report a bug</a>
+    <a href="https://github.com/carmelo-schepis/S6_CUT/issues">Report a bug</a>
   </p>
 </div>
 
-Fork of OpenShorts, hardened and extended: cloud-or-local transcription, Gemini viral-moment detection, active-speaker 9:16 reframing, compose-on-download editing, and one-click multi-platform scheduling.
+Fork of <a href="https://github.com/OpenShorts/OpenShorts">OpenShorts</a>, hardened and extended: cloud-or-local transcription, Gemini viral-moment detection, active-speaker 9:16 reframing, compose-on-download editing, and one-click multi-platform scheduling.
 
-> Status: personal/self-hosted project. Both published ports bind to **loopback by default** (`CLIPPYME_BIND=127.0.0.1`); opening them to a LAN (`CLIPPYME_BIND=0.0.0.0`) is a deliberate choice — pair it with `CLIPPYME_API_TOKEN` so every API request needs the shared secret. **Do not expose it to the public internet** without a reverse proxy terminating TLS in front.
+> Status: personal/self-hosted project. Both published ports bind to **loopback by default** (<code>S6CUT_BIND=127.0.0.1</code>); opening them to a LAN (<code>S6CUT_BIND=0.0.0.0</code>) is a deliberate choice — pair it with <code>S6CUT_API_TOKEN</code> so every API request needs the shared secret. **Do not expose it to the public internet** without a reverse proxy terminating TLS in front.
 
 <details>
 <summary><b>Table of contents</b></summary>
@@ -52,13 +52,13 @@ Fork of OpenShorts, hardened and extended: cloud-or-local transcription, Gemini 
 
 ## What it does
 
-Given a video URL or upload, ClippyMe runs the following pipeline end-to-end:
+Given a video URL or upload, S6_cut runs the following pipeline end-to-end:
 
 1. **Download** with `yt-dlp` (Deno-based JS runtime to bypass YouTube bot detection, optional cookies for age-gated content).
 2. **Transcribe** with one of three providers, chosen in Settings: **Deepgram Nova-3** by default (multi-language, code-switching EN/IT), **ElevenLabs Scribe** (emits `(laughter)`/`(applause)` audio-event tags that feed the viral prompt as a free emotional-payoff signal, with an optional Voice Isolator pre-pass for noisy sources), or local **Faster-Whisper**. Both cloud providers fall back to Faster-Whisper on any failure, so a bad key never breaks a job. The video is stripped to a mono-16 kHz FLAC first, so only audio is uploaded/decoded (a few MB instead of the full mp4). Cached on disk for 7 days keyed by URL hash.
 3. **Detect viral moments** with **Google Gemini** (`gemini-3.5-flash` by default). A 5-axis viral_score rubric (HOOK_STRENGTH, EMOTIONAL_PAYOFF, QUOTABILITY, SELF_CONTAINED, DENSITY) plus a 5-level robust JSON parser tolerates malformed model output. **No-AI fallback:** if no Gemini key is set or the call fails, the transcript is topic-segmented into several clips by dependency-light lexical **TextTiling** (ported from [ClipsAI](https://github.com/ClipsAI/clipsai)) instead of dumping the whole video as one clip, heuristic, not viral-ranked, but offline and free. **Clean clip edges:** each selected `[start, end]` is then snapped to transcript boundaries, first to the nearest **word** edge, then extended to the surrounding **sentence** (start back to the sentence onset, end forward to the sentence-final word) so a clip never opens or closes mid-word or mid-sentence. The sentence pass is asymmetric and clamped (≤60 s, no overlap with a neighbouring clip), guards against false sentence-ends (abbreviations, decimals, acronyms), and gracefully no-ops on unpunctuated transcripts, so it is never worse than the word-only snap. A final **waveform** pass then nudges each edge into the nearest actual audio **silence trough** (ffmpeg `silencedetect`) so a cut never clips a word's attack or release, moving only toward quiet, and a no-op when no silence sits near the edge.
 4. **Reframe to 9:16** with active-speaker tracking: YOLOv8 person detection + MediaPipe FaceMesh mouth-aspect-ratio (MAR) variance to pick who is speaking, then a smoothed cameraman that adapts speed and zoom per scene. Hardened against messy real-world inputs: variable-frame-rate normalization, audio `start_time` compensation (YouTube A/V desync), and corrupt-frame resilience, all no-ops on clean sources.
-5. **Post-process** each clip: Ken Burns auto-zoom (1.0→1.05×), EBU R128 audio normalization to −14 LUFS, automatic cover frame selection. Every rendered mp4 is written with a leading `moov` atom (`+faststart`), so it starts playing in the browser before the full file downloads and uploads cleanly to social. Every render and compose pass shares one near-visually-lossless libx264 setting (CRF 18, `CLIPPYME_X264_CRF`), so the stacked re-encodes don't compound into soft output; the final mux and download copy are stream-copy/lossless.
+5. **Post-process** each clip: Ken Burns auto-zoom (1.0→1.05×), EBU R128 audio normalization to −14 LUFS, automatic cover frame selection. Every rendered mp4 is written with a leading `moov` atom (`+faststart`), so it starts playing in the browser before the full file downloads and uploads cleanly to social. Every render and compose pass shares one near-visually-lossless libx264 setting (CRF 18, `S6CUT_X264_CRF`), so the stacked re-encodes don't compound into soft output; the final mux and download copy are stream-copy/lossless.
 6. **Optional editing** at download time (compose-on-demand): a **Colour grade** preset (warm_cinematic / cool_crisp / neutral_punch / vivid_pop), **Smart Cut** (filler-word + silence removal via auto-editor v3 timeline + audio polish, plus a separate manual transcript trim and a conversational AI trim), **Hook** text overlay (Pillow + emoji, with Instagram-Stories-style banner / colours / outline / font, defaulting to bannerless white Anton with a thin black outline), **Subtitles** (6 ASS karaoke presets or classic SRT with a live preview), and a **Brand logo** watermark. The per-clip editor is a tabbed modal; settings can be applied to one clip, copied to all clips, or staged across a multi-select. Custom subtitle/hook fonts and the logo are uploaded once in Settings.
 7. **Publish or schedule** to TikTok / Instagram / YouTube via **Zernio**, with a SmartScheduler that picks Italian-prime-time slots, avoids same-day collisions, and (when scheduling) spreads one clip per day to stay under per-platform daily caps. Any residual Zernio daily-limit 429 is surfaced verbatim per clip.
 
@@ -86,8 +86,8 @@ While a job runs you stay in control:
 ## Quick start (Docker)
 
 ```bash
-git clone https://github.com/fralapo/clippyme.git
-cd clippyme
+git clone https://github.com/carmelo-schepis/S6_CUT.git
+cd S6_CUT
 docker compose up --build
 ```
 
@@ -121,14 +121,14 @@ Swaps the dashboard from the Vite dev server to a static `vite build` served by 
 ```bash
 # Backend
 pip install -r requirements.txt
-pip install -e .                                       # registers the clippyme src-layout package
-python -m uvicorn clippyme.api.app:app --reload --port 8000
+pip install -e .                                       # registers the s6_cut src-layout package
+python -m uvicorn s6_cut.api.app:app --reload --port 8000
 
 # Frontend (separate terminal)
 cd dashboard && npm install && npm run dev
 
 # Pipeline CLI (one-shot, no API)
-python -m clippyme.pipeline.main <url_or_path> [--instructions "focus on hooks"] \
+python -m s6_cut.pipeline.main <url_or_path> [--instructions "focus on hooks"] \
                                                 [--reframe-mode auto|subject|disabled] \
                                                 [--no-zoom]
 ```
@@ -153,12 +153,12 @@ Runtime env overrides (rarely needed):
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `CLIPPYME_BIND` | `127.0.0.1` | Host interface both published ports (8000/5175) bind to. `0.0.0.0` exposes the app to the LAN — deliberate choice only. |
-| `CLIPPYME_API_TOKEN` | _(unset)_ | Optional shared-secret auth: when set, every `/api` request must carry it (`X-API-Token` or `Authorization: Bearer`). The dashboard stores it in Settings → API token. Unset = no-op. |
+| `S6CUT_BIND` | `127.0.0.1` | Host interface both published ports (8000/5175) bind to. `0.0.0.0` exposes the app to the LAN — deliberate choice only. |
+| `S6CUT_API_TOKEN` | _(unset)_ | Optional shared-secret auth: when set, every `/api` request must carry it (`X-API-Token` or `Authorization: Bearer`). The dashboard stores it in Settings → API token. Unset = no-op. |
 | `TRANSCRIPTION_PROVIDER` | `deepgram` | Or `elevenlabs` (Scribe), or `whisper` to force local. |
 | `ELEVENLABS_AUDIO_ISOLATION` | `false` | Run the ElevenLabs Voice Isolator before ASR to strip background noise/music on noisy sources. |
-| `CLIPPYME_TRANSCRIBE_AUDIO_ONLY` | `true` | Strip to audio-only FLAC before transcription; `false` sends the full video. |
-| `CLIPPYME_SILENCE_SNAP` | `1` | Refine clip edges to the nearest waveform silence trough (ffmpeg `silencedetect`); `0`/`false` keeps the transcript-derived edges. |
+| `S6CUT_TRANSCRIBE_AUDIO_ONLY` | `true` | Strip to audio-only FLAC before transcription; `false` sends the full video. |
+| `S6CUT_SILENCE_SNAP` | `1` | Refine clip edges to the nearest waveform silence trough (ffmpeg `silencedetect`); `0`/`false` keeps the transcript-derived edges. |
 | `DEEPGRAM_MODEL` | `nova-3` | |
 | `DEEPGRAM_LANGUAGE` | `multi` | |
 | `REFRAME_COMFORT` | `1` | Anti-nausea default (global-smooth + per-scene stationary + zoom lock). `0` = original single-pass tracker. |
@@ -169,8 +169,8 @@ Runtime env overrides (rarely needed):
 | `REFRAME_OBJECT_WEIGHTS` | _(off)_ | Faceless scenes follow a weighted-object centroid (product/dog/car) by reusing the existing YOLO pass. `1` = curated defaults, or `dog:3,car:2` for custom weights. |
 | `REFRAME_FRAMESHIFT_WEIGHTS` | _(GUI defaults)_ | `object`-mode class weights. Defaults `face:1,person:0.8,default:0.5`; override any of those three or add a COCO class, e.g. `face:1,person:0.8,default:0.5,dog:3`. |
 | `YTDLP_PLAYER_CLIENTS` | `default,tv+tv_embedded,web_safari` | Comma-separated yt-dlp player-client fallback chain; each entry is `default` (no override) or a `+`-joined client list. On a 403 / format-negotiation failure the next entry is tried (5 s apart); page-level blocks (bot wall, private/removed, geo) stop the chain immediately. |
-| `CLIPPYME_X264_CRF` | `18` | Shared libx264 quality for every render/compose encode (near-visually-lossless; lower = higher quality + bigger files, 0–51). Stops the stacked re-encodes from compounding into soft output. |
-| `CLIPPYME_X264_PRESET` | `medium` | Shared libx264 preset; a faster preset (e.g. `fast`) trades a little quality/size for render speed. |
+| `S6CUT_X264_CRF` | `18` | Shared libx264 quality for every render/compose encode (near-visually-lossless; lower = higher quality + bigger files, 0–51). Stops the stacked re-encodes from compounding into soft output. |
+| `S6CUT_X264_PRESET` | `medium` | Shared libx264 preset; a faster preset (e.g. `fast`) trades a little quality/size for render speed. |
 | `ZERNIO_DEFAULT_TZ` | `Europe/Rome` | |
 | `ZERNIO_MIN_GAP_SECONDS` | `5400` | SmartScheduler min spacing between posts. |
 | `TWITCH_CLIENT_ID` / `TWITCH_CLIENT_SECRET` | _(unset)_ | Helix app creds ([dev.twitch.tv](https://dev.twitch.tv/console/apps)) for the Twitch content monitor. Also settable in Settings. Fallback only if not stored in `data/config.json`. |
@@ -185,29 +185,29 @@ Runtime env overrides (rarely needed):
 | `REFRAME_MIN_FACE_RATIO` | `0.10` | Ignore faces smaller than this share of the largest candidate — background heads never steal the frame. |
 | `REFRAME_DIALOGUE_GROUP` | `1` | Keep two similarly-active, separated participants in frame instead of cutting between them. |
 | `REFRAME_DIALOGUE_SCORE_RATIO` / `REFRAME_DIALOGUE_SEPARATION` | `0.88` / `0.28` | Group-framing thresholds: min second/first activity ratio, min horizontal separation (fraction of frame). |
-| `CLIPPYME_JOB_MAX_ATTEMPTS` | `3` | Worker attempts per queued job (bounded 1–10). Exit code `2` = deterministic rejection, never retried. |
-| `CLIPPYME_RENDER_QA_RETRIES` | `1` | Extra render attempts after a **critical** output-QA failure. |
-| `CLIPPYME_KEEP_CHECKPOINTS` | `0` | Keep the hidden transcript/phase checkpoints after a fully successful job. |
-| `CLIPPYME_MAX_DURATION_SECONDS` / `CLIPPYME_MAX_INPUT_GB` | _(disabled)_ | Preflight quotas: reject sources longer / larger than this before any expensive work. |
-| `CLIPPYME_MAX_ESTIMATED_COST_USD` | _(disabled)_ | Reject a job whose estimated Gemini spend exceeds this. Conservative estimate, not a billing promise. |
-| `CLIPPYME_MIN_FREE_DISK_GB` | `1` | Free space that must still remain after the estimated peak disk use. |
-| `CLIPPYME_MAX_CLIPS` | _(disabled)_ | Cap how many ranked candidates are actually rendered. |
-| `CLIPPYME_CREATOR_NAME` | _(unset)_ | Channel owner passed to the Gemini prompt so titles can name whose stream the clip is from. Set per-job by the Live Monitor; never used to attribute a quote. |
-| `CLIPPYME_MIN_VIRAL_SCORE` | _(disabled)_ | Drop clips scoring below this (1–100) before the cap — the clip count then follows the material (a weak segment can yield zero clips). Set by the Live Monitor's "Automatic" clip selection. |
-| `CLIPPYME_QA_SIGNAL` | `1` | `0` runs structural output QA only (skips black/freeze/loudness probes) on constrained hosts. |
+| `S6CUT_JOB_MAX_ATTEMPTS` | `3` | Worker attempts per queued job (bounded 1–10). Exit code `2` = deterministic rejection, never retried. |
+| `S6CUT_RENDER_QA_RETRIES` | `1` | Extra render attempts after a **critical** output-QA failure. |
+| `S6CUT_KEEP_CHECKPOINTS` | `0` | Keep the hidden transcript/phase checkpoints after a fully successful job. |
+| `S6CUT_MAX_DURATION_SECONDS` / `S6CUT_MAX_INPUT_GB` | _(disabled)_ | Preflight quotas: reject sources longer / larger than this before any expensive work. |
+| `S6CUT_MAX_ESTIMATED_COST_USD` | _(disabled)_ | Reject a job whose estimated Gemini spend exceeds this. Conservative estimate, not a billing promise. |
+| `S6CUT_MIN_FREE_DISK_GB` | `1` | Free space that must still remain after the estimated peak disk use. |
+| `S6CUT_MAX_CLIPS` | _(disabled)_ | Cap how many ranked candidates are actually rendered. |
+| `S6CUT_CREATOR_NAME` | _(unset)_ | Channel owner passed to the Gemini prompt so titles can name whose stream the clip is from. Set per-job by the Live Monitor; never used to attribute a quote. |
+| `S6CUT_MIN_VIRAL_SCORE` | _(disabled)_ | Drop clips scoring below this (1–100) before the cap — the clip count then follows the material (a weak segment can yield zero clips). Set by the Live Monitor's "Automatic" clip selection. |
+| `S6CUT_QA_SIGNAL` | `1` | `0` runs structural output QA only (skips black/freeze/loudness probes) on constrained hosts. |
 
 ---
 
 ## Runtime resilience & output QA
 
-Queued jobs run through `clippyme.pipeline.orchestrator`, which wraps the proven `pipeline.main` stages with durability and verification. Full reference: [`docs/runtime-quality.md`](docs/runtime-quality.md).
+Queued jobs run through `s6_cut.pipeline.orchestrator`, which wraps the proven `pipeline.main` stages with durability and verification. Full reference: [`docs/runtime-quality.md`](docs/runtime-quality.md).
 
-- **Durable lifecycle** — each job dir keeps `.clippyme_runtime.json` (owner-only phase/progress/attempt state) and `.clippyme_checkpoint/` (reusable transcript + phase artefacts). Writes are atomic and fsync'd; the `/videos` mount rejects both. A retry or a backend restart reuses the existing download, transcript, analysis and finished clips instead of redoing them.
-- **Bounded retries** — transient failures back off exponentially up to `CLIPPYME_JOB_MAX_ATTEMPTS`; exit code `2` (validation/preflight rejection) is terminal. Stop/cancel semantics are unchanged.
+- **Durable lifecycle** — each job dir keeps `.s6_cut_runtime.json` (owner-only phase/progress/attempt state) and `.s6_cut_checkpoint/` (reusable transcript + phase artefacts). Writes are atomic and fsync'd; the `/videos` mount rejects both. A retry or a backend restart reuses the existing download, transcript, analysis and finished clips instead of redoing them.
+- **Bounded retries** — transient failures back off exponentially up to `S6CUT_JOB_MAX_ATTEMPTS`; exit code `2` (validation/preflight rejection) is terminal. Stop/cancel semantics are unchanged.
 - **Preflight** — before transcription or Gemini analysis, the source is probed and runtime, peak disk and Gemini tokens/cost are estimated, so a job that would blow a quota is rejected up front rather than halfway through.
 - **Output QA** — every temporary render is probed (size, duration, stream presence, aspect, black/frozen-frame ratio, mean/peak audio) *before* it atomically replaces the public clip. Structural defects trigger a bounded re-render; signal findings stay as warnings in metadata rather than deleting a usable clip.
 - **Telemetry** — `GET /api/status/{job_id}` may carry `result.operations` (phase, attempt, ETA, verified/failed clips, host CPU/RAM/disk, per-stage durations, QA summaries), surfaced in the processing view. The job log keeps a single replaceable `[runtime]` line so polling can't grow it without bound.
-- **Regression suites** — `python -m clippyme.pipeline.quality_suite <manifest>.json --output report.json` replays the production QA policy over versioned fixture clips; exit `0` pass, `1` quality regression, `2` invalid/unsafe manifest. Manifest paths are confined to the manifest directory, so it is safe to run in CI.
+- **Regression suites** — `python -m s6_cut.pipeline.quality_suite <manifest>.json --output report.json` replays the production QA policy over versioned fixture clips; exit `0` pass, `1` quality regression, `2` invalid/unsafe manifest. Manifest paths are confined to the manifest directory, so it is safe to run in CI.
 
 ---
 
@@ -216,7 +216,7 @@ Queued jobs run through `clippyme.pipeline.orchestrator`, which wraps the proven
 Backend uses an **`src/`-layout** Python package; frontend is a separate Vite app. Tests live at the root.
 
 ```
-src/clippyme/
+src/s6_cut/
   netutil.py          Bounded DNS resolution shared by the SSRF guards (no global socket state)
   api/                FastAPI surface (thin: validate → domain helper → JSON)
     app.py            Thin FastAPI layer: job-lifecycle routes, middleware, static mounts, lifespan
@@ -240,7 +240,7 @@ src/clippyme/
     reframe_detect.py YOLO / MediaPipe detectors
     cut_ops.py        Pure clip-edge snapping + neighbour-bounds / transcript-snap orchestration → host-tested
     media_probe.py    cv2-free ffprobe + A/V-sync helpers (VFR, start_time, fps)
-  domain/             Endpoint-facing business logic (never imports FastAPI; raises errors.ClippyMeError)
+  domain/             Endpoint-facing business logic (never imports FastAPI; raises errors.S6CutError)
     errors.py         Domain exceptions (Validation/NotFound/Conflict) mapped to HTTP by one app handler
     clip_resolve.py   Shared resolve_clip(): job dir → metadata → clip entry → path (used by every per-clip route)
     job_submission.py · job_runner.py · job_worker.py   Submit + per-job subprocess loop + queue dispatch/cleanup
@@ -364,7 +364,7 @@ Inside **Auto**, three per-scene strategies are decided by sampling 7 frames per
 
 **Static framing (`REFRAME_STATIC_AUTO`, default on):** the rule that ties the strategies together is that the camera never moves *within* a shot. Each scene collapses to a single fixed crop, TRACK locks on the face (zoom capped so it's framed, not shoved in your face), WIDE locks zoomed-out between the faces. Zoom can still change *across* a cut, which reads as a new shot rather than camera motion. This is the deterministic end-state of comfort mode; set `REFRAME_STATIC_AUTO=0` to go back to the eased-but-moving Savitzky-Golay smoother. The decision math (`centroid_span`, `collapse_scene_targets`) is pure and host-tested.
 
-**Lost-subject recovery:** in TRACK/WIDE, if no speaker is detected for `REFRAME_LOST_HOLD` frames (~3 s) the camera eases back to the source center and gently zooms out instead of freezing on empty space. The active-speaker camera can optionally use a 1€ adaptive filter (`REFRAME_SMOOTHER=euro`) or a momentum/damped-spring smoother (`REFRAME_SMOOTHER=spring`) in place of the default two-speed EMA, with an optional hard pan-rate cap (`REFRAME_MAX_STEP_PX`). The pure decision math lives in the cv2-free, host-tested `clippyme.pipeline.reframe_ops` module; ffprobe-backed A/V-sync helpers (VFR detection, stream `start_time`, fps reconcile) live alongside in `media_probe.py`.
+**Lost-subject recovery:** in TRACK/WIDE, if no speaker is detected for `REFRAME_LOST_HOLD` frames (~3 s) the camera eases back to the source center and gently zooms out instead of freezing on empty space. The active-speaker camera can optionally use a 1€ adaptive filter (`REFRAME_SMOOTHER=euro`) or a momentum/damped-spring smoother (`REFRAME_SMOOTHER=spring`) in place of the default two-speed EMA, with an optional hard pan-rate cap (`REFRAME_MAX_STEP_PX`). The pure decision math lives in the cv2-free, host-tested `s6_cut.pipeline.reframe_ops` module; ffprobe-backed A/V-sync helpers (VFR detection, stream `start_time`, fps reconcile) live alongside in `media_probe.py`.
 
 **Comfort mode (`REFRAME_COMFORT`, default on):** continuous face-tracking is what makes auto-reframes feel like seasickness, the camera is always gently moving, and the changing velocity (plus a zoom that breathes mid-shot) is the actual nausea trigger, not pixel jitter. So the default render now biases toward a *still* camera the way [AutoFlip](https://research.google/blog/autoflip-an-open-source-framework-for-intelligent-video-reframing/) does: a two-pass global trajectory smoother Savitzky-Golay-smooths the whole camera path per scene (the alternative `REFRAME_GLOBAL_METHOD=kalman`/`l2` pan-path solvers are reachable only with `REFRAME_STATIC_AUTO=0` — the default static-auto policy collapses each scene to a single locked crop before they would run), a per-scene **stationary lock** (`REFRAME_STATIONARY_THRESH`, default `0.30`) pins near-static scenes to a locked tripod (with `REFRAME_SNAP_CENTER`), and **per-scene zoom lock** (`REFRAME_ZOOM_LOCK`) holds one zoom level per shot so the frame never breathes. It costs a second video decode; set `REFRAME_COMFORT=0` to fall back to the original single-pass streaming tracker. See [`docs/reframe-improvements-research.md`](docs/reframe-improvements-research.md) for the measured comparison.
 
@@ -416,8 +416,8 @@ This project has been audited; the current state is suitable for **trusted LAN d
 - **Per-client rate limiting** (`RATE_LIMIT_ENABLED`, default on): a dependency-free token bucket throttles the compute-heavy endpoints (`process` / `batch` / `publish`) per client IP; the bucket table is bounded against a unique-IP-flood memory DoS.
 - **Spoof-resistant client IP**: `X-Forwarded-For` / `X-Real-IP` are honoured only when `TRUST_PROXY=1` **and** the TCP peer is itself a private/loopback proxy, so a direct public client can't forge its address to dodge the rate limiter or the trusted-origin guard. Within `X-Forwarded-For` the backend reads the **last** hop — the address the proxy itself wrote — so it stays spoof-proof whether your proxy appends to the header (nginx's `$proxy_add_x_forwarded_for`, as shipped) or overwrites it. Exactly one trusted proxy is supported; don't enable it behind a proxy chain.
 - **SSRF hardening**: download + Zernio upload URLs are re-resolved and rejected when every resolved address is internal/loopback/link-local (DNS-rebinding-aware), with the DNS lookup bounded by a daemon-thread timeout (no process-global socket state).
-- **Loopback by default**: both published ports bind to `127.0.0.1` (`CLIPPYME_BIND`). The trust model treats every private-network peer as an authorized client for config/state endpoints, so LAN exposure is opt-in, not the default.
-- **Optional API token** (`CLIPPYME_API_TOKEN`): when set, an app middleware requires the shared secret on every `/api` request (`X-API-Token` or `Authorization: Bearer`, constant-time compare) — the auth layer for deliberate LAN deployments. Static media mounts stay IP-open (`<video>`/FontFace can't send custom headers).
+- **Loopback by default**: both published ports bind to `127.0.0.1` (`S6CUT_BIND`). The trust model treats every private-network peer as an authorized client for config/state endpoints, so LAN exposure is opt-in, not the default.
+- **Optional API token** (`S6CUT_API_TOKEN`): when set, an app middleware requires the shared secret on every `/api` request (`X-API-Token` or `Authorization: Bearer`, constant-time compare) — the auth layer for deliberate LAN deployments. Static media mounts stay IP-open (`<video>`/FontFace can't send custom headers).
 
 **Not yet in place** (required before exposing publicly): a reverse proxy terminating TLS + security headers.
 

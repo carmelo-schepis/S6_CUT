@@ -1,12 +1,12 @@
-"""Tests for clippyme.integrations.kick_client.
+"""Tests for s6_cut.integrations.kick_client.
 
 Pure readers (is_live / playback_url) plus get_channel with a fake curl_cffi
 module injected — no network, no curl_cffi wheel required on the host.
 """
 from datetime import timezone
 
-from clippyme.integrations import kick_client
-from clippyme.integrations.kick_client import (
+from s6_cut.integrations import kick_client
+from s6_cut.integrations.kick_client import (
     KickClient,
     extract_vods,
     is_live,

@@ -4,7 +4,7 @@ Pins the TRUST_PROXY hardening: X-Forwarded-For is trusted only when
 TRUST_PROXY=1 AND the immediate TCP peer is a private/loopback proxy. A
 direct public peer can never spoof its IP via a forged header.
 """
-from clippyme.api import security
+from s6_cut.api import security
 
 
 class _FakeClient:

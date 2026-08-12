@@ -10,8 +10,8 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from clippyme.api import app as app_module
-import clippyme.domain.clip_edit_ai as clip_edit_ai
+from s6_cut.api import app as app_module
+import s6_cut.domain.clip_edit_ai as clip_edit_ai
 
 JOB_ID = "44444444-4444-4444-8444-444444444444"
 ORIGIN = {"Origin": "http://localhost:5175", "X-Gemini-Key": "dummy-test-key-not-real"}

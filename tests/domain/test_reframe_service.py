@@ -13,7 +13,7 @@ import asyncio
 import json
 import os
 
-from clippyme.domain import reframe_service
+from s6_cut.domain import reframe_service
 
 
 class _FakeProc:

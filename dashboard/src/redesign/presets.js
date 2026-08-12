@@ -5,8 +5,8 @@
 // single-user app (no accounts/backend needed).
 import { PRESETS as BUILTIN_PRESETS } from './data';
 
-const PRESETS_KEY = 'clippyme_user_presets_v1';
-const DEFAULT_KEY = 'clippyme_default_preset_v1';
+const PRESETS_KEY = 's6_cut_user_presets_v1';
+const DEFAULT_KEY = 's6_cut_default_preset_v1';
 
 // The create-options fields a preset captures (everything except the source).
 // Keep this in sync with the Clip Options controls in create.jsx — a missing

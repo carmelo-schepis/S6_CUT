@@ -1,4 +1,4 @@
-# ClippyMe Docker Compose
+# S6_cut Docker Compose
 #
 # CPU / Apple Silicon / ARM (default):
 #   docker compose up --build
@@ -6,10 +6,10 @@
 # NVIDIA GPU:
 #   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
 
-name: clippyme
+name: s6-cut
 
 networks:
-  clippyme-net:
+  s6-cut-net:
     driver: bridge
 
 services:
@@ -17,15 +17,15 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: clippyme-backend
-    image: clippyme-backend
+    container_name: s6-cut-backend
+    image: s6-cut-backend
     ports:
       # Bound to loopback: security.py treats every RFC1918 peer as a trusted
       # client for the config/state endpoints (key overwrite, cookie download,
       # job deletion), so publishing on 0.0.0.0 hands that trust to the whole
-      # LAN. Override CLIPPYME_BIND (e.g. CLIPPYME_BIND=0.0.0.0) ONLY on a
+      # LAN. Override S6CUT_BIND (e.g. S6CUT_BIND=0.0.0.0) ONLY on a
       # network where every device is trusted.
-      - "${CLIPPYME_BIND:-127.0.0.1}:8000:8000"
+      - "${S6CUT_BIND:-127.0.0.1}:8000:8000"
     dns:
       - 8.8.8.8
       - 8.8.4.4
@@ -112,16 +112,16 @@ services:
       # near-visually-lossless so the stacked re-encodes don't compound into soft
       # output. Lower CRF = higher quality + bigger files (0-51); a faster preset
       # (e.g. `fast`/`veryfast`) trades a little quality/size for render speed.
-      - CLIPPYME_X264_CRF=${CLIPPYME_X264_CRF:-18}
-      - CLIPPYME_X264_PRESET=${CLIPPYME_X264_PRESET:-medium}
+      - S6CUT_X264_CRF=${S6CUT_X264_CRF:-18}
+      - S6CUT_X264_PRESET=${S6CUT_X264_PRESET:-medium}
       # Transcription: strip to audio-only (FLAC) before sending to the provider.
       # DEFAULT ON; set to false to upload/decode the full video.
-      - CLIPPYME_TRANSCRIBE_AUDIO_ONLY=${CLIPPYME_TRANSCRIBE_AUDIO_ONLY:-true}
+      - S6CUT_TRANSCRIBE_AUDIO_ONLY=${S6CUT_TRANSCRIBE_AUDIO_ONLY:-true}
       # Optional shared-secret auth for /api. Unset (default) = no auth beyond
-      # the private-network trust model. Set together with CLIPPYME_BIND=0.0.0.0
+      # the private-network trust model. Set together with S6CUT_BIND=0.0.0.0
       # for a deliberate LAN deployment: every API request must then carry
       # X-API-Token (the dashboard has a Settings field for it).
-      - CLIPPYME_API_TOKEN=${CLIPPYME_API_TOKEN:-}
+      - S6CUT_API_TOKEN=${S6CUT_API_TOKEN:-}
       # Conservative CPU defaults. GPU settings exist only in the explicit
       # docker-compose.gpu.yml override.
       - S6CUT_DEVICE=cpu
@@ -131,25 +131,25 @@ services:
       - /app/__pycache__
       - ./data:/app/data
     networks:
-      - clippyme-net
+      - s6-cut-net
     restart: unless-stopped
 
   frontend:
     build: ./dashboard
-    container_name: clippyme-frontend
-    image: clippyme-frontend
+    container_name: s6-cut-frontend
+    image: s6-cut-frontend
     ports:
       # Loopback too: the Vite dev proxy forwards /api to the backend from
       # INSIDE the docker network, where the frontend container is itself a
       # trusted private peer — so a LAN-exposed dashboard would reopen the
-      # exact hole the backend loopback binding closes. Same CLIPPYME_BIND
+      # exact hole the backend loopback binding closes. Same S6CUT_BIND
       # override applies.
-      - "${CLIPPYME_BIND:-127.0.0.1}:5175:5175"
+      - "${S6CUT_BIND:-127.0.0.1}:5175:5175"
     volumes:
       - ./dashboard:/app
       - /app/node_modules
     networks:
-      - clippyme-net
+      - s6-cut-net
     restart: unless-stopped
     depends_on:
       - backend

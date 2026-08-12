@@ -1,4 +1,4 @@
-// Cross-job taste memory (#8). ClippyMe never learned from which clips a user
+// Cross-job taste memory (#8). S6_cut never learned from which clips a user
 // actually kept vs threw away — every job started cold. This records a small
 // rolling signal (clip viral_score + duration + whether kept/published or
 // discarded) and distils it into a one-line natural-language hint that is
@@ -9,7 +9,7 @@
 // Pure functions (summarizeTaste) are unit-tested via `node --test`; the
 // localStorage I/O is thin and guarded.
 
-const KEY = 'clippyme_taste_v1';
+const KEY = 's6_cut_taste_v1';
 const MAX_EVENTS = 120;        // rolling window — old taste decays out
 const MIN_EVENTS = 6;          // below this we don't have enough signal to hint
 

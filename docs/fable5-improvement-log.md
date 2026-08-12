@@ -28,7 +28,7 @@ Test: `tests/api/test_job_controls.py::test_run_job_kills_orphan_on_unexpected_e
 `timeout=`; each call executes on asyncio's shared default thread pool, so a
 few hung ffmpeg processes would pin its workers and stall job polling
 server-wide. All four now pass `encode.ffmpeg_timeout()` (new,
-`CLIPPYME_FFMPEG_TIMEOUT`, default 600s). Grade degrades to
+`S6CUT_FFMPEG_TIMEOUT`, default 600s). Grade degrades to
 keep-ungraded-input on timeout; hook/logo raise with a clear message.
 `logo.py`'s ffprobe also gained a 30s timeout and a warning log on its
 previously-silent 1080×1920 fallback (wrong for 1:1 / 16:9 jobs).
@@ -60,7 +60,7 @@ Verified by piping 4 representative fake-key samples through the exact
 patterns (all matched).
 
 **Verification (Wave 1):** `pytest -m "not integration"` → 583 passed,
-3 skipped. `ruff check src/clippyme tests --select E9,F63,F7,F82` (CI rule
+3 skipped. `ruff check src/s6_cut tests --select E9,F63,F7,F82` (CI rule
 set) → clean. Commit `6749f0e`.
 
 ## Wave 2 — per-clip serialisation locks (2026-07-02)
@@ -217,8 +217,8 @@ Commit `1d56e87`.
 every RFC1918 peer as a trusted client for config/state endpoints (API-key
 overwrite, cookies download/delete, job deletion); docker-compose published
 8000 and 5175 on all interfaces, extending that trust to the whole LAN. Both
-ports now bind `127.0.0.1` via `${CLIPPYME_BIND:-127.0.0.1}` — LAN exposure
-becomes an explicit opt-in (`CLIPPYME_BIND=0.0.0.0`). The dashboard port is
+ports now bind `127.0.0.1` via `${S6CUT_BIND:-127.0.0.1}` — LAN exposure
+becomes an explicit opt-in (`S6CUT_BIND=0.0.0.0`). The dashboard port is
 bound too because the Vite proxy reaches the backend from inside the docker
 network as a trusted private peer, so a LAN-exposed dashboard would reopen
 the hole. Verified with `docker compose config` (host_ip: 127.0.0.1 on both).
@@ -286,7 +286,7 @@ one).
 the thin-handler rule). Everything from metadata resolution through the
 `--reframe-only` subprocess and metadata persistence moved verbatim to
 `domain/reframe_service.run_reframe`; the endpoint keeps only trust/rate-limit
-checks + mode validation and delegates. Domain code raises `ClippyMeError`
+checks + mode validation and delegates. Domain code raises `S6_cutError`
 subclasses (incl. the 409 source-slice case) instead of `HTTPException`,
 mapped by the existing app-level exception handler. app.py: 1428 → 1315
 lines; behaviour pinned by the untouched `tests/api/test_reframe_aspect_api.py`
@@ -328,9 +328,9 @@ a deliberate deployment. New opt-in prod path, fully additive:
 `dashboard/Dockerfile.prod` (multi-stage `npm ci` + `vite build` → nginx),
 `dashboard/nginx.conf` (SPA fallback, immutable `/assets/` caching, proxy for
 `/api|/videos|/thumbnails|/fonts` → backend:8000 with 600s timeouts matched
-to `CLIPPYME_FFMPEG_TIMEOUT` and unbuffered upload/video streaming), and
+to `S6CUT_FFMPEG_TIMEOUT` and unbuffered upload/video streaming), and
 `docker-compose.prod.yml` (swaps the frontend build, drops the dev mounts via
-`!reset`; needs Compose ≥ 2.24). nginx listens on 5175 so the `CLIPPYME_BIND`
+`!reset`; needs Compose ≥ 2.24). nginx listens on 5175 so the `S6CUT_BIND`
 loopback default and port mapping carry over unchanged; the build gets the
 CSP meta tag (vite cspPlugin is build-only). Default `docker compose up`
 dev workflow untouched.
@@ -342,8 +342,8 @@ Commit 59b0240.
 
 ## Wave 14 — optional API token for deliberate LAN deploys (2026-07-02)
 
-**25. `CLIPPYME_BIND=0.0.0.0` re-extended RFC1918 trust to the whole LAN**
-with no per-client auth. New `CLIPPYME_API_TOKEN` (default unset = no-op,
+**25. `S6CUT_BIND=0.0.0.0` re-extended RFC1918 trust to the whole LAN**
+with no per-client auth. New `S6CUT_API_TOKEN` (default unset = no-op,
 byte-identical): `security.configured_api_token`/`enforce_api_token`
 (constant-time `hmac.compare_digest`; `X-API-Token` or `Authorization:
 Bearer`) enforced by an app middleware on every `/api` route (OPTIONS
@@ -363,7 +363,7 @@ the env through.
 
 **Final sweep (2026-07-02):** host pytest 617 passed / 3 skipped; Docker
 integration 34 passed; frontend 58/58 + lint + build green; zero
-TODO/FIXME markers in `src/clippyme` + `dashboard/src`. No open items: #23 shipped via flat-config composition (4e6a4cf) —
+TODO/FIXME markers in `src/s6_cut` + `dashboard/src`. No open items: #23 shipped via flat-config composition (4e6a4cf) —
 zero owner decisions outstanding.
 
 ## Iteration 3 — residual quality pass (2026-07-12)
@@ -377,7 +377,7 @@ Split along the pure/impure seam like `reframe_ops` / `cut_ops`: new
 arithmetic, `analyze_silences`, the auto-editor v3 timeline builder, LRU cache
 primitives); `smartcut.py` stays the ffmpeg/auto-editor orchestrator and
 re-exports every moved name so callers/tests importing from
-`clippyme.domain.smartcut` are unchanged. `_build_v3_timeline` — previously
+`s6_cut.domain.smartcut` are unchanged. `_build_v3_timeline` — previously
 zero coverage — gains `test_smartcut_ops.py` (frame conversion, cumulative
 output offsets, sub-frame drop, empty tracks, fractional fps). A dead
 `last_kept_end` store carried over verbatim was removed (pure no-op).

@@ -25,4 +25,4 @@ Works at inference time instead of fine-tuning on paired video-camera datasets. 
 ## Results
 Comparable or better than training-based methods (MotionCtrl, CameraCtrl); rotational + translational control; works with EasyAnimate, VideoCrafter2; robust across visual styles.
 
-Fundamentally different paradigm from crop-based reframing: it generates/controls camera motion in a diffusion model's latent space rather than cropping real footage. Relevant as a future direction, not a drop-in for ClippyMe's deterministic crop pipeline.
+Fundamentally different paradigm from crop-based reframing: it generates/controls camera motion in a diffusion model's latent space rather than cropping real footage. Relevant as a future direction, not a drop-in for S6_cut's deterministic crop pipeline.

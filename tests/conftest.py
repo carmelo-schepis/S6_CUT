@@ -1,6 +1,6 @@
 """Shared pytest configuration.
 
-Some test modules import ``clippyme.pipeline.main`` (and transitively
+Some test modules import ``s6_cut.pipeline.main`` (and transitively
 ``ultralytics`` / ``cv2`` / ``mediapipe``) at module load time. Those modules
 are marked ``@pytest.mark.integration`` so they only run in the Docker image
 that ships the heavy CV/ML runtime — but a marker cannot stop a *collection*

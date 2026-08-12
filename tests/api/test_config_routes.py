@@ -24,8 +24,8 @@ import struct
 import pytest
 from fastapi.testclient import TestClient
 
-import clippyme.api.app as app_module
-import clippyme.api.config_routes as config_module
+import s6_cut.api.app as app_module
+import s6_cut.api.config_routes as config_module
 
 # A trusted browser origin (in the default allow-list) — the gate accepts it
 # via its Origin branch without needing a private client IP.

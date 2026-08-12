@@ -1,7 +1,7 @@
 import json
 from types import SimpleNamespace
 
-from clippyme.pipeline import orchestrator
+from s6_cut.pipeline import orchestrator
 
 
 class FakeState:
@@ -44,7 +44,7 @@ def test_missing_gemini_uses_texttiling_and_persists_structured_warning(
     tmp_path, monkeypatch
 ):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    monkeypatch.setenv("CLIPPYME_SILENCE_SNAP", "0")
+    monkeypatch.setenv("S6CUT_SILENCE_SNAP", "0")
     args = SimpleNamespace(
         skip_analysis=False,
         monitor=False,

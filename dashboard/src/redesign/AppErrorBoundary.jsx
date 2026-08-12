@@ -14,7 +14,7 @@ export class AppErrorBoundary extends Component {
   }
 
   componentDidCatch(error, info) {
-    console.error('ClippyMe frontend crashed', error, info);
+    console.error('S6_cut frontend crashed', error, info);
   }
 
   render() {
@@ -24,7 +24,7 @@ export class AppErrorBoundary extends Component {
         <div className="fatal-card">
           <span className="fatal-icon"><Icon n="triangle-alert" /></span>
           <p className="eyebrow">Frontend recovery</p>
-          <h1>ClippyMe hit an unexpected UI error.</h1>
+          <h1>S6_cut hit an unexpected UI error.</h1>
           <p>Your rendered files and backend jobs are untouched. Reload the interface, or clear only the saved browser session if the same screen keeps crashing.</p>
           <div className="fatal-actions">
             <Btn variant="grad" icon="refresh-cw" onClick={() => window.location.reload()}>Reload interface</Btn>

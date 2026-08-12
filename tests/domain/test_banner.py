@@ -1,12 +1,12 @@
-"""Host tests for clippyme.domain.banner."""
+"""Host tests for s6_cut.domain.banner."""
 import os
 import sys
 from types import SimpleNamespace
 
 import pytest
 
-from clippyme.domain import banner
-from clippyme.domain.banner import (
+from s6_cut.domain import banner
+from s6_cut.domain.banner import (
     DEFAULT_BANNER_Y_PCT,
     banner_text,
     clamp_y_pct,
@@ -135,7 +135,7 @@ def test_rasterized_logo_cache_is_written_atomically(monkeypatch, tmp_path):
 
 def test_banner_renders_use_distinct_temp_files(monkeypatch, tmp_path):
     import subprocess
-    from clippyme.pipeline import media_probe
+    from s6_cut.pipeline import media_probe
 
     video = tmp_path / "clip_1.mp4"
     video.write_bytes(b"video")

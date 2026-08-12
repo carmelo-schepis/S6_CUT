@@ -5,14 +5,14 @@ design history and rationale live in `docs/` (see the pointers at the bottom).
 
 ## Project
 
-ClippyMe is a self-hosted AI video platform that turns long-form videos
+S6_cut is a self-hosted AI video platform that turns long-form videos
 (YouTube or local uploads) into viral 9:16 vertical shorts. Fork of OpenShorts.
 Backend: FastAPI + a subprocess video pipeline. Frontend: React 18 + Vite 6 +
 Tailwind v4.
 
 ## Repo layout
 
-Python backend is src-layout under `src/clippyme/` (`pip install -e .`):
+Python backend is src-layout under `src/s6_cut/` (`pip install -e .`):
 
 - `api/` — `app.py` (thin FastAPI layer: job-lifecycle routes, middleware,
   static mounts, lifespan), `config_routes.py` (the config-family `APIRouter`:
@@ -27,8 +27,8 @@ Python backend is src-layout under `src/clippyme/` (`pip install -e .`):
   journal + startup recovery), `job_worker.py` (queue dispatch + retention
   cleanup), `job_results.py` (`build_main_cmd`, partial/final result loaders),
   `job_artifacts.py` (atomic metadata IO), `runtime_state.py` (durable per-job
-  phase/progress/attempt state in `<job>/.clippyme_runtime.json` + the
-  `.clippyme_checkpoint/` artefact dir — atomic + fsync'd, owner-only),
+  phase/progress/attempt state in `<job>/.s6_cut_runtime.json` + the
+  `.s6_cut_checkpoint/` artefact dir — atomic + fsync'd, owner-only),
   `uploads.py` (local-file intake: size cap, safe destination paths),
   `job_control.py` (status machine +
   psutil process-tree suspend/resume), `publish_service.py` (Zernio publish
@@ -47,9 +47,9 @@ Python backend is src-layout under `src/clippyme/` (`pip install -e .`):
   fields, apply to future clips); per-segment clip selection
   (`clip_selection: fixed|auto` — `fixed` publishes the top `max_clips` by
   viral_score, `auto` adds a `min_viral_score` floor via
-  `CLIPPYME_MIN_VIRAL_SCORE` so a weak segment yields fewer clips or none,
+  `S6CUT_MIN_VIRAL_SCORE` so a weak segment yields fewer clips or none,
   with `max_clips` staying the ceiling — `max_clips: 0` means NO cap and rides
-  through as `CLIPPYME_MAX_CLIPS=0`, which the orchestrator reads as uncapped);
+  through as `S6CUT_MAX_CLIPS=0`, which the orchestrator reads as uncapped);
   per-monitor `smart_cut` (opt-in — adds
   the `smartcut` toggle to the auto-publish compose recipe) and
   `letterbox_zoom` (monitors always render reframe-`disabled`);
@@ -68,7 +68,7 @@ Python backend is src-layout under `src/clippyme/` (`pip install -e .`):
   `errors.py` (domain exceptions mapped to HTTP by one app-level handler).
 - `pipeline/` — `orchestrator.py` (**the entrypoint queued jobs actually run**:
   preflight → checkpointed `main.py` stages → per-render output QA; owns
-  retries, resume and `.clippyme_runtime.json`), `preflight.py` (pure-ish
+  retries, resume and `.s6_cut_runtime.json`), `preflight.py` (pure-ish
   pre-spend probe: duration/size/disk/Gemini-cost estimate + quota rejection,
   exit code 2 = never retried), `media_qa.py` (ffprobe clip verification:
   streams, aspect, black/freeze ratio, loudness), `quality_suite.py`
@@ -85,7 +85,7 @@ Python backend is src-layout under `src/clippyme/` (`pip install -e .`):
   prompt/cost/retry-classification — the pure half of `get_viral_clips`; the
   prompt's `TITLE & CAPTION COPY` section is engagement-first by design
   (see `docs/title-hook-copy-research.md`) — never reintroduce a mechanical
-  CTA there, and `CLIPPYME_CREATOR_NAME` names the clip's subject without
+  CTA there, and `S6CUT_CREATOR_NAME` names the clip's subject without
   ever overriding the speaker-attribution rule; the
   per-word payload is TOON-encoded (`encode_words_toon`, ~50% smaller than
   JSON) while the response contract stays JSON),
@@ -130,7 +130,7 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build  # pr
 # Backend host tests (fast, no CV stack) + lint
 pip install -e ".[host-tests]" && pip install pytest ruff
 pytest -m "not integration" -q
-ruff check src/clippyme tests --select E9,F63,F7,F82
+ruff check src/s6_cut tests --select E9,F63,F7,F82
 
 # Heavy CV/ML integration tests (Docker only)
 docker compose run --rm -u root backend sh -lc "pip install -q pytest && pytest -m integration"
@@ -149,14 +149,14 @@ CI (`.github/workflows/ci.yml`): backend host suite (with report-only
 coverage) + ruff bug-class rules + blocking `pip-audit`; frontend lint +
 **test** (with coverage) + build; the Docker integration job runs on main
 pushes or `workflow_dispatch`, pre-building the backend image with GHA layer
-caching (tagged `clippyme-backend` so compose reuses it).
+caching (tagged `s6-cut-backend` so compose reuses it).
 
 ## Architecture
 
 **Job lifecycle**: `POST /api/process|/api/batch` (cloud keys optional; no
 Gemini submission gate) → `build_main_cmd` → `submit_job` (in-memory `jobs` dict + `asyncio.Queue`) → `process_queue`
 dispatch (semaphore, `MAX_CONCURRENT_JOBS`) → `run_job` spawns
-`python -m clippyme.pipeline.orchestrator` as a subprocess and polls partial
+`python -m s6_cut.pipeline.orchestrator` as a subprocess and polls partial
 results every 2s. Statuses: `queued → processing ⇄ paused → {completed, failed,
 cancelled, stopped}` (`job_control.py` owns the guards). `stopped` keeps
 finished clips; `cancelled` rmtree's everything.
@@ -164,7 +164,7 @@ finished clips; `cancelled` rmtree's everything.
 **Runtime resilience**: the orchestrator (not `main.py`) is what queued jobs
 execute. It preflights the source, keeps durable state + reusable artefacts in
 the job dir, retries transient failures with bounded backoff
-(`CLIPPYME_JOB_MAX_ATTEMPTS`, exit code `2` = deterministic rejection, never
+(`S6CUT_JOB_MAX_ATTEMPTS`, exit code `2` = deterministic rejection, never
 retried), resumes after a backend restart when state + source are still safe,
 and QA-probes every temporary render before it atomically replaces the public
 clip (structural defect → bounded re-render; signal finding → metadata
@@ -248,9 +248,9 @@ through verbatim (the frontend parses per-platform 429 daily limits).
 
 ## Code rules
 
-- **Thin handlers**: validate → call a `clippyme.domain.*` helper → return
+- **Thin handlers**: validate → call a `s6_cut.domain.*` helper → return
   JSON. A handler growing past ~25 lines of logic gets extracted. Domain
-  modules never import FastAPI — they raise `errors.ClippyMeError` subclasses
+  modules never import FastAPI — they raise `errors.S6CutError` subclasses
   (`ValidationError` 400, `NotFoundError` 404, `ConflictError` 409) mapped by
   one app-level handler.
 - **Per-clip endpoints resolve through `clip_resolve.resolve_clip()`** — do
@@ -296,7 +296,7 @@ through verbatim (the frontend parses per-platform 429 daily limits).
 
 API keys, Gemini model, transcription provider and cookies are managed from
 the dashboard Settings tab (persisted in `data/config.json`, git-ignored).
-The full operational env-var reference (REFRAME_*, AE_*, CLIPPYME_*,
+The full operational env-var reference (REFRAME_*, AE_*, S6CUT_*,
 DEEPGRAM_*, ELEVENLABS_*, ZERNIO_*, server knobs) lives in `.env.example`
 (commented, with defaults) and the README table — keep those two in sync when
 adding a knob. `GEMINI_MODEL` defaults to `gemini-3.5-flash`; per-job override

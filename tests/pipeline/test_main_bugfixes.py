@@ -12,7 +12,7 @@ import pytest
 pytest.importorskip("scenedetect")
 pytestmark = pytest.mark.integration
 
-from clippyme.pipeline.main import _resolve_cookies_path
+from s6_cut.pipeline.main import _resolve_cookies_path
 
 
 def test_bug1_cookie_path_points_at_repo_root_data_dir(tmp_path, monkeypatch):
@@ -49,7 +49,7 @@ def test_bug1_cookie_none_when_nothing_configured(tmp_path, monkeypatch):
 def test_bug2_person_box_targets_head_zone_not_above_head():
     """Bug #2: full person bbox fed to cameraman must center Y at
     y + 0.15*h, not at y + 0.15*0.4*h."""
-    from clippyme.pipeline.main import SmoothedCameraman
+    from s6_cut.pipeline.main import SmoothedCameraman
     cam = SmoothedCameraman(output_width=1080, output_height=1920,
                             video_width=1920, video_height=1080)
     cam.update_target([800, 200, 300, 800], is_person_box=True)
@@ -58,7 +58,7 @@ def test_bug2_person_box_targets_head_zone_not_above_head():
 
 
 def test_bug5_cooldown_blocks_switch_even_when_old_speaker_offscreen():
-    from clippyme.pipeline.main import SpeakerTracker
+    from s6_cut.pipeline.main import SpeakerTracker
     st = SpeakerTracker(cooldown_frames=45)
     box_a = {'box': [100, 100, 200, 200], 'score': 40000, 'mar': 0.3}
     st.get_target([box_a], frame_number=0, width=1920)
@@ -70,7 +70,7 @@ def test_bug5_cooldown_blocks_switch_even_when_old_speaker_offscreen():
 
 
 def test_bug6_detection_smoother_prunes_stale_tracks():
-    from clippyme.pipeline.main import DetectionSmoother
+    from s6_cut.pipeline.main import DetectionSmoother
     s = DetectionSmoother(window_size=5)
     s.smooth([{'box': [0, 0, 100, 100], 'score': 10000}], frame_number=0)
     assert len(s.histories) == 1

@@ -1,12 +1,12 @@
 """Host-unit tests for the pure lexical TextTiling fallback (no cv2/torch).
 
 Pins the math ported from ClipsAI (gap → smooth → depth → boundary) and the
-``find_topic_clips`` duration shaping used as ClippyMe's no-AI whole-video
+``find_topic_clips`` duration shaping used as S6_cut's no-AI whole-video
 fallback. See docs/clipsai-analysis.md.
 """
 from collections import Counter
 
-from clippyme.pipeline import texttiling_ops as tt
+from s6_cut.pipeline import texttiling_ops as tt
 
 
 # --- primitives ------------------------------------------------------------

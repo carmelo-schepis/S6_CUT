@@ -44,4 +44,4 @@ Input: long gameplay videos in `gameplay/`. Output: 9:16 MP4 clips + subtitle JS
 ## Key concepts
 Semantic tagging drives style-adaptive captions; graceful fallback when components unavailable; smart cropping with optional blurred background for non-vertical source.
 
-Strong parallel to ClippyMe's viral-moment detection + compose pipeline, but gameplay-specialized and adds TTS voiceover.
+Strong parallel to S6_cut's viral-moment detection + compose pipeline, but gameplay-specialized and adds TTS voiceover.

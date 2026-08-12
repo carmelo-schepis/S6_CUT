@@ -25,7 +25,7 @@ FROM nginx:alpine
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist /usr/share/nginx/html
 
-# Same port as the dev server so the compose port mapping (and CLIPPYME_BIND
+# Same port as the dev server so the compose port mapping (and S6CUT_BIND
 # loopback default) carries over unchanged from docker-compose.yml.
 EXPOSE 5175
 

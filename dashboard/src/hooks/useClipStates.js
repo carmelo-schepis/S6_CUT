@@ -4,7 +4,7 @@ import { readStoredJson, removeStoredValue, subscribeStoredJson, writeStoredJson
 
 const validStates = (value) => value && typeof value === 'object' && !Array.isArray(value);
 
-function keyFor(jobId) { return `clippyme_clip_states_${jobId}`; }
+function keyFor(jobId) { return `s6_cut_clip_states_${jobId}`; }
 
 function normalize(value) {
   if (!validStates(value)) return {};

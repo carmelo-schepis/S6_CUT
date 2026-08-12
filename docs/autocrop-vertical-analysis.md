@@ -1,4 +1,4 @@
-# Comparative analysis: `kamilstanuch/Autocrop-vertical` → ClippyMe
+# Comparative analysis: `kamilstanuch/Autocrop-vertical` → S6_cut
 
 Date: 2026-06-17
 External repo: <https://github.com/kamilstanuch/Autocrop-vertical> @ `main`
@@ -15,26 +15,26 @@ Unlike the fifth study (`aregrid/frame`, vaporware), this is **real, mature,
 single-file code** in the same domain: horizontal → vertical social-media
 cropping (PySceneDetect → YOLOv8 person detection → per-scene TRACK/LETTERBOX →
 OpenCV frame pipe → FFmpeg encode). Its **reframe algorithm is simpler than
-ClippyMe's** (static per-scene center-crop on a person box; no camera smoothing,
+S6_cut's** (static per-scene center-crop on a person box; no camera smoothing,
 no active-speaker selection, no continuous zoom, no global trajectory pass) — so
-there is nothing to port on the reframe-*math* axis where ClippyMe already runs
+there is nothing to port on the reframe-*math* axis where S6_cut already runs
 ahead (`reframe_ops.py` + five prior studies).
 
 Its real value is the **production-hardening layer** the changelog was written
 around: A/V-sync correctness on messy real-world inputs (YouTube downloads, phone
-VFR). That layer maps onto concrete, previously-unhandled gaps in ClippyMe's
+VFR). That layer maps onto concrete, previously-unhandled gaps in S6_cut's
 clip/reframe render path, and is what this study ports.
 
 ---
 
 ## 1. Architecture comparison
 
-| Aspect | Autocrop-vertical | ClippyMe | Takeaway |
+| Aspect | Autocrop-vertical | S6_cut | Takeaway |
 |---|---|---|---|
 | Scene detection | PySceneDetect `ContentDetector`, `--frame-skip`/`--downscale` | PySceneDetect (`scene_detection.py`) | Parity. |
-| Subject detect | YOLOv8n person + Haar-cascade face (middle frame only) | YOLOv8n + MediaPipe FaceMesh + MAR active-speaker (per frame) | ClippyMe richer. |
-| Crop decision | `decide_cropping_strategy`: 0 people→LETTERBOX, 1→track box, group→TRACK if group-width < crop-width else LETTERBOX | `analyze_scenes_strategy` → TRACK/WIDE/GENERAL/DISABLED | Comparable intent; ClippyMe adds WIDE multi-speaker. |
-| Camera | **static** center-crop per scene (no motion) | `SmoothedCameraman`: EMA/1€/spring smoothing, continuous zoom, lost-subject drift | ClippyMe far ahead. |
+| Subject detect | YOLOv8n person + Haar-cascade face (middle frame only) | YOLOv8n + MediaPipe FaceMesh + MAR active-speaker (per frame) | S6_cut richer. |
+| Crop decision | `decide_cropping_strategy`: 0 people→LETTERBOX, 1→track box, group→TRACK if group-width < crop-width else LETTERBOX | `analyze_scenes_strategy` → TRACK/WIDE/GENERAL/DISABLED | Comparable intent; S6_cut adds WIDE multi-speaker. |
+| Camera | **static** center-crop per scene (no motion) | `SmoothedCameraman`: EMA/1€/spring smoothing, continuous zoom, lost-subject drift | S6_cut far ahead. |
 | **VFR handling** | `is_variable_frame_rate` (ffprobe r vs avg rate) → re-mux `-vsync cfr` | **none** | **Gap. Ported.** |
 | **Audio start_time** | `get_stream_start_time` → `-ss` trims audio lead-in | **none** | **Gap. Ported.** |
 | **Corrupt-frame** | try/except → duplicate last good frame | loop aborts on exception | **Gap. Ported.** |
@@ -49,20 +49,20 @@ clip/reframe render path, and is what this study ports.
 
 | Pri | Improvement | Status | Notes |
 |---|---|---|---|
-| **High** | Audio `start_time` offset compensation | ✅ implemented | Classic yt-dlp A/V desync; YouTube is ClippyMe's primary input. `audio_sync_seek_args` + `probe_stream_start_time`, wired into reframe Step 5. |
+| **High** | Audio `start_time` offset compensation | ✅ implemented | Classic yt-dlp A/V desync; YouTube is S6_cut's primary input. `audio_sync_seek_args` + `probe_stream_start_time`, wired into reframe Step 5. |
 | **High** | VFR → CFR pre-normalization | ✅ implemented | Phone/odd-timebase sources. `probe_is_variable_frame_rate` gate + re-mux in reframe; CFR inputs (the normal clip slices) untouched. |
 | **Medium** | `-pix_fmt yuv420p` on the two bare libx264 encoders | ✅ implemented | reframe raw-frame encoder + main.py source-slice cut; guarantees universal decode even when later 420p passes are skipped. |
 | **Medium** | Corrupt/failed-frame resilience | ✅ implemented | try/except in the reframe render loop → duplicate last good frame; preserves frame count → no A/V drift. |
 | **Medium** | `-vsync cfr` on reframe encoder + cut | ✅ implemented | Locks constant output rate; pairs with the VFR fix. |
 | **Medium** | fps cross-check (cv2 ↔ PySceneDetect) | ✅ implemented | `reconcile_fps`: frames are decoded by OpenCV, so the encoder `-r` follows the cv2 reader when it diverges from the detector (>0.1 fps); within tolerance the detector value is kept (byte-identical). Fixes slow A/V drift on CFR files where VFR-normalize never fires. |
-| Low | Hardware encoder (NVENC/VideoToolbox) | ⏸ deferred | ClippyMe encodes in a Linux/Docker container where libx264 is the portable choice; HW detect adds surface for marginal CPU savings off the product axis. Documented, not wired. |
-| Low | `--quality`/`--ratio`/`--plan-only` CLI knobs | ⏸ deferred | ClippyMe's ratio/quality are driven by the dashboard + per-stage tuning, not CLI flags; not a fit. |
+| Low | Hardware encoder (NVENC/VideoToolbox) | ⏸ deferred | S6_cut encodes in a Linux/Docker container where libx264 is the portable choice; HW detect adds surface for marginal CPU savings off the product axis. Documented, not wired. |
+| Low | `--quality`/`--ratio`/`--plan-only` CLI knobs | ⏸ deferred | S6_cut's ratio/quality are driven by the dashboard + per-stage tuning, not CLI flags; not a fit. |
 
 ---
 
 ## 3. What was implemented
 
-New module **`src/clippyme/pipeline/media_probe.py`** (pure helpers + thin
+New module **`src/s6_cut/pipeline/media_probe.py`** (pure helpers + thin
 ffprobe wrappers, **no cv2** → host-importable), following the established
 `reframe_ops.py` "pure logic in a testable module, thin glue in the cv2 file"
 pattern:
@@ -101,7 +101,7 @@ no-op boundaries, and the never-raise contract.
   slices, so its bytes are unchanged — confirmed by the integration suite still
   passing (13/13).
 - **"Don't rewrite; keep the style" (instruction).** No reframe logic was
-  rewritten; the static-crop algorithm was *not* adopted (ClippyMe's is better).
+  rewritten; the static-crop algorithm was *not* adopted (S6_cut's is better).
   Only the orthogonal robustness layer was added, in the same inline-ffmpeg +
   pure-helper-module style already used across the pipeline.
 - **fps-source mismatch (concern #3).** Closed by `reconcile_fps`: VFR normalize +
@@ -114,7 +114,7 @@ no-op boundaries, and the never-raise contract.
   commit), so both render paths now duplicate the last good frame rather than
   aborting.
 - **Heavy ports skipped.** HW encoder, quality/ratio CLI flags are real but off
-  ClippyMe's product axis (dashboard-driven, containerized libx264) — catalogued
+  S6_cut's product axis (dashboard-driven, containerized libx264) — catalogued
   as deferred, honouring "Non riscrivere tutto."
 
 ---
@@ -122,7 +122,7 @@ no-op boundaries, and the never-raise contract.
 ## 5. Learnings & how they were applied
 
 1. **A simpler upstream can still be a net contribution — via its hardening, not
-   its core.** Autocrop's *algorithm* is behind ClippyMe's, but its changelog is
+   its core.** Autocrop's *algorithm* is behind S6_cut's, but its changelog is
    a checklist of real-world A/V-sync bugs (VFR drift, start_time desync,
    dropped-frame drift) that a more sophisticated reframe core never bothered to
    handle. Value lived in the boring layer. *Applied:* ported the robustness,

@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-from clippyme.domain import hooks
+from s6_cut.domain import hooks
 
 
 class Response(io.BytesIO):
@@ -58,7 +58,7 @@ def test_download_rejects_untrusted_host_before_network(monkeypatch, tmp_path):
 
 
 def test_public_download_is_disabled_by_default(monkeypatch, tmp_path):
-    monkeypatch.delenv("CLIPPYME_RUNTIME_FONT_DOWNLOAD", raising=False)
+    monkeypatch.delenv("S6CUT_RUNTIME_FONT_DOWNLOAD", raising=False)
     monkeypatch.setattr(hooks, "FONT_DIR", str(tmp_path))
     monkeypatch.setattr(hooks, "FONT_PATH", str(tmp_path / "missing.ttf"))
     monkeypatch.setattr(

@@ -3,7 +3,7 @@
 Pure/host-runnable — exercises the interval arithmetic + analyze_silences
 manual path without ffmpeg. See docs/flycut-caption-analysis.md.
 """
-from clippyme.domain import smartcut as sc
+from s6_cut.domain import smartcut as sc
 
 
 # --- normalize_drop_ranges -------------------------------------------------

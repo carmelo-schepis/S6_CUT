@@ -1,10 +1,10 @@
-# Comparative analysis: `mfahsold/montage-ai` → ClippyMe reframe
+# Comparative analysis: `mfahsold/montage-ai` → S6_cut reframe
 
 Date: 2026-06-17
 External repo: <https://github.com/mfahsold/montage-ai> @ `main`
 Size: ~80k LOC Python across `src/montage_ai/` (86 modules) + k3s deploy, Drone /
 Jenkins CI, MoE expert routing, creative director, color grading, dialogue
-ducking, distributed render. Scope of this study: ClippyMe's reframe subsystem.
+ducking, distributed render. Scope of this study: S6_cut's reframe subsystem.
 Fourth external reframe study, after `gauravzazz/smart-reframe`,
 `KazKozDev/auto-vertical-reframe`, and `obi19999/smart-video-reframe`.
 
@@ -12,12 +12,12 @@ Fourth external reframe study, after `gauravzazz/smart-reframe`,
 
 ## 0. Scope note
 
-montage-ai is a large, genuinely mature platform — far broader than ClippyMe
+montage-ai is a large, genuinely mature platform — far broader than S6_cut
 (distributed k3s rendering, a mixture-of-experts selection engine, full color
 grading, audio dialogue ducking, timeline/EDL export). A 1:1 comparison of the
-whole system is out of scope and mostly off ClippyMe's product axis. This study
+whole system is out of scope and mostly off S6_cut's product axis. This study
 stays in the **reframe lane** — `src/montage_ai/auto_reframe.py` (725 LOC) — where
-ClippyMe has deep, host-testable infrastructure (`reframe_ops.py`) and a clean
+S6_cut has deep, host-testable infrastructure (`reframe_ops.py`) and a clean
 port path. Broader net-new subsystems observed are catalogued in §4 as deferred,
 with rationale, rather than force-fit.
 
@@ -25,13 +25,13 @@ with rationale, rather than force-fit.
 
 ## 1. Architecture comparison (reframe)
 
-| Aspect | montage-ai `auto_reframe.py` | ClippyMe | Takeaway |
+| Aspect | montage-ai `auto_reframe.py` | S6_cut | Takeaway |
 |---|---|---|---|
-| Shape | `AutoReframeEngine` + `CameraMotionOptimizer` + `SubjectKalmanFilter`, all in one cv2 module | `reframe.py` glue + `reframe_ops.py` pure math | Comparable; ClippyMe's pure/glue split keeps the math host-tested. |
+| Shape | `AutoReframeEngine` + `CameraMotionOptimizer` + `SubjectKalmanFilter`, all in one cv2 module | `reframe.py` glue + `reframe_ops.py` pure math | Comparable; S6_cut's pure/glue split keeps the math host-tested. |
 | Camera path | **Global L2 convex optimiser** (data + velocity + accel penalties, keyframe constraints) via scipy.sparse solve | Two-speed EMA / 1€ / spring (online) + opt-in **savgol** global 2-pass | montage-ai's optimiser is *more principled* than savgol. **Ported.** |
 | Smoothing fallback | **Forward-backward Kalman (RTS) smoother**, scipy-free | savgol / EMA | RTS extrapolates through detection gaps — net-new. **Ported.** |
 | Keyframe overrides | constraints dict → strong-penalty pull in the solve | none | Net-new; came free with the L2 port. |
-| Detector | MediaPipe FaceDetection (full-range) + IoU subject lock + OpenCV KCF/CSRT object-track fallback | YOLOv8n + MediaPipe FaceMesh + MAR speaker | Comparable; ClippyMe adds active-speaker scoring. |
+| Detector | MediaPipe FaceDetection (full-range) + IoU subject lock + OpenCV KCF/CSRT object-track fallback | YOLOv8n + MediaPipe FaceMesh + MAR speaker | Comparable; S6_cut adds active-speaker scoring. |
 | Lost-subject | hold last center; reset after `fps·1.0` lost frames | `drift_to_center` after `REFRAME_LOST_HOLD` | Parity (different policy). |
 | Render | segmented `trim+crop+concat` filtergraph (camera "cuts") | streaming single-pass + opt-in 2-pass | Parity. |
 | Optional-dep discipline | `find_spec` lazy scipy/mediapipe, graceful fallback, test stubs | env-gated, Deepgram→Whisper fallback | Both strong; their lazy-import-to-cut-startup pattern is worth noting. |
@@ -44,11 +44,11 @@ with rationale, rather than force-fit.
 |---|---|---|---|
 | **High** | Forward-backward **Kalman RTS** global smoother | ✅ implemented + wired (opt-in) | `kalman_rts_smooth`; `REFRAME_GLOBAL_METHOD=kalman`. Handles detection gaps. |
 | **High** | **L2 convex** camera-path optimiser (data/velocity/accel + keyframe constraints) | ✅ implemented + wired (opt-in) | `solve_camera_path_l2`; `REFRAME_GLOBAL_METHOD=l2`. Principled global optimiser. |
-| Medium | Lazy `find_spec` import to cut package startup (~700ms claim) | ⏸ note | ClippyMe already lazy-loads YOLO/MediaPipe via subprocess reframe; minor. |
+| Medium | Lazy `find_spec` import to cut package startup (~700ms claim) | ⏸ note | S6_cut already lazy-loads YOLO/MediaPipe via subprocess reframe; minor. |
 | Low | Color grading / LUT pipeline (`clip_enhancement.py`, `data/luts`) | ⏸ deferred | Net-new product area; off the current reframe scope. |
-| Low | Dialogue ducking (`dialogue_ducking.py`) | ⏸ deferred | ClippyMe has loudnorm; ducking is a separate audio feature. |
-| Low | MoE selection engine (`moe/experts`, `selection_engine.py`) | ⏸ deferred | Overlaps ClippyMe's Gemini viral detection; large, different design. |
-| Skip | Distributed k3s render, MoE control plane, timeline EDL export | ❌ | Platform-scale infra beyond ClippyMe's single-host scope. |
+| Low | Dialogue ducking (`dialogue_ducking.py`) | ⏸ deferred | S6_cut has loudnorm; ducking is a separate audio feature. |
+| Low | MoE selection engine (`moe/experts`, `selection_engine.py`) | ⏸ deferred | Overlaps S6_cut's Gemini viral detection; large, different design. |
+| Skip | Distributed k3s render, MoE control plane, timeline EDL export | ❌ | Platform-scale infra beyond S6_cut's single-host scope. |
 
 ---
 
@@ -85,7 +85,7 @@ when `REFRAME_GLOBAL_SMOOTH=1` is also set.
 
 ## 4. Conflicts & resolutions
 
-- **Savgol is the incumbent global smoother (choice conflict).** ClippyMe already
+- **Savgol is the incumbent global smoother (choice conflict).** S6_cut already
   shipped savgol for `REFRAME_GLOBAL_SMOOTH`. Per the "suggest alternatives on
   conflict" instruction, the L2 optimiser and Kalman RTS smoother are added as
   **opt-in alternatives** behind `REFRAME_GLOBAL_METHOD`, with `savgol` remaining

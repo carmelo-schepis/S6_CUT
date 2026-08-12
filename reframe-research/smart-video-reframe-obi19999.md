@@ -32,4 +32,4 @@ Input: MP4/AVI/MOV (landscape). Output: 9:16 mobile-optimized video.
 - User-adjustable detection sensitivity.
 - Batch processing, cross-platform (Windows/macOS/Linux).
 
-Same core idea as ClippyMe (face-tracked crop/pan + scene analysis) but YOLO-face based rather than MediaPipe MAR active-speaker scoring.
+Same core idea as S6_cut (face-tracked crop/pan + scene analysis) but YOLO-face based rather than MediaPipe MAR active-speaker scoring.

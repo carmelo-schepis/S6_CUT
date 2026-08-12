@@ -1,4 +1,4 @@
-// ClippyMe redesign — wired to the real backend via the production hooks.
+// S6_cut redesign — wired to the real backend via the production hooks.
 // Visual layer is the Claude Design handoff; data layer reuses the same
 // useJobSubmission / useJobPolling / useHistory / useClipStates the production
 // app uses, so the pipeline behaves identically.
@@ -175,7 +175,7 @@ export default function RedesignApp() {
 
   const setPreselections = (value) => {
     setPreselectionsRaw(value);
-    try { if (jobId && value) localStorage.setItem(`clippyme_preselections_job_${jobId}`, JSON.stringify(value)); } catch { /* */ }
+    try { if (jobId && value) localStorage.setItem(`s6_cut_preselections_job_${jobId}`, JSON.stringify(value)); } catch { /* */ }
   };
 
   // recipe / manual-edit handling on opts
@@ -325,7 +325,7 @@ export default function RedesignApp() {
       setStatus('complete');
       setProcessingMedia({ type: h.sourceType || 'url', payload: h.source });
       try {
-        const saved = localStorage.getItem(`clippyme_preselections_job_${h.jobId}`);
+        const saved = localStorage.getItem(`s6_cut_preselections_job_${h.jobId}`);
         setPreselectionsRaw(saved ? JSON.parse(saved) : null);
       } catch { setPreselectionsRaw(null); }
       setViewingHistory(true);

@@ -1,8 +1,8 @@
-"""Tests for clippyme.integrations.youtube_feed pure helpers (no network)."""
+"""Tests for s6_cut.integrations.youtube_feed pure helpers (no network)."""
 import pytest
 
-from clippyme.integrations import youtube_feed as yf
-from clippyme.integrations.youtube_feed import (
+from s6_cut.integrations import youtube_feed as yf
+from s6_cut.integrations.youtube_feed import (
     feed_url,
     parse_feed,
     uploads_playlist_id,

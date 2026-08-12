@@ -1,4 +1,4 @@
-from clippyme.pipeline.run_ops import (
+from s6_cut.pipeline.run_ops import (
     sanitize_windows_basename,
     clip_output_basename,
     should_use_fallback,

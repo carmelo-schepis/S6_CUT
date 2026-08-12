@@ -1,4 +1,4 @@
-"""Tests for clippyme.domain.compose — layer composition + cleanup.
+"""Tests for s6_cut.domain.compose — layer composition + cleanup.
 
 The individual layer helpers (_apply_subtitles / _apply_smartcut /
 _apply_hook) shell out to ffmpeg / auto-editor / Pillow, so they are
@@ -15,8 +15,8 @@ import os
 
 import pytest
 
-from clippyme.domain import compose
-from clippyme.domain.compose import (
+from s6_cut.domain import compose
+from s6_cut.domain.compose import (
     _SIZE_MAP,
     _cleanup_intermediates,
     compose_layers,

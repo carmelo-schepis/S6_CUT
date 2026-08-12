@@ -1,10 +1,10 @@
-# Comparative analysis: `KazKozDev/auto-vertical-reframe` → ClippyMe reframe
+# Comparative analysis: `KazKozDev/auto-vertical-reframe` → S6_cut reframe
 
 > **Update 2026-07:** the unwired building blocks ported from this analysis (`rank_subject`, `associate_subject`/`iou`) were removed from `reframe_ops.py` — they never gained a production caller. Git history has them if the gating infrastructure (masks/pose/ByteTrack) ever lands.
 
 Date: 2026-06-17
 External repo: <https://github.com/KazKozDev/auto-vertical-reframe> @ `33ac38d`
-(MIT). Single module `src/verthor/auto_reframe.py` (2253 LOC). Scope: ClippyMe's
+(MIT). Single module `src/verthor/auto_reframe.py` (2253 LOC). Scope: S6_cut's
 reframe subsystem. This is the second external reframe study; the first
 (`gauravzazz/smart-reframe`) is in `smart-reframe-analysis.md`.
 
@@ -12,13 +12,13 @@ reframe subsystem. This is the second external reframe study; the first
 
 ## 1. Architecture comparison
 
-| Aspect | verthor | ClippyMe (post-upgrade) | Takeaway |
+| Aspect | verthor | S6_cut (post-upgrade) | Takeaway |
 |---|---|---|---|
-| Shape | One 2253-LOC file, dataclasses (`Candidate`, `CameraState`) + free functions | `reframe.py` glue + `reframe_ops.py` pure math | ClippyMe's pure/glue split stays the better testability story. |
+| Shape | One 2253-LOC file, dataclasses (`Candidate`, `CameraState`) + free functions | `reframe.py` glue + `reframe_ops.py` pure math | S6_cut's pure/glue split stays the better testability story. |
 | Detector | **YOLOv11-seg** (instance masks) + ByteTrack | YOLOv8n (bbox) + MediaPipe faces | Masks give a true silhouette centroid; net-new. |
-| Tracking ID | **ByteTrack** persistent IDs (`lap` Hungarian) + subject lock/hysteresis | Per-frame re-detect, center-distance match (IoU `associate_subject` stays unwired) | ByteTrack is the robust-identity piece ClippyMe still lacks. |
+| Tracking ID | **ByteTrack** persistent IDs (`lap` Hungarian) + subject lock/hysteresis | Per-frame re-detect, center-distance match (IoU `associate_subject` stays unwired) | ByteTrack is the robust-identity piece S6_cut still lacks. |
 | Subject choice | **Linear ranking model** fusing 8+ signals | MAR-variance only | Ported the model as a building block. |
-| Camera | Online **spring-damper** (velocity+damping+cap) + EMA velocity feed-forward; **no** global pass | Two-speed EMA / 1€ / **opt-in savgol global 2-pass** | ClippyMe is *more* advanced on global smoothing. Ported their spring as a 3rd smoother. |
+| Camera | Online **spring-damper** (velocity+damping+cap) + EMA velocity feed-forward; **no** global pass | Two-speed EMA / 1€ / **opt-in savgol global 2-pass** | S6_cut is *more* advanced on global smoothing. Ported their spring as a 3rd smoother. |
 | Framing | Pose-driven headroom, mask centroid, two-person union crop | Face-occupancy zoom, single-subject | Pose/two-person are net-new. |
 | Presets | `talking_head/sports/pets/cars` (class/zoom/step bundles) | Fixed constants | Useful concept; the per-axis max-step is the portable nugget. |
 | Saliency | Handcrafted spectral-residual + optional DeepGaze-MR (torch.hub) | none | Handcrafted is dep-free; DeepGaze is heavyweight/experimental. |
@@ -27,7 +27,7 @@ reframe subsystem. This is the second external reframe study; the first
 ### Key correction to their README
 Despite README claiming a "path optimizer," verthor's camera is **entirely
 online/causal** (spring-damper + EMA feed-forward) — there is no global/offline
-trajectory optimization. ClippyMe's opt-in two-stage savgol pass is strictly
+trajectory optimization. S6_cut's opt-in two-stage savgol pass is strictly
 more sophisticated here, so nothing was ported on that axis.
 
 ---
@@ -77,12 +77,12 @@ lock / speaker signals. Host-unit-tested with the published weights.
 
 ## 4. Conflicts & resolutions
 
-- **Ranking model not wired into the default path (deliberate).** ClippyMe has
+- **Ranking model not wired into the default path (deliberate).** S6_cut has
   no segmentation masks, pose, saliency, or persistent track IDs yet, so most of
   the model's features would be constant/zero and it would only marginally
   re-weight the existing MAR score — while *changing* default speaker selection
   in a way no automated test can A/B. So `rank_subject` ships as a tested,
-  documented building block (the same convention ClippyMe already uses for the
+  documented building block (the same convention S6_cut already uses for the
   unwired-but-tested `associate_subject` / `salient_crop_center`). It becomes the
   natural fusion point once the deferred mask/pose/ByteTrack signals land.
 - **Spring vs existing smoothers.** Not a gap — a third option. Kept opt-in and
@@ -90,7 +90,7 @@ lock / speaker signals. Host-unit-tested with the published weights.
   unchanged. The genuinely net-new idea beyond a 3rd lerp is the **explicit
   per-frame velocity cap**, surfaced separately as `REFRAME_MAX_STEP_PX` so it
   composes with EMA and 1€ too.
-- **Global path optimization.** verthor has none; ClippyMe already shipped the
+- **Global path optimization.** verthor has none; S6_cut already shipped the
   opt-in savgol 2-pass last round. No change.
 
 ---

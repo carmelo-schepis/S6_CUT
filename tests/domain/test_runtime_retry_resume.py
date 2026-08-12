@@ -1,7 +1,7 @@
 import asyncio
 import io
 
-from clippyme.domain import job_runner
+from s6_cut.domain import job_runner
 
 
 class _Process:
@@ -9,7 +9,7 @@ class _Process:
         self.returncode = returncode
         self.pid = 1234
         self.stdout = io.BytesIO(b"")
-        attempt_log.append(env["CLIPPYME_ATTEMPT"])
+        attempt_log.append(env["S6CUT_ATTEMPT"])
 
     def poll(self):
         return self.returncode

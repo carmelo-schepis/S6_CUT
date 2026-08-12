@@ -6,7 +6,7 @@ import { renderHook, act, waitFor } from '@testing-library/react';
 import { useClipStates } from './useClipStates.js';
 
 const JOB = 'job-abc';
-const KEY = `clippyme_clip_states_${JOB}`;
+const KEY = `s6_cut_clip_states_${JOB}`;
 
 test('processing flag is cleared when state loads from storage', async () => {
   localStorage.setItem(KEY, JSON.stringify({

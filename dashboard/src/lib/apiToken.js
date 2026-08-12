@@ -1,10 +1,10 @@
-// Optional API token for deliberate LAN deployments (CLIPPYME_API_TOKEN).
+// Optional API token for deliberate LAN deployments (S6CUT_API_TOKEN).
 // When the backend has a token configured, every /api request must carry it;
 // the token itself lives in localStorage (set in Settings) so the static
 // frontend needs no build-time secret. Empty token → apiFetch is plain fetch,
 // byte-identical request shape.
 
-const API_TOKEN_KEY = 'clippyme_api_token';
+const API_TOKEN_KEY = 's6_cut_api_token';
 
 function storage() {
   // Node (unit tests) has no localStorage; browsers can throw on access in

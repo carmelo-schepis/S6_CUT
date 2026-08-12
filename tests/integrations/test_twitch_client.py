@@ -1,11 +1,11 @@
-"""Tests for clippyme.integrations.twitch_client.
+"""Tests for s6_cut.integrations.twitch_client.
 
 Pure parsers (stream_is_live / parse_vods) plus TwitchClient with requests
 monkeypatched — no network, no creds.
 """
 from datetime import timezone
 
-from clippyme.integrations.twitch_client import (
+from s6_cut.integrations.twitch_client import (
     TwitchClient,
     parse_vods,
     stream_is_live,

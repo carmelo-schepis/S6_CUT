@@ -1,4 +1,4 @@
-// ClippyMe redesign — BannerControls: the per-clip attribution banner (platform
+// S6_cut redesign — BannerControls: the per-clip attribution banner (platform
 // logo + channel handle burned bottom-of-clip), shared by the Create recipe
 // and the EditClipModal (hookStyle.jsx / layerControls.jsx precedent: fully
 // controlled `value` + `onChange(partial)`, no defaults applied here — the

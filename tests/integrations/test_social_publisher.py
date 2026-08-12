@@ -1,4 +1,4 @@
-"""Tests for clippyme.integrations.social_publisher.
+"""Tests for s6_cut.integrations.social_publisher.
 
 Covers the two pure, network-free pieces:
 - _safe_zernio_base_url() — the SSRF-by-configuration guard on ZERNIO_BASE_URL.
@@ -9,8 +9,8 @@ from datetime import date, datetime, time, timedelta
 
 import pytest
 
-from clippyme.integrations import social_publisher as sp
-from clippyme.integrations.social_publisher import SmartScheduler
+from s6_cut.integrations import social_publisher as sp
+from s6_cut.integrations.social_publisher import SmartScheduler
 
 
 DEFAULT = "https://zernio.com/api/v1"
@@ -305,7 +305,7 @@ def test_auto_schedule_uses_configured_timezone_not_server_local(monkeypatch, tm
 def test_presigned_upload_dns_failure_is_fail_closed(monkeypatch):
     import socket
 
-    from clippyme import netutil
+    from s6_cut import netutil
     monkeypatch.setattr(netutil, "resolve_host_addresses", lambda *a, **k: (_ for _ in ()).throw(socket.gaierror()))
     with pytest.raises(sp.ZernioError, match="safely resolved"):
         sp._reject_internal_upload_url("https://upload.example.test/object")

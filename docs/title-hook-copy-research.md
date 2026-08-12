@@ -106,6 +106,6 @@ direct encoding of the above. Two guards ride with it:
 - **Grounding rule** — exaggerate the framing, never invent the event (the
   delivery test).
 - **Speaker attribution** — the live monitor passes the channel owner as
-  `CLIPPYME_CREATOR_NAME`, which lets a title name *whose stream this is*, but
+  `S6CUT_CREATOR_NAME`, which lets a title name *whose stream this is*, but
   never puts a quote in their mouth: guests and co-streamers share the mic and
   the transcript carries no speaker identity.

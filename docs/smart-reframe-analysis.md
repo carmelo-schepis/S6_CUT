@@ -1,18 +1,18 @@
-# Comparative analysis: `gauravzazz/smart-reframe` → ClippyMe reframe
+# Comparative analysis: `gauravzazz/smart-reframe` → S6_cut reframe
 
 Date: 2026-06-17
 External repo analysed: <https://github.com/gauravzazz/smart-reframe> @ `29822eb`
 (MIT licensed). Scope: the auto-reframe subsystem only
-(`src/clippyme/pipeline/reframe.py` + `reframe_ops.py`).
+(`src/s6_cut/pipeline/reframe.py` + `reframe_ops.py`).
 
 ---
 
 ## 1. Architecture comparison
 
-| Aspect | smart-reframe | ClippyMe | Takeaway |
+| Aspect | smart-reframe | S6_cut | Takeaway |
 |---|---|---|---|
-| Package shape | Standalone lib (`smart_reframe/`), ~2 800 LOC, modular by concern (`detectors/`, `tracking/`, `framing/`, `solver/`, `audio/`, `compositor/`) | Two files: `reframe.py` (cv2 glue, 944 LOC) + `reframe_ops.py` (pure math, 187 LOC) inside a larger product | Their fine-grained split is cleaner, but ClippyMe's **pure-math / cv2-glue** split is the higher-value idea: it makes the decision logic host-unit-testable. We kept and extended that. |
-| Camera path | **Offline / 2-pass**: per-frame 1-D saliency maps → Viterbi DP (`solver/path_finder.py`) finds the globally optimal crop trajectory | **Online / single-pass streaming**: per-frame EMA (or 1€) easing, no look-ahead | smart-reframe's global optimum is smoother; ClippyMe is cheaper and lower-latency. We ported the *spirit* (global smoothing) cheaply. |
+| Package shape | Standalone lib (`smart_reframe/`), ~2 800 LOC, modular by concern (`detectors/`, `tracking/`, `framing/`, `solver/`, `audio/`, `compositor/`) | Two files: `reframe.py` (cv2 glue, 944 LOC) + `reframe_ops.py` (pure math, 187 LOC) inside a larger product | Their fine-grained split is cleaner, but S6_cut's **pure-math / cv2-glue** split is the higher-value idea: it makes the decision logic host-unit-testable. We kept and extended that. |
+| Camera path | **Offline / 2-pass**: per-frame 1-D saliency maps → Viterbi DP (`solver/path_finder.py`) finds the globally optimal crop trajectory | **Online / single-pass streaming**: per-frame EMA (or 1€) easing, no look-ahead | smart-reframe's global optimum is smoother; S6_cut is cheaper and lower-latency. We ported the *spirit* (global smoothing) cheaply. |
 | Active speaker | Audio activity (`librosa`) fused with face position | Visual only — Mouth-Aspect-Ratio variance | Audio fusion is real value but a bigger dependency/sync change — deferred. |
 | Identity | SFace 128-D ONNX embeddings, re-ID at cosine 0.4 | Frame-to-frame horizontal-center proximity | Embedding re-ID is more robust through occlusion; deferred (extra model + dep). |
 | Zoom | Continuous face-occupancy target + **asymmetric smoothing** (fast pull-back, slow push-in) + close-up correction (face ≤55% height) | Coarse 4-bucket zoom ladder, symmetric ease | **Ported** — biggest visible quality win for least risk. |
@@ -37,13 +37,13 @@ External repo analysed: <https://github.com/gauravzazz/smart-reframe> @ `29822eb
 | Medium | Audio-fused active-speaker selection | ⏸ deferred | Adds `librosa` + per-clip audio extraction + A/V sync; larger surface. |
 | Low | Face re-ID via SFace embeddings | ⏸ deferred | Adds an ONNX model + runtime; center-distance is adequate today. |
 | Low | Split-screen multi-speaker compositor | ⏸ deferred | Changes the output format — conflicts with "don't rewrite". |
-| Low | Audio-reactive beat "pulse" zoom | ❌ rejected | Gimmick; inconsistent with ClippyMe's cinematic-stability goal. |
+| Low | Audio-reactive beat "pulse" zoom | ❌ rejected | Gimmick; inconsistent with S6_cut's cinematic-stability goal. |
 
 ---
 
 ## 3. What was implemented
 
-All three High items, kept coherent with ClippyMe's existing
+All three High items, kept coherent with S6_cut's existing
 pure-math-in-`reframe_ops` pattern so the new logic is host-unit-testable.
 
 ### A. `zoom_for_face_height()` — continuous close-up correction
@@ -51,7 +51,7 @@ pure-math-in-`reframe_ops` pattern so the new logic is host-unit-testable.
 `SmoothedCameraman.update_target`. Targets a constant face occupancy
 (~40 % of crop height): `zoom = max_crop_h * target_occupancy / face_h`,
 clamped to `[1.0, 1.6]`. Adapted from smart-reframe `framing/zoom.py`
-`needed_zoom_for_size`, translated into ClippyMe's inverted zoom convention.
+`needed_zoom_for_size`, translated into S6_cut's inverted zoom convention.
 
 ### B. `asymmetric_zoom_step()` — fast pull-back, slow push-in
 `reframe_ops.py`, wired into `get_crop_box`. Pull-back (wider crop) eases at
@@ -65,7 +65,7 @@ Wires the previously-dormant `savgol_1d` via a new
 target in pass 1, Savitzky-Golay-smooths it **per scene segment** (never across
 a cut), then renders in pass 2 via the new `SmoothedCameraman.crop_box_at`.
 Gated by `REFRAME_GLOBAL_SMOOTH=1`; default-off keeps the proven single-pass
-path byte-identical. This is ClippyMe's cheap analogue of their Viterbi
+path byte-identical. This is S6_cut's cheap analogue of their Viterbi
 `PathSolver` (no per-pixel saliency, no DP — just a global low-pass).
 
 ### Bonus bugfix (surfaced by the new integration test)
@@ -87,7 +87,7 @@ break from the original `main.py` extraction that the existing tests never hit
 
 ## 5. Conflicts with current design & chosen resolutions
 
-- **Streaming vs offline.** ClippyMe is intentionally single-pass for low
+- **Streaming vs offline.** S6_cut is intentionally single-pass for low
   latency. Rather than convert the default path to 2-pass (a rewrite), the
   global smoother is **opt-in** and isolated, mirroring the existing
   `REFRAME_SMOOTHER=euro` opt-in convention.

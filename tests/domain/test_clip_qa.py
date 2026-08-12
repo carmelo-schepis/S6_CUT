@@ -1,5 +1,5 @@
 """Host-unit tests for the post-render QA evaluator (pure)."""
-from clippyme.domain.clip_qa import evaluate_clip_qa
+from s6_cut.domain.clip_qa import evaluate_clip_qa
 
 
 def _ev(**kw):

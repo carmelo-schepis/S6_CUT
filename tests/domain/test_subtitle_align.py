@@ -1,8 +1,8 @@
 """Host tests for subtitle horizontal alignment + karaoke stroke colour."""
 import pytest
 
-from clippyme.domain import subtitles
-from clippyme.domain.subtitles import (
+from s6_cut.domain import subtitles
+from s6_cut.domain.subtitles import (
     normalize_h_align,
     ass_alignment_and_margins,
     generate_ass_karaoke,
