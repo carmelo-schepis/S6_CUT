@@ -1,0 +1,64 @@
+name: s6-cut
+
+services:
+  engine:
+    build:
+      context: .
+      dockerfile: engine/Dockerfile
+    restart: unless-stopped
+    environment:
+      S6_DATA_PATH: /app/data
+      S6_WHISPER_MODEL: ${S6_WHISPER_MODEL:-small}
+      S6_JOB_WORKERS: ${S6_JOB_WORKERS:-1}
+      S6_MAX_QUEUED_JOBS: ${S6_MAX_QUEUED_JOBS:-4}
+      S6_MAX_UPLOAD_BYTES: ${S6_MAX_UPLOAD_BYTES:-20000000000}
+      S6_MAX_SOURCE_SECONDS: ${S6_MAX_SOURCE_SECONDS:-14400}
+      S6_JOB_RETENTION_DAYS: ${S6_JOB_RETENTION_DAYS:-30}
+      S6_MAX_RETAINED_JOBS: ${S6_MAX_RETAINED_JOBS:-100}
+      S6_MEDIA_URL_TTL_SECONDS: ${S6_MEDIA_URL_TTL_SECONDS:-900}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
+    volumes:
+      - type: bind
+        source: ${S6_DATA_PATH:-./data}
+        target: /app/data
+    networks:
+      - private
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/api/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 2m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    stop_grace_period: 30s
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      engine:
+        condition: service_healthy
+    ports:
+      - "${S6_PORT:-8080}:8080"
+    networks:
+      - private
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+networks:
+  private:
+    internal: false

@@ -1,81 +1,12 @@
-# Video files
-*.mp4
-*.webm
-*.mov
-*.mkv
-
-# YOLO model
-*.pt
-
-# Python virtual environment
+node_modules/
+web/dist/
 .venv/
 __pycache__/
-*.pyc
-*.egg-info/
-
-# Node / frontend build artifacts
-node_modules/
-**/node_modules/
-dashboard/dist/
-
-# graphify knowledge-graph output
-graphify-out/
-
-# pytest
 .pytest_cache/
-
-# Temporary files / runtime dirs
-temp_*
-tmp/
-/tmp/
-uploads/
-downloads/
-videos/
-output/
-
-# OS / IDE
-.DS_Store
-.idea/
-.vscode/
-
-# Secrets
-.env
-data/
-config.json
-cookies.txt
-data/cookies.txt
-
-# Generated metadata
-*_metadata.json
-
-# Cache dirs
-.cache/
-.config/
-# Multi-agent Skills
-.agents/
-.agent/
-.claude/
-skills/
-skills-lock.json
-
-docs/superpowers/
-fonts/NotoColorEmoji.ttf
-
-# pip --user installs leaking from container `docker compose run` into mounted /app
-.local/
-
-# pytest coverage data (report-only in CI)
 .coverage
-
-# Isolated feature worktrees
-.worktrees/
-
-# Local Codex CLI settings
-.codex/
-
-# pytest temp artifacts
-.pytest-tmp-*
-
-# ruff cache
-.ruff_cache/
-.pytest-tmp/
+data/
+*.pyc
+*.log
+.env
+test-artifacts/
+.test-data-import/

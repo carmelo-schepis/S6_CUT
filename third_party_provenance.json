@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-13",
+  "directCodeCopies": [],
+  "behavioralReferences": [
+    { "name": "ClippyMe", "licence": "MIT", "revision": "unavailable in supplied copy", "filesReviewed": ["S6_CUT_TAKEAWAYS.md"], "use": "Boundary, recovery, independent clip and security behavior; clean implementation" },
+    { "name": "ReelsGenerator", "licence": "MIT", "revision": "unavailable in supplied copy", "filesReviewed": ["S6_CUT_TAKEAWAYS.md"], "use": "Script, TTS cache and pacing behavior; clean implementation" },
+    { "name": "ViralMint", "licence": "AGPL-3.0", "revision": "unavailable in supplied copy", "filesReviewed": ["S6_CUT_TAKEAWAYS.md"], "use": "Provider health, scoring and storyboard behavior; clean implementation" },
+    { "name": "VUZA", "licence": "MIT", "revision": "unavailable in supplied copy", "filesReviewed": ["S6_CUT_TAKEAWAYS.md"], "use": "Resolver fallback behavior; clean implementation" },
+    { "name": "AI YouTube Shorts Generator", "licence": "unverified", "revision": "unavailable in supplied copy", "filesReviewed": ["S6_CUT_TAKEAWAYS.md"], "use": "Reference-only pipeline vocabulary; no code copied" }
+  ],
+  "runtimeComponents": [
+    { "name": "yt-dlp", "version": "2026.7.4", "licence": "Unlicense/public-domain dedication plus bundled third-party notices", "use": "Constrained user-authorised YouTube import" }
+  ]
+}

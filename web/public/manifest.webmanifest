@@ -1,0 +1,13 @@
+{
+  "name": "S6_cut",
+  "short_name": "S6_cut",
+  "description": "A local-first studio for long video clips and script videos.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "icons": [
+    { "src": "/app-icon.png", "sizes": "800x800", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

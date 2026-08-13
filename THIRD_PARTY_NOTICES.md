@@ -1,57 +1,16 @@
 # Third-party notices
 
-S6_cut incorporates or is derived from the following third-party software. Each component is used under its respective license.
+S6_cut application code in this repository is licensed under the MIT License. It uses third-party packages installed from the locked npm/Python dependency manifests and system packages installed by the container images; their upstream licences apply.
 
-## OpenShorts
+## Behavioural references reviewed
 
-- Source: https://github.com/OpenShorts/OpenShorts
-- License: MIT
+No source code was copied from the reference repositories during this build. The following local resources informed clean implementation at a behavioural/architectural level:
 
-S6_cut is a fork of OpenShorts.
+- **ClippyMe** — MIT. Reviewed its local `S6_CUT_TAKEAWAYS.md` plus documented concepts for TextTiling, boundary cleanup, independent clips, job recovery, composition order, QA, and security. The local resource checkout does not expose Git revision metadata; no direct source file was copied.
+- **ReelsGenerator** — MIT. Reviewed modular Script/TTS/cache/pacing concepts through `S6_CUT_TAKEAWAYS.md`; no direct source file was copied.
+- **ViralMint** — AGPL-3.0. Reviewed provider abstraction, score explainability, storyboard, provider health, and test-taxonomy concepts through `S6_CUT_TAKEAWAYS.md`; no direct source file was copied.
+- **VUZA Free AI Video Creator** — MIT. Reviewed resolver fallback and progressive gallery concepts through `S6_CUT_TAKEAWAYS.md`; Pinterest scraping and rights-unknown media behavior were explicitly excluded.
+- **AI YouTube Shorts Generator** — reference-only because the supplied copy lacks a verified licence/revision. No code was copied.
+- **yt-dlp** — Unlicense/public-domain dedication and third-party component notices in the bundled project. S6_cut installs release `2026.7.4` as a constrained, user-authorised YouTube import dependency and does not vendor its source.
 
-## FrameShift
-
-- Source: https://github.com/fralapo/FrameShift
-- License: MIT
-
-The `subject` reframe mode uses a weighted-interest centroid algorithm ported from FrameShift.
-
-## yt-dlp
-
-- Source: https://github.com/yt-dlp/yt-dlp
-- License: Unlicense / MIT
-
-## Faster-Whisper
-
-- Source: https://github.com/SYSTRAN/faster-whisper
-- License: MIT
-
-## auto-editor
-
-- Source: https://github.com/WyattBlue/auto-editor
-- License: Unlicense
-
-## ClipsAI
-
-- Source: https://github.com/ClipsAI/clipsai
-- License: MIT
-
-The no-AI TextTiling topic-segmentation fallback is a lexical port of the ClipsAI algorithm.
-
-## Additional dependencies
-
-S6_cut uses the following third-party libraries. Each is used under its respective license:
-
-- Deepgram (https://deepgram.com) — cloud transcription API
-- Google Gemini (https://ai.google.dev) — AI analysis API
-- ElevenLabs (https://elevenlabs.io) — cloud transcription and voice API
-- Ultralytics YOLO (https://github.com/ultralytics/ultralytics) — AGPL-3.0
-- MediaPipe (https://github.com/google/mediapipe) — Apache 2.0
-- Zernio (https://zernio.com) — social publishing API
-- FastAPI (https://fastapi.tiangolo.com) — MIT
-- React (https://react.dev) — MIT
-- Vite (https://vitejs.dev) — MIT
-- Tailwind CSS (https://tailwindcss.com) — MIT
-- lucide-react (https://lucide.dev) — ISC
-- Pillow (https://python-pillow.org) — Historical Permission Notice and Disclaimer (HPND)
-- FFmpeg (https://ffmpeg.org) — LGPL/GPL
+Code licences do not grant rights to source media, downloaded media, models, voices, fonts, or the supplied S6_cut logo. Users must verify their own rights and provider terms.
