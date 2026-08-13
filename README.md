@@ -103,7 +103,7 @@ npm run build
 docker compose config
 ```
 
-See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for verified behavior, limitations, and exact evidence. See [ARCHITECTURE.md](ARCHITECTURE.md) for trust boundaries and durable processing. This repository is MIT-licensed; third-party notices and the machine-readable provenance ledger are included.
+See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for verified behavior, limitations, and exact evidence. See [ARCHITECTURE.md](ARCHITECTURE.md) for trust boundaries and durable processing. Third-party notices and the machine-readable provenance ledger are included.
 
 ## Responsible use
 

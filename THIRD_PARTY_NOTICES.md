@@ -1,6 +1,6 @@
 # Third-party notices
 
-S6_cut application code in this repository is licensed under the MIT License. It uses third-party packages installed from the locked npm/Python dependency manifests and system packages installed by the container images; their upstream licences apply.
+This repository uses third-party packages installed from the locked npm/Python dependency manifests and system packages installed by the container images; their upstream licences apply.
 
 ## Behavioural references reviewed
 
