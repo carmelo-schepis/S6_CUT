@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Captions, ChevronDown, Clock, Download, Eye, FileText, Film, Lock, Pause, Play, RefreshCw, RotateCcw, SlidersHorizontal, Sparkles, Square, Volume2, Zap } from "lucide-react";
-import { controlJob, createZip, getJob, jobEventsUrl, readableError, retryClip, setClipSelection } from "../api";
-import { jobSchema, type Clip, type Health, type Job, type Project } from "../types";
+import { AlertTriangle, Captions, Clock, Download, Eye, FileText, Film, Pause, Play, RefreshCw, RotateCcw, SlidersHorizontal, Sparkles, Square, Volume2, Zap } from "lucide-react";
+import { changeProjectFolder, controlJob, createZip, getJob, jobEventsUrl, listFolders, readableError, retryClip, setClipSelection } from "../api";
+import { jobSchema, type Clip, type Health, type Job, type LibraryFolder, type Project } from "../types";
 import { Button, EmptyState, IconButton, Progress, StatusBadge, formatDuration } from "./common";
 import { isTerminalJob, ProcessingState } from "./processing-state";
 import { ProcessChecklist } from "./process-checklist";
@@ -10,17 +10,18 @@ export function WorkspaceView({ project, health, hasSelectedProvider = true, onC
   const [job, setJob] = useState<Job | null>(null);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
   const [inspectorTab, setInspectorTab] = useState<"score" | "captions" | "asset" | "info">("score");
-  const [timelineOpen, setTimelineOpen] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [waitingForEngine, setWaitingForEngine] = useState(false);
   const [providerCalloutDismissed, setProviderCalloutDismissed] = useState(false);
   const [stalledCalloutDismissed, setStalledCalloutDismissed] = useState(false);
+  const [folders, setFolders] = useState<LibraryFolder[]>([]);
   const [now, setNow] = useState(() => Date.now());
   const pollingRef = useRef<number | null>(null);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 5000);
+    void listFolders().then(setFolders).catch(() => undefined);
     return () => clearInterval(timer);
   }, []);
 
@@ -113,6 +114,13 @@ export function WorkspaceView({ project, health, hasSelectedProvider = true, onC
     try { setJob(await retryClip(job.id, clip.id)); } catch (cause) { setError(readableError(cause)); } finally { setBusy(false); }
   };
 
+  const changeFolder = async (folderId: string) => {
+    if (!project || folderId === project.libraryFolderId) return;
+    const moveExistingAssets = window.confirm("Move this project's existing automatically created Library assets to the new folder? Choose Cancel to change only future outputs.");
+    setBusy(true);
+    try { await changeProjectFolder(project.id, folderId, moveExistingAssets); await onProjectUpdated(); } catch (cause) { setError(readableError(cause)); } finally { setBusy(false); }
+  };
+
   const exportSelected = async () => {
     if (!job || !selectedIds.length) return;
     setBusy(true);
@@ -126,7 +134,7 @@ export function WorkspaceView({ project, health, hasSelectedProvider = true, onC
 
   return <div className="workspace-page">
     <div className="workspace-commandbar">
-      <div><span className="mode-chip">{project.mode === "clip" ? <Film size={13} /> : <FileText size={13} />} {project.mode} mode</span><strong>{project.name}</strong><span className="muted">{project.style}</span></div>
+      <div><span className="mode-chip">{project.mode === "clip" ? <Film size={13} /> : <FileText size={13} />} {project.mode} mode</span><strong>{project.name}</strong><span className="muted">{project.style}</span>{folders.length > 0 && <label className="workspace-folder-picker"><span>Business folder</span><select aria-label="Business folder" value={project.libraryFolderId || folders.find((folder) => folder.system)?.id || ""} disabled={busy} onChange={(event) => void changeFolder(event.target.value)}>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></label>}</div>
       <div>
         {job && <StatusBadge state={job.state} label={job.stageLabel} />}
         {job && ["active", "queued", "recovered"].includes(job.state) && <Button disabled={busy} onClick={() => act("pause")}><Pause size={15} /> Pause</Button>}
@@ -196,10 +204,6 @@ export function WorkspaceView({ project, health, hasSelectedProvider = true, onC
         : <div className="beat-board">{job?.beats.map((beat, index) => <article key={beat.id} className="beat-tile"><div className="beat-visual"><span>{String(index + 1).padStart(2, "0")}</span><Sparkles size={22} /></div><div><strong>{beat.concept}</strong><p>{beat.text}</p><span>{formatDuration(beat.start)}–{formatDuration(beat.end)} · {beat.source} · {Math.round(beat.confidence * 100)}%</span></div><StatusBadge state={beat.source === "library" ? "ready" : "fallback"} label={beat.ruleState || beat.source} /></article>)}</div>}
     </section>
 
-    <section className={`timeline-panel panel ${timelineOpen ? "open" : "closed"}`}>
-      <button className="timeline-toggle" onClick={() => setTimelineOpen(!timelineOpen)} aria-expanded={timelineOpen}><div><ChevronDown size={15} /><strong>Layered timeline</strong><span>EDL v1 · preview/export parity</span></div><span>{timelineOpen ? "Collapse" : "Expand"}</span></button>
-      {timelineOpen && <Timeline clip={selectedClip} />}
-    </section>
   </div>;
 }
 
@@ -210,15 +214,4 @@ function ScoreInspector({ clip }: { clip: Clip }) {
     ["Energy", clip.score.energy], ["Practical value", clip.score.practicalValue], ["Visual potential", clip.score.visualPotential], ["Completeness", clip.score.completeness],
   ] as const;
   return <><div className="score-total"><span>{Math.round(clip.score.total)}</span><div><strong>Selection score</strong><small>Deterministic local model</small></div></div><p className="score-explanation">{clip.score.explanation}</p><div className="factor-list">{factors.map(([label, value]) => <div key={label}><span>{label}</span><div><i style={{ width: `${value}%` }} /></div><strong>{Math.round(value)}</strong></div>)}</div>{clip.score.penalties > 0 && <div className="penalty"><AlertTriangle size={14} /> Penalties −{Math.round(clip.score.penalties)}</div>}</>;
-}
-
-function Timeline({ clip }: { clip: Clip | null }) {
-  const duration = clip?.duration || 30;
-  const lanes = [
-    { id: "V1", name: "Source", icon: <Film size={13} />, fill: "source", width: "100%" },
-    { id: "O2", name: "Visuals", icon: <Sparkles size={13} />, fill: "visuals", width: clip?.visualLabel ? "33%" : "0%" },
-    { id: "C1", name: "Captions", icon: <Captions size={13} />, fill: "captions", width: "92%" },
-    { id: "A1", name: "Speech", icon: <Volume2 size={13} />, fill: "speech", width: "100%" },
-  ];
-  return <div className="timeline"><div className="timeline-ruler"><span /><div>{[0, .25, .5, .75, 1].map((part) => <i key={part} style={{ left: `${part * 100}%` }}>{formatDuration(duration * part)}</i>)}</div></div>{lanes.map((lane) => <div className="timeline-lane" key={lane.id}><div className="lane-label"><span>{lane.id}</span>{lane.icon}<strong>{lane.name}</strong><Lock size={11} /></div><div className="lane-track"><div className={`timeline-block ${lane.fill}`} style={{ width: lane.width }}>{lane.width !== "0%" && <span>{lane.name === "Visuals" ? clip?.visualLabel : lane.name}</span>}</div></div></div>)}<div className="playhead" style={{ left: "38%" }} /></div>;
 }

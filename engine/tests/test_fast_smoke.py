@@ -79,6 +79,10 @@ def test_fast_pipeline_real_smoke_never_enters_smart_services(monkeypatch: pytes
     assert result.clips[0].end <= result.clips[1].start
     assert [step.id for step in result.steps] == ["source", "probe", "plan", "render", "verify", "ready"]
     assert all(step.status == "complete" for step in result.steps)
+    assert len(database.list_assets()) == 3
+    assert database.get_project(project_id).source_blob_id == result.source_blob_id
+    assert all(clip.blob_id for clip in result.clips)
+    assert all((tmp_path / database.blob_relative_path(clip.blob_id)).is_file() for clip in result.clips)
     for clip in result.clips:
         output = tmp_path / "jobs" / job_id / "clips" / str(clip.output_name)
         metadata = probe(output, runtime)

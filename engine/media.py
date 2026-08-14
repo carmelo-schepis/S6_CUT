@@ -209,7 +209,7 @@ def download_youtube(url: str, target_dir: Path, settings: Settings) -> Path:
     target_dir.mkdir(parents=True, exist_ok=True)
     template = str(target_dir / "source-%(id)s.%(ext)s")
     result = run([
-        settings.ytdlp, "--no-playlist", "--no-warnings", "--restrict-filenames",
+        settings.ytdlp, "--no-playlist", "--no-warnings", "--restrict-filenames", "--write-info-json",
         "--max-filesize", str(settings.max_upload_bytes),
         "--format", "bv*[height<=1080]+ba/b[height<=1080]",
         "--merge-output-format", "mp4", "--output", template,
@@ -217,7 +217,7 @@ def download_youtube(url: str, target_dir: Path, settings: Settings) -> Path:
     ], timeout=3600)
     candidates = [Path(line.strip()) for line in result.stdout.splitlines() if line.strip()]
     if not candidates:
-        candidates = list(target_dir.glob("source-*"))
+        candidates = [item for item in target_dir.glob("source-*") if item.suffix.casefold() in ALLOWED_VIDEO_SUFFIXES]
     if not candidates:
         raise MediaError("YouTube import completed without a usable file")
     source = candidates[-1].resolve()
@@ -225,6 +225,21 @@ def download_youtube(url: str, target_dir: Path, settings: Settings) -> Path:
         raise MediaError("YouTube output escaped its job directory")
     probe(source, settings)
     return source
+
+
+def youtube_import_title(source: Path) -> str | None:
+    """Read yt-dlp's local metadata sidecar without exposing or retaining it as media."""
+    info = source.with_suffix(".info.json")
+    if not info.is_file():
+        return None
+    try:
+        payload = json.loads(info.read_text(encoding="utf-8"))
+        title = str(payload.get("title") or "").strip()
+        return title[:200] or None
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return None
+    finally:
+        info.unlink(missing_ok=True)
 
 
 def _media_duration(path: Path, settings: Settings) -> float:

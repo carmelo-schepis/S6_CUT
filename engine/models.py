@@ -24,6 +24,7 @@ ProcessingStepStatus = Literal["pending", "active", "complete", "skipped", "fail
 Style = Literal["funny", "serious", "educational", "hype"]
 JobState = Literal["queued", "active", "paused", "partial", "failed", "recovered", "cancelled_kept", "complete"]
 ProcessingMode = Literal["fast", "smart"]
+UNSORTED_LIBRARY_FOLDER_ID = "00000000-0000-0000-0000-000000000001"
 
 
 class ScoreBreakdown(ApiModel):
@@ -63,6 +64,7 @@ class Clip(ApiModel):
     score: ScoreBreakdown | None = None
     selected: bool = True
     output_name: str | None = None
+    blob_id: str | None = None
     download_url: str | None = None
     error: str | None = None
     fallback_used: bool = False
@@ -117,6 +119,9 @@ class Job(ApiModel):
     schema_version: Literal[1] = 1
     id: str
     project_id: str
+    # Captured when the job is created; later project moves do not alter it.
+    library_folder_id: str = UNSORTED_LIBRARY_FOLDER_ID
+    source_blob_id: str | None = None
     mode: Literal["clip", "script"]
     state: JobState
     stage: str
@@ -155,6 +160,8 @@ class Project(ApiModel):
     source_kind: Literal["upload", "youtube", "script"]
     requested_count: int = Field(ge=1, le=60)
     latest_job_id: str | None = None
+    library_folder_id: str = UNSORTED_LIBRARY_FOLDER_ID
+    source_blob_id: str | None = None
     created_at: str = Field(default_factory=now_iso)
     updated_at: str = Field(default_factory=now_iso)
 
@@ -181,10 +188,16 @@ class ScriptJobInput(ApiModel):
     style: Style = "educational"
     aspect_ratio: Literal["9:16", "1:1", "16:9"] = "9:16"
     narration: Literal["auto", "local", "silent"] = "auto"
+    library_folder_id: str = UNSORTED_LIBRARY_FOLDER_ID
 
 
 class SelectionInput(ApiModel):
     clip_ids: list[str] = Field(max_length=60)
+
+
+class ProjectFolderUpdate(ApiModel):
+    folder_id: str
+    move_existing_assets: bool = False
 
 
 class ProfileInput(ApiModel):
@@ -223,6 +236,43 @@ class ProviderProfile(ApiModel):
     fallbacks: dict[str, str]
 
 
+AssetOrigin = Literal["manual-import", "project-source", "generated-clip", "script-output"]
+
+
+class LibraryFolder(ApiModel):
+    id: str
+    name: str = Field(min_length=1, max_length=100)
+    parent_id: str | None = None
+    description: str = Field(default="", max_length=500)
+    color: str | None = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")
+    archived: bool = False
+    system: bool = False
+    created_at: str = Field(default_factory=now_iso)
+    updated_at: str = Field(default_factory=now_iso)
+
+
+class FolderCreate(ApiModel):
+    name: str = Field(min_length=1, max_length=100)
+    parent_id: str | None = None
+    description: str = Field(default="", max_length=500)
+    color: str | None = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")
+
+
+class FolderUpdate(ApiModel):
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    description: str | None = Field(default=None, max_length=500)
+    color: str | None = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")
+
+
+class FolderMove(ApiModel):
+    parent_id: str | None = None
+
+
+class AssetMove(ApiModel):
+    asset_ids: list[str] = Field(min_length=1, max_length=500)
+    folder_id: str
+
+
 class Asset(ApiModel):
     id: str
     title: str = Field(min_length=1, max_length=200)
@@ -230,6 +280,8 @@ class Asset(ApiModel):
     media_type: str
     filename: str
     tags: list[str] = Field(default_factory=list)
+    brands: list[str] = Field(default_factory=list)
+    people: list[str] = Field(default_factory=list)
     triggers: list[str] = Field(default_factory=list)
     aliases: list[str] = Field(default_factory=list)
     negative_triggers: list[str] = Field(default_factory=list)
@@ -242,13 +294,31 @@ class Asset(ApiModel):
     licence: str = Field(default="User supplied", max_length=500)
     attribution: str = Field(default="", max_length=1000)
     content_hash: str
+    folder_id: str = UNSORTED_LIBRARY_FOLDER_ID
+    origin: AssetOrigin = "manual-import"
+    blob_id: str = ""
+    source_project_id: str | None = None
+    source_job_id: str | None = None
+    source_clip_id: str | None = None
+    duration_seconds: float | None = Field(default=None, ge=0)
+    width: int | None = Field(default=None, ge=1)
+    height: int | None = Field(default=None, ge=1)
+    preview_url: str | None = None
     created_at: str = Field(default_factory=now_iso)
+
+    @model_validator(mode="after")
+    def default_blob_id(self):
+        if not self.blob_id:
+            self.blob_id = self.content_hash
+        return self
 
 
 class AssetUpdate(ApiModel):
     title: str | None = Field(default=None, min_length=1, max_length=200)
     description: str | None = Field(default=None, max_length=2_000)
     tags: list[str] | None = None
+    brands: list[str] | None = None
+    people: list[str] | None = None
     triggers: list[str] | None = None
     aliases: list[str] | None = None
     negative_triggers: list[str] | None = None
@@ -260,6 +330,7 @@ class AssetUpdate(ApiModel):
     active_until: str | None = None
     licence: str | None = Field(default=None, max_length=500)
     attribution: str | None = Field(default=None, max_length=1000)
+    folder_id: str | None = None
 
 
 class MatchExplanation(ApiModel):

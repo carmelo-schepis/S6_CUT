@@ -13,9 +13,10 @@ Updated: 2026-08-13
 - Explicit Smart clips use extracted 16 kHz mono audio, CPU-friendly Faster-Whisper defaults, real segment progress, cancellation checkpoints, versioned transcript cache, optional OpenRouter candidate ordering, and deterministic local fallback.
 - Durable mode-specific processing checklists record real validated checkpoints, provider fallbacks, render counts, partial output verification, retries, pause/cancel, and restart recovery.
 - Independent FFmpeg renders with centre 9:16/1:1/16:9 crop, H.264/AAC, word-highlight captions, visual text cards or matched Library overlays, FFprobe output validation, and atomic publication.
-- Progressive workspace through SSE with polling fallback, clip selection, score inspector, storyboard/Beat board, EDL lanes, partial success, pause/resume, stop-and-keep, and scoped retry.
+- Progressive workspace through SSE with polling fallback, clip selection, score inspector, storyboard/Beat board, partial success, pause/resume, stop-and-keep, and scoped retry. The internal EDL remains authoritative while the redundant layered-timeline panel is no longer rendered.
 - ZIP export with numbered successful media, `manifest.json`, `credits.json`, and warning/failure summary.
-- Personal Media Library upload/dedup, Required/Prefer/Neutral/Never policy, active dates, negative triggers, deterministic explanation, and protected state.
+- Personal Media Library with persistent three-level business folders, Unsorted migration, combined search/type/origin/policy filters, signed previews, protected state, and resilient refresh handling.
+- Validated uploads, YouTube sources, Fast/Smart clips, Script outputs, and retries publish idempotently into a shared content-addressed blob store with durable project/job/clip/Library references and neutral matching defaults.
 - Script exact-span planning every roughly 2-3 seconds, optional ElevenLabs -> local espeak-ng -> silent narration fallback, word alignment, storyboard, captions, visual beats, and render.
 - Provider profiles with configurable OpenRouter model, optional ElevenLabs voice, test/duplicate/delete, masked read API, session-only or Fernet-encrypted persistent secrets.
 - nginx same-origin gateway, private engine service, signed media links, security headers, non-root images, one mounted data directory, Compose/TrueNAS/Portainer documentation, and Windows launcher.
@@ -24,8 +25,8 @@ Updated: 2026-08-13
 
 - `npm run lint` - passed with zero warnings.
 - `npm run typecheck` - passed under TypeScript strict mode.
-- `npm test` - 89/89 frontend contract/component/integration tests passed.
-- `python -m pytest engine/tests -q` - 121/121 engine unit/API/security/media/checklist tests passed. One Starlette environment deprecation warning is upstream and does not affect results.
+- `npm test` - 93/93 frontend contract/component/integration tests passed.
+- `python -m pytest engine/tests -q` - 129/129 engine unit/API/security/media/checklist/migration tests passed. One Starlette environment deprecation warning is upstream and does not affect results.
 - `npm run build` - Vite production build passed; 1,794 modules transformed.
 - `npm install` and container `npm ci` audits - zero known vulnerabilities.
 - Both multi-stage web and engine images built successfully, including FFmpeg, Faster-Whisper, yt-dlp, and espeak-ng in the private engine image.

@@ -401,6 +401,9 @@ def test_smart_transcription_completes_only_after_persisted(monkeypatch: pytest.
     assert steps["openrouter"].status == "skipped"
     assert steps["openrouter"].detail == "No connected provider; used local planning"
     assert steps["local_planning"].status == "complete"
+    assets = test_db.list_assets()
+    assert len([asset for asset in assets if asset.origin == "generated-clip"]) == len(job.clips)
+    assert all(clip.blob_id for clip in job.clips)
     _assert_step_invariants(job)
 
 
@@ -638,6 +641,10 @@ def test_script_silent_marks_narration_steps_skipped(monkeypatch: pytest.MonkeyP
     assert steps["local_voice"].status == "skipped"
     assert steps["render"].status == "complete"
     assert steps["verify"].status == "complete"
+    outputs = [asset for asset in test_db.list_assets() if asset.origin == "script-output"]
+    assert len(outputs) == 1
+    assert outputs[0].title == "script-silent-proj — Script video"
+    assert job.clips[0].blob_id == outputs[0].blob_id
 
 
 # ---------------------------------------------------------------------------

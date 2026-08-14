@@ -139,6 +139,37 @@ def test_fast_pipeline_skips_smart_components(monkeypatch: pytest.MonkeyPatch) -
         assert (tmp_path / "jobs" / "fast-skip" / "clips" / clip.output_name).exists()
     assert called == [], f"Smart components were called: {called}"
     assert any("only two windows fit" in w for w in processed.warnings)
+    assets = test_db.list_assets()
+    assert len(assets) == 3
+    assert [asset.origin for asset in assets].count("project-source") == 1
+    assert [asset.origin for asset in assets].count("generated-clip") == 2
+    assert all(asset.folder_id == processed.library_folder_id for asset in assets)
+    assert all(asset.blob_id for asset in assets)
+
+
+def test_validated_youtube_source_and_outputs_register_once_across_recovery(monkeypatch: pytest.MonkeyPatch) -> None:
+    tmp_path = _tmpdir()
+    test_db, test_manager = _cluster(tmp_path)
+    source = tmp_path / "jobs" / "youtube-job" / "source" / "source-video.mp4"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"youtube-video")
+    monkeypatch.setattr("engine.jobs.download_youtube", lambda *_: source)
+    monkeypatch.setattr("engine.jobs.youtube_import_title", lambda _: "Validated channel title")
+    monkeypatch.setattr("engine.jobs.probe", _fake_probe)
+    monkeypatch.setattr(media_module, "plan_fast_windows", _fake_plan)
+    monkeypatch.setattr(media_module, "render_fast_clip", _fake_render)
+    project = Project(id="youtube-project", name="YouTube import", mode="clip", style="educational", state="queued", source_name="YouTube import", source_kind="youtube", requested_count=2, latest_job_id="youtube-job")
+    job = Job(id="youtube-job", project_id=project.id, mode="clip", processing_mode="fast", state="queued", stage="queued", stage_label="Queued", progress=0, style="educational")
+    test_db.save_project(project)
+    test_db.save_job(job, {"url": "https://www.youtube.com/watch?v=fixture", "processing_mode": "fast", "count": 2, "min_duration": 10, "max_duration": 30, "aspect_ratio": "9:16"})
+
+    test_manager._process(job.id)
+    assets = test_db.list_assets()
+    assert len(assets) == 3
+    source_asset = next(asset for asset in assets if asset.origin == "project-source")
+    assert source_asset.title == "Validated channel title"
+    test_manager._process(job.id)  # terminal recovery/polling is idempotent
+    assert len(test_db.list_assets()) == 3
 
 
 def test_fast_allows_silent_source(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -197,6 +228,9 @@ def test_fast_partial_and_retry_only_failed(monkeypatch: pytest.MonkeyPatch) -> 
     assert processed.clips[0].state == "failed"
     assert "test-render-boom" in processed.clips[0].error
     assert processed.clips[1].state == "complete"
+    first_assets = test_db.list_assets()
+    assert len([asset for asset in first_assets if asset.origin == "generated-clip"]) == 1
+    assert all(asset.source_clip_id != processed.clips[0].id for asset in first_assets)
 
     # Simulate retry-failed: only the failed clip is set back to queued
     rendered_starts.clear()
@@ -221,6 +255,7 @@ def test_fast_partial_and_retry_only_failed(monkeypatch: pytest.MonkeyPatch) -> 
     assert final is not None
     assert final.state == "complete"
     assert all(clip.state == "complete" for clip in final.clips)
+    assert len([asset for asset in test_db.list_assets() if asset.origin == "generated-clip"]) == 2
     # Only the previously-failed first window was re-rendered
     assert rendered_starts == [0.0], f"Expected only clip 1 re-render, got {rendered_starts}"
 

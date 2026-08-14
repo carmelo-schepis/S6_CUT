@@ -2,11 +2,14 @@ import {
   assetSchema,
   healthSchema,
   jobSchema,
+  libraryFolderSchema,
   profileSchema,
   projectSchema,
   type Health,
   type Job,
+  type AssetOrigin,
   type LibraryAsset,
+  type LibraryFolder,
   type MatchExplanation,
   type ProcessingMode,
   type Project,
@@ -50,6 +53,14 @@ export async function getProject(id: string): Promise<Project> {
   return projectSchema.parse(await request(`/projects/${encodeURIComponent(id)}`));
 }
 
+export async function changeProjectFolder(id: string, folderId: string, moveExistingAssets: boolean): Promise<Project> {
+  return projectSchema.parse(await request(`/projects/${encodeURIComponent(id)}/folder`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ folderId, moveExistingAssets }),
+  }));
+}
+
 type ClipJobInput = {
   file?: File;
   url?: string;
@@ -59,6 +70,7 @@ type ClipJobInput = {
   maxDuration: number;
   aspectRatio: string;
   processingMode?: ProcessingMode;
+  libraryFolderId?: string;
 };
 
 export async function createClipJob(input: ClipJobInput): Promise<{ project: Project; job: Job }> {
@@ -71,6 +83,7 @@ export async function createClipJob(input: ClipJobInput): Promise<{ project: Pro
   form.set("max_duration", String(input.maxDuration));
   form.set("aspect_ratio", input.aspectRatio);
   if (input.processingMode) form.set("processing_mode", input.processingMode);
+  if (input.libraryFolderId) form.set("library_folder_id", input.libraryFolderId);
   const value = await request<{ project: unknown; job: unknown }>("/jobs/clip", { method: "POST", body: form });
   return { project: projectSchema.parse(value.project), job: jobSchema.parse(value.job) };
 }
@@ -81,6 +94,7 @@ export async function createScriptJob(input: {
   style: Style;
   aspectRatio: string;
   narration: "auto" | "local" | "silent";
+  libraryFolderId?: string;
 }): Promise<{ project: Project; job: Job }> {
   const value = await request<{ project: unknown; job: unknown }>("/jobs/script", {
     method: "POST",
@@ -150,12 +164,55 @@ export async function deleteProfile(id: string): Promise<void> {
   await request(`/profiles/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
-export async function listAssets(): Promise<LibraryAsset[]> {
-  return assetSchema.array().parse(await request("/library/assets"));
+export type AssetFilters = { folderId?: string; mediaType?: string; origin?: AssetOrigin; search?: string; includeArchived?: boolean };
+
+export async function listAssets(filters: AssetFilters = {}): Promise<LibraryAsset[]> {
+  const query = new URLSearchParams();
+  if (filters.folderId) query.set("folder_id", filters.folderId);
+  if (filters.mediaType) query.set("media_type", filters.mediaType);
+  if (filters.origin) query.set("origin", filters.origin);
+  if (filters.search) query.set("search", filters.search);
+  if (filters.includeArchived) query.set("include_archived", "true");
+  const suffix = query.size ? `?${query}` : "";
+  return assetSchema.array().parse(await request(`/library/assets${suffix}`));
+}
+
+export async function listFolders(options: { includeArchived?: boolean } = {}): Promise<LibraryFolder[]> {
+  const suffix = options.includeArchived ? "?include_archived=true" : "";
+  return libraryFolderSchema.array().parse(await request(`/library/folders${suffix}`));
+}
+
+export async function createFolder(input: { name: string; parentId?: string | null }): Promise<LibraryFolder> {
+  return libraryFolderSchema.parse(await request("/library/folders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) }));
+}
+
+export async function updateFolder(id: string, input: { name?: string; description?: string; color?: string | null }): Promise<LibraryFolder> {
+  return libraryFolderSchema.parse(await request(`/library/folders/${encodeURIComponent(id)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) }));
+}
+
+export async function moveFolder(id: string, parentId: string | null): Promise<LibraryFolder> {
+  return libraryFolderSchema.parse(await request(`/library/folders/${encodeURIComponent(id)}/move`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ parentId }) }));
+}
+
+export async function archiveFolder(id: string, archived = true): Promise<LibraryFolder> {
+  return libraryFolderSchema.parse(await request(`/library/folders/${encodeURIComponent(id)}/archive?archived=${archived}`, { method: "POST" }));
+}
+
+export async function removeFolder(id: string, destinationFolderId: string): Promise<void> {
+  await request(`/library/folders/${encodeURIComponent(id)}?destination_folder_id=${encodeURIComponent(destinationFolderId)}&confirmed=true`, { method: "DELETE" });
+}
+
+export async function moveAssets(assetIds: string[], folderId: string): Promise<number> {
+  const result = await request<{ moved: number }>("/library/assets/move", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ assetIds, folderId }) });
+  return result.moved;
 }
 
 export async function uploadAsset(form: FormData): Promise<LibraryAsset> {
   return assetSchema.parse(await request("/library/assets", { method: "POST", body: form }));
+}
+
+export async function deleteAsset(id: string): Promise<void> {
+  await request(`/library/assets/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
 export async function updateAsset(id: string, input: Record<string, unknown>): Promise<LibraryAsset> {

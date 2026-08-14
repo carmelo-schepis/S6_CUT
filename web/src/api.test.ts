@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, createClipJob, getHealth, readableError } from "./api";
+import { ApiError, createClipJob, createFolder, getHealth, readableError } from "./api";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -24,6 +24,7 @@ describe("engine API boundary", () => {
       const body = init?.body as FormData;
       expect(body.get("processing_mode")).toBe("fast");
       expect(body.get("style")).toBe("serious");
+      expect(body.get("library_folder_id")).toBe("business-1");
       return new Response(JSON.stringify({
         project: {
           schemaVersion: 1, id: "p", name: "P", mode: "clip", style: "serious", state: "queued",
@@ -39,9 +40,18 @@ describe("engine API boundary", () => {
     }));
     const result = await createClipJob({
       style: "serious", count: 3, minDuration: 20, maxDuration: 60, aspectRatio: "9:16",
-      processingMode: "fast",
+      processingMode: "fast", libraryFolderId: "business-1",
     });
     expect(result.project.id).toBe("p");
     expect(result.job.processingMode).toBe("smart"); // legacy backend omission defaults to Smart
+  });
+
+  it("uses the typed folder endpoint", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      id: "f1", name: "Acme", parentId: null, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
+    }), { status: 201, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    expect((await createFolder({ name: "Acme" })).name).toBe("Acme");
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/library/folders", expect.objectContaining({ method: "POST" }));
   });
 });

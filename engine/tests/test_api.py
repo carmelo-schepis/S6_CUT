@@ -92,6 +92,12 @@ def test_library_dedup_and_match_explanation() -> None:
     second = client.post("/api/v1/library/assets", files=upload, data=data)
     assert first.status_code == second.status_code == 200
     assert first.json()["id"] == second.json()["id"]
+    assert "previewUrl" in first.json()
+    assert "AppData" not in first.json()["previewUrl"] and "\\" not in first.json()["previewUrl"]
+    preview = client.get(first.json()["previewUrl"])
+    assert preview.status_code == 200
+    assert preview.content == b"small-fixture-image-bytes"
+    assert client.get(first.json()["previewUrl"].replace("signature=", "signature=tampered")).status_code == 403
     match = client.get("/api/v1/library/match", params={"text": "The Beatles changed music"})
     assert match.status_code == 200
     assert match.json()["selected"]["title"] == "Beatles poster"

@@ -37,7 +37,8 @@ The browser owns interaction state. The engine is authoritative for projects, jo
 6. Generate sentence-aware, duration-bounded, deterministic candidates and score components.
 7. Resolve a personal Library asset first; otherwise use an explicit relevant text card.
 8. Render each clip independently to a partial filename, probe its structure, then atomically publish.
-9. Keep successful clips if another render fails; failed clips remain scoped and retryable.
+9. Hash each validated source/output into `blobs/sha256`, using a same-filesystem hard link when possible and an atomic copy fallback otherwise. In one SQLite transaction, bind the blob, project/job/clip reference, idempotent Library asset, typed origin, and immutable business-folder snapshot. Temporary or failed files never cross this boundary.
+10. Keep successful clips if another render fails; failed clips remain scoped and retryable. Recovery repeats publication safely using stable source/clip identities.
 10. Build ZIP on disk with numbered media, manifest, credits, and warning/failure summary.
 
 Fast cut switch: `switch-fast` reuses the saved source (no duplicate upload), cooperatively cancels the Smart job at its next checkpoint, and queues a new fast job against the same project.
@@ -54,7 +55,7 @@ The canonical job/clip/beat records are the first versioned EDL. FFmpeg consumes
 4. word-by-word ASS captions with current-word highlight;
 5. source speech or generated narration.
 
-The source file and Library sources are immutable. Manual editing can create later EDL versions without transcoding over originals.
+The source file and Library sources are immutable. Manual editing can create later EDL versions without transcoding over originals. Business folders are metadata-only organizational containers, never filesystem or security boundaries. Physical blobs are eligible for retention cleanup only after their durable reference count reaches zero.
 
 ## Security model
 

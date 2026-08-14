@@ -9,7 +9,7 @@ import { WorkspaceView } from "./workspace-view";
 vi.mock("../api", () => {
   const readableError = (e: unknown) =>
     e instanceof Error ? e.message : "Something went wrong. Try again.";
-  return { readableError, getJob: vi.fn(), controlJob: vi.fn(), jobEventsUrl: vi.fn(() => ""), createZip: vi.fn(), retryClip: vi.fn(), setClipSelection: vi.fn() };
+  return { readableError, getJob: vi.fn(), controlJob: vi.fn(), jobEventsUrl: vi.fn(() => ""), createZip: vi.fn(), retryClip: vi.fn(), setClipSelection: vi.fn(), listFolders: vi.fn().mockResolvedValue([]), changeProjectFolder: vi.fn() };
 });
 
 import { controlJob, getJob } from "../api";
@@ -153,6 +153,16 @@ describe("WorkspaceView – stalled smart detection", () => {
 });
 
 // ---------------------------------------------------------------
+describe("WorkspaceView – timeline removal", () => {
+  it("does not render the layered timeline while preserving export selection", async () => {
+    mockGetJob.mockResolvedValue(staleSmartJobWithOutputs);
+    renderView();
+    expect((await screen.findAllByText("Hello world")).length).toBeGreaterThan(0);
+    expect(screen.queryByText("Layered timeline")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Include in export")).toBeInTheDocument();
+  });
+});
+
 describe("WorkspaceView – processing checklist placement", () => {
   it("renders the checklist above the board from API-provided steps", async () => {
     const withSteps: Job = {

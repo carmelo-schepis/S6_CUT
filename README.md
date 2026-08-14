@@ -87,9 +87,10 @@ The application remains operational when OpenRouter is the only configured API. 
 All server-side state is under `S6_DATA_PATH`:
 
 ```text
-s6-cut.sqlite3      projects, jobs, profiles, Library metadata, caches
-jobs/               source files, atomic journals, captions, narration, clips
-library/            immutable personal media sources
+s6-cut.sqlite3      projects, jobs, business folders, blob references, Library metadata, caches
+jobs/               project references, atomic journals, captions, narration, clips
+blobs/sha256/       shared content-addressed media used by projects and the Library
+library/            legacy personal media retained in place during staged migration
 models/             Faster-Whisper model cache
 cache/              reusable analysis/media cache
 exports/            ZIP bundles
@@ -101,7 +102,10 @@ Back up or snapshot the complete data directory while the stack is stopped, or u
 
 - Uninstall but keep data: `docker compose down --rmi local`, leaving `S6_DATA_PATH` untouched.
 - Remove data: stop the stack, confirm the exact configured absolute data path, and remove that dataset/directory separately. Compose never declares a named volume that silently deletes the host dataset.
-- Deleting one project never deletes a Library source as a side effect.
+- Deleting one project never deletes a Library source as a side effect. Removing a Library record likewise leaves project and clip references usable.
+- Business folders are organizational containers, not accounts or access-control boundaries; folder names never become filesystem paths.
+- Back up and restore the entire `S6_DATA_PATH` together. The SQLite reference graph and `blobs/` content-addressed files are one backup unit. Existing `library/` files are migrated by reference without destructive startup moves.
+- New managed media uses an atomic same-filesystem hard link into the shared blob store when supported, with an atomic copy fallback for filesystems that cannot hard-link. The schema is already separated into blobs and references so legacy media can be consolidated gradually without startup relocation.
 
 ## TrueNAS SCALE and Portainer
 

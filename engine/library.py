@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import mimetypes
+import os
 import re
+import shutil
+import uuid
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
-from .database import Database
-from .models import Asset, MatchExplanation
+from .database import Database, UNSORTED_FOLDER_ID
+from .models import Asset, AssetOrigin, MatchExplanation
 
 
 TOKEN_RE = re.compile(r"[\w'-]+", re.UNICODE)
@@ -30,6 +34,76 @@ class LibraryRules:
     def __init__(self, db: Database, library_root: Path):
         self.db = db
         self.library_root = library_root
+
+    @property
+    def data_root(self) -> Path:
+        return self.library_root.parent
+
+    def _publish_blob(self, path: Path, digest: str) -> tuple[Path, str]:
+        """Create one content-addressed durable blob, preferring a zero-copy hard link."""
+        suffix = path.suffix.casefold() if path.suffix else ".bin"
+        target = self.data_root / "blobs" / "sha256" / digest[:2] / f"{digest}{suffix}"
+        relative = target.relative_to(self.data_root).as_posix()
+        if target.is_file():
+            return target, relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.partial")
+        try:
+            try:
+                os.link(path, temporary)
+            except OSError:
+                with path.open("rb") as source, temporary.open("xb") as destination:
+                    shutil.copyfileobj(source, destination, 1024 * 1024)
+                    destination.flush()
+                    os.fsync(destination.fileno())
+            if target.exists():
+                temporary.unlink(missing_ok=True)
+            else:
+                os.replace(temporary, target)
+        finally:
+            temporary.unlink(missing_ok=True)
+        return target, relative
+
+    def register_file(
+        self, path: Path, *, title: str, media_type: str, origin: AssetOrigin,
+        folder_id: str, project_id: str | None = None, job_id: str | None = None,
+        clip_id: str | None = None, metadata: dict[str, object] | None = None,
+        content_hash: str | None = None, filename: str | None = None,
+        tags: list[str] | None = None, triggers: list[str] | None = None,
+        policy: str = "neutral", licence: str = "User supplied",
+    ) -> Asset:
+        from .media import sha256_file
+
+        if not path.is_file() or ".partial" in path.name:
+            raise ValueError("Only published media files can be registered")
+        digest = content_hash or sha256_file(path)
+        blob, relative = self._publish_blob(path, digest)
+        values = metadata or {}
+        asset = Asset(
+            id=str(uuid.uuid4()), title=title[:200], media_type=media_type,
+            filename=filename or path.name, content_hash=digest, blob_id=digest,
+            origin=origin, folder_id=folder_id, source_project_id=project_id,
+            source_job_id=job_id, source_clip_id=clip_id,
+            duration_seconds=float(values["duration"]) if values.get("duration") is not None else None,
+            width=int(values["width"]) if values.get("width") is not None else None,
+            height=int(values["height"]) if values.get("height") is not None else None,
+            tags=tags or [], triggers=triggers or [], policy=policy,
+            licence=licence,
+        )
+        return self.db.register_blob_asset(asset, relative, blob.stat().st_size)
+
+    def register_managed_video(
+        self, path: Path, *, title: str, origin: AssetOrigin, project_id: str,
+        job_id: str, metadata: dict[str, object], clip_id: str | None = None,
+        folder_id: str = UNSORTED_FOLDER_ID, content_hash: str | None = None,
+    ) -> Asset:
+        """Register a validated video and its durable project/job/clip references."""
+        return self.register_file(
+            path, title=title, media_type=mimetypes.guess_type(path.name)[0] or "video/mp4",
+            origin=origin, folder_id=folder_id, project_id=project_id, job_id=job_id,
+            clip_id=clip_id, metadata=metadata, content_hash=content_hash,
+            filename=path.name, policy="neutral", licence="Created or supplied by user",
+        )
 
     def explain(self, text: str, *, on_date: date | None = None) -> MatchExplanation:
         on_date = on_date or date.today()
@@ -77,7 +151,8 @@ class LibraryRules:
         explanation = self.explain(text)
         if explanation.selected:
             asset = explanation.selected
-            path = self.library_root / asset.id / asset.filename
+            relative = self.db.blob_relative_path(asset.blob_id)
+            path = self.data_root / relative if relative else self.library_root / asset.id / asset.filename
             return ResolvedVisual(asset.title, "library", explanation.score / 100, explanation.reason, asset, path if path.exists() else None)
         concept = visual_concept(text)
         return ResolvedVisual(concept, "text-card", 0.55, "No eligible local or enabled licensed result; used a relevant text card")

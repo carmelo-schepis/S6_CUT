@@ -57,6 +57,7 @@ export const clipSchema = z.object({
   score: scoreSchema.nullable().default(null),
   selected: z.boolean(),
   outputName: z.string().nullable().optional(),
+  blobId: z.string().nullable().optional(),
   downloadUrl: z.string().nullable().optional(),
   error: z.string().nullable().optional(),
   fallbackUsed: z.boolean().default(false),
@@ -108,6 +109,8 @@ export const jobSchema = z.object({
   schemaVersion: z.literal(1),
   id: z.string(),
   projectId: z.string(),
+  libraryFolderId: z.string().optional(),
+  sourceBlobId: z.string().nullable().optional(),
   mode: z.enum(["clip", "script"]),
   state: jobStateSchema,
   stage: z.string(),
@@ -142,6 +145,8 @@ export const projectSchema = z.object({
   sourceKind: z.enum(["upload", "youtube", "script"]),
   requestedCount: z.number(),
   latestJobId: z.string().nullable().optional(),
+  libraryFolderId: z.string().optional(),
+  sourceBlobId: z.string().nullable().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -190,6 +195,22 @@ export const profileSchema = z.object({
 });
 export type ProviderProfile = z.infer<typeof profileSchema>;
 
+export const assetOriginSchema = z.enum(["manual-import", "project-source", "generated-clip", "script-output"]);
+export type AssetOrigin = z.infer<typeof assetOriginSchema>;
+
+export const libraryFolderSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  parentId: z.string().nullable().optional(),
+  description: z.string().default(""),
+  color: z.string().nullable().optional(),
+  archived: z.boolean().default(false),
+  system: z.boolean().default(false),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type LibraryFolder = z.infer<typeof libraryFolderSchema>;
+
 export const assetSchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -209,6 +230,18 @@ export const assetSchema = z.object({
   licence: z.string(),
   attribution: z.string(),
   contentHash: z.string(),
+  folderId: z.string().default("00000000-0000-0000-0000-000000000001"),
+  origin: assetOriginSchema.default("manual-import"),
+  blobId: z.string().default("legacy"),
+  sourceProjectId: z.string().nullable().optional(),
+  sourceJobId: z.string().nullable().optional(),
+  sourceClipId: z.string().nullable().optional(),
+  durationSeconds: z.number().nonnegative().nullable().optional(),
+  width: z.number().int().positive().nullable().optional(),
+  height: z.number().int().positive().nullable().optional(),
+  previewUrl: z.string().optional(),
+  brands: z.array(z.string()).default([]),
+  people: z.array(z.string()).default([]),
   createdAt: z.string(),
 });
 export type LibraryAsset = z.infer<typeof assetSchema>;

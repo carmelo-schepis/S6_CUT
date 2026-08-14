@@ -1,8 +1,10 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FileText, Film, FolderOpen, Link2, Plus, Sparkles, UploadCloud, Zap } from "lucide-react";
-import { createClipJob, createScriptJob, readableError } from "../api";
-import type { Health, ProcessingMode, Project, Style } from "../types";
+import { createClipJob, createFolder, createScriptJob, listFolders, readableError } from "../api";
+import type { Health, LibraryFolder, ProcessingMode, Project, Style } from "../types";
 import { Button, Field, PageHeader, Progress, StatusBadge, formatAge } from "./common";
+
+const RECENT_FOLDER_KEY = "s6-cut.recent-library-folder";
 
 const styles: { id: Style; label: string; note: string }[] = [
   { id: "funny", label: "Funny", note: "Punchlines & reactions" },
@@ -36,8 +38,29 @@ export function ProjectsView({ projects, health, hasSelectedProvider = true, onC
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [providerCalloutDismissed, setProviderCalloutDismissed] = useState(false);
+  const [folders, setFolders] = useState<LibraryFolder[]>([]);
+  const [libraryFolderId, setLibraryFolderId] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
   const scriptInput = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    void listFolders().then((next) => {
+      setFolders(next);
+      const recent = localStorage.getItem(RECENT_FOLDER_KEY);
+      const fallback = next.find((folder) => folder.system || folder.name === "Unsorted") || next[0];
+      setLibraryFolderId(next.some((folder) => folder.id === recent) ? recent! : fallback?.id || "");
+    }).catch(() => undefined);
+  }, []);
+
+  const addFolder = async () => {
+    const name = window.prompt("Business folder name");
+    if (!name?.trim()) return;
+    try {
+      const folder = await createFolder({ name: name.trim() });
+      setFolders((current) => [...current, folder]);
+      setLibraryFolderId(folder.id);
+    } catch (cause) { setError(readableError(cause)); }
+  };
 
   const submit = async () => {
     setError(null);
@@ -47,8 +70,9 @@ export function ProjectsView({ projects, health, hasSelectedProvider = true, onC
     setSubmitting(true);
     try {
       const result = mode === "clip"
-        ? await createClipJob({ file: sourceType === "file" ? file || undefined : undefined, url: sourceType === "url" ? url.trim() : undefined, style, count, minDuration, maxDuration, aspectRatio, processingMode })
-        : await createScriptJob({ script, style, aspectRatio, narration });
+        ? await createClipJob({ file: sourceType === "file" ? file || undefined : undefined, url: sourceType === "url" ? url.trim() : undefined, style, count, minDuration, maxDuration, aspectRatio, processingMode, libraryFolderId: libraryFolderId || undefined })
+        : await createScriptJob({ script, style, aspectRatio, narration, libraryFolderId: libraryFolderId || undefined });
+      if (libraryFolderId) localStorage.setItem(RECENT_FOLDER_KEY, libraryFolderId);
       onCreated(result.project);
     } catch (cause) {
       setError(readableError(cause));
@@ -133,6 +157,7 @@ export function ProjectsView({ projects, health, hasSelectedProvider = true, onC
                     : <p className="mode-note"><Zap size={12} /> No provider selected — this will run as a <strong>Fast local cut</strong>.</p>
                   : <p className="mode-note"><Zap size={12} /> Fast runs deterministically on this machine — no provider needed.</p>}
           </div>}
+          <div className="folder-picker"><Field label="Business folder"><select value={libraryFolderId} onChange={(event) => setLibraryFolderId(event.target.value)}>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></Field><Button variant="ghost" onClick={addFolder}><Plus size={13} /> Create folder</Button></div>
           <button className="advanced-toggle" onClick={() => setAdvanced(!advanced)} aria-expanded={advanced}>Advanced controls <span>{advanced ? "−" : "+"}</span></button>
           {advanced && <div className="advanced-grid">
             <Field label="Aspect"><select value={aspectRatio} onChange={(event) => setAspectRatio(event.target.value)}><option>9:16</option><option>1:1</option><option>16:9</option></select></Field>

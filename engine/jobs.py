@@ -17,7 +17,7 @@ from .database import Database
 from .library import LibraryRules
 from .media import (
     MediaError, available, download_youtube, probe, probe_audio, render_clip, render_script,
-    sha256_file, synthesize_local, transcribe,
+    sha256_file, synthesize_local, transcribe, youtube_import_title,
 )
 from .models import (
     Clip, Job, ProcessingMode, ProcessingStep, ProvenanceRecord, ScoreBreakdown, now_iso,
@@ -462,17 +462,53 @@ class JobManager:
                 self.active_workers -= 1
             lock.release()
 
+    def _register_source(self, job: Job, private: dict[str, Any], source: Path) -> None:
+        metadata = private.get("source_metadata")
+        if not isinstance(metadata, dict):
+            metadata = probe(source, self.settings)
+        project = self.db.get_project(job.project_id)
+        title = str(private.get("youtube_title") or "YouTube source") if private.get("url") else (project.name if project else source.stem)
+        asset = self.rules.register_managed_video(
+            source, title=title, origin="project-source", project_id=job.project_id,
+            job_id=job.id, metadata=metadata, folder_id=job.library_folder_id,
+            content_hash=str(private["source_hash"]) if private.get("source_hash") else None,
+        )
+        private["source_hash"] = asset.content_hash
+        job.source_blob_id = asset.blob_id
+        if project and project.source_blob_id != asset.blob_id:
+            project.source_blob_id = asset.blob_id
+            project.updated_at = now_iso()
+            self.db.save_project(project)
+
+    def _register_output(self, job: Job, clip: Clip, output: Path, private: dict[str, Any], *, script: bool = False) -> None:
+        # Renderers atomically publish only after their own FFprobe validation.
+        dimensions = {"9:16": (1080, 1920), "1:1": (1080, 1080), "16:9": (1920, 1080)}
+        width, height = dimensions[str(private["aspect_ratio"])]
+        metadata: dict[str, object] = {"duration": clip.duration, "width": width, "height": height}
+        project = self.db.get_project(job.project_id)
+        project_name = project.name if project else "Project"
+        title = f"{project_name} — Script video" if script else f"{project_name} — Cut {clip.index:02d}"
+        asset = self.rules.register_managed_video(
+            output, title=title, origin="script-output" if script else "generated-clip",
+            project_id=job.project_id, job_id=job.id, clip_id=clip.id,
+            metadata=metadata, folder_id=job.library_folder_id,
+        )
+        clip.blob_id = asset.blob_id
+
     def _source(self, job: Job, private: dict[str, Any]) -> Path:
         if private.get("source_path"):
             source = Path(private["source_path"])
             if source.is_file():
-                self.complete_step(job, "source", detail="Source received and validated", private=private)
+                self._register_source(job, private, source)
+                self.complete_step(job, "source", detail="Source received, validated, and added to library", private=private)
                 return source
         if private.get("url"):
             self.start_step(job, "source", detail="Importing authorised YouTube source", label="Importing authorised YouTube source", progress=5, private=private)
             source = download_youtube(private["url"], self.settings.data_path / "jobs" / job.id / "source", self.settings)
             private["source_path"] = str(source)
-            self.complete_step(job, "source", detail="YouTube source imported and validated", private=private)
+            private["youtube_title"] = youtube_import_title(source) or "YouTube source"
+            self._register_source(job, private, source)
+            self.complete_step(job, "source", detail="YouTube source imported, validated, and added to library", private=private)
             return source
         raise MediaError("The source file is missing from the mounted data directory")
 
@@ -665,6 +701,7 @@ class JobManager:
             visuals = [(clip.visual_label or "Key idea", .45, min(3.0, clip.duration))]
             try:
                 render_clip(source, output, start=clip.start, end=clip.end, aspect=private["aspect_ratio"], words=words, visuals=visuals, overlays=overlays, settings=self.settings)
+                self._register_output(job, clip, output, private)
                 clip.state = "complete"
                 clip.output_name = output.name
                 clip.selected = True
@@ -742,6 +779,7 @@ class JobManager:
             output = output_dir / f"{position:02d}-cut.mp4"
             try:
                 render(source, output, start=clip.start, end=clip.end, aspect=private["aspect_ratio"], has_audio=has_audio, settings=self.settings)
+                self._register_output(job, clip, output, private)
                 clip.state = "complete"
                 clip.output_name = output.name
                 clip.selected = True
@@ -857,6 +895,7 @@ class JobManager:
             self._save(job, private)
             self.fail_step(job, "ready", detail="Project failed", private=private)
             return
+        self._register_output(job, clip, output, private, script=True)
         clip.state = "complete"
         clip.output_name = output.name
         clip.selected = True
@@ -941,10 +980,12 @@ class JobManager:
         self._save(job)
         new_private = dict(private)
         new_private["processing_mode"] = "fast"
+        new_private["library_folder_id"] = job.library_folder_id
         new_private.pop("transcript", None)
         new_id = str(uuid.uuid4())
         new_job = Job(
-            id=new_id, project_id=job.project_id, mode="clip", processing_mode="fast",
+            id=new_id, project_id=job.project_id, library_folder_id=job.library_folder_id,
+            source_blob_id=job.source_blob_id, mode="clip", processing_mode="fast",
             state="queued", stage="queued", stage_label="Queued on this machine",
             progress=0, style=job.style, steps=self._fast_steps(),
         )

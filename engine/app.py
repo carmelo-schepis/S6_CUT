@@ -21,12 +21,13 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from . import __version__
 from .config import settings
-from .database import Database
+from .database import Database, MAX_FOLDER_DEPTH, UNSORTED_FOLDER_ID
 from .jobs import JobManager, QueueFullError, SwitchFastError
 from .library import LibraryRules
 from .media import MediaError, available, probe, validate_video_upload
 from .models import (
-    Asset, AssetUpdate, Health, Job, MatchExplanation, ProcessingMode, ProfileInput, Project,
+    Asset, AssetMove, AssetOrigin, AssetUpdate, FolderCreate, FolderMove, FolderUpdate, Health, Job,
+    LibraryFolder, MatchExplanation, ProcessingMode, ProfileInput, Project, ProjectFolderUpdate,
     ProviderProfile, ScriptJobInput, SelectionInput, now_iso,
 )
 from .providers import ProfileService
@@ -129,6 +130,24 @@ async def list_projects() -> list[Project]:
     return db.list_projects()
 
 
+@app.put("/api/v1/projects/{project_id}/folder", response_model=Project)
+async def change_project_folder(project_id: str, value: ProjectFolderUpdate) -> Project:
+    try:
+        return db.update_project_folder(project_id, value.folder_id, value.move_existing_assets)
+    except KeyError as exc:
+        raise _not_found("Project") from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.delete("/api/v1/projects/{project_id}", status_code=204)
+async def delete_project(project_id: str) -> None:
+    try:
+        db.delete_project(project_id)
+    except KeyError as exc:
+        raise _not_found("Project") from exc
+
+
 @app.get("/api/v1/projects/{project_id}", response_model=Project)
 async def get_project(project_id: str) -> Project:
     try:
@@ -177,8 +196,14 @@ async def create_clip_job(
     min_duration: Annotated[float, Form(ge=8, le=120)] = 20,
     max_duration: Annotated[float, Form(ge=10, le=180)] = 60,
     aspect_ratio: Annotated[Literal["9:16", "1:1", "16:9"], Form()] = "9:16",
+    library_folder_id: Annotated[str, Form()] = UNSORTED_FOLDER_ID,
 ) -> dict[str, object]:
     _rate_limit(request)
+    selected_folder = db.get_folder(library_folder_id)
+    if not selected_folder:
+        raise _not_found("Library folder")
+    if selected_folder.archived:
+        raise HTTPException(409, "Archived folders cannot receive new projects")
     if manager.queue.full():
         raise HTTPException(429, "The local processing queue is full. Try again after an active job completes.")
     if bool(file) == bool(url and url.strip()):
@@ -192,6 +217,7 @@ async def create_clip_job(
         "count": count, "min_duration": min_duration, "max_duration": max_duration,
         "aspect_ratio": aspect_ratio, "processing_mode": mode,
         "use_openrouter": mode == "smart" and smart_available,
+        "library_folder_id": library_folder_id,
     }
     if file:
         original = safe_filename(file.filename or "source.mp4", "source.mp4")
@@ -216,7 +242,7 @@ async def create_clip_job(
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         source_name, source_kind = "YouTube import", "youtube"
-    project = Project(id=project_id, name=Path(source_name).stem[:160], mode="clip", style=style, state="queued", source_name=source_name, source_kind=source_kind, requested_count=count, latest_job_id=job_id)
+    project = Project(id=project_id, name=Path(source_name).stem[:160], mode="clip", style=style, state="queued", source_name=source_name, source_kind=source_kind, requested_count=count, latest_job_id=job_id, library_folder_id=library_folder_id)
     steps = manager._fast_steps() if mode == "fast" else manager._smart_steps(bool(private["use_openrouter"]))
     if source_kind == "upload":
         checkpoint_time = now_iso()
@@ -226,7 +252,7 @@ async def create_clip_job(
             steps[1].status = "complete"
             steps[1].detail = f"Source validated - {float(source_metadata['duration']):.1f}s"
             steps[1].started_at = steps[1].completed_at = checkpoint_time
-    job = Job(id=job_id, project_id=project_id, mode="clip", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style=style, processing_mode=mode, steps=steps)
+    job = Job(id=job_id, project_id=project_id, library_folder_id=library_folder_id, mode="clip", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style=style, processing_mode=mode, steps=steps)
     db.save_project(project)
     db.save_job(job, private)
     try:
@@ -243,12 +269,18 @@ async def create_script_job(request: Request, value: ScriptJobInput) -> dict[str
     _rate_limit(request)
     if manager.queue.full():
         raise HTTPException(429, "The local processing queue is full. Try again after an active job completes.")
+    folder_id = value.library_folder_id or UNSORTED_FOLDER_ID
+    selected_folder = db.get_folder(folder_id)
+    if not selected_folder:
+        raise _not_found("Library folder")
+    if selected_folder.archived:
+        raise HTTPException(409, "Archived folders cannot receive new projects")
     project_id, job_id = str(uuid.uuid4()), str(uuid.uuid4())
     first_line = next((line.strip() for line in value.script.splitlines() if line.strip()), "Script project")
     name = value.name or first_line[:70]
-    project = Project(id=project_id, name=name, mode="script", style=value.style, state="queued", source_name=f"{len(value.script)} character script", source_kind="script", requested_count=1, latest_job_id=job_id)
-    job = Job(id=job_id, project_id=project_id, mode="script", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style=value.style, steps=manager._script_steps())
-    private = {"script": value.script, "aspect_ratio": value.aspect_ratio, "narration": value.narration}
+    project = Project(id=project_id, name=name, mode="script", style=value.style, state="queued", source_name=f"{len(value.script)} character script", source_kind="script", requested_count=1, latest_job_id=job_id, library_folder_id=folder_id)
+    job = Job(id=job_id, project_id=project_id, library_folder_id=folder_id, mode="script", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style=value.style, steps=manager._script_steps())
+    private = {"script": value.script, "aspect_ratio": value.aspect_ratio, "narration": value.narration, "library_folder_id": folder_id}
     db.save_project(project)
     db.save_job(job, private)
     await manager.enqueue(job_id)
@@ -355,7 +387,7 @@ async def export_job(job_id: str, value: SelectionInput) -> dict[str, str]:
 
 @app.get("/api/v1/files/{relative_path:path}")
 async def download_file(relative_path: str, expires: int = Query(...), signature: str = Query(...)) -> FileResponse:
-    if not (relative_path.startswith("jobs/") or relative_path.startswith("exports/")) or not signer.verify(relative_path, expires, signature):
+    if not relative_path.startswith(("jobs/", "exports/")) or not signer.verify(relative_path, expires, signature):
         raise HTTPException(403, "Download link is invalid or expired")
     try:
         target = confined(settings.data_path, *relative_path.split("/"))
@@ -412,9 +444,90 @@ def _csv(value: str) -> list[str]:
     return list(dict.fromkeys(item.strip() for item in value.split(",") if item.strip()))[:100]
 
 
+def _public_asset(asset: Asset) -> Asset:
+    token = f"library-asset:{asset.id}:{asset.blob_id}"
+    expires, signature = signer.sign(token)
+    return asset.model_copy(update={"preview_url": f"/api/v1/library/assets/{asset.id}/preview?expires={expires}&signature={signature}"})
+
+
+@app.get("/api/v1/library/folders", response_model=list[LibraryFolder])
+async def list_library_folders(include_archived: bool = False) -> list[LibraryFolder]:
+    return db.list_folders(include_archived)
+
+
+@app.post("/api/v1/library/folders", response_model=LibraryFolder, status_code=201)
+async def create_library_folder(value: FolderCreate) -> LibraryFolder:
+    if value.parent_id:
+        parent = db.get_folder(value.parent_id)
+        if not parent:
+            raise _not_found("Parent folder")
+        depth, cursor = 2, parent
+        while cursor.parent_id:
+            depth += 1
+            cursor = db.get_folder(cursor.parent_id) or cursor.model_copy(update={"parent_id": None})
+        if depth > MAX_FOLDER_DEPTH:
+            raise HTTPException(409, f"Folders may be at most {MAX_FOLDER_DEPTH} levels deep")
+    folder = LibraryFolder(id=str(uuid.uuid4()), **value.model_dump())
+    try:
+        return db.save_folder(folder)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.put("/api/v1/library/folders/{folder_id}", response_model=LibraryFolder)
+async def update_library_folder(folder_id: str, value: FolderUpdate) -> LibraryFolder:
+    folder = db.get_folder(folder_id)
+    if not folder:
+        raise _not_found("Folder")
+    if folder.system and value.name is not None:
+        raise HTTPException(409, "System folders cannot be renamed")
+    try:
+        return db.save_folder(folder.model_copy(update={**value.model_dump(exclude_unset=True), "updated_at": now_iso()}))
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.post("/api/v1/library/folders/{folder_id}/move", response_model=LibraryFolder)
+async def move_library_folder(folder_id: str, value: FolderMove) -> LibraryFolder:
+    try:
+        return db.move_folder(folder_id, value.parent_id)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.post("/api/v1/library/folders/{folder_id}/archive", response_model=LibraryFolder)
+async def archive_library_folder(folder_id: str, archived: bool = True) -> LibraryFolder:
+    folder = db.get_folder(folder_id)
+    if not folder:
+        raise _not_found("Folder")
+    if folder.system:
+        raise HTTPException(409, "System folders cannot be archived")
+    return db.save_folder(folder.model_copy(update={"archived": archived, "updated_at": now_iso()}))
+
+
+@app.delete("/api/v1/library/folders/{folder_id}", status_code=204)
+async def remove_library_folder(folder_id: str, destination_folder_id: str = UNSORTED_FOLDER_ID, confirmed: bool = False) -> None:
+    if not confirmed:
+        raise HTTPException(409, "Confirm removal; assets and child folders will be moved to the destination")
+    try:
+        db.remove_folder(folder_id, destination_folder_id)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
 @app.get("/api/v1/library/assets", response_model=list[Asset])
-async def list_assets() -> list[Asset]:
-    return db.list_assets()
+async def list_assets(folder_id: str | None = None, media_type: str | None = None, origin: AssetOrigin | None = None, search: str | None = Query(default=None, max_length=500), include_archived: bool = False) -> list[Asset]:
+    if folder_id and not db.get_folder(folder_id):
+        raise _not_found("Folder")
+    return [_public_asset(asset) for asset in db.list_assets(folder_id=folder_id, media_type=media_type, origin=origin, search=search, include_archived=include_archived)]
+
+
+@app.post("/api/v1/library/assets/move", response_model=dict[str, int])
+async def move_library_assets(value: AssetMove) -> dict[str, int]:
+    try:
+        return {"moved": db.move_assets(value.asset_ids, value.folder_id)}
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @app.post("/api/v1/library/assets", response_model=Asset)
@@ -425,25 +538,69 @@ async def create_asset(
     triggers: Annotated[str, Form()] = "",
     policy: Annotated[Literal["required", "prefer", "neutral", "never"], Form()] = "neutral",
     licence: Annotated[str, Form(max_length=500)] = "User supplied",
+    folder_id: Annotated[str, Form()] = UNSORTED_FOLDER_ID,
 ) -> Asset:
+    selected_folder = db.get_folder(folder_id)
+    if not selected_folder:
+        raise _not_found("Folder")
+    if selected_folder.archived:
+        raise HTTPException(409, "Archived folders cannot receive new assets")
     name = safe_filename(file.filename or "asset", "asset")
     if not (file.content_type or "").startswith(("image/", "video/", "audio/")):
         raise HTTPException(415, "Library files must be an image, video, or audio asset")
     asset_id = str(uuid.uuid4())
-    directory = settings.data_path / "library" / asset_id
+    directory = settings.data_path / "temp" / "library-imports" / asset_id
     target = directory / name
     _, digest = await _stream_upload(file, target, min(settings.max_upload_bytes, 2_000_000_000))
-    existing = db.get_asset_by_hash(digest)
-    if existing:
+    try:
+        metadata = None
+        if (file.content_type or "").startswith("video/"):
+            try:
+                metadata = await asyncio.to_thread(validate_video_upload, target, name, settings)
+            except MediaError as exc:
+                raise HTTPException(422, str(exc)) from exc
+        asset = await asyncio.to_thread(
+            rules.register_file, target, title=title, media_type=file.content_type or "application/octet-stream",
+            origin="manual-import", folder_id=folder_id, metadata=metadata, content_hash=digest,
+            filename=name, tags=_csv(tags), triggers=_csv(triggers), policy=policy, licence=licence,
+        )
+        return _public_asset(asset)
+    finally:
         target.unlink(missing_ok=True)
         try:
             directory.rmdir()
         except OSError:
             pass
-        return existing
-    asset = Asset(id=asset_id, title=title, media_type=file.content_type or "application/octet-stream", filename=name, tags=_csv(tags), triggers=_csv(triggers), policy=policy, licence=licence, content_hash=digest)
-    db.save_asset(asset)
-    return asset
+
+
+@app.get("/api/v1/library/assets/{asset_id}/preview")
+async def preview_asset(asset_id: str, expires: int = Query(...), signature: str = Query(...)) -> FileResponse:
+    asset = db.get_asset(asset_id)
+    if not asset:
+        raise _not_found("Asset")
+    token = f"library-asset:{asset.id}:{asset.blob_id}"
+    if not signer.verify(token, expires, signature):
+        raise HTTPException(403, "Preview link is invalid or expired")
+    relative = db.blob_relative_path(asset.blob_id)
+    if not relative:
+        raise _not_found("Media blob")
+    try:
+        target = confined(settings.data_path, *relative.split("/"))
+    except ValueError as exc:
+        raise HTTPException(400, "Invalid media reference") from exc
+    if not target.is_file():
+        raise _not_found("Media blob")
+    return FileResponse(target, filename=safe_filename(asset.filename, "library-media"), media_type=asset.media_type)
+
+
+@app.delete("/api/v1/library/assets/{asset_id}", status_code=204)
+async def delete_library_asset(asset_id: str) -> None:
+    try:
+        db.delete_asset(asset_id)
+    except KeyError as exc:
+        raise _not_found("Asset") from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 @app.put("/api/v1/library/assets/{asset_id}", response_model=Asset)
@@ -452,9 +609,15 @@ async def update_asset(asset_id: str, value: AssetUpdate) -> Asset:
     if not asset:
         raise _not_found("Asset")
     update = value.model_dump(exclude_unset=True)
+    if update.get("folder_id"):
+        destination = db.get_folder(update["folder_id"])
+        if not destination:
+            raise _not_found("Folder")
+        if destination.archived:
+            raise HTTPException(409, "Archived folders cannot receive assets")
     asset = asset.model_copy(update=update)
     db.save_asset(asset)
-    return asset
+    return _public_asset(asset)
 
 
 @app.get("/api/v1/library/match", response_model=MatchExplanation)
@@ -465,7 +628,7 @@ async def match_asset(text: str = Query(min_length=1, max_length=10_000)) -> Mat
 @app.get("/api/v1/storage")
 async def storage_diagnostics() -> dict[str, object]:
     usage = shutil.disk_usage(settings.data_path)
-    counts = {name: sum(1 for item in (settings.data_path / name).rglob("*") if item.is_file()) for name in ("jobs", "library", "cache", "exports")}
+    counts = {name: sum(1 for item in (settings.data_path / name).rglob("*") if item.is_file()) for name in ("jobs", "blobs", "library", "cache", "exports")}
     return {"freeBytes": usage.free, "totalBytes": usage.total, "files": counts, "retentionDays": settings.retention_days, "maxRetainedJobs": settings.max_retained_jobs}
 
 

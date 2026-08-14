@@ -9,7 +9,7 @@ import { ProjectsView } from "./projects-view";
 vi.mock("../api", () => {
   const readableError = (e: unknown) =>
     e instanceof Error ? e.message : "Something went wrong. Try again.";
-  return { readableError, createClipJob: vi.fn(), createScriptJob: vi.fn() };
+  return { readableError, createClipJob: vi.fn(), createScriptJob: vi.fn(), listFolders: vi.fn(async () => []), createFolder: vi.fn() };
 });
 
 import { createScriptJob } from "../api";
