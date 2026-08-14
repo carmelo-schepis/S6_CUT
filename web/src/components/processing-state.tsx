@@ -41,6 +41,6 @@ export function ProcessingState({ job, waitingForEngine = false }: { job: Job; w
       <div className="filmstrip-perforations bottom" />
     </div>
     <div className="processing-meta"><span>Elapsed {formatElapsed(job.createdAt, now)}</span>{job.currentItem > 0 && job.totalItems > 0 && <span>Item {job.currentItem} / {job.totalItems}</span>}</div>
-    <p>You can leave this screen. Processing will continue in the engine.</p>
+    <p>Processing continues in the local engine if you leave this screen.</p>
   </div>;
 }

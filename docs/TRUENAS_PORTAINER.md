@@ -17,7 +17,7 @@ Copy or clone this repository into `source`. Give the container UID/GID `10001:1
 S6_DATA_PATH=/mnt/tank/apps/s6-cut/data
 S6_PORT=8080
 S6_JOB_WORKERS=1
-S6_WHISPER_MODEL=small
+S6_WHISPER_MODEL=base
 ```
 
 Start with one worker. Transcription and H.264 composition consume substantial CPU, RAM, and I/O. No GPU is required.

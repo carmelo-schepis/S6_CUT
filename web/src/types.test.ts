@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { beatSchema, clipSchema, jobSchema } from "./types";
+import { beatSchema, clipSchema, jobSchema, processingModeSchema, processingStepSchema } from "./types";
 
 const score = {
   hook: 80, coherence: 82, ending: 79, energy: 70, practicalValue: 75,
@@ -21,5 +21,88 @@ describe("versioned UI contracts", () => {
 
   it("requires schema version 1 for durable jobs", () => {
     expect(() => jobSchema.parse({ schemaVersion: 2 })).toThrow();
+  });
+
+  it("defaults legacy Job processingMode to smart", () => {
+    const job = jobSchema.parse({
+      schemaVersion: 1, id: "x", projectId: "p", mode: "clip", state: "queued",
+      stage: "q", stageLabel: "Q", progress: 0, style: "funny",
+      createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
+    });
+    expect(job.processingMode).toBe("smart");
+  });
+
+  it("defaults Job.steps to an empty array for legacy jobs without steps", () => {
+    const job = jobSchema.parse({
+      schemaVersion: 1, id: "x", projectId: "p", mode: "clip", state: "queued",
+      stage: "q", stageLabel: "Q", progress: 0, style: "funny",
+      createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
+    });
+    expect(job.steps).toEqual([]);
+  });
+
+  it("parses structured processing steps with camelCase timestamps", () => {
+    const job = jobSchema.parse({
+      schemaVersion: 1, id: "x", projectId: "p", mode: "clip", state: "active",
+      stage: "r", stageLabel: "Rendering clips", progress: 40, style: "funny",
+      createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
+      steps: [
+        { id: "s1", label: "Source received", status: "complete", completedAt: "2026-01-01T00:00:01Z" },
+        { id: "s2", label: "Clips rendered", status: "active", startedAt: "2026-01-01T00:00:02Z", currentItem: 3, totalItems: 5, detail: "Rendering output 3" },
+      ],
+    });
+    expect(job.steps).toHaveLength(2);
+    expect(job.steps[0].status).toBe("complete");
+    expect(job.steps[0].completedAt).toBe("2026-01-01T00:00:01Z");
+    expect(job.steps[1].currentItem).toBe(3);
+    expect(job.steps[1].totalItems).toBe(5);
+  });
+
+  it("rejects unknown processing step statuses and non-string timestamps", () => {
+    expect(() => processingStepSchema.parse({ id: "s", label: "X", status: "done" })).toThrow();
+    expect(() => processingStepSchema.parse({ id: "s", label: "X", status: "complete", completedAt: 123 })).toThrow();
+    expect(() => processingStepSchema.parse({ id: "s", label: "X", status: "active", currentItem: -1, totalItems: 5 })).toThrow();
+  });
+
+  it("enforces processing step timestamp and item-count invariants", () => {
+    const base = { id: "render", label: "Clips rendered" };
+    expect(processingStepSchema.safeParse({ ...base, status: "complete" }).success).toBe(false);
+    expect(processingStepSchema.safeParse({ ...base, status: "pending", completedAt: "2026-01-01T00:00:00Z" }).success).toBe(false);
+    expect(processingStepSchema.safeParse({ ...base, status: "active", currentItem: 4, totalItems: 3 }).success).toBe(false);
+    expect(processingStepSchema.safeParse({ ...base, status: "complete", completedAt: "2026-01-01T00:00:00Z" }).success).toBe(true);
+  });
+
+  it("accepts explicit processingMode values", () => {
+    expect(processingModeSchema.parse("auto")).toBe("auto");
+    expect(processingModeSchema.parse("fast")).toBe("fast");
+    expect(processingModeSchema.parse("smart")).toBe("smart");
+  });
+
+  it("makes clip score nullable with null default", () => {
+    const clip = clipSchema.parse({
+      id: "c1", index: 1, state: "complete", start: 0, end: 5, duration: 5,
+      openingLine: "Hi", score: null, selected: true, fallbackUsed: false, provenance: [],
+    });
+    expect(clip.score).toBeNull();
+    // Omitting score also defaults to null
+    const clip2 = clipSchema.parse({
+      id: "c2", index: 2, state: "complete", start: 0, end: 5, duration: 5,
+      openingLine: "Hi", selected: true, fallbackUsed: false, provenance: [],
+    });
+    expect(clip2.score).toBeNull();
+  });
+
+  it("still accepts a valid score object", () => {
+    const score = {
+      hook: 80, coherence: 82, ending: 79, energy: 70, practicalValue: 75,
+      visualPotential: 77, completeness: 91, penalties: 2, llmContribution: null,
+      total: 82, explanation: "A complete, useful thought.",
+    };
+    const clip = clipSchema.parse({
+      id: "c1", index: 1, state: "complete", start: 0, end: 5, duration: 5,
+      openingLine: "Hi", score, selected: true, fallbackUsed: false, provenance: [],
+    });
+    expect(clip.score).not.toBeNull();
+    expect(clip.score!.total).toBe(82);
   });
 });

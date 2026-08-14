@@ -8,6 +8,7 @@ import {
   type Job,
   type LibraryAsset,
   type MatchExplanation,
+  type ProcessingMode,
   type Project,
   type ProviderProfile,
   type Style,
@@ -57,6 +58,7 @@ type ClipJobInput = {
   minDuration: number;
   maxDuration: number;
   aspectRatio: string;
+  processingMode?: ProcessingMode;
 };
 
 export async function createClipJob(input: ClipJobInput): Promise<{ project: Project; job: Job }> {
@@ -68,6 +70,7 @@ export async function createClipJob(input: ClipJobInput): Promise<{ project: Pro
   form.set("min_duration", String(input.minDuration));
   form.set("max_duration", String(input.maxDuration));
   form.set("aspect_ratio", input.aspectRatio);
+  if (input.processingMode) form.set("processing_mode", input.processingMode);
   const value = await request<{ project: unknown; job: unknown }>("/jobs/clip", { method: "POST", body: form });
   return { project: projectSchema.parse(value.project), job: jobSchema.parse(value.job) };
 }
@@ -95,7 +98,7 @@ export async function getJob(id: string): Promise<Job> {
   return jobSchema.parse(await request(`/jobs/${encodeURIComponent(id)}`));
 }
 
-export async function controlJob(id: string, action: "pause" | "resume" | "stop-keep" | "retry-failed"): Promise<Job> {
+export async function controlJob(id: string, action: "pause" | "resume" | "stop-keep" | "retry-failed" | "switch-fast"): Promise<Job> {
   return jobSchema.parse(await request(`/jobs/${encodeURIComponent(id)}/control/${action}`, { method: "POST" }));
 }
 

@@ -2,17 +2,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
-import re
 import shutil
 import subprocess
 import threading
+from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from .config import Settings
-from .security import confined, redact, safe_filename, validate_youtube_url
-
+from .security import redact, validate_youtube_url
 
 ALLOWED_VIDEO_SUFFIXES = {".mp4", ".mov", ".webm", ".mkv", ".m4v", ".avi"}
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
@@ -22,6 +22,117 @@ _whisper_models: dict[str, Any] = {}
 
 class MediaError(RuntimeError):
     pass
+
+
+class TranscriptionCancelled(MediaError):
+    """Raised when a caller-provided cancellation callback reports True.
+
+    Subclasses :class:`MediaError` so existing failure handling keeps working;
+    callers that wire cancellation can catch this type to mark a job as
+    cancelled instead of failed.
+    """
+
+
+# Stable faster-whisper model-name → Hugging Face repo ID mapping. Only used to
+# locate the on-disk cache; transcription itself keeps using settings.whisper_model.
+_WHISPER_MODEL_REPOS: dict[str, str] = {
+    "tiny.en": "Systran/faster-whisper-tiny.en",
+    "tiny": "Systran/faster-whisper-tiny",
+    "base.en": "Systran/faster-whisper-base.en",
+    "base": "Systran/faster-whisper-base",
+    "small.en": "Systran/faster-whisper-small.en",
+    "small": "Systran/faster-whisper-small",
+    "medium.en": "Systran/faster-whisper-medium.en",
+    "medium": "Systran/faster-whisper-medium",
+    "large-v1": "Systran/faster-whisper-large-v1",
+    "large-v2": "Systran/faster-whisper-large-v2",
+    "large-v3": "Systran/faster-whisper-large-v3",
+    "large": "Systran/faster-whisper-large-v3",
+    "distil-large-v2": "Systran/faster-distil-whisper-large-v2",
+    "distil-medium.en": "Systran/faster-distil-whisper-medium.en",
+    "distil-small.en": "Systran/faster-distil-whisper-small.en",
+    "distil-large-v3": "Systran/faster-distil-whisper-large-v3",
+    "distil-large-v3.5": "distil-whisper/distil-large-v3.5-ct2",
+    "large-v3-turbo": "mobiuslabsgmbh/faster-whisper-large-v3-turbo",
+    "turbo": "mobiuslabsgmbh/faster-whisper-large-v3-turbo",
+}
+
+
+def _whisper_repo_id(model: str) -> str:
+    """Hugging Face repo ID for a faster-whisper model name or explicit repo ID."""
+    if "/" in model:
+        return model
+    return _WHISPER_MODEL_REPOS.get(model, model)
+
+
+def _whisper_model_cache_path(settings: Settings) -> Path | None:
+    """Resolve the downloaded model directory, or None when it is not cached yet.
+
+    Faster-Whisper stores models in the Hugging Face cache layout under
+    ``S6_DATA_PATH/models``; a model counts as cached when one snapshot
+    directory contains the CTranslate2 ``model.bin`` file. Local model paths
+    (absolute or relative) are recognised directly.
+    """
+    candidate = Path(settings.whisper_model)
+    if (candidate / "model.bin").is_file():
+        return candidate
+    repo_id = _whisper_repo_id(settings.whisper_model)
+    snapshots = settings.data_path / "models" / f"models--{repo_id.replace('/', '--')}" / "snapshots"
+    if not snapshots.is_dir():
+        return None
+    for revision in sorted(snapshots.iterdir()):
+        if revision.is_dir() and (revision / "model.bin").is_file():
+            return revision
+    return None
+
+
+def is_whisper_model_cached(settings: Settings) -> bool:
+    """True when the configured Whisper model is already downloaded on disk.
+
+    This is an observability helper: callers can skip the "model download"
+    stage (or show it as instant) without loading the model into memory.
+    """
+    return _whisper_model_cache_path(settings) is not None
+
+
+def _rational_to_float(value: str | None) -> float | None:
+    """Parse an FFprobe rational like ``30000/1001`` into a float (29.97...)."""
+    if not value:
+        return None
+    numerator, _, denominator = value.partition("/")
+    try:
+        numerator_float = float(numerator)
+        denominator_float = float(denominator) if denominator else 1.0
+    except ValueError:
+        return None
+    if denominator_float <= 0 or numerator_float <= 0 or math.isinf(numerator_float / denominator_float):
+        return None
+    return numerator_float / denominator_float
+
+
+def _rotation_from_stream(video: dict[str, Any]) -> int:
+    """Best-effort rotation in degrees (0, 90, 180, 270) from FFprobe output."""
+    rotation = video.get("rotation")
+    if rotation is not None and rotation != "":
+        try:
+            return int(rotation) % 360
+        except (TypeError, ValueError):
+            pass
+    tags = video.get("tags") or {}
+    rotate = next((value for key, value in tags.items() if str(key).casefold() == "rotate"), None)
+    if rotate is not None:
+        try:
+            return int(float(rotate)) % 360
+        except (TypeError, ValueError):
+            pass
+    for side_data in video.get("side_data_list") or []:
+        rotate = next((value for key, value in side_data.items() if str(key).casefold() == "rotation"), None)
+        if rotate is not None:
+            try:
+                return int(round(float(rotate))) % 360
+            except (TypeError, ValueError):
+                continue
+    return 0
 
 
 def available(command: str) -> bool:
@@ -61,7 +172,17 @@ def probe(path: Path, settings: Settings) -> dict[str, Any]:
         raise MediaError("The source does not contain a readable video stream")
     if duration > settings.max_source_seconds:
         raise MediaError(f"Source duration exceeds the configured {settings.max_source_seconds}-second limit")
-    return {"duration": duration, "width": int(video.get("width") or 0), "height": int(video.get("height") or 0), "video_codec": video.get("codec_name"), "audio": bool(audio), "audio_codec": audio.get("codec_name") if audio else None}
+    frame_rate = _rational_to_float(video.get("avg_frame_rate")) or _rational_to_float(video.get("r_frame_rate")) or 0.0
+    return {
+        "duration": duration,
+        "width": int(video.get("width") or 0),
+        "height": int(video.get("height") or 0),
+        "video_codec": video.get("codec_name"),
+        "audio": bool(audio),
+        "audio_codec": audio.get("codec_name") if audio else None,
+        "frame_rate": round(frame_rate, 3),
+        "rotation": _rotation_from_stream(video),
+    }
 
 
 def probe_audio(path: Path, settings: Settings) -> dict[str, Any]:
@@ -106,7 +227,103 @@ def download_youtube(url: str, target_dir: Path, settings: Settings) -> Path:
     return source
 
 
-def transcribe(path: Path, settings: Settings) -> dict[str, Any]:
+def _media_duration(path: Path, settings: Settings) -> float:
+    """Total media duration in seconds for progress normalisation.
+
+    Prefers the audio stream (Whisper only consumes audio); falls back to the
+    video container duration for silent or metadata-only inputs.
+    """
+    try:
+        return float(probe_audio(path, settings)["duration"])
+    except MediaError:
+        return float(probe(path, settings)["duration"])
+
+
+def extract_audio_16k(source: Path, settings: Settings, *, output: Path | None = None) -> Path:
+    """Extract a 16 kHz mono PCM WAV for Whisper consumption.
+
+    Faster-Whisper decodes media with its own FFmpeg invocation; extracting a
+    canonical 16 kHz mono WAV first makes decoding deterministic, enables
+    duration-based progress, and lets callers reuse the audio across runs.
+
+    Parameters
+    ----------
+    source : Path
+        Any media file with an audio track.
+    settings : Settings
+        Engine runtime settings (FFmpeg binary reference).
+    output : Path | None
+        Explicit output path. When omitted, a unique file is created under
+        ``S6_DATA_PATH/temp``. The caller owns cleanup of returned files.
+
+    Returns
+    -------
+    Path
+        The extracted WAV file (16 kHz, mono, PCM s16le).
+
+    Raises
+    ------
+    MediaError
+        When the source has no readable audio or extraction fails.
+    """
+    target = output or (settings.data_path / "temp" / f"whisper-{os.urandom(6).hex()}.wav")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    run([
+        settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+        "-i", str(source),
+        "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le",
+        str(target),
+    ], timeout=900)
+    if not target.is_file() or target.stat().st_size < 44:
+        raise MediaError("Audio extraction did not produce a usable 16 kHz WAV")
+    return target
+
+
+def transcribe(
+    path: Path,
+    settings: Settings,
+    *,
+    progress_callback: Callable[[float, str], object] | None = None,
+    cancellation_callback: Callable[[], bool] | None = None,
+    device: str | None = None,
+    compute_type: str | None = None,
+    beam_size: int | None = None,
+    word_timestamps: bool | None = None,
+) -> dict[str, Any]:
+    """Transcribe media with Faster-Whisper and return word-level timing.
+
+    Parameters
+    ----------
+    path : Path
+        Source media file (video or audio).
+    settings : Settings
+        Engine runtime settings, including Whisper device/compute/beam defaults.
+    progress_callback : Callable[[float, str], object] | None
+        Invoked incrementally with ``(fraction, message)`` as real segments are
+        decoded, where ``fraction`` is ``segment.end / total duration`` clamped
+        to ``[0, 1]`` and ``message`` is the decoded segment text. Progress is
+        always derived from actual segment boundaries — never simulated. The
+        caller throttles/persists; this function calls back on every segment.
+    cancellation_callback : Callable[[], bool] | None
+        Polled between segments (and before model load/decoding). Returning
+        ``True`` aborts transcription with :class:`TranscriptionCancelled`.
+    device : str | None
+        Override ``S6_WHISPER_DEVICE`` (cpu/auto/cuda).
+    compute_type : str | None
+        Override ``S6_WHISPER_COMPUTE_TYPE`` (int8/int8_float16/float16/float32/auto).
+    beam_size : int | None
+        Override ``S6_WHISPER_BEAM_SIZE`` (1..8). Lower beams are faster on CPU.
+    word_timestamps : bool | None
+        Override ``S6_WHISPER_WORD_TIMESTAMPS``; word timing is required for
+        caption rendering, so callers disabling it must handle missing words.
+
+    Returns
+    -------
+    dict[str, Any]
+        ``{"language": str, "words": [...], "segments": [...]}`` compatible
+        with the ``S6_TEST_TRANSCRIPT_JSON`` fixture shape. ``words`` carry
+        ``text/start/end/confidence``; ``segments`` carry ``start/end/text``.
+    """
     fixture = os.getenv("S6_TEST_TRANSCRIPT_JSON")
     if fixture:
         return json.loads(fixture)
@@ -114,27 +331,62 @@ def transcribe(path: Path, settings: Settings) -> dict[str, Any]:
         from faster_whisper import WhisperModel  # type: ignore
     except ImportError as exc:
         raise MediaError("Local Whisper is not installed in this engine runtime") from exc
+
+    run_device = device or settings.whisper_device
+    run_compute = compute_type or settings.whisper_compute_type
+    run_beam = settings.whisper_beam_size if beam_size is None else beam_size
+    run_beam = max(1, min(int(run_beam), 8))
+    run_words = settings.whisper_word_timestamps if word_timestamps is None else bool(word_timestamps)
+
+    total_duration = 0.0
+    if progress_callback is not None:
+        total_duration = _media_duration(path, settings)
+        if cancellation_callback is not None and cancellation_callback():
+            raise TranscriptionCancelled("Transcription cancelled before model load")
+
     with _whisper_lock:
-        model = _whisper_models.get(settings.whisper_model)
+        model_key = f"{settings.whisper_model}:{run_device}:{run_compute}"
+        model = _whisper_models.get(model_key)
         if model is None:
-            model = WhisperModel(settings.whisper_model, device="auto", compute_type="auto", download_root=str(settings.data_path / "models"))
-            _whisper_models[settings.whisper_model] = model
-    segments, info = model.transcribe(str(path), word_timestamps=True, vad_filter=True, beam_size=5)
+            if cancellation_callback is not None and cancellation_callback():
+                raise TranscriptionCancelled("Transcription cancelled before model load")
+            model = WhisperModel(
+                settings.whisper_model,
+                device=run_device,
+                compute_type=run_compute,
+                download_root=str(settings.data_path / "models"),
+            )
+            _whisper_models[model_key] = model
+
+    if cancellation_callback is not None and cancellation_callback():
+        raise TranscriptionCancelled("Transcription cancelled before decoding")
+
+    segments, info = model.transcribe(
+        str(path),
+        word_timestamps=run_words,
+        vad_filter=True,
+        beam_size=run_beam,
+    )
     words: list[dict[str, Any]] = []
     segment_records: list[dict[str, Any]] = []
     for segment in segments:
+        if cancellation_callback is not None and cancellation_callback():
+            raise TranscriptionCancelled("Transcription cancelled during decoding")
         segment_records.append({"start": float(segment.start), "end": float(segment.end), "text": segment.text.strip()})
         for word in segment.words or []:
             text = str(word.word).strip()
             if text:
                 words.append({"text": text, "start": float(word.start), "end": float(word.end), "confidence": float(word.probability or 0)})
+        if progress_callback is not None and total_duration > 0:
+            fraction = min(1.0, max(0.0, float(segment.end) / total_duration))
+            progress_callback(fraction, f"Transcribing: {segment.text.strip()[:60]}")
     if not words:
         raise MediaError("No speech was detected. Automatic clips require a readable speech track; the source remains available for manual editing.")
     return {"language": getattr(info, "language", "unknown"), "words": words, "segments": segment_records}
 
 
 def synthesize_local(text: str, output: Path, settings: Settings) -> Path:
-    run([settings.local_tts, "-v", "en", "-s", "165", "-w", str(output), text], timeout=900)
+    run([settings.local_tts, "-v", "en", "-s", "165", "-w", str(output), "--", text], timeout=900)
     if not output.exists() or output.stat().st_size < 1000:
         raise MediaError("The local narration engine did not produce playable audio")
     return output
@@ -226,6 +478,225 @@ def render_clip(source: Path, output: Path, *, start: float, end: float, aspect:
     metadata = probe(temp, settings)
     if metadata["width"] != width or metadata["height"] != height or not metadata["audio"]:
         raise MediaError("Rendered clip failed structural output validation")
+    os.replace(temp, output)
+
+
+def plan_fast_windows(
+    duration: float,
+    count: int,
+    min_duration: float,
+    max_duration: float,
+    guard_seconds: float = 0,
+) -> tuple[list[tuple[float, float]], str]:
+    """Partition a source timeline into non-overlapping deterministic windows.
+
+    Parameters
+    ----------
+    duration : float
+        Total duration of the source in seconds (positive).
+    count : int
+        Desired number of output windows (>= 1).
+    min_duration : float
+        Minimum window length in seconds (>= 0.1).
+    max_duration : float
+        Maximum window length in seconds (>= min_duration).
+    guard_seconds : float
+        Start/end guard kept away from source edges when the source is long enough.
+
+    Returns
+    -------
+    tuple[list[tuple[float, float]], str]
+        Ordered ``(start, end)`` windows in absolute source seconds, plus a
+        single warning string (empty when the request is fully satisfied).
+
+    The planner is deterministic: identical inputs always produce the same
+    windows.  If the source cannot satisfy the requested count, the returned
+    list is shorter and the warning explains why.
+    """
+    warning = ""
+    if duration <= 0 or count < 1:
+        return [], warning
+    min_duration = max(0.1, min_duration)
+    max_duration = max(min_duration, max_duration)
+    guard_seconds = max(0.0, guard_seconds)
+    requested = count
+    if duration < min_duration:
+        return [(0.0, round(duration, 6))], "Source is shorter than the minimum window duration; created one clip using the full source."
+
+    guards_fit = duration >= requested * min_duration + guard_seconds * (requested + 1)
+    applied_guard = guard_seconds if guards_fit else 0.0
+    available = duration - applied_guard * (requested + 1)
+    count = min(requested, max(1, int(available // min_duration)))
+    if count < requested:
+        warning = f"Reduced fast-cut windows from {requested} to {count} because the source is too short for non-overlapping clips."
+        guards_fit = duration >= count * min_duration + guard_seconds * (count + 1)
+        applied_guard = guard_seconds if guards_fit else 0.0
+
+    available_for_windows = duration - applied_guard * (count + 1)
+    window_size = min(max_duration, available_for_windows / count)
+    unused = max(0.0, duration - (count * window_size + applied_guard * (count + 1)))
+    shared_gap = unused / (count + 1)
+    edge_gap = applied_guard + shared_gap
+    internal_gap = applied_guard + shared_gap
+    windows: list[tuple[float, float]] = []
+    start = edge_gap
+    for _ in range(count):
+        end = min(start + window_size, duration - edge_gap)
+        windows.append((round(start, 6), round(end, 6)))
+        start = end + internal_gap
+
+    if not warning and unused > 0.01:
+        warning = (
+            f"Planned {count} windows within {min_duration:g}s-{max_duration:g}s; "
+            "unused source time is distributed evenly between clip windows."
+        )
+
+    return windows, warning
+
+
+def _fast_crop_scale_filter(
+    src_width: int, src_height: int, target_width: int, target_height: int
+) -> str:
+    """Build a ``-vf`` filter string that centre-crops to the target aspect
+    ratio without needless upscaling.
+
+    The largest native-resolution region with the target aspect is centre-
+    cropped, then scaled down only when that region exceeds the target canvas.
+    A source that is already at or below the target resolution is never blown
+    up: the output keeps its native size (even-rounded for H.264 yuv420p).
+    """
+    if src_width * target_height >= src_height * target_width:
+        # Source is wider (or equal) than the target aspect: crop the width.
+        crop_w = round(src_height * target_width / target_height)
+        crop_h = src_height
+    else:
+        # Source is taller than the target aspect: crop the height.
+        crop_w = src_width
+        crop_h = round(src_width * target_height / target_width)
+    factor = min(1.0, target_width / crop_w, target_height / crop_h)
+    out_w = int(crop_w * factor)
+    out_h = int(crop_h * factor)
+    out_w -= out_w % 2
+    out_h -= out_h % 2
+    return (
+        f"crop={crop_w}:{crop_h}:(iw-{crop_w})/2:(ih-{crop_h})/2,"
+        f"scale={out_w}:{out_h},setsar=1"
+    )
+
+
+def render_fast_clip(
+    source: Path,
+    output: Path,
+    *,
+    start: float,
+    end: float,
+    aspect: str,
+    settings: Settings,
+    has_audio: bool = True,
+) -> None:
+    """Render a fast clip with no captions, overlays, or visual beats.
+
+    This is a lightweight render path that bypasses the ASS/caption/overlay
+    pipeline entirely.  It performs:
+
+    * Efficient input seeking (``-ss`` before ``-i``).
+    * Centre-crop to the requested ``aspect`` without needless upscaling.
+    * H.264 ``veryfast`` encoding.
+    * AAC audio **only** when the source provides an audio track.
+    * Output validation (dimensions, audio presence).
+    * Atomic publish via a temporary ``.partial.mp4`` then ``os.replace``.
+
+    The output canvas matches ``dimensions(aspect)`` only when the source is
+    large enough; smaller sources keep their native resolution (no upscaling).
+
+    Parameters
+    ----------
+    source : Path
+        Source video file.
+    output : Path
+        Destination path for the finished clip (must not exist yet).
+    start : float
+        Seek position in seconds.
+    end : float
+        End position in seconds.
+    aspect : str
+        One of ``"9:16"``, ``"1:1"``, ``"16:9"``.
+    settings : Settings
+        Engine runtime settings.
+    has_audio : bool
+        Whether the source segment has an audio track to encode.
+    """
+    output.parent.mkdir(parents=True, exist_ok=True)
+    width, height = dimensions(aspect)
+    duration = max(0.1, end - start)
+    temp = output.with_suffix(".partial.mp4")
+
+    meta = probe(source, settings)
+    if has_audio and not meta["audio"]:
+        raise MediaError("Fast clip requested audio but the source has no audio track")
+    # FFmpeg applies display-matrix autorotation before video filters. Probe
+    # dimensions are encoded dimensions, so crop against the displayed frame.
+    src_width, src_height = meta["width"], meta["height"]
+    if meta["rotation"] % 180:
+        src_width, src_height = src_height, src_width
+    vf = _fast_crop_scale_filter(src_width, src_height, width, height)
+
+    command = [
+        settings.ffmpeg,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-ss",
+        f"{start:.3f}",
+        "-i",
+        str(source),
+        "-t",
+        f"{duration:.3f}",
+        "-vf",
+        vf,
+        "-map",
+        "0:v",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "23",
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+    ]
+    if has_audio:
+        command.extend([
+            "-map",
+            "0:a:0",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "128k",
+            "-ar",
+            "44100",
+        ])
+    else:
+        command.append("-an")
+    command.append(str(temp))
+
+    run(command, cwd=output.parent, timeout=7200)
+
+    result = probe(temp, settings)
+    aspect_error = abs(result["width"] * height - result["height"] * width) / (width * height)
+    if result["width"] < 2 or result["height"] < 2 or aspect_error > 0.02:
+        raise MediaError(
+            f"Fast clip failed aspect validation: expected {width}:{height} canvas "
+            f"({width}x{height}), got {result['width']}x{result['height']}"
+        )
+    if has_audio and not result["audio"]:
+        raise MediaError("Fast clip expected audio but the output has no audio track")
+    if abs(float(result["duration"]) - duration) > max(0.75, duration * 0.05):
+        raise MediaError("Fast clip failed duration validation")
+
     os.replace(temp, output)
 
 

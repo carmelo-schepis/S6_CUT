@@ -107,10 +107,36 @@ describe("SettingsView – provider profile list", () => {
     expect(within(article).getByText("Invalid API key — check your ElevenLabs key")).toBeInTheDocument();
   });
 
-  it("shows empty state when no profiles exist", async () => {
+  it("shows the inline setup form by default on an empty card, and the empty state after dismissing it", async () => {
     mockListProfiles.mockResolvedValue([]);
     renderView();
+    // Inline form is open by default so OpenRouter is visible.
+    expect(await screen.findByText("New provider profile")).toBeInTheDocument();
+    expect(screen.getByText("OpenRouter")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("sk-or-v1-…")).toHaveAttribute("type", "password");
+    expect(screen.getByRole("button", { name: "Use fast local cutting without APIs" })).toBeInTheDocument();
+    // Dismissing the form reveals the empty-state copy.
+    fireEvent.click(screen.getByRole("button", { name: "Close provider form" }));
     expect(await screen.findByText("No provider profile")).toBeInTheDocument();
+  });
+
+  it("shows an in-card Add provider button once profiles exist", async () => {
+    mockListProfiles.mockResolvedValue([baseProfile]);
+    renderView();
+    await screen.findByText("Minimal");
+    const addButton = await screen.findByRole("button", { name: "Add or update provider" });
+    fireEvent.click(addButton);
+    expect(screen.getByText("New provider profile")).toBeInTheDocument();
+  });
+
+  it("calls onSkipSetup from the fast-local action on the empty card", async () => {
+    mockListProfiles.mockResolvedValue([]);
+    const onSkipSetup = vi.fn();
+    render(<SettingsView health={health} onHealthRefresh={vi.fn(async () => undefined)} onSkipSetup={onSkipSetup} />);
+    await screen.findByText("New provider profile");
+    fireEvent.click(screen.getByRole("button", { name: "Close provider form" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Continue with fast local cut/i }));
+    expect(onSkipSetup).toHaveBeenCalledOnce();
   });
 });
 
@@ -309,6 +335,7 @@ describe("SettingsView – profile actions (test, duplicate, delete)", () => {
     await waitFor(() => {
       expect(mockDeleteProfile).toHaveBeenCalledWith(baseProfile.id);
     });
-    expect(await screen.findByText("No provider profile")).toBeInTheDocument();
+    // With no profiles left, the inline setup form opens again by default.
+    expect(await screen.findByText("New provider profile")).toBeInTheDocument();
   });
 });

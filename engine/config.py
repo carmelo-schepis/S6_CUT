@@ -12,10 +12,33 @@ def _int(name: str, default: int) -> int:
         return default
 
 
+def _float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+
+
+def _bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().casefold() in {"1", "true", "yes", "on"}
+
+
+def _str_choices(name: str, default: str, choices: tuple[str, ...]) -> str:
+    value = os.getenv(name, default).strip().casefold()
+    return value if value in choices else default
+
+
 @dataclass(frozen=True)
 class Settings:
     data_path: Path
     whisper_model: str
+    whisper_device: str
+    whisper_compute_type: str
+    whisper_beam_size: int
+    whisper_word_timestamps: bool
     job_workers: int
     max_queued_jobs: int
     max_upload_bytes: int
@@ -24,6 +47,7 @@ class Settings:
     retention_days: int
     max_retained_jobs: int
     media_url_ttl: int
+    fast_guard_seconds: float
     allowed_origins: tuple[str, ...]
     ffmpeg: str
     ffprobe: str
@@ -31,14 +55,20 @@ class Settings:
     local_tts: str
 
     @classmethod
-    def from_env(cls) -> "Settings":
+    def from_env(cls) -> Settings:
         root = Path(os.getenv("S6_DATA_PATH", "data")).expanduser().resolve()
         origins = tuple(item.strip() for item in os.getenv(
             "S6_ALLOWED_ORIGINS", "http://127.0.0.1:5173,http://localhost:5173"
         ).split(",") if item.strip())
         return cls(
             data_path=root,
-            whisper_model=os.getenv("S6_WHISPER_MODEL", "small"),
+            whisper_model=os.getenv("S6_WHISPER_MODEL", "base").strip() or "base",
+            whisper_device=_str_choices("S6_WHISPER_DEVICE", "cpu", ("cpu", "auto", "cuda")),
+            whisper_compute_type=_str_choices(
+                "S6_WHISPER_COMPUTE_TYPE", "int8", ("int8", "int8_float16", "float16", "float32", "auto")
+            ),
+            whisper_beam_size=max(1, min(_int("S6_WHISPER_BEAM_SIZE", 1), 8)),
+            whisper_word_timestamps=_bool("S6_WHISPER_WORD_TIMESTAMPS", True),
             job_workers=max(1, min(_int("S6_JOB_WORKERS", 1), 4)),
             max_queued_jobs=max(1, min(_int("S6_MAX_QUEUED_JOBS", 4), 20)),
             max_upload_bytes=max(50_000_000, _int("S6_MAX_UPLOAD_BYTES", 20_000_000_000)),
@@ -47,6 +77,7 @@ class Settings:
             retention_days=max(1, _int("S6_JOB_RETENTION_DAYS", 30)),
             max_retained_jobs=max(5, _int("S6_MAX_RETAINED_JOBS", 100)),
             media_url_ttl=max(60, _int("S6_MEDIA_URL_TTL_SECONDS", 900)),
+            fast_guard_seconds=max(0.1, min(_float("S6_FAST_GUARD_SECONDS", 1.0), 10.0)),
             allowed_origins=origins,
             ffmpeg=os.getenv("S6_FFMPEG_BIN", "ffmpeg"),
             ffprobe=os.getenv("S6_FFPROBE_BIN", "ffprobe"),

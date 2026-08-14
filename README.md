@@ -14,7 +14,7 @@ docker compose up -d --build
 docker compose ps
 ```
 
-Open <http://localhost:8080>. The first automatic Clip job downloads the configured Faster-Whisper model into the mounted data path. To stop without deleting state:
+Open <http://localhost:8080>. No-provider Auto jobs use Fast local cut and do not download Whisper. The first explicit Smart clips job downloads the configured Faster-Whisper model into the mounted data path. To stop without deleting state:
 
 ```bash
 docker compose down
@@ -44,7 +44,11 @@ Copy `.env.example` to `.env`. Important values:
 | --- | --- | --- |
 | `S6_PORT` | `8080` | The one published web/portal port |
 | `S6_DATA_PATH` | `./data` | Persistent database, jobs, uploads, Library, cache, models, exports, and instance secrets |
-| `S6_WHISPER_MODEL` | `small` | Local Faster-Whisper model |
+| `S6_WHISPER_MODEL` | `base` | CPU-friendly local Faster-Whisper model used only by explicit Smart clips |
+| `S6_WHISPER_DEVICE` | `cpu` | Whisper device: `cpu`, `auto`, or `cuda` |
+| `S6_WHISPER_COMPUTE_TYPE` | `int8` | Whisper compute type: `int8`, `int8_float16`, `float16`, `float32`, or `auto` |
+| `S6_WHISPER_BEAM_SIZE` | `1` | Whisper beam size (1–8); lower beams decode faster on CPU |
+| `S6_WHISPER_WORD_TIMESTAMPS` | `true` | Enable word-level timestamps required for caption rendering |
 | `S6_JOB_WORKERS` | `1` | CPU/RAM-heavy concurrent jobs; start with one |
 | `S6_MAX_QUEUED_JOBS` | `4` | Bounded pending queue |
 | `S6_MAX_UPLOAD_BYTES` | `20000000000` | Streamed source-size ceiling |
@@ -54,12 +58,23 @@ Copy `.env.example` to `.env`. Important values:
 
 Provider profiles can be configured in Settings. Persistent secrets are encrypted with a locally generated instance key and are never returned by read APIs. Headless deployments may set `OPENROUTER_API_KEY` and `ELEVENLABS_API_KEY` in `.env` or Docker secrets orchestration. Protect `.env` like any other credential file.
 
+### Whisper performance tuning
+
+Smart-mode transcription runs locally with Faster-Whisper. The CPU-friendly defaults (`cpu` + `int8` + beam 1) keep memory low and decode fast; raise the model size or beam only when you need more accuracy and have CPU/RAM headroom:
+
+- `S6_WHISPER_MODEL=base` or `small` is the sweet spot on 8 GB hosts; `medium`/`large-v3` need noticeably more RAM and time.
+- On an NVIDIA GPU, set `S6_WHISPER_DEVICE=cuda` with `S6_WHISPER_COMPUTE_TYPE=float16` for the fastest decode.
+- `S6_WHISPER_WORD_TIMESTAMPS=false` skips per-word alignment (faster) but disables word-timed captions; keep it `true` for captioned clips.
+
+Whisper job stages report real, incrementally observed progress: each fraction is derived from an actual decoded segment boundary (`segment.end / duration`), never simulated, and stage labels show the text of the segment just decoded. The engine checks the model cache on disk, so a pre-downloaded model (under `S6_DATA_PATH/models`) skips straight to transcription.
+
 ## Provider and fallback matrix
 
 | Capability | Preferred | Missing or failing optional provider |
 | --- | --- | --- |
-| Transcription/timing | Local Faster-Whisper | Local Whisper remains required; an LLM never invents timing |
-| Clip selection | Deterministic boundaries and style score | Same deterministic local path |
+| Fast clip cutting | Deterministic FFprobe windows and FFmpeg crop | No transcription, captions, model download, or API required |
+| Smart transcription/timing | Local Faster-Whisper | Local Whisper supplies timing; an LLM never performs transcription |
+| Smart clip selection | Optional OpenRouter ordering over validated local candidates | Deterministic local candidate planning |
 | Script planning | Optional OpenRouter structured planning boundary | Deterministic exact-span phrase planner |
 | Narration | Selected ElevenLabs voice | Local espeak-ng; then explicitly silent render |
 | Visuals | Required/preferred personal Library | Relevant local text card; wrong media is not substituted |

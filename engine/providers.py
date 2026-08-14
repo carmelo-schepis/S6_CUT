@@ -67,6 +67,17 @@ class ProfileService:
         secrets.setdefault("elevenlabsKey", os.getenv("ELEVENLABS_API_KEY", ""))
         return profile, {key: value for key, value in secrets.items() if value}
 
+    def smart_available(self) -> bool:
+        """True only when the selected OpenRouter profile is configured and connected."""
+        for profile in self.db.list_profiles():
+            if not profile.selected or not profile.openrouter_configured:
+                continue
+            if profile.openrouter_status != "connected":
+                continue
+            if self.secrets(profile.id).get("openrouterKey"):
+                return True
+        return False
+
     def save(self, value: ProfileInput, profile_id: str | None = None) -> ProviderProfile:
         profile_id = profile_id or str(uuid.uuid4())
         existing = self.db.get_profile(profile_id)

@@ -53,7 +53,7 @@ export function App() {
   };
 
   const selected = projects.find((project) => project.id === selectedProjectId) || null;
-  const hasSelectedProvider = profiles.some((profile) => profile.selected);
+  const hasSelectedProvider = profiles.some((profile) => profile.selected && profile.openrouterStatus === "connected");
   const openProviders = () => setPage("settings");
 
   return <div className="app-shell">
@@ -94,7 +94,7 @@ export function App() {
         {page === "library" && <LibraryView />}
         {page === "workspace" && <WorkspaceView key={selected?.id || "none"} project={selected} health={health} hasSelectedProvider={hasSelectedProvider} onConfigureProviders={openProviders} onProjectUpdated={refresh} onGoProjects={() => setPage("projects")} />}
         {page === "jobs" && <JobsView onOpenProject={openProject} />}
-        {page === "settings" && <SettingsView health={health} onHealthRefresh={refresh} onProfilesChanged={setProfiles} />}
+        {page === "settings" && <SettingsView health={health} onHealthRefresh={refresh} onProfilesChanged={setProfiles} onSkipSetup={() => setPage("projects")} />}
       </main>
     </div>
   </div>;

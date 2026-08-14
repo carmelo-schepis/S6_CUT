@@ -31,14 +31,16 @@ The browser owns interaction state. The engine is authoritative for projects, jo
 
 1. Stream an upload into a `.uploading` file with a hard byte limit, then atomically promote it.
 2. Validate the source with FFprobe before creating processing work.
-3. Create the project and immutable job settings snapshot in SQLite.
+3. Create the project and immutable job settings snapshot in SQLite. Clip jobs record a resolved `processing_mode`: `auto` becomes `smart` only when the selected OpenRouter profile is configured and connected, otherwise `fast` (legacy jobs default to `smart`).
 4. Before announcing each stage/result, save the SQLite job and atomically replace `jobs/<uuid>/state.json`.
-5. Cache the local transcript by source hash, model, and schema version.
+5. Smart mode transcribes with visible Whisper model stages; fast mode skips transcription, providers, selection, Library resolution, and captions entirely — it probes, plans neutral windows with `plan_fast_windows`, and renders each cut independently with `render_fast_clip` (silent sources allowed).
 6. Generate sentence-aware, duration-bounded, deterministic candidates and score components.
 7. Resolve a personal Library asset first; otherwise use an explicit relevant text card.
 8. Render each clip independently to a partial filename, probe its structure, then atomically publish.
 9. Keep successful clips if another render fails; failed clips remain scoped and retryable.
 10. Build ZIP on disk with numbered media, manifest, credits, and warning/failure summary.
+
+Fast cut switch: `switch-fast` reuses the saved source (no duplicate upload), cooperatively cancels the Smart job at its next checkpoint, and queues a new fast job against the same project.
 
 Startup changes interrupted queued/active work to `recovered` and requeues it. Pausing is cooperative at safe checkpoints. “Stop and keep” is distinct from retry and preserves completed outputs.
 

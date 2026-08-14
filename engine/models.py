@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 def now_iso() -> str:
@@ -19,8 +19,11 @@ class ApiModel(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="forbid")
 
 
+ProcessingStepStatus = Literal["pending", "active", "complete", "skipped", "failed"]
+
 Style = Literal["funny", "serious", "educational", "hype"]
 JobState = Literal["queued", "active", "paused", "partial", "failed", "recovered", "cancelled_kept", "complete"]
+ProcessingMode = Literal["fast", "smart"]
 
 
 class ScoreBreakdown(ApiModel):
@@ -57,7 +60,7 @@ class Clip(ApiModel):
     end: float = Field(gt=0)
     duration: float = Field(gt=0)
     opening_line: str
-    score: ScoreBreakdown
+    score: ScoreBreakdown | None = None
     selected: bool = True
     output_name: str | None = None
     download_url: str | None = None
@@ -72,6 +75,27 @@ class Clip(ApiModel):
         if value <= 0:
             raise ValueError("end must be positive")
         return value
+
+
+class ProcessingStep(ApiModel):
+    id: str = Field(min_length=1)
+    label: str = Field(min_length=1)
+    status: ProcessingStepStatus = "pending"
+    detail: str | None = None
+    started_at: str | None = None
+    completed_at: str | None = None
+    current_item: int | None = Field(default=None, ge=0)
+    total_items: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def valid_timestamps_and_counts(self):
+        if self.status in {"pending", "active"} and self.completed_at is not None:
+            raise ValueError(f"{self.status} steps cannot have a completion timestamp")
+        if self.status in {"complete", "skipped", "failed"} and self.completed_at is None:
+            raise ValueError(f"{self.status} steps require a completion timestamp")
+        if self.current_item is not None and self.total_items is not None and self.current_item > self.total_items:
+            raise ValueError("current item cannot exceed total items")
+        return self
 
 
 class Beat(ApiModel):
@@ -101,12 +125,23 @@ class Job(ApiModel):
     current_item: int = Field(default=0, ge=0)
     total_items: int = Field(default=0, ge=0)
     style: Style
+    processing_mode: ProcessingMode = "smart"
     warnings: list[str] = Field(default_factory=list)
     error: str | None = None
     clips: list[Clip] = Field(default_factory=list)
     beats: list[Beat] = Field(default_factory=list)
+    steps: list[ProcessingStep] = Field(default_factory=list)
     created_at: str = Field(default_factory=now_iso)
     updated_at: str = Field(default_factory=now_iso)
+
+    @model_validator(mode="after")
+    def valid_step_state(self):
+        if sum(step.status == "active" for step in self.steps) > 1:
+            raise ValueError("at most one processing step may be active")
+        ready = next((step for step in self.steps if step.id == "ready"), None)
+        if ready and ready.status == "complete" and self.state in {"queued", "active", "paused", "recovered"}:
+            raise ValueError("Project ready cannot complete while the job is still processing")
+        return self
 
 
 class Project(ApiModel):

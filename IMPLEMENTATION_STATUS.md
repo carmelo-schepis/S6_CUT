@@ -9,8 +9,9 @@ Updated: 2026-08-13
 - Funny, Serious, Educational, and Hype deterministic score weights.
 - FastAPI engine with SQLite WAL project/job/profile/Library records and an atomic per-job JSON checkpoint.
 - Streamed, bounded upload; safe filename/path handling; FFprobe validation; duration limit; queue limit; creation rate limit.
-- Local Faster-Whisper word transcription and content/model/schema cache.
-- Sentence-aware bounded candidates, auditable score components, temporal overlap suppression, and complete-boundary preference.
+- New no-provider Auto jobs resolve to Fast local cut: FFprobe-validated, deterministic non-overlapping windows, silent-video support, progressive FFmpeg crop/render, and no Whisper/provider calls.
+- Explicit Smart clips use extracted 16 kHz mono audio, CPU-friendly Faster-Whisper defaults, real segment progress, cancellation checkpoints, versioned transcript cache, optional OpenRouter candidate ordering, and deterministic local fallback.
+- Durable mode-specific processing checklists record real validated checkpoints, provider fallbacks, render counts, partial output verification, retries, pause/cancel, and restart recovery.
 - Independent FFmpeg renders with centre 9:16/1:1/16:9 crop, H.264/AAC, word-highlight captions, visual text cards or matched Library overlays, FFprobe output validation, and atomic publication.
 - Progressive workspace through SSE with polling fallback, clip selection, score inspector, storyboard/Beat board, EDL lanes, partial success, pause/resume, stop-and-keep, and scoped retry.
 - ZIP export with numbered successful media, `manifest.json`, `credits.json`, and warning/failure summary.
@@ -23,9 +24,9 @@ Updated: 2026-08-13
 
 - `npm run lint` - passed with zero warnings.
 - `npm run typecheck` - passed under TypeScript strict mode.
-- `npm test` - 7/7 frontend contract/integration tests passed.
-- `python -m pytest engine/tests -q` - 15/15 engine unit/API/security tests passed. One Starlette environment deprecation warning is upstream and does not affect results.
-- `npm run build` - Vite production build passed; 1,792 modules transformed.
+- `npm test` - 89/89 frontend contract/component/integration tests passed.
+- `python -m pytest engine/tests -q` - 121/121 engine unit/API/security/media/checklist tests passed. One Starlette environment deprecation warning is upstream and does not affect results.
+- `npm run build` - Vite production build passed; 1,794 modules transformed.
 - `npm install` and container `npm ci` audits - zero known vulnerabilities.
 - Both multi-stage web and engine images built successfully, including FFmpeg, Faster-Whisper, yt-dlp, and espeak-ng in the private engine image.
 - `docker compose config` passed. Only nginx publishes a host port; the engine remains private on the Compose network.
@@ -33,7 +34,8 @@ Updated: 2026-08-13
 - Gateway health reported SQLite, FFmpeg, FFprobe, Whisper, yt-dlp, local TTS, and `/app/data` ready.
 - Response headers verified CSP, `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`, and COOP.
 - Script-mode smoke completed a vertical H.264 render with exact script spans, deterministic beats, captions, and provenance using the silent fallback when no narration provider was configured.
-- Real supplied-media smoke completed a 20.60-second 1080x1920 H.264/AAC clip with 53 timed caption events after local Whisper transcription.
+- Real supplied-media Smart smoke completed a 20.60-second 1080x1920 H.264/AAC clip with 53 timed caption events after local Whisper transcription.
+- Generated Fast-mode end-to-end smoke passed with both AAC and silent sources; each produced two validated 9:16 H.264 clips while instrumentation made any Whisper, OpenRouter, ElevenLabs, or semantic-selection call fail the test.
 - Signed selected-export ZIP was downloaded and inspected: it contains the successful clip, `manifest.json`, and `credits.json` with project/job/style/score/provenance data.
 - Completed jobs remained accessible after the production containers were recreated, exercising the mounted durable data path.
 - Desktop and compact production screenshots were captured after asynchronous health/project data loaded and visually inspected for responsive layout and engine-ready state.
@@ -43,7 +45,7 @@ Updated: 2026-08-13
 - Reframe is reliable centre crop with reversible source preservation; face/active-speaker trajectory analysis is not implemented yet.
 - The EDL is versioned in the durable job/clip/beat contract, but interactive trim, caption correction, asset replacement, and persisted undo/redo controls are the next editor milestone.
 - The Library resolver is fully local and deterministic. No live no-key web media adapter is enabled; unmatched content uses a visible relevant text card instead of rights-unknown or unrelated media.
-- OpenRouter transport is implemented as a strict JSON boundary but deterministic local planning is currently the active production path; provider-enhanced candidate/beat validation can be added without changing core records.
+- Smart clips may use the selected, tested OpenRouter profile to order validated local candidates. Provider failure is recorded in the checklist and falls back to deterministic local planning; OpenRouter never performs transcription.
 - Local narration uses espeak-ng for dependable offline operation. Higher-quality local neural TTS is not bundled yet.
 - Retention policy is reported/configured; only safe stale partial-file cleanup is automatic in this milestone. Operator-approved project/output cleanup needs a reference-aware UI.
 - The UI shows the canonical EDL structure but the central viewer uses finished media when available rather than frame-accurate draft compositing before render.

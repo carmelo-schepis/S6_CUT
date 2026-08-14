@@ -16,10 +16,12 @@ const activeJob: Job = {
   currentItem: 2,
   totalItems: 5,
   style: "serious",
+  processingMode: "auto",
   warnings: [],
   error: null,
   clips: [],
   beats: [],
+  steps: [],
   createdAt: "2026-08-13T00:00:00Z",
   updatedAt: "2026-08-13T00:00:00Z",
 };
@@ -55,7 +57,7 @@ describe("ProcessingState – stage, progress & items", () => {
   it("renders the reassurance paragraph", () => {
     render(<ProcessingState job={activeJob} />);
     expect(
-      screen.getByText("You can leave this screen. Processing will continue in the engine."),
+      screen.getByText("Processing continues in the local engine if you leave this screen."),
     ).toBeInTheDocument();
   });
 

@@ -22,11 +22,11 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from . import __version__
 from .config import settings
 from .database import Database
-from .jobs import JobManager, QueueFullError
+from .jobs import JobManager, QueueFullError, SwitchFastError
 from .library import LibraryRules
 from .media import MediaError, available, probe, validate_video_upload
 from .models import (
-    Asset, AssetUpdate, Health, Job, MatchExplanation, ProfileInput, Project,
+    Asset, AssetUpdate, Health, Job, MatchExplanation, ProcessingMode, ProfileInput, Project,
     ProviderProfile, ScriptJobInput, SelectionInput, now_iso,
 )
 from .providers import ProfileService
@@ -72,6 +72,12 @@ def _rate_limit(request: Request) -> None:
     if len(bucket) >= 10:
         raise HTTPException(429, "Too many project creations. Wait one minute and try again.")
     bucket.append(now)
+
+
+def resolve_processing_mode(requested: Literal["fast", "smart", "auto"], smart_available: bool) -> ProcessingMode:
+    if requested == "auto":
+        return "smart" if smart_available else "fast"
+    return requested
 
 
 def _not_found(kind: str = "Record") -> HTTPException:
@@ -135,9 +141,10 @@ async def get_project(project_id: str) -> Project:
     return project
 
 
-async def _stream_upload(upload: UploadFile, target: Path, max_bytes: int) -> int:
+async def _stream_upload(upload: UploadFile, target: Path, max_bytes: int) -> tuple[int, str]:
     temp = target.with_suffix(target.suffix + ".uploading")
     total = 0
+    digest = hashlib.sha256()
     target.parent.mkdir(parents=True, exist_ok=True)
     try:
         with temp.open("wb") as handle:
@@ -145,13 +152,14 @@ async def _stream_upload(upload: UploadFile, target: Path, max_bytes: int) -> in
                 total += len(chunk)
                 if total > max_bytes:
                     raise HTTPException(413, "Upload exceeds the configured source-size limit")
+                digest.update(chunk)
                 handle.write(chunk)
             handle.flush()
             os.fsync(handle.fileno())
         if not total:
             raise HTTPException(422, "Uploaded file is empty")
         os.replace(temp, target)
-        return total
+        return total, digest.hexdigest()
     finally:
         await upload.close()
         if temp.exists():
@@ -164,6 +172,7 @@ async def create_clip_job(
     file: Annotated[UploadFile | None, File()] = None,
     url: Annotated[str | None, Form()] = None,
     style: Annotated[Literal["funny", "serious", "educational", "hype"], Form()] = "educational",
+    processing_mode: Annotated[Literal["fast", "smart", "auto"], Form()] = "auto",
     count: Annotated[int, Form(ge=1, le=30)] = 5,
     min_duration: Annotated[float, Form(ge=8, le=120)] = 20,
     max_duration: Annotated[float, Form(ge=10, le=180)] = 60,
@@ -177,20 +186,29 @@ async def create_clip_job(
     if min_duration >= max_duration:
         raise HTTPException(422, "Minimum duration must be shorter than maximum duration")
     project_id, job_id = str(uuid.uuid4()), str(uuid.uuid4())
-    private: dict[str, object] = {"count": count, "min_duration": min_duration, "max_duration": max_duration, "aspect_ratio": aspect_ratio}
+    smart_available = profiles.smart_available()
+    mode = resolve_processing_mode(processing_mode, smart_available)
+    private: dict[str, object] = {
+        "count": count, "min_duration": min_duration, "max_duration": max_duration,
+        "aspect_ratio": aspect_ratio, "processing_mode": mode,
+        "use_openrouter": mode == "smart" and smart_available,
+    }
     if file:
         original = safe_filename(file.filename or "source.mp4", "source.mp4")
         suffix = Path(original).suffix.casefold()
         if suffix not in {".mp4", ".mov", ".webm", ".mkv", ".m4v", ".avi"}:
             raise HTTPException(415, "Unsupported video type. Use MP4, MOV, WebM, MKV, M4V, or AVI.")
         source = settings.data_path / "jobs" / job_id / "source" / f"source{suffix}"
-        await _stream_upload(file, source, settings.max_upload_bytes)
+        _, source_hash = await _stream_upload(file, source, settings.max_upload_bytes)
         try:
-            await asyncio.to_thread(validate_video_upload, source, original, settings)
+            source_metadata = await asyncio.to_thread(validate_video_upload, source, original, settings)
         except MediaError as exc:
             source.unlink(missing_ok=True)
             raise HTTPException(422, str(exc)) from exc
         private["source_path"] = str(source)
+        private["source_hash"] = source_hash
+        if isinstance(source_metadata, dict):
+            private["source_metadata"] = source_metadata
         source_name, source_kind = original, "upload"
     else:
         try:
@@ -199,7 +217,16 @@ async def create_clip_job(
             raise HTTPException(422, str(exc)) from exc
         source_name, source_kind = "YouTube import", "youtube"
     project = Project(id=project_id, name=Path(source_name).stem[:160], mode="clip", style=style, state="queued", source_name=source_name, source_kind=source_kind, requested_count=count, latest_job_id=job_id)
-    job = Job(id=job_id, project_id=project_id, mode="clip", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style=style)
+    steps = manager._fast_steps() if mode == "fast" else manager._smart_steps(bool(private["use_openrouter"]))
+    if source_kind == "upload":
+        checkpoint_time = now_iso()
+        steps[0].status, steps[0].detail = "complete", "Upload atomically stored"
+        steps[0].started_at = steps[0].completed_at = checkpoint_time
+        if isinstance(source_metadata, dict):
+            steps[1].status = "complete"
+            steps[1].detail = f"Source validated - {float(source_metadata['duration']):.1f}s"
+            steps[1].started_at = steps[1].completed_at = checkpoint_time
+    job = Job(id=job_id, project_id=project_id, mode="clip", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style=style, processing_mode=mode, steps=steps)
     db.save_project(project)
     db.save_job(job, private)
     try:
@@ -220,7 +247,7 @@ async def create_script_job(request: Request, value: ScriptJobInput) -> dict[str
     first_line = next((line.strip() for line in value.script.splitlines() if line.strip()), "Script project")
     name = value.name or first_line[:70]
     project = Project(id=project_id, name=name, mode="script", style=value.style, state="queued", source_name=f"{len(value.script)} character script", source_kind="script", requested_count=1, latest_job_id=job_id)
-    job = Job(id=job_id, project_id=project_id, mode="script", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style=value.style)
+    job = Job(id=job_id, project_id=project_id, mode="script", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style=value.style, steps=manager._script_steps())
     private = {"script": value.script, "aspect_ratio": value.aspect_ratio, "narration": value.narration}
     db.save_project(project)
     db.save_job(job, private)
@@ -270,13 +297,15 @@ async def job_events(job_id: str, request: Request) -> StreamingResponse:
 
 
 @app.post("/api/v1/jobs/{job_id}/control/{action}", response_model=Job)
-async def job_control(job_id: str, action: Literal["pause", "resume", "stop-keep", "retry-failed"]) -> Job:
+async def job_control(job_id: str, action: Literal["pause", "resume", "stop-keep", "retry-failed", "switch-fast"]) -> Job:
     try:
         return public_job(await manager.control(job_id, action))
     except KeyError as exc:
         raise _not_found("Job") from exc
     except QueueFullError as exc:
         raise HTTPException(429, str(exc)) from exc
+    except SwitchFastError as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 @app.post("/api/v1/jobs/{job_id}/clips/{clip_id}/retry", response_model=Job)
@@ -289,7 +318,10 @@ async def retry_clip(job_id: str, clip_id: str) -> Job:
         raise _not_found("Clip")
     if clip.state != "failed":
         raise HTTPException(409, "Only failed clips can be retried")
+    if manager.queue.full():
+        raise HTTPException(429, "The local processing queue is full. Try the clip retry again shortly.")
     clip.state, clip.error, job.state, job.stage_label = "queued", None, "queued", "Retrying one failed clip"
+    manager._reset_steps_for_retry(job)
     manager._save(job)
     await manager.enqueue(job.id)
     return public_job(job)
@@ -400,8 +432,7 @@ async def create_asset(
     asset_id = str(uuid.uuid4())
     directory = settings.data_path / "library" / asset_id
     target = directory / name
-    await _stream_upload(file, target, min(settings.max_upload_bytes, 2_000_000_000))
-    digest = await asyncio.to_thread(_hash_file, target)
+    _, digest = await _stream_upload(file, target, min(settings.max_upload_bytes, 2_000_000_000))
     existing = db.get_asset_by_hash(digest)
     if existing:
         target.unlink(missing_ok=True)
@@ -413,14 +444,6 @@ async def create_asset(
     asset = Asset(id=asset_id, title=title, media_type=file.content_type or "application/octet-stream", filename=name, tags=_csv(tags), triggers=_csv(triggers), policy=policy, licence=licence, content_hash=digest)
     db.save_asset(asset)
     return asset
-
-
-def _hash_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while chunk := handle.read(1024 * 1024):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 @app.put("/api/v1/library/assets/{asset_id}", response_model=Asset)

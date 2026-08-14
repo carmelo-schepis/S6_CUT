@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
-import { FileText, Film, FolderOpen, Link2, Plus, Sparkles, UploadCloud } from "lucide-react";
+import { FileText, Film, FolderOpen, Link2, Plus, Sparkles, UploadCloud, Zap } from "lucide-react";
 import { createClipJob, createScriptJob, readableError } from "../api";
-import type { Health, Project, Style } from "../types";
+import type { Health, ProcessingMode, Project, Style } from "../types";
 import { Button, Field, PageHeader, Progress, StatusBadge, formatAge } from "./common";
 
 const styles: { id: Style; label: string; note: string }[] = [
@@ -32,6 +32,7 @@ export function ProjectsView({ projects, health, hasSelectedProvider = true, onC
   const [maxDuration, setMaxDuration] = useState(60);
   const [aspectRatio, setAspectRatio] = useState("9:16");
   const [narration, setNarration] = useState<"auto" | "local" | "silent">("auto");
+  const [processingMode, setProcessingMode] = useState<ProcessingMode>("auto");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [providerCalloutDismissed, setProviderCalloutDismissed] = useState(false);
@@ -46,7 +47,7 @@ export function ProjectsView({ projects, health, hasSelectedProvider = true, onC
     setSubmitting(true);
     try {
       const result = mode === "clip"
-        ? await createClipJob({ file: sourceType === "file" ? file || undefined : undefined, url: sourceType === "url" ? url.trim() : undefined, style, count, minDuration, maxDuration, aspectRatio })
+        ? await createClipJob({ file: sourceType === "file" ? file || undefined : undefined, url: sourceType === "url" ? url.trim() : undefined, style, count, minDuration, maxDuration, aspectRatio, processingMode })
         : await createScriptJob({ script, style, aspectRatio, narration });
       onCreated(result.project);
     } catch (cause) {
@@ -116,6 +117,22 @@ export function ProjectsView({ projects, health, hasSelectedProvider = true, onC
               <li>Deterministic {style} selection</li>
             </ul>
           </div>
+          {mode === "clip" && <div className="mode-field"><div className="step-label"><span>Mode</span></div>
+            <div className="segmented mode-tabs" aria-label="Processing mode">
+              <button className={processingMode === "auto" ? "active" : ""} onClick={() => setProcessingMode("auto")}><Sparkles size={13} /> Auto</button>
+              <button className={processingMode === "fast" ? "active" : ""} onClick={() => setProcessingMode("fast")}><Zap size={13} /> Fast</button>
+              <button className={processingMode === "smart" ? "active" : ""} onClick={() => setProcessingMode("smart")}><Sparkles size={13} /> Smart</button>
+            </div>
+            {processingMode === "smart" && !hasSelectedProvider
+              ? <p className="mode-note" role="note"><strong>Smart local mode.</strong> No connected provider is selected, so Smart will use local Whisper and deterministic planning.</p>
+              : processingMode === "smart"
+                ? <p className="mode-note"><Sparkles size={12} /> Smart uses the selected provider for enhanced planning.</p>
+                : processingMode === "auto"
+                  ? hasSelectedProvider
+                    ? <p className="mode-note"><Sparkles size={12} /> Auto uses a provider when connected, otherwise Fast local.</p>
+                    : <p className="mode-note"><Zap size={12} /> No provider selected — this will run as a <strong>Fast local cut</strong>.</p>
+                  : <p className="mode-note"><Zap size={12} /> Fast runs deterministically on this machine — no provider needed.</p>}
+          </div>}
           <button className="advanced-toggle" onClick={() => setAdvanced(!advanced)} aria-expanded={advanced}>Advanced controls <span>{advanced ? "−" : "+"}</span></button>
           {advanced && <div className="advanced-grid">
             <Field label="Aspect"><select value={aspectRatio} onChange={(event) => setAspectRatio(event.target.value)}><option>9:16</option><option>1:1</option><option>16:9</option></select></Field>

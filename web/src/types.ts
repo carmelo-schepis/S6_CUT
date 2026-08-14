@@ -15,6 +15,9 @@ export const jobStateSchema = z.enum([
 ]);
 export type JobState = z.infer<typeof jobStateSchema>;
 
+export const processingModeSchema = z.enum(["auto", "fast", "smart"]);
+export type ProcessingMode = z.infer<typeof processingModeSchema>;
+
 export const scoreSchema = z.object({
   hook: z.number().min(0).max(100),
   coherence: z.number().min(0).max(100),
@@ -51,7 +54,7 @@ export const clipSchema = z.object({
   end: z.number().positive(),
   duration: z.number().positive(),
   openingLine: z.string(),
-  score: scoreSchema,
+  score: scoreSchema.nullable().default(null),
   selected: z.boolean(),
   outputName: z.string().nullable().optional(),
   downloadUrl: z.string().nullable().optional(),
@@ -64,6 +67,26 @@ export const clipSchema = z.object({
   if (Math.abs(clip.duration - (clip.end - clip.start)) > .1) context.addIssue({ code: z.ZodIssueCode.custom, message: "Clip duration must match its range", path: ["duration"] });
 });
 export type Clip = z.infer<typeof clipSchema>;
+
+export const processingStepStatusSchema = z.enum(["pending", "active", "complete", "skipped", "failed"]);
+export type ProcessingStepStatus = z.infer<typeof processingStepStatusSchema>;
+
+export const processingStepSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  status: processingStepStatusSchema,
+  detail: z.string().nullable().optional(),
+  startedAt: z.string().nullable().optional(),
+  completedAt: z.string().nullable().optional(),
+  currentItem: z.number().int().min(0).nullable().optional(),
+  totalItems: z.number().int().min(0).nullable().optional(),
+}).superRefine((step, context) => {
+  const terminal = ["complete", "skipped", "failed"].includes(step.status);
+  if (terminal && !step.completedAt) context.addIssue({ code: z.ZodIssueCode.custom, message: "Terminal steps require completedAt", path: ["completedAt"] });
+  if (!terminal && step.completedAt) context.addIssue({ code: z.ZodIssueCode.custom, message: "Pending and active steps cannot be completed", path: ["completedAt"] });
+  if (step.currentItem != null && step.totalItems != null && step.currentItem > step.totalItems) context.addIssue({ code: z.ZodIssueCode.custom, message: "currentItem cannot exceed totalItems", path: ["currentItem"] });
+});
+export type ProcessingStep = z.infer<typeof processingStepSchema>;
 
 export const beatSchema = z.object({
   id: z.string(),
@@ -93,12 +116,18 @@ export const jobSchema = z.object({
   currentItem: z.number().default(0),
   totalItems: z.number().default(0),
   style: styleSchema,
+  processingMode: processingModeSchema.default("smart"),
   warnings: z.array(z.string()).default([]),
   error: z.string().nullable().optional(),
   clips: z.array(clipSchema).default([]),
   beats: z.array(beatSchema).default([]),
+  steps: z.array(processingStepSchema).default([]),
   createdAt: z.string(),
   updatedAt: z.string(),
+}).superRefine((job, context) => {
+  if (job.steps.filter((step) => step.status === "active").length > 1) context.addIssue({ code: z.ZodIssueCode.custom, message: "Only one processing step may be active", path: ["steps"] });
+  const ready = job.steps.find((step) => step.id === "ready");
+  if (ready?.status === "complete" && ["queued", "active", "paused", "recovered"].includes(job.state)) context.addIssue({ code: z.ZodIssueCode.custom, message: "Project ready cannot complete while work is active", path: ["steps"] });
 });
 export type Job = z.infer<typeof jobSchema>;
 

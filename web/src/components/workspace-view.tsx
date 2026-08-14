@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Captions, ChevronDown, Download, Eye, FileText, Film, Lock, Pause, Play, RefreshCw, RotateCcw, SlidersHorizontal, Sparkles, Square, Volume2 } from "lucide-react";
+import { AlertTriangle, Captions, ChevronDown, Clock, Download, Eye, FileText, Film, Lock, Pause, Play, RefreshCw, RotateCcw, SlidersHorizontal, Sparkles, Square, Volume2, Zap } from "lucide-react";
 import { controlJob, createZip, getJob, jobEventsUrl, readableError, retryClip, setClipSelection } from "../api";
 import { jobSchema, type Clip, type Health, type Job, type Project } from "../types";
 import { Button, EmptyState, IconButton, Progress, StatusBadge, formatDuration } from "./common";
 import { isTerminalJob, ProcessingState } from "./processing-state";
+import { ProcessChecklist } from "./process-checklist";
 
 export function WorkspaceView({ project, health, hasSelectedProvider = true, onConfigureProviders = () => undefined, onProjectUpdated, onGoProjects }: { project: Project | null; health?: Health | null; hasSelectedProvider?: boolean; onConfigureProviders?: () => void; onProjectUpdated: () => Promise<void>; onGoProjects: () => void }) {
   const [job, setJob] = useState<Job | null>(null);
@@ -14,7 +15,22 @@ export function WorkspaceView({ project, health, hasSelectedProvider = true, onC
   const [busy, setBusy] = useState(false);
   const [waitingForEngine, setWaitingForEngine] = useState(false);
   const [providerCalloutDismissed, setProviderCalloutDismissed] = useState(false);
+  const [stalledCalloutDismissed, setStalledCalloutDismissed] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
   const pollingRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 5000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const isStalledSmart = Boolean(
+    job &&
+    job.processingMode === "smart" &&
+    job.state === "active" &&
+    !stalledCalloutDismissed &&
+    now - new Date(job.updatedAt).getTime() > 90_000,
+  );
 
   useEffect(() => {
     const jobId = project?.latestJobId;
@@ -79,7 +95,7 @@ export function WorkspaceView({ project, health, hasSelectedProvider = true, onC
   const providerCouldHelp = providerRelatedFailure || Boolean(job?.state === "failed" && project?.mode === "script" && !hasSelectedProvider);
   const canContinueLocally = providerRelatedFailure && Boolean(project?.mode === "clip" || health?.localTts);
 
-  const act = async (action: "pause" | "resume" | "stop-keep" | "retry-failed") => {
+  const act = async (action: "pause" | "resume" | "stop-keep" | "retry-failed" | "switch-fast") => {
     if (!job) return;
     setBusy(true);
     try { setJob(await controlJob(job.id, action)); await onProjectUpdated(); } catch (cause) { setError(readableError(cause)); } finally { setBusy(false); }
@@ -123,8 +139,10 @@ export function WorkspaceView({ project, health, hasSelectedProvider = true, onC
 
     {waitingForEngine && <div className="workspace-offline" role="status">Waiting for the S6 Cut engine…</div>}
     {error && !waitingForEngine && <div className="workspace-alert" role="alert"><AlertTriangle size={16} /> {error}<button onClick={() => setError(null)}>Dismiss</button></div>}
+    {isStalledSmart && <div className="stalled-callout" role="status"><Clock size={16} /><div><strong>Smart processing appears stalled</strong><span>This Smart job has not reported progress for over 90 seconds. You can leave this screen — processing will continue in the engine — or switch to a Fast local cut.</span></div><div><Button disabled={busy} onClick={() => act("switch-fast")}><Zap size={14} /> Switch to fast local</Button><Button onClick={() => setStalledCalloutDismissed(true)}>Keep waiting</Button>{job && job.clips.some((clip) => clip.state === "complete") && <Button disabled={busy} onClick={() => act("stop-keep")}><Square size={14} /> Stop & keep outputs</Button>}</div></div>}
     {job?.state === "failed" && <div className="failure-strip" role="alert"><AlertTriangle size={17} /><div><strong>Project failed</strong><span>{job.error || "The engine could not finish this project. Completed outputs, if any, are still preserved."}</span></div><div><Button disabled={busy} onClick={() => act("retry-failed")}><RefreshCw size={14} /> Retry failed work</Button>{providerCouldHelp && <Button onClick={onConfigureProviders}>Configure providers</Button>}{canContinueLocally && <Button disabled={busy} onClick={() => act("retry-failed")}>Continue with local fallback</Button>}</div></div>}
     {job && !["complete", "failed", "cancelled_kept"].includes(job.state) && <div className="job-strip"><div><strong>{job.stageLabel}</strong><span>{job.currentItem > 0 && job.totalItems > 0 ? ` · ${job.currentItem} of ${job.totalItems}` : ""}</span></div><Progress value={job.progress} label={job.stageLabel} /></div>}
+    {job && job.steps.length > 0 && <ProcessChecklist steps={job.steps} jobState={job.state} compact={isTerminalJob(job)} />}
     {job?.warnings.map((warning) => <div className="warning-strip" key={warning}><AlertTriangle size={14} /><span>{warning}</span></div>)}
 
     <div className="workspace-grid">
@@ -172,7 +190,7 @@ export function WorkspaceView({ project, health, hasSelectedProvider = true, onC
     <section className="board-panel panel">
       <div className="board-header"><div><strong>{project.mode === "clip" ? "Clip board" : "Beat board"}</strong><span>{project.mode === "clip" ? `${job?.clips.length || 0} planned · ${job?.clips.filter((clip) => clip.state === "complete").length || 0} ready` : `${job?.beats.length || 0} visual beats`}</span></div><div className="board-filters"><button className="active">All</button><button>Selected</button><button>Failed</button></div></div>
       {project.mode === "clip" ? <div className="clip-board">{job?.clips.map((clip) => <article key={clip.id} className={`clip-tile ${selectedClipId === clip.id ? "active" : ""} ${clip.state}`} onClick={() => setSelectedClipId(clip.id)}>
-        <div className="clip-thumb"><span className="clip-number">{String(clip.index).padStart(2, "0")}</span>{clip.state === "complete" ? <><Film size={24} /><span className="score-ring">{Math.round(clip.score.total)}</span></> : clip.state === "failed" ? <AlertTriangle size={24} /> : <RefreshCw size={24} className="spin" />}</div>
+        <div className="clip-thumb"><span className="clip-number">{String(clip.index).padStart(2, "0")}</span>{clip.state === "complete" ? <><Film size={24} /><span className="score-ring">{clip.score ? Math.round(clip.score.total) : "–"}</span></> : clip.state === "failed" ? <AlertTriangle size={24} /> : <RefreshCw size={24} className="spin" />}</div>
         <div className="clip-tile-body"><strong>{clip.openingLine || `Candidate ${clip.index}`}</strong><span>{formatDuration(clip.duration)} · {clip.state}</span>{clip.state === "failed" ? <Button disabled={busy} onClick={(event) => { event.stopPropagation(); void retryOneClip(clip); }}><RefreshCw size={12} /> Retry clip</Button> : <label onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={clip.selected} disabled={clip.state !== "complete"} onChange={() => toggleClip(clip)} /> Include in export</label>}</div>
       </article>) || <div className="board-placeholder">Candidates appear here after local transcription and selection.</div>}</div>
         : <div className="beat-board">{job?.beats.map((beat, index) => <article key={beat.id} className="beat-tile"><div className="beat-visual"><span>{String(index + 1).padStart(2, "0")}</span><Sparkles size={22} /></div><div><strong>{beat.concept}</strong><p>{beat.text}</p><span>{formatDuration(beat.start)}–{formatDuration(beat.end)} · {beat.source} · {Math.round(beat.confidence * 100)}%</span></div><StatusBadge state={beat.source === "library" ? "ready" : "fallback"} label={beat.ruleState || beat.source} /></article>)}</div>}
@@ -186,6 +204,7 @@ export function WorkspaceView({ project, health, hasSelectedProvider = true, onC
 }
 
 function ScoreInspector({ clip }: { clip: Clip }) {
+  if (!clip.score) return <p className="muted">No score recorded for this clip yet.</p>;
   const factors = [
     ["Hook", clip.score.hook], ["Coherence", clip.score.coherence], ["Ending", clip.score.ending],
     ["Energy", clip.score.energy], ["Practical value", clip.score.practicalValue], ["Visual potential", clip.score.visualPotential], ["Completeness", clip.score.completeness],

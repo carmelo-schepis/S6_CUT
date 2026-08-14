@@ -4,6 +4,8 @@ import json
 
 import pytest
 
+from engine.app import settings
+from engine.media import synthesize_local
 from engine.security import MediaSigner, SecretVault, confined, mask_secret, safe_filename, validate_youtube_url
 
 
@@ -18,6 +20,21 @@ def test_url_import_rejects_unsupported_protocol_and_host() -> None:
         validate_youtube_url("http://youtube.com/watch?v=one")
     with pytest.raises(ValueError, match="public HTTPS YouTube"):
         validate_youtube_url("https://127.0.0.1/video")
+
+
+def test_local_tts_terminates_options_before_user_script(tmp_path, monkeypatch) -> None:
+    captured: list[str] = []
+
+    def fake_run(command, **_):
+        captured.extend(command)
+        output = command[command.index("-w") + 1]
+        from pathlib import Path
+        Path(output).write_bytes(b"0" * 1200)
+
+    monkeypatch.setattr("engine.media.run", fake_run)
+    synthesize_local("-f/app/data/secrets/instance.key", tmp_path / "voice.wav", settings)
+    assert captured[-2] == "--"
+    assert captured[-1] == "-f/app/data/secrets/instance.key"
 
 
 def test_secrets_encrypt_mask_and_signed_links_expire(tmp_path, monkeypatch) -> None:
