@@ -20,7 +20,7 @@ from .media import (
     sha256_file, synthesize_local, transcribe, youtube_import_title,
 )
 from .models import (
-    Clip, Job, ProcessingMode, ProcessingStep, ProvenanceRecord, ScoreBreakdown, now_iso,
+    Asset, Clip, Job, ProcessingMode, ProcessingStep, ProvenanceRecord, ScoreBreakdown, now_iso,
 )
 from .providers import ProfileService, provider_runtime_message
 from .script import align_script_words, plan_beats
@@ -75,6 +75,41 @@ class JobManager:
             recovered.append(job.id)
         if recovered:
             self.recovery_task = asyncio.create_task(self._feed_recovered(recovered), name="s6-recovery-feeder")
+        # Repair legacy/committed-but-unlinked publications once on startup.  The
+        # backfill is idempotent, so repeated startups never duplicate assets.
+        self.repair_publications()
+
+    def repair_publications(self) -> int:
+        """Backfill missing automatic Library assets for completed clips.
+
+        Legacy completed clips, or clips whose blob promotion committed but whose
+        transaction was interrupted, get exactly one linked asset created from
+        their stable (origin, project, job, clip) identity.  Idempotent by
+        construction: the unique asset identity index reuses an existing asset
+        instead of creating ``Cut 01 (2)``.
+
+        Returns the number of assets backfilled.
+        """
+        repaired = 0
+        for job in self.db.list_jobs():
+            job, backfilled, _ = self.db.backfill_missing_assets(job)
+            private = self.db.get_job_private(job.id)
+            for clip in list(job.clips):
+                if clip.state != "complete" or clip.library_asset_id or not clip.output_name:
+                    continue
+                output = self.settings.data_path / "jobs" / job.id / "clips" / clip.output_name
+                if not output.is_file():
+                    continue
+                try:
+                    probe(output, self.settings)
+                    job, _, _ = self._publish_output(job, clip, output, private, script=job.mode == "script")
+                    backfilled += 1
+                except Exception as exc:
+                    job.warnings.append(f"Could not repair legacy output {clip.index}: {redact(str(exc))}")
+            if backfilled:
+                self._save(job, private)
+                repaired += backfilled
+        return repaired
 
     async def _feed_recovered(self, job_ids: list[str]) -> None:
         for job_id in job_ids:
@@ -236,7 +271,7 @@ class JobManager:
             ProcessingStep(id="source", label="Source received"),
             ProcessingStep(id="probe", label="Video validated"),
             ProcessingStep(id="plan", label="Cut points planned"),
-            ProcessingStep(id="render", label="Clips rendered"),
+            ProcessingStep(id="render", label="Clips rendered and saved"),
             ProcessingStep(id="verify", label="Outputs verified"),
             ProcessingStep(id="ready", label="Project ready"),
         ]
@@ -257,7 +292,7 @@ class JobManager:
             ProcessingStep(id="local_planning", label="Local planning fallback"),
             ProcessingStep(id="select", label="Complete moments selected"),
             ProcessingStep(id="boundaries", label="Clip boundaries verified"),
-            ProcessingStep(id="render", label="Clips rendered"),
+            ProcessingStep(id="render", label="Clips rendered and saved"),
             ProcessingStep(id="verify", label="Outputs verified"),
             ProcessingStep(id="ready", label="Project ready"),
         ]
@@ -271,7 +306,7 @@ class JobManager:
             ProcessingStep(id="align", label="Words aligned"),
             ProcessingStep(id="plan", label="Visual beats planned"),
             ProcessingStep(id="assets", label="Assets resolved"),
-            ProcessingStep(id="render", label="Video rendered"),
+            ProcessingStep(id="render", label="Video rendered and saved"),
             ProcessingStep(id="verify", label="Output verified"),
             ProcessingStep(id="ready", label="Project ready"),
         ]
@@ -388,7 +423,9 @@ class JobManager:
             self.complete_step(job, "render", detail=detail, current=len(successful), total=total, private=private)
         verified = [
             clip for clip in job.clips
-            if clip.state == "complete" and clip.output_name and (output_dir / clip.output_name).is_file()
+            if clip.state == "complete" and clip.library_asset_id and clip.output_name
+            and (output_dir / clip.output_name).is_file()
+            and self.db.validate_clip_asset_relationship(clip, self.db.get_asset(clip.library_asset_id)) is None
         ]
         missing = [
             clip for clip in job.clips
@@ -468,9 +505,10 @@ class JobManager:
             metadata = probe(source, self.settings)
         project = self.db.get_project(job.project_id)
         title = str(private.get("youtube_title") or "YouTube source") if private.get("url") else (project.name if project else source.stem)
+        publication_folder, _ = self._publication_folder(job)
         asset = self.rules.register_managed_video(
             source, title=title, origin="project-source", project_id=job.project_id,
-            job_id=job.id, metadata=metadata, folder_id=job.library_folder_id,
+            job_id=job.id, metadata=metadata, folder_id=publication_folder,
             content_hash=str(private["source_hash"]) if private.get("source_hash") else None,
         )
         private["source_hash"] = asset.content_hash
@@ -480,20 +518,68 @@ class JobManager:
             project.updated_at = now_iso()
             self.db.save_project(project)
 
-    def _register_output(self, job: Job, clip: Clip, output: Path, private: dict[str, Any], *, script: bool = False) -> None:
-        # Renderers atomically publish only after their own FFprobe validation.
-        dimensions = {"9:16": (1080, 1920), "1:1": (1080, 1080), "16:9": (1920, 1080)}
-        width, height = dimensions[str(private["aspect_ratio"])]
-        metadata: dict[str, object] = {"duration": clip.duration, "width": width, "height": height}
+    def _publication_folder(self, job: Job) -> tuple[str, str | None]:
+        """Resolve the folder for the next output publication.
+
+        The worker always uses the immutable job snapshot; when the selected
+        business folder was archived or removed, outputs fall back to Unsorted
+        with a visible job warning instead of failing the render.
+        """
+        effective, warning = self.db.validate_publication_folder(job.library_folder_id, job)
+        if warning and warning not in job.warnings:
+            job.warnings.append(warning)
+        return effective, warning
+
+    def _publish_output(self, job: Job, clip: Clip, output: Path, private: dict[str, Any], *, script: bool = False) -> tuple[Job, Clip, Asset]:
+        """Atomically publish one validated clip output to the Clip Board and Media Library.
+
+        Staged publication protocol:
+          1. resolve the effective business folder (archived/removed -> Unsorted + warning);
+          2. hash the validated output and atomically promote it into the content-addressed
+             blob store (hard link when possible, copy fallback otherwise);
+          3. commit the linked Clip record (final fields incl. ``library_asset_id``), the
+             automatic Asset record, durable blob references, and the job checkpoint in one
+             SQLite transaction.
+
+        Only after the transaction commits is the clip considered published, so the
+        workspace event stream can never expose a ready clip without its Library asset.
+        Recovery is idempotent: re-publishing the same stable (origin, project, job,
+        clip) identity reuses the existing asset and blob instead of duplicating them.
+        """
+        effective_folder_id, _ = self._publication_folder(job)
+        try:
+            output_metadata = probe(output, self.settings)
+            width, height = int(output_metadata["width"]), int(output_metadata["height"])
+        except MediaError:
+            width, height = {"9:16": (1080, 1920), "1:1": (1080, 1080), "16:9": (1920, 1080)}[str(private["aspect_ratio"])]
         project = self.db.get_project(job.project_id)
         project_name = project.name if project else "Project"
         title = f"{project_name} — Script video" if script else f"{project_name} — Cut {clip.index:02d}"
-        asset = self.rules.register_managed_video(
-            output, title=title, origin="script-output" if script else "generated-clip",
-            project_id=job.project_id, job_id=job.id, clip_id=clip.id,
-            metadata=metadata, folder_id=job.library_folder_id,
+        origin = "script-output" if script else "generated-clip"
+
+        digest = sha256_file(output)
+        _, relative = self.rules._publish_blob(output, digest)
+        asset = Asset(
+            id=str(uuid.uuid4()), title=title[:200], media_type="video/mp4",
+            filename=output.name, content_hash=digest, blob_id=digest,
+            origin=origin, folder_id=effective_folder_id,
+            source_project_id=job.project_id, source_job_id=job.id, source_clip_id=clip.id,
+            duration_seconds=clip.duration, width=width, height=height,
+            aspect_ratio=str(private["aspect_ratio"]), tags=[], triggers=[], policy="neutral",
+            licence="Generated from user-supplied or authorised source",
         )
-        clip.blob_id = asset.blob_id
+        published_at = now_iso()
+        clip = clip.model_copy(update={
+            "state": "complete", "output_name": output.name, "title": title,
+            "width": width, "height": height, "folder_id": effective_folder_id,
+            "published_at": published_at, "selected": True, "error": None,
+        })
+        published = sum(1 for item in job.clips if item.state == "complete" and item.id != clip.id) + 1
+        render_step = next((step for step in job.steps if step.id == "render"), None)
+        if render_step:
+            self._apply_step(job, render_step, status="active", detail=f"{published} of {len(job.clips)} rendered and saved", current=published, total=len(job.clips))
+        job.current_item = published
+        return self.db.publish_clip_output(job, clip, asset, relative, output.stat().st_size, private=private)
 
     def _source(self, job: Job, private: dict[str, Any]) -> Path:
         if private.get("source_path"):
@@ -701,14 +787,10 @@ class JobManager:
             visuals = [(clip.visual_label or "Key idea", .45, min(3.0, clip.duration))]
             try:
                 render_clip(source, output, start=clip.start, end=clip.end, aspect=private["aspect_ratio"], words=words, visuals=visuals, overlays=overlays, settings=self.settings)
-                self._register_output(job, clip, output, private)
-                clip.state = "complete"
-                clip.output_name = output.name
-                clip.selected = True
+                job, clip, _ = self._publish_output(job, clip, output, private)
             except Exception as exc:
-                clip.state = "failed"
-                clip.error = redact(str(exc))
-                clip.selected = False
+                clip = clip.model_copy(update={"state": "failed", "error": redact(str(exc)), "selected": False})
+                job.clips = [clip if c.id == clip.id else c for c in job.clips]
             rendered = sum(1 for item in job.clips if item.state == "complete")
             self._apply_step(job, render_step, status="active", detail=f"{rendered} of {len(job.clips)} rendered", current=rendered)
             job.current_item = rendered
@@ -779,14 +861,10 @@ class JobManager:
             output = output_dir / f"{position:02d}-cut.mp4"
             try:
                 render(source, output, start=clip.start, end=clip.end, aspect=private["aspect_ratio"], has_audio=has_audio, settings=self.settings)
-                self._register_output(job, clip, output, private)
-                clip.state = "complete"
-                clip.output_name = output.name
-                clip.selected = True
+                job, clip, _ = self._publish_output(job, clip, output, private)
             except Exception as exc:
-                clip.state = "failed"
-                clip.error = redact(str(exc))
-                clip.selected = False
+                clip = clip.model_copy(update={"state": "failed", "error": redact(str(exc)), "selected": False})
+                job.clips = [clip if c.id == clip.id else c for c in job.clips]
             rendered = sum(1 for item in job.clips if item.state == "complete")
             self._apply_step(job, render_step, status="active", detail=f"{rendered} of {len(job.clips)} rendered", current=rendered)
             job.current_item = rendered
@@ -895,15 +973,10 @@ class JobManager:
             self._save(job, private)
             self.fail_step(job, "ready", detail="Project failed", private=private)
             return
-        self._register_output(job, clip, output, private, script=True)
-        clip.state = "complete"
-        clip.output_name = output.name
-        clip.selected = True
-        self.complete_step(job, "render", detail="Script video rendered", private=private)
         if not output.is_file():
-            clip.state = "failed"
-            clip.error = "Rendered output is missing from disk"
-            clip.selected = False
+            clip = clip.model_copy(update={"state": "failed", "error": "Rendered output is missing from disk", "selected": False})
+            job.clips = [clip if c.id == clip.id else c for c in job.clips]
+            self.fail_step(job, "render", detail="Script render failed", private=private)
             self.fail_step(job, "verify", detail="Rendered output missing from disk", private=private)
             job.state = "failed"
             job.stage = "failed"
@@ -912,6 +985,8 @@ class JobManager:
             self._save(job, private)
             self.fail_step(job, "ready", detail="Project failed", private=private)
             return
+        job, clip, _ = self._publish_output(job, clip, output, private, script=True)
+        self.complete_step(job, "render", detail="Script video rendered", private=private)
         self.complete_step(job, "verify", detail="Output verified", current=1, total=1, private=private)
         job.state = "complete"
         job.stage = "complete"

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { Archive, FileImage, Folder, FolderPlus, ImagePlus, Info, Library, RefreshCw, Search, ShieldCheck, Sparkles, Upload } from "lucide-react";
 import { archiveFolder, createFolder, deleteAsset, explainMatch, getHealth, listAssets, listFolders, moveAssets, moveFolder, readableError, removeFolder, updateAsset, updateFolder, uploadAsset } from "../api";
+import { bindRevalidationOnFocus, createBoundedRevalidation, onLibraryChanged } from "../library-sync";
 import type { AssetOrigin, Health, LibraryAsset, LibraryFolder, MatchExplanation } from "../types";
 import { Button, EmptyState, Field, PageHeader, StatusBadge, formatAge } from "./common";
 
@@ -41,9 +42,22 @@ export function LibraryView() {
     setLoading(false);
   }, [showArchived]);
 
+  // Initial load on mount
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
     return () => window.clearTimeout(timer);
+  }, [load]);
+
+  // Set up bounded revalidation and cross-view event subscription
+  useEffect(() => {
+    const reval = createBoundedRevalidation(() => load(false));
+    const unsubFocus = bindRevalidationOnFocus(() => reval.signal());
+    const unsubEvent = onLibraryChanged(() => reval.signal());
+    return () => {
+      unsubFocus();
+      unsubEvent();
+      reval.dispose();
+    };
   }, [load]);
 
   const visibleAssets = useMemo(() => assets.filter((asset) => {

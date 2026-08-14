@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Health, Job, Project } from "../types";
+import type { Health, Job, LibraryFolder, Project } from "../types";
 import { WorkspaceView } from "./workspace-view";
 
 // ---------------------------------------------------------------
@@ -12,9 +12,10 @@ vi.mock("../api", () => {
   return { readableError, getJob: vi.fn(), controlJob: vi.fn(), jobEventsUrl: vi.fn(() => ""), createZip: vi.fn(), retryClip: vi.fn(), setClipSelection: vi.fn(), listFolders: vi.fn().mockResolvedValue([]), changeProjectFolder: vi.fn() };
 });
 
-import { controlJob, getJob } from "../api";
+import { controlJob, getJob, listFolders } from "../api";
 const mockGetJob = vi.mocked(getJob);
 const mockControlJob = vi.mocked(controlJob);
+const mockListFolders = vi.mocked(listFolders);
 
 const health: Health = {
   status: "ready", version: "test", database: true, ffmpeg: true, ffprobe: true,
@@ -186,5 +187,124 @@ describe("WorkspaceView – processing checklist placement", () => {
     renderView();
     expect(await screen.findAllByText("Planning with provider")).toBeTruthy();
     expect(document.querySelector(".checklist-panel")).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------
+describe("WorkspaceView – publication metadata, Details rename, read-only captions", () => {
+  const folders: LibraryFolder[] = [
+    { id: "acme", name: "Acme Corp", parentId: null, description: "", color: null, archived: false, system: false, createdAt: "2026-01-01", updatedAt: "2026-01-01" },
+    { id: "unsorted", name: "Unsorted", parentId: null, description: "", color: null, archived: false, system: true, createdAt: "2026-01-01", updatedAt: "2026-01-01" },
+  ];
+
+  const publishedJob: Job = {
+    schemaVersion: 1, id: "j1", projectId: "p1", mode: "clip", state: "complete",
+    stage: "done", stageLabel: "Complete", progress: 100,
+    currentItem: 2, totalItems: 2, style: "serious", processingMode: "fast",
+    warnings: [], error: null,
+    clips: [
+      {
+        id: "c1", index: 1, state: "complete", start: 0, end: 10, duration: 10,
+        openingLine: "Hello world", score: null, selected: true, fallbackUsed: false,
+        provenance: [],
+        libraryAssetId: "asset-1", title: "Test — Cut 01", width: 1080, height: 1920,
+        folderId: "acme", downloadUrl: "/api/v1/media/dl/one.mp4",
+      },
+      {
+        id: "c2", index: 2, state: "complete", start: 0, end: 12, duration: 12,
+        openingLine: "Second clip", score: null, selected: true, fallbackUsed: false,
+        provenance: [],
+        libraryAssetId: null, title: "Test — Cut 02", width: 1080, height: 1920,
+        folderId: "acme", downloadUrl: undefined,
+      },
+    ],
+    beats: [], steps: [],
+    createdAt: "2026-08-13T00:00:00Z", updatedAt: "2026-08-13T00:00:00Z",
+  };
+
+  beforeEach(() => {
+    mockListFolders.mockResolvedValue(folders);
+    mockGetJob.mockResolvedValue(publishedJob);
+  });
+
+  it("shows Saved to Library only for server-confirmed linked clips", async () => {
+    renderView();
+    expect(await screen.findByText("Test — Cut 01")).toBeInTheDocument();
+    const badges = screen.getAllByText("Saved to Library");
+    expect(badges).toHaveLength(1);
+    // Badge appears inside the first clip's tile
+    expect(badges[0].closest(".clip-tile")?.classList.contains("active")).toBeTruthy();
+    // Second clip tile has no badge
+    const tiles = document.querySelectorAll(".clip-tile");
+    expect(tiles[1].querySelector(".saved-badge")).toBeNull();
+  });
+
+  it("shows title, duration, dimensions, and folder on ready cards", async () => {
+    renderView();
+    expect(await screen.findByText("Test — Cut 01")).toBeInTheDocument();
+    expect(screen.getByText("Test — Cut 02")).toBeInTheDocument();
+    expect(screen.getByText("0:10 · 1080×1920 · Acme Corp")).toBeInTheDocument();
+    expect(screen.getByText("0:12 · 1080×1920 · Acme Corp")).toBeInTheDocument();
+  });
+
+  it("board header includes the saved-to-Library count", async () => {
+    renderView();
+    expect(await screen.findByText(/2 planned · 2 ready · 1 saved to Library/)).toBeInTheDocument();
+  });
+
+  it("Preview button selects the clip in the viewer", async () => {
+    renderView();
+    expect(await screen.findByText("0:00 / 0:10")).toBeInTheDocument();
+    const previewBtns = screen.getAllByRole("button", { name: "Preview" });
+    expect(previewBtns).toHaveLength(2);
+    fireEvent.click(previewBtns[1]);
+    await waitFor(() => expect(screen.getByText("0:00 / 0:12")).toBeInTheDocument());
+  });
+
+  it("Download link appears when clip has downloadUrl and is complete", async () => {
+    renderView();
+    expect(await screen.findByText("Test — Cut 01")).toBeInTheDocument();
+    const links = screen.getAllByRole("link", { name: /Download/i });
+    expect(links).toHaveLength(1);
+    expect(links[0]).toHaveAttribute("href", "/api/v1/media/dl/one.mp4");
+  });
+
+  it("shows a retryable preview placeholder when the video thumbnail fails to load", async () => {
+    renderView();
+    expect(await screen.findByText("Test — Cut 01")).toBeInTheDocument();
+    const video = document.querySelector<HTMLVideoElement>(".clip-thumbnail");
+    expect(video).toBeTruthy();
+    expect(video?.src).toContain("/api/v1/media/dl/one.mp4");
+    fireEvent.error(video!);
+    expect(screen.getByRole("button", { name: "Retry preview" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry preview" }));
+    expect(document.querySelector(".clip-thumbnail")).toBeTruthy();
+  });
+
+  it("Details panel replaces Inspector, captions are read-only, helper text present", async () => {
+    renderView();
+    expect(await screen.findByText("Test — Cut 01")).toBeInTheDocument();
+    // No "Inspector" heading
+    expect(screen.queryByText("Inspector")).not.toBeInTheDocument();
+    // "Details" heading exists
+    expect(screen.getByText("Details")).toBeInTheDocument();
+    // Preview/review helper text
+    expect(screen.getByText(/Preview generated videos, review processing details, and choose downloads/)).toBeInTheDocument();
+    // Read-only caption preset
+    fireEvent.click(screen.getByRole("button", { name: /captions/i }));
+    expect(screen.getByText("Read-only")).toBeInTheDocument();
+    expect(screen.getByText("Editorial highlight")).toBeInTheDocument();
+    expect(screen.getByText("Minimal · High contrast box")).toBeInTheDocument();
+    // No select inside the inspector content
+    const inspectorContent = document.querySelector(".inspector-content");
+    expect(inspectorContent?.querySelector("select")).toBeNull();
+  });
+
+  it("no timeline as before", async () => {
+    renderView();
+    expect(await screen.findByText("Test — Cut 01")).toBeInTheDocument();
+    expect(screen.queryByText("Layered timeline")).not.toBeInTheDocument();
+    // Both ready clips keep their non-destructive include-in-export checkboxes
+    expect(screen.getAllByLabelText("Include in export")).toHaveLength(2);
   });
 });

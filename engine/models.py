@@ -65,6 +65,13 @@ class Clip(ApiModel):
     selected: bool = True
     output_name: str | None = None
     blob_id: str | None = None
+    library_asset_id: str | None = None
+    title: str | None = None
+    width: int | None = Field(default=None, ge=1)
+    height: int | None = Field(default=None, ge=1)
+    folder_id: str | None = None
+    published_at: str | None = None
+    preview_url: str | None = None
     download_url: str | None = None
     error: str | None = None
     fallback_used: bool = False
@@ -246,6 +253,7 @@ class LibraryFolder(ApiModel):
     description: str = Field(default="", max_length=500)
     color: str | None = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")
     archived: bool = False
+    deleted: bool = False
     system: bool = False
     created_at: str = Field(default_factory=now_iso)
     updated_at: str = Field(default_factory=now_iso)
@@ -304,6 +312,8 @@ class Asset(ApiModel):
     width: int | None = Field(default=None, ge=1)
     height: int | None = Field(default=None, ge=1)
     preview_url: str | None = None
+    aspect_ratio: str | None = None
+    published_at: str = Field(default_factory=now_iso)
     created_at: str = Field(default_factory=now_iso)
 
     @model_validator(mode="after")

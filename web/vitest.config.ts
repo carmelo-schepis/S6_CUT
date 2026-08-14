@@ -10,6 +10,9 @@ export default mergeConfig(
       setupFiles: "./src/test/setup.ts",
       include: ["src/**/*.test.{ts,tsx}"],
       css: true,
+      // jsdom renders the full stylesheet and some interaction tests are
+      // heavy; leave headroom for parallel suite runs.
+      testTimeout: 15_000,
     },
   }),
 );

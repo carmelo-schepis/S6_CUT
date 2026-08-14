@@ -93,8 +93,13 @@ def _download_url(relative: str) -> str:
 def public_job(job: Job) -> Job:
     result = job.model_copy(deep=True)
     for clip in result.clips:
+        if clip.state == "complete" and not clip.library_asset_id:
+            clip.state = "rendering"
+            clip.selected = False
+            clip.error = "Publication repair required before this output is ready"
         if clip.state == "complete" and clip.output_name:
             clip.download_url = _download_url(f"jobs/{job.id}/clips/{clip.output_name}")
+            clip.preview_url = clip.download_url
     return result
 
 
@@ -285,6 +290,24 @@ async def create_script_job(request: Request, value: ScriptJobInput) -> dict[str
     db.save_job(job, private)
     await manager.enqueue(job_id)
     return {"project": project, "job": public_job(job)}
+
+
+@app.post("/api/v1/jobs/{job_id}/repair-publication", response_model=Job)
+async def repair_job_publication(job_id: str) -> Job:
+    """Backfill missing Library assets for completed clips in a job.
+
+    Idempotent repair operation: scans the job's completed clips, creates
+    a Media Library asset for any clip that lacks ``library_asset_id``,
+    and persists the updated job record.  Uses stable (origin, project,
+    job, clip) identity so repeated calls never duplicate assets.
+    """
+    job = db.get_job(job_id)
+    if not job:
+        raise _not_found("Job")
+    job, backfilled, _ = db.backfill_missing_assets(job)
+    if backfilled:
+        manager._save(job)
+    return public_job(job)
 
 
 @app.get("/api/v1/jobs", response_model=list[Job])

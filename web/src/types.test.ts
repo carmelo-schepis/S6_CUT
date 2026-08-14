@@ -105,4 +105,40 @@ describe("versioned UI contracts", () => {
     expect(clip.score).not.toBeNull();
     expect(clip.score!.total).toBe(82);
   });
+
+  it("accepts publication metadata fields (libraryAssetId, title, dimensions, folder, publishedAt, previewUrl)", () => {
+    const clip = clipSchema.parse({
+      id: "c1", index: 1, state: "complete", start: 0, end: 5, duration: 5,
+      openingLine: "Test", selected: true, fallbackUsed: false, provenance: [],
+      libraryAssetId: "asset-1",
+      title: "Project — Cut 01",
+      width: 1080, height: 1920,
+      folderId: "business-1", folderName: "Acme Corp",
+      publishedAt: "2026-08-14T00:00:00Z",
+      previewUrl: "/api/v1/media/preview/hash.mp4",
+    });
+    expect(clip.libraryAssetId).toBe("asset-1");
+    expect(clip.title).toBe("Project — Cut 01");
+    expect(clip.width).toBe(1080);
+    expect(clip.height).toBe(1920);
+    expect(clip.folderId).toBe("business-1");
+    expect(clip.folderName).toBe("Acme Corp");
+    expect(clip.publishedAt).toBe("2026-08-14T00:00:00Z");
+    expect(clip.previewUrl).toBe("/api/v1/media/preview/hash.mp4");
+  });
+
+  it("legacy clip without publication metadata still parses (fields are undefined)", () => {
+    const clip = clipSchema.parse({
+      id: "c1", index: 1, state: "complete", start: 0, end: 5, duration: 5,
+      openingLine: "Hi", selected: true, fallbackUsed: false, provenance: [],
+    });
+    expect(clip.libraryAssetId).toBeUndefined();
+    expect(clip.title).toBeUndefined();
+    expect(clip.width).toBeUndefined();
+    expect(clip.height).toBeUndefined();
+    expect(clip.folderId).toBeUndefined();
+    expect(clip.folderName).toBeUndefined();
+    expect(clip.publishedAt).toBeUndefined();
+    expect(clip.previewUrl).toBeUndefined();
+  });
 });

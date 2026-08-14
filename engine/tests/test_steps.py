@@ -274,7 +274,7 @@ def test_fast_checklist_exact_and_no_irrelevant_steps(monkeypatch: pytest.Monkey
     assert job.state == "complete"
     assert [step.id for step in job.steps] == FAST_IDS
     assert [step.label for step in job.steps] == [
-        "Source received", "Video validated", "Cut points planned", "Clips rendered", "Outputs verified", "Project ready",
+        "Source received", "Video validated", "Cut points planned", "Clips rendered and saved", "Outputs verified", "Project ready",
     ]
     for step in job.steps:
         assert step.status == "complete"

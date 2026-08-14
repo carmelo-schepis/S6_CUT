@@ -3,12 +3,13 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+import uuid
 from pathlib import Path
 from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
-from .models import Asset, Job, LibraryFolder, Project, ProviderProfile, UNSORTED_LIBRARY_FOLDER_ID, now_iso
+from .models import Asset, Clip, Job, LibraryFolder, Project, ProviderProfile, UNSORTED_LIBRARY_FOLDER_ID, now_iso
 
 UNSORTED_FOLDER_ID = UNSORTED_LIBRARY_FOLDER_ID
 MAX_FOLDER_DEPTH = 3
@@ -278,6 +279,41 @@ class Database:
             row = db.execute("SELECT * FROM assets WHERE content_hash=? ORDER BY updated_at LIMIT 1", (content_hash,)).fetchone()
         return self._asset_from_row(row) if row else None
 
+    def validate_clip_asset_relationship(self, clip: Clip, asset: Asset | None) -> str | None:
+        """Validate the Clip Board ↔ Media Library bidirectional relationship.
+
+        Returns ``None`` when the pair is consistent, otherwise a human-readable
+        reason.  Used by publication and by repair/observability paths to enforce
+        the invariant: a ready clip must have its linked asset, and an automatic
+        asset must point back at its source clip.
+        """
+        if clip.state == "complete" and clip.library_asset_id is None:
+            return "Clip is ready but has no linked Library asset"
+        if clip.library_asset_id is None:
+            return None
+        if asset is None:
+            asset = self.get_asset(clip.library_asset_id)
+        if asset is None:
+            return "Clip references a Library asset that does not exist"
+        if asset.source_clip_id != clip.id:
+            return "Asset does not point back at its source clip"
+        if clip.blob_id and asset.blob_id and clip.blob_id != asset.blob_id:
+            return "Clip and asset reference different blobs"
+        return None
+
+    def get_generated_asset(self, origin: str, project_id: str, job_id: str, clip_id: str) -> Asset | None:
+        """Look up the automatic asset for a generated output by its stable identity.
+
+        Mirrors the ``assets_output_identity_idx`` unique key used at publication so
+        callers can validate the bidirectional clip <-> asset relationship.
+        """
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT * FROM assets WHERE origin=? AND source_project_id=? AND source_job_id=? AND source_clip_id=?",
+                (origin, project_id, job_id, clip_id),
+            ).fetchone()
+        return self._asset_from_row(row) if row else None
+
     def register_blob_asset(self, asset: Asset, relative_path: str, byte_size: int) -> Asset:
         """Atomically bind a published blob, durable references, and one idempotent asset."""
         with self._lock, self._connect() as db:
@@ -335,6 +371,211 @@ class Database:
                 db.execute("INSERT OR IGNORE INTO media_blob_refs(blob_id,ref_type,ref_id,created_at) VALUES(?,?,?,?)", (asset.blob_id, ref_type, ref_id, stamp))
         return asset
 
+    def validate_publication_folder(self, folder_id: str | None, job: Job) -> tuple[str, str | None]:
+        """Resolve the effective folder ID for publication.
+
+        Returns (resolved_folder_id, warning_or_None).
+        Falls back to Unsorted with a warning when the folder is archived, deleted, or missing.
+        """
+        effective = folder_id or UNSORTED_FOLDER_ID
+        folder = self.get_folder(effective)
+        if folder and (folder.archived or folder.deleted):
+            return UNSORTED_FOLDER_ID, f"Business folder '{folder.name}' was archived or removed; assets published to Unsorted."
+        if not folder:
+            return UNSORTED_FOLDER_ID, "Selected business folder no longer exists; assets published to Unsorted."
+        return effective, None
+
+    def publish_clip_output(
+        self,
+        job: Job,
+        clip: Clip,
+        asset: Asset,
+        relative_path: str,
+        byte_size: int,
+        *,
+        private: dict[str, Any] | None = None,
+    ) -> tuple[Job, Clip, Asset]:
+        """Atomically publish a validated clip output: blob, asset, clip fields, and job checkpoint.
+
+        All database writes happen in one SQLite transaction.  After this method
+        returns the clip is considered fully published – both the Clip Board and
+        Media Library records are committed, and the job checkpoint is advanced.
+
+        The bidirectional relationship is validated:
+        - clip.library_asset_id == asset.id
+        - asset.source_clip_id == clip.id
+
+        Returns the updated (job, clip, asset) with final state.
+        """
+        with self._lock, self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            stamp = now_iso()
+
+            # 1. Upsert the media_blob
+            db.execute(
+                "INSERT INTO media_blobs(id,content_hash,relative_path,byte_size,created_at) VALUES(?,?,?,?,?) "
+                "ON CONFLICT(id) DO UPDATE SET relative_path=excluded.relative_path,byte_size=excluded.byte_size",
+                (asset.blob_id, asset.content_hash, relative_path, byte_size, stamp),
+            )
+
+            # 2. Idempotent asset upsert by (origin, source_project_id, source_job_id, source_clip_id)
+            existing_row = db.execute(
+                "SELECT * FROM assets WHERE origin=? AND source_project_id=? AND source_job_id=? AND source_clip_id=?",
+                (asset.origin, asset.source_project_id, asset.source_job_id, asset.source_clip_id),
+            ).fetchone()
+
+            if existing_row:
+                existing = self._asset_from_row(existing_row)
+                if existing.blob_id != asset.blob_id:
+                    db.execute("DELETE FROM media_blob_refs WHERE ref_type='asset' AND ref_id=?", (existing.id,))
+                # Merge: keep existing metadata, update output fields
+                asset = asset.model_copy(update={
+                    "id": existing.id, "created_at": existing.created_at,
+                    "title": existing.title, "description": existing.description,
+                    "folder_id": existing.folder_id, "tags": existing.tags,
+                    "brands": existing.brands, "people": existing.people,
+                    "triggers": existing.triggers, "aliases": existing.aliases,
+                    "negative_triggers": existing.negative_triggers, "policy": existing.policy,
+                    "protected": existing.protected, "min_spacing_seconds": existing.min_spacing_seconds,
+                    "max_uses_per_project": existing.max_uses_per_project,
+                    "active_from": existing.active_from, "active_until": existing.active_until,
+                    "licence": existing.licence, "attribution": existing.attribution,
+                    "source_project_id": existing.source_project_id,
+                    "source_job_id": existing.source_job_id,
+                    "source_clip_id": existing.source_clip_id,
+                })
+
+            db.execute(
+                "INSERT INTO assets(id,content_hash,updated_at,payload,folder_id,origin,blob_id,source_project_id,source_job_id,source_clip_id) VALUES(?,?,?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(id) DO UPDATE SET content_hash=excluded.content_hash,updated_at=excluded.updated_at,payload=excluded.payload,folder_id=excluded.folder_id,origin=excluded.origin,blob_id=excluded.blob_id,source_project_id=excluded.source_project_id,source_job_id=excluded.source_job_id,source_clip_id=excluded.source_clip_id",
+                (asset.id, asset.content_hash, stamp, self._json(asset), asset.folder_id, asset.origin, asset.blob_id, asset.source_project_id, asset.source_job_id, asset.source_clip_id),
+            )
+
+            # 3. Durable references
+            db.execute("DELETE FROM media_blob_refs WHERE ref_type='clip-output' AND ref_id=?", (clip.id,))
+            for ref_type, ref_id in [("asset", asset.id), ("clip-output", clip.id)]:
+                db.execute("INSERT OR IGNORE INTO media_blob_refs(blob_id,ref_type,ref_id,created_at) VALUES(?,?,?,?)", (asset.blob_id, ref_type, ref_id, stamp))
+
+            # 4. Update Clip fields with library_asset_id
+            clip = clip.model_copy(update={
+                "state": "complete",
+                "blob_id": asset.blob_id,
+                "library_asset_id": asset.id,
+            })
+
+            # 5. Update the job payload (which contains the clip list)
+            updated_clips = []
+            for c in job.clips:
+                if c.id == clip.id:
+                    updated_clips.append(clip)
+                else:
+                    updated_clips.append(c)
+
+            job = job.model_copy(update={
+                "clips": updated_clips,
+                "updated_at": stamp,
+            })
+
+            # 6. Save updated job payload
+            folder_id = job.library_folder_id or UNSORTED_FOLDER_ID
+            private_json = json.dumps(private, separators=(",", ":")) if private is not None else None
+            existing_private = db.execute("SELECT private_payload FROM jobs WHERE id=?", (job.id,)).fetchone()
+            if private_json is None:
+                private_json = existing_private["private_payload"] if existing_private else "{}"
+
+            db.execute(
+                "INSERT INTO jobs(id,project_id,state,updated_at,payload,private_payload,library_folder_id) VALUES(?,?,?,?,?,?,?) "
+                "ON CONFLICT(id) DO UPDATE SET project_id=excluded.project_id,state=excluded.state,updated_at=excluded.updated_at,payload=excluded.payload,private_payload=excluded.private_payload,library_folder_id=excluded.library_folder_id",
+                (job.id, job.project_id, job.state, stamp, self._json(job), private_json, folder_id),
+            )
+
+            # 7. Validate bidirectional relationship
+            if clip.library_asset_id != asset.id:
+                raise ValueError(f"Publication invariant violated: clip.library_asset_id ({clip.library_asset_id}) != asset.id ({asset.id})")
+            if asset.source_clip_id != clip.id:
+                raise ValueError(f"Publication invariant violated: asset.source_clip_id ({asset.source_clip_id}) != clip.id ({clip.id})")
+
+        return job, clip, asset
+
+    def backfill_missing_assets(self, job: Job) -> tuple[Job, int, list[str]]:
+        """Create missing Media Library assets for completed clips that lack one.
+
+        Scans completed clips in the job.  For each clip that has ``blob_id``
+        and ``output_name`` set but no ``library_asset_id``, creates a new
+        automatic asset using the blob and clip metadata.  Uses the stable
+        (origin, source_project_id, source_job_id, source_clip_id) identity so
+        an asset that already exists for that clip is reused, never duplicated.
+
+        The caller is responsible for persisting the returned job (which carries
+        the updated ``clip.library_asset_id`` fields).
+
+        Returns ``(job, backfilled_count, created_asset_ids)``.
+        """
+        backfilled = 0
+        created_ids: list[str] = []
+        private = self.get_job_private(job.id)
+        dimensions = {"9:16": (1080, 1920), "1:1": (1080, 1080), "16:9": (1920, 1080)}
+        width, height = dimensions.get(str(private.get("aspect_ratio") or "9:16"), (1080, 1920))
+
+        for clip in job.clips:
+            if clip.state != "complete":
+                continue
+            if clip.library_asset_id is not None:
+                continue
+            origin = "script-output" if job.mode == "script" else "generated-clip"
+            existing_asset = self.get_generated_asset(origin, job.project_id, job.id, clip.id)
+            if existing_asset:
+                job.clips = [
+                    (c.model_copy(update={"library_asset_id": existing_asset.id, "blob_id": existing_asset.blob_id, "folder_id": existing_asset.folder_id, "width": existing_asset.width, "height": existing_asset.height, "title": existing_asset.title, "published_at": existing_asset.published_at}) if c.id == clip.id else c)
+                    for c in job.clips
+                ]
+                backfilled += 1
+                created_ids.append(existing_asset.id)
+                continue
+            if not clip.blob_id or not clip.output_name:
+                continue
+
+            relative = self.blob_relative_path(clip.blob_id)
+            if not relative:
+                continue
+            blob_path = self.path.parent / relative
+            if not blob_path.is_file():
+                continue
+
+            project = self.get_project(job.project_id)
+            project_name = project.name if project else "Project"
+            title = f"{project_name} — Script video" if origin == "script-output" else f"{project_name} — Cut {clip.index:02d}"
+            folder_id, _ = self.validate_publication_folder(job.library_folder_id, job)
+
+            asset = Asset(
+                id=str(uuid.uuid4()),
+                title=title[:200],
+                media_type="video/mp4",
+                filename=clip.output_name,
+                content_hash=clip.blob_id,
+                blob_id=clip.blob_id,
+                origin=origin,
+                folder_id=folder_id,
+                source_project_id=job.project_id,
+                source_job_id=job.id,
+                source_clip_id=clip.id,
+                duration_seconds=clip.duration,
+                width=width,
+                height=height,
+                policy="neutral",
+                licence="Created or supplied by user",
+            )
+            result = self.register_blob_asset(asset, relative, blob_path.stat().st_size)
+            job.clips = [
+                (c.model_copy(update={"library_asset_id": result.id}) if c.id == clip.id else c)
+                for c in job.clips
+            ]
+            job.updated_at = now_iso()
+            backfilled += 1
+            created_ids.append(result.id)
+
+        return job, backfilled, created_ids
+
     def blob_relative_path(self, blob_id: str) -> str | None:
         with self._connect() as db:
             row = db.execute("SELECT relative_path FROM media_blobs WHERE id=?", (blob_id,)).fetchone()
@@ -385,7 +626,7 @@ class Database:
         where = " WHERE deleted=0" + ("" if include_archived else " AND archived=0")
         with self._connect() as db:
             rows = db.execute("SELECT * FROM library_folders" + where + " ORDER BY system DESC,name_key").fetchall()
-        return [LibraryFolder(id=row["id"], name=row["name"], parent_id=row["parent_id"], description=row["description"], color=row["color"], archived=bool(row["archived"]), system=bool(row["system"]), created_at=row["created_at"], updated_at=row["updated_at"]) for row in rows]
+        return [LibraryFolder(id=row["id"], name=row["name"], parent_id=row["parent_id"], description=row["description"], color=row["color"], archived=bool(row["archived"]), deleted=bool(row["deleted"]), system=bool(row["system"]), created_at=row["created_at"], updated_at=row["updated_at"]) for row in rows]
 
     def get_folder(self, folder_id: str) -> LibraryFolder | None:
         return next((folder for folder in self.list_folders(True) if folder.id == folder_id), None)

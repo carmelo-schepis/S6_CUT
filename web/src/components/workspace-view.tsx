@@ -1,15 +1,63 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Captions, Clock, Download, Eye, FileText, Film, Pause, Play, RefreshCw, RotateCcw, SlidersHorizontal, Sparkles, Square, Volume2, Zap } from "lucide-react";
+import { AlertTriangle, Captions, Check, Clock, Download, Eye, FileText, Film, Pause, Play, RefreshCw, RotateCcw, SlidersHorizontal, Sparkles, Square, Volume2, Zap } from "lucide-react";
 import { changeProjectFolder, controlJob, createZip, getJob, jobEventsUrl, listFolders, readableError, retryClip, setClipSelection } from "../api";
+import { emitLibraryChanged } from "../library-sync";
 import { jobSchema, type Clip, type Health, type Job, type LibraryFolder, type Project } from "../types";
 import { Button, EmptyState, IconButton, Progress, StatusBadge, formatDuration } from "./common";
 import { isTerminalJob, ProcessingState } from "./processing-state";
 import { ProcessChecklist } from "./process-checklist";
 
+function folderName(folderId: string | null | undefined, folders: LibraryFolder[], project: Project | null): string {
+  if (!folderId) {
+    // Fall back to project-level folder selection
+    const pf = project?.libraryFolderId;
+    if (pf) {
+      const match = folders.find((f) => f.id === pf);
+      if (match) return match.name;
+    }
+    return "Unsorted";
+  }
+  const match = folders.find((f) => f.id === folderId);
+  return match?.name || "Unsorted";
+}
+
+function ClipThumb({ clip }: { clip: Clip }) {
+  const [failed, setFailed] = useState(false);
+  // Try previewUrl first, then downloadUrl as fallback
+  const src = clip.previewUrl || clip.downloadUrl;
+  if (src && !failed) {
+    return (
+      <video
+        src={src}
+        muted
+        playsInline
+        preload="metadata"
+        className="clip-thumbnail"
+        aria-hidden="true"
+        onError={() => setFailed(true)}
+      />
+    );
+  }
+  return (
+    <>
+      <Film size={24} />
+      {failed && (
+        <button
+          className="clip-thumb-retry"
+          aria-label="Retry preview"
+          onClick={(e) => { e.stopPropagation(); setFailed(false); }}
+        >
+          <RefreshCw size={12} />
+        </button>
+      )}
+    </>
+  );
+}
+
 export function WorkspaceView({ project, health, hasSelectedProvider = true, onConfigureProviders = () => undefined, onProjectUpdated, onGoProjects }: { project: Project | null; health?: Health | null; hasSelectedProvider?: boolean; onConfigureProviders?: () => void; onProjectUpdated: () => Promise<void>; onGoProjects: () => void }) {
   const [job, setJob] = useState<Job | null>(null);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
-  const [inspectorTab, setInspectorTab] = useState<"score" | "captions" | "asset" | "info">("score");
+  const [detailsTab, setDetailsTab] = useState<"score" | "captions" | "asset" | "info">("score");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [waitingForEngine, setWaitingForEngine] = useState(false);
@@ -18,6 +66,10 @@ export function WorkspaceView({ project, health, hasSelectedProvider = true, onC
   const [folders, setFolders] = useState<LibraryFolder[]>([]);
   const [now, setNow] = useState(() => Date.now());
   const pollingRef = useRef<number | null>(null);
+  // Track the previous clip states so we can detect new publications
+  // and emit a library-changed signal for cross-view revalidation.
+  const prevClipStates = useRef<Map<string, Clip["state"]>>(new Map());
+  const jobRef = useRef<Job | null>(null);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 5000);
@@ -45,6 +97,23 @@ export function WorkspaceView({ project, health, hasSelectedProvider = true, onC
       if (disposed) return;
       terminal = isTerminalJob(next);
       setWaitingForEngine(false);
+      // Detect newly completed clips and emit library-changed signal
+      const prev = jobRef.current;
+      if (prev) {
+        for (const clip of next.clips) {
+          const prevState = prevClipStates.current.get(clip.id);
+          if (prevState !== "complete" && clip.state === "complete") {
+            // A clip just became complete — library data may have changed
+            emitLibraryChanged();
+            break;
+          }
+        }
+      }
+      // Update stored clip states
+      for (const clip of next.clips) {
+        prevClipStates.current.set(clip.id, clip.state);
+      }
+      jobRef.current = next;
       setJob(next);
       setSelectedClipId((current) => {
         const currentClip = next.clips.find((clip) => clip.id === current);
@@ -92,6 +161,7 @@ export function WorkspaceView({ project, health, hasSelectedProvider = true, onC
 
   const selectedClip = useMemo(() => job?.clips.find((clip) => clip.id === selectedClipId) || null, [job, selectedClipId]);
   const selectedIds = job?.clips.filter((clip) => clip.selected && clip.state === "complete").map((clip) => clip.id) || [];
+  const savedCount = job?.clips.filter((clip) => clip.state === "complete" && clip.libraryAssetId).length || 0;
   const providerRelatedFailure = Boolean(job?.error && /openrouter|elevenlabs|provider|credential|api key|model|voice/i.test(job.error));
   const providerCouldHelp = providerRelatedFailure || Boolean(job?.state === "failed" && project?.mode === "script" && !hasSelectedProvider);
   const canContinueLocally = providerRelatedFailure && Boolean(project?.mode === "clip" || health?.localTts);
@@ -128,6 +198,12 @@ export function WorkspaceView({ project, health, hasSelectedProvider = true, onC
       const result = await createZip(job.id, selectedIds);
       window.location.assign(result.downloadUrl);
     } catch (cause) { setError(readableError(cause)); } finally { setBusy(false); }
+  };
+
+  const selectClipForPreview = (clip: Clip) => {
+    setSelectedClipId(clip.id);
+    // Scroll the viewer into view on compact screens
+    document.querySelector(".viewer-panel")?.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
   };
 
   if (!project) return <div className="page"><EmptyState icon={<SlidersHorizontal size={30} />} title="No project selected" action={<Button variant="primary" onClick={onGoProjects}>Choose a project</Button>}>Open a project to review its clips, score decisions, storyboard, and export state.</EmptyState></div>;
@@ -181,25 +257,26 @@ export function WorkspaceView({ project, health, hasSelectedProvider = true, onC
       </section>
 
       <aside className="inspector-panel panel">
-        <div className="panel-title"><strong>Inspector</strong>{selectedClip && <span>Clip {selectedClip.index}</span>}</div>
+        <div className="panel-title"><strong>Details</strong>{selectedClip && <span>Clip {selectedClip.index}</span>}</div>
         <div className="inspector-tabs">
-          {(["score", "captions", "asset", "info"] as const).map((tab) => <button key={tab} className={inspectorTab === tab ? "active" : ""} onClick={() => setInspectorTab(tab)}>{tab}</button>)}
+          {(["score", "captions", "asset", "info"] as const).map((tab) => <button key={tab} className={detailsTab === tab ? "active" : ""} onClick={() => setDetailsTab(tab)}>{tab}</button>)}
         </div>
         <div className="inspector-content">
+          <div className="review-hint" role="note">Preview generated videos, review processing details, and choose downloads. Editing happens by changing project settings and generating a new version.</div>
           {!hasSelectedProvider && !providerCalloutDismissed && <div className="provider-callout compact"><Sparkles size={15} /><div><strong>Add optional AI providers</strong><span>Connect OpenRouter for enhanced planning and ElevenLabs for premium narration. Local fallbacks remain available.</span></div><div><Button onClick={onConfigureProviders}>Configure providers</Button><Button variant="ghost" onClick={() => setProviderCalloutDismissed(true)}>Continue locally</Button></div></div>}
-          {inspectorTab === "score" && (selectedClip ? <ScoreInspector clip={selectedClip} /> : <p className="muted">Select a clip to inspect its auditable score.</p>)}
-          {inspectorTab === "captions" && <><div className="inspector-section"><label>Preset</label><select defaultValue="editorial"><option value="editorial">Editorial highlight</option><option value="minimal">Minimal</option><option value="boxed">High contrast box</option></select></div><div className="inspector-note"><Captions size={15} /><span>Caption timing comes from local word timestamps. Preview and export use the same EDL model.</span></div></>}
-          {inspectorTab === "asset" && <><div className="inspector-section"><label>Visual intention</label><strong>{selectedClip?.visualLabel || job?.beats[0]?.concept || "No visual beat selected"}</strong></div><div className="inspector-section"><label>Source</label><span>{selectedClip?.provenance[0]?.provider || job?.beats[0]?.source || "Text-card fallback"}</span></div><div className="inspector-note"><Sparkles size={15} /><span>{selectedClip?.provenance[0]?.matchReason || job?.beats[0]?.matchReason || "A relevant text card is preferred over unrelated media."}</span></div></>}
-          {inspectorTab === "info" && <dl className="info-list"><dt>Project</dt><dd>{project.id.slice(0, 8)}</dd><dt>Job</dt><dd>{job?.id.slice(0, 8) || "—"}</dd><dt>Mode</dt><dd>{project.mode}</dd><dt>Style</dt><dd>{project.style}</dd><dt>Source</dt><dd>{project.sourceKind}</dd><dt>Storage</dt><dd>Mounted local data</dd></dl>}
+          {detailsTab === "score" && (selectedClip ? <ScoreInspector clip={selectedClip} /> : <p className="muted">Select a clip to inspect its auditable score.</p>)}
+          {detailsTab === "captions" && <><div className="inspector-section"><label>Preset</label><span className="readonly-preset">Editorial highlight<span className="readonly-tag">Read-only</span></span><span className="preset-options">Minimal · High contrast box</span></div><div className="inspector-note"><Captions size={15} /><span>Caption style and timing are decided when the job is created. Captions are burned into each render from local word timestamps; nothing here is editable.</span></div></>}
+          {detailsTab === "asset" && <><div className="inspector-section"><label>Visual intention</label><strong>{selectedClip?.visualLabel || job?.beats[0]?.concept || "No visual beat selected"}</strong></div><div className="inspector-section"><label>Source</label><span>{selectedClip?.provenance[0]?.provider || job?.beats[0]?.source || "Text-card fallback"}</span></div><div className="inspector-note"><Sparkles size={15} /><span>{selectedClip?.provenance[0]?.matchReason || job?.beats[0]?.matchReason || "A relevant text card is preferred over unrelated media."}</span></div></>}
+          {detailsTab === "info" && <dl className="info-list"><dt>Project</dt><dd>{project.id.slice(0, 8)}</dd><dt>Job</dt><dd>{job?.id.slice(0, 8) || "—"}</dd><dt>Mode</dt><dd>{project.mode}</dd><dt>Style</dt><dd>{project.style}</dd><dt>Source</dt><dd>{project.sourceKind}</dd><dt>Storage</dt><dd>Mounted local data</dd></dl>}
         </div>
       </aside>
     </div>
 
     <section className="board-panel panel">
-      <div className="board-header"><div><strong>{project.mode === "clip" ? "Clip board" : "Beat board"}</strong><span>{project.mode === "clip" ? `${job?.clips.length || 0} planned · ${job?.clips.filter((clip) => clip.state === "complete").length || 0} ready` : `${job?.beats.length || 0} visual beats`}</span></div><div className="board-filters"><button className="active">All</button><button>Selected</button><button>Failed</button></div></div>
+      <div className="board-header"><div><strong>{project.mode === "clip" ? "Clip board" : "Beat board"}</strong><span>{project.mode === "clip" ? `${job?.clips.length || 0} planned · ${job?.clips.filter((clip) => clip.state === "complete").length || 0} ready${savedCount ? ` · ${savedCount} saved to Library` : ""}` : `${job?.beats.length || 0} visual beats`}</span></div><div className="board-filters"><button className="active">All</button><button>Selected</button><button>Failed</button></div></div>
       {project.mode === "clip" ? <div className="clip-board">{job?.clips.map((clip) => <article key={clip.id} className={`clip-tile ${selectedClipId === clip.id ? "active" : ""} ${clip.state}`} onClick={() => setSelectedClipId(clip.id)}>
-        <div className="clip-thumb"><span className="clip-number">{String(clip.index).padStart(2, "0")}</span>{clip.state === "complete" ? <><Film size={24} /><span className="score-ring">{clip.score ? Math.round(clip.score.total) : "–"}</span></> : clip.state === "failed" ? <AlertTriangle size={24} /> : <RefreshCw size={24} className="spin" />}</div>
-        <div className="clip-tile-body"><strong>{clip.openingLine || `Candidate ${clip.index}`}</strong><span>{formatDuration(clip.duration)} · {clip.state}</span>{clip.state === "failed" ? <Button disabled={busy} onClick={(event) => { event.stopPropagation(); void retryOneClip(clip); }}><RefreshCw size={12} /> Retry clip</Button> : <label onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={clip.selected} disabled={clip.state !== "complete"} onChange={() => toggleClip(clip)} /> Include in export</label>}</div>
+        <div className="clip-thumb"><span className="clip-number">{String(clip.index).padStart(2, "0")}</span>{clip.state === "complete" ? <><ClipThumb clip={clip} /><span className="score-ring">{clip.score ? Math.round(clip.score.total) : "–"}</span></> : clip.state === "failed" ? <AlertTriangle size={24} /> : <RefreshCw size={24} className="spin" />}</div>
+        <div className="clip-tile-body"><strong className="clip-title">{clip.title || `Cut ${String(clip.index).padStart(2, "0")}`}</strong><span className="clip-line">{clip.openingLine || "Candidate clip"}</span><span className="clip-meta">{formatDuration(clip.duration)}{clip.width && clip.height ? ` · ${clip.width}×${clip.height}` : ""} · {folderName(clip.folderId, folders, project)}</span>{clip.state === "complete" && clip.libraryAssetId && <span className="saved-badge"><Check size={11} /> Saved to Library</span>}{clip.state === "failed" ? <Button disabled={busy} onClick={(event) => { event.stopPropagation(); void retryOneClip(clip); }}><RefreshCw size={12} /> Retry clip</Button> : <div className="clip-actions"><Button className="clip-action" disabled={clip.state !== "complete"} onClick={(event) => { event.stopPropagation(); selectClipForPreview(clip); }}><Eye size={12} /> Preview</Button>{clip.state === "complete" && clip.downloadUrl && <a className="button button-secondary clip-action" href={clip.downloadUrl} download onClick={(event) => event.stopPropagation()}><Download size={12} /> Download</a>}<label onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={clip.selected} disabled={clip.state !== "complete"} onChange={() => toggleClip(clip)} /> Include in export</label></div>}</div>
       </article>) || <div className="board-placeholder">Candidates appear here after local transcription and selection.</div>}</div>
         : <div className="beat-board">{job?.beats.map((beat, index) => <article key={beat.id} className="beat-tile"><div className="beat-visual"><span>{String(index + 1).padStart(2, "0")}</span><Sparkles size={22} /></div><div><strong>{beat.concept}</strong><p>{beat.text}</p><span>{formatDuration(beat.start)}–{formatDuration(beat.end)} · {beat.source} · {Math.round(beat.confidence * 100)}%</span></div><StatusBadge state={beat.source === "library" ? "ready" : "fallback"} label={beat.ruleState || beat.source} /></article>)}</div>}
     </section>

@@ -63,6 +63,18 @@ export const clipSchema = z.object({
   fallbackUsed: z.boolean().default(false),
   visualLabel: z.string().nullable().optional(),
   provenance: z.array(provenanceSchema).default([]),
+  // Publication metadata: only the engine may set these when the rendered
+  // output passes validation AND its Media Library asset transaction commits.
+  // `libraryAssetId` is the server-confirmed link used to display
+  // "Saved to Library" — the UI never shows it from optimistic state.
+  libraryAssetId: z.string().nullable().optional(),
+  title: z.string().nullable().optional(),
+  width: z.number().int().positive().nullable().optional(),
+  height: z.number().int().positive().nullable().optional(),
+  folderId: z.string().nullable().optional(),
+  folderName: z.string().nullable().optional(),
+  publishedAt: z.string().nullable().optional(),
+  previewUrl: z.string().nullable().optional(),
 }).superRefine((clip, context) => {
   if (clip.end <= clip.start) context.addIssue({ code: z.ZodIssueCode.custom, message: "Clip end must follow its start", path: ["end"] });
   if (Math.abs(clip.duration - (clip.end - clip.start)) > .1) context.addIssue({ code: z.ZodIssueCode.custom, message: "Clip duration must match its range", path: ["duration"] });
@@ -240,6 +252,8 @@ export const assetSchema = z.object({
   width: z.number().int().positive().nullable().optional(),
   height: z.number().int().positive().nullable().optional(),
   previewUrl: z.string().optional(),
+  aspectRatio: z.string().nullable().optional(),
+  publishedAt: z.string().optional(),
   brands: z.array(z.string()).default([]),
   people: z.array(z.string()).default([]),
   createdAt: z.string(),

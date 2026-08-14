@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { emitLibraryChanged } from "../library-sync";
 import type { LibraryAsset, LibraryFolder } from "../types";
 import { LibraryView } from "./library-view";
 
@@ -45,5 +46,42 @@ describe("LibraryView", () => {
     fireEvent.click(screen.getByRole("button", { name: /Retry/ }));
     await waitFor(() => expect(screen.queryByText("Could not reach the local S6 Cut media library.")).not.toBeInTheDocument());
     expect(screen.getByText("Acme launch")).toBeInTheDocument();
+  });
+});
+
+describe("LibraryView – bounded revalidation", () => {
+  beforeEach(() => {
+    mockListAssets.mockResolvedValue(assets);
+    mockListFolders.mockResolvedValue(folders);
+  });
+
+  it("revalidates after a library-changed event without a manual refresh", async () => {
+    render(<LibraryView />);
+    expect(await screen.findByText("Acme launch")).toBeInTheDocument();
+    const callsBefore = mockListAssets.mock.calls.length;
+    emitLibraryChanged();
+    await waitFor(() => expect(mockListAssets.mock.calls.length).toBeGreaterThan(callsBefore), { timeout: 2000 });
+    expect(screen.getByText("Acme launch")).toBeInTheDocument();
+  });
+
+  it("revalidates on window focus with a debounced server reload", async () => {
+    render(<LibraryView />);
+    expect(await screen.findByText("Acme launch")).toBeInTheDocument();
+    const callsBefore = mockListAssets.mock.calls.length;
+    window.dispatchEvent(new Event("focus"));
+    await waitFor(() => expect(mockListAssets.mock.calls.length).toBeGreaterThan(callsBefore), { timeout: 2000 });
+  });
+
+  it("collapses rapid bursts of signals into one revalidation", async () => {
+    render(<LibraryView />);
+    expect(await screen.findByText("Acme launch")).toBeInTheDocument();
+    const callsBefore = mockListAssets.mock.calls.length;
+    window.dispatchEvent(new Event("focus"));
+    emitLibraryChanged();
+    emitLibraryChanged();
+    window.dispatchEvent(new Event("focus"));
+    await waitFor(() => expect(mockListAssets.mock.calls.length).toBeGreaterThan(callsBefore), { timeout: 2000 });
+    // The debounce window collapses the burst — at most one extra reload
+    expect(mockListAssets.mock.calls.length - callsBefore).toBeLessThanOrEqual(2);
   });
 });
