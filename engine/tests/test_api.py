@@ -42,6 +42,49 @@ def test_provider_secrets_are_masked_and_never_returned() -> None:
     assert key not in listed
 
 
+def test_provider_tests_report_each_optional_service_independently(monkeypatch) -> None:
+    created = client.post("/api/v1/profiles", json={
+        "name": "Independent providers", "modelId": "openai/test", "voiceId": "voice-ok",
+        "openrouterKey": "openrouter-secret", "elevenlabsKey": "elevenlabs-secret",
+        "persistence": "encrypted", "selected": True,
+    }).json()
+
+    class Response:
+        def __init__(self, status_code: int, payload: dict[str, object]):
+            self.status_code = status_code
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_: object):
+            return None
+
+        async def get(self, url: str, **_: object):
+            if "openrouter" in url:
+                return Response(401, {})
+            return Response(200, {"voices": [{"voice_id": "voice-ok"}]})
+
+    monkeypatch.setattr("engine.providers.httpx.AsyncClient", lambda **_: Client())
+    response = client.post(f"/api/v1/profiles/{created['id']}/test")
+    assert response.status_code == 200
+    assert response.json()["openrouterStatus"] == "invalid_credentials"
+    assert response.json()["elevenlabsStatus"] == "connected"
+    assert "openrouter-secret" not in response.text
+    assert "elevenlabs-secret" not in response.text
+
+
+def test_invalid_profile_input_never_echoes_a_raw_key() -> None:
+    raw_key = "sensitive-" + "x" * 600
+    response = client.post("/api/v1/profiles", json={"name": "Too long", "openrouterKey": raw_key})
+    assert response.status_code == 422
+    assert raw_key not in response.text
+
+
 def test_library_dedup_and_match_explanation() -> None:
     upload = {"file": ("poster.png", b"small-fixture-image-bytes", "image/png")}
     data = {"title": "Beatles poster", "tags": "music, band", "triggers": "The Beatles", "policy": "prefer", "licence": "User supplied"}

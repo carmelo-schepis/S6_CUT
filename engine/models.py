@@ -162,6 +162,12 @@ class ProfileInput(ApiModel):
     selected: bool = False
 
 
+ProviderConnectionStatus = Literal[
+    "not_configured", "configured", "connected", "invalid_credentials", "rate_limited",
+    "timeout_offline", "unavailable_model_or_voice", "malformed_response",
+]
+
+
 class ProviderProfile(ApiModel):
     id: str
     name: str
@@ -173,6 +179,10 @@ class ProviderProfile(ApiModel):
     elevenlabs_configured: bool
     openrouter_masked: str | None = None
     elevenlabs_masked: str | None = None
+    openrouter_status: ProviderConnectionStatus = "not_configured"
+    elevenlabs_status: ProviderConnectionStatus = "not_configured"
+    openrouter_message: str | None = None
+    elevenlabs_message: str | None = None
     status: str
     capabilities: list[str]
     fallbacks: dict[str, str]

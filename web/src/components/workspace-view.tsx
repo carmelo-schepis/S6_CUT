@@ -1,46 +1,83 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Captions, ChevronDown, Download, Eye, FileText, Film, Lock, Pause, Play, RefreshCw, RotateCcw, SlidersHorizontal, Sparkles, Volume2 } from "lucide-react";
-import { controlJob, createZip, getJob, jobEventsUrl, readableError, setClipSelection } from "../api";
-import { jobSchema, type Clip, type Job, type Project } from "../types";
+import { AlertTriangle, Captions, ChevronDown, Download, Eye, FileText, Film, Lock, Pause, Play, RefreshCw, RotateCcw, SlidersHorizontal, Sparkles, Square, Volume2 } from "lucide-react";
+import { controlJob, createZip, getJob, jobEventsUrl, readableError, retryClip, setClipSelection } from "../api";
+import { jobSchema, type Clip, type Health, type Job, type Project } from "../types";
 import { Button, EmptyState, IconButton, Progress, StatusBadge, formatDuration } from "./common";
+import { isTerminalJob, ProcessingState } from "./processing-state";
 
-export function WorkspaceView({ project, onProjectUpdated, onGoProjects }: { project: Project | null; onProjectUpdated: () => Promise<void>; onGoProjects: () => void }) {
+export function WorkspaceView({ project, health, hasSelectedProvider = true, onConfigureProviders = () => undefined, onProjectUpdated, onGoProjects }: { project: Project | null; health?: Health | null; hasSelectedProvider?: boolean; onConfigureProviders?: () => void; onProjectUpdated: () => Promise<void>; onGoProjects: () => void }) {
   const [job, setJob] = useState<Job | null>(null);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
   const [inspectorTab, setInspectorTab] = useState<"score" | "captions" | "asset" | "info">("score");
   const [timelineOpen, setTimelineOpen] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [waitingForEngine, setWaitingForEngine] = useState(false);
+  const [providerCalloutDismissed, setProviderCalloutDismissed] = useState(false);
   const pollingRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (!project?.latestJobId) return;
+    const jobId = project?.latestJobId;
+    if (!jobId) return;
+    const currentJobId = jobId;
     let disposed = false;
+    let terminal = false;
+    let polling = false;
+    let backoff = 1000;
     const update = (next: Job) => {
       if (disposed) return;
+      terminal = isTerminalJob(next);
+      setWaitingForEngine(false);
       setJob(next);
-      setSelectedClipId((current) => current && next.clips.some((clip) => clip.id === current) ? current : next.clips.find((clip) => clip.state === "complete")?.id || next.clips[0]?.id || null);
+      setSelectedClipId((current) => {
+        const currentClip = next.clips.find((clip) => clip.id === current);
+        if (currentClip?.state === "complete") return current;
+        return next.clips.find((clip) => clip.state === "complete")?.id || currentClip?.id || next.clips[0]?.id || null;
+      });
     };
-    const fetchJob = () => getJob(project.latestJobId!).then(update).catch((cause) => !disposed && setError(readableError(cause)));
-    fetchJob();
-    const events = new EventSource(jobEventsUrl(project.latestJobId));
+    function schedulePoll(delay: number) {
+      if (disposed || terminal || pollingRef.current) return;
+      pollingRef.current = window.setTimeout(() => { pollingRef.current = null; void fetchJob(); }, delay);
+    }
+    async function fetchJob() {
+      try {
+        update(await getJob(currentJobId));
+        backoff = 1000;
+        if (polling && !terminal) schedulePoll(2500);
+      } catch {
+        if (disposed) return;
+        polling = true;
+        setWaitingForEngine(true);
+        schedulePoll(backoff);
+        backoff = Math.min(backoff * 2, 15_000);
+      }
+    }
+    void fetchJob();
+    const events = new EventSource(jobEventsUrl(currentJobId));
     events.onmessage = (event) => {
-      try { update(jobSchema.parse(JSON.parse(event.data))); } catch { fetchJob(); }
+      try { update(jobSchema.parse(JSON.parse(event.data))); } catch { void fetchJob(); }
     };
     events.onerror = () => {
       events.close();
-      if (!pollingRef.current) pollingRef.current = window.setInterval(fetchJob, 2500);
+      if (!terminal) {
+        polling = true;
+        setWaitingForEngine(true);
+        schedulePoll(backoff);
+      }
     };
     return () => {
       disposed = true;
       events.close();
-      if (pollingRef.current) window.clearInterval(pollingRef.current);
+      if (pollingRef.current) window.clearTimeout(pollingRef.current);
       pollingRef.current = null;
     };
   }, [project?.id, project?.latestJobId]);
 
   const selectedClip = useMemo(() => job?.clips.find((clip) => clip.id === selectedClipId) || null, [job, selectedClipId]);
   const selectedIds = job?.clips.filter((clip) => clip.selected && clip.state === "complete").map((clip) => clip.id) || [];
+  const providerRelatedFailure = Boolean(job?.error && /openrouter|elevenlabs|provider|credential|api key|model|voice/i.test(job.error));
+  const providerCouldHelp = providerRelatedFailure || Boolean(job?.state === "failed" && project?.mode === "script" && !hasSelectedProvider);
+  const canContinueLocally = providerRelatedFailure && Boolean(project?.mode === "clip" || health?.localTts);
 
   const act = async (action: "pause" | "resume" | "stop-keep" | "retry-failed") => {
     if (!job) return;
@@ -51,7 +88,13 @@ export function WorkspaceView({ project, onProjectUpdated, onGoProjects }: { pro
   const toggleClip = async (clip: Clip) => {
     if (!job) return;
     const next = job.clips.filter((item) => item.state === "complete" && (item.id === clip.id ? !item.selected : item.selected)).map((item) => item.id);
-    setJob(await setClipSelection(job.id, next));
+    try { setJob(await setClipSelection(job.id, next)); } catch (cause) { setError(readableError(cause)); }
+  };
+
+  const retryOneClip = async (clip: Clip) => {
+    if (!job || clip.state !== "failed") return;
+    setBusy(true);
+    try { setJob(await retryClip(job.id, clip.id)); } catch (cause) { setError(readableError(cause)); } finally { setBusy(false); }
   };
 
   const exportSelected = async () => {
@@ -71,14 +114,17 @@ export function WorkspaceView({ project, onProjectUpdated, onGoProjects }: { pro
       <div>
         {job && <StatusBadge state={job.state} label={job.stageLabel} />}
         {job && ["active", "queued", "recovered"].includes(job.state) && <Button disabled={busy} onClick={() => act("pause")}><Pause size={15} /> Pause</Button>}
+        {job && ["active", "queued", "recovered", "paused"].includes(job.state) && <Button disabled={busy} onClick={() => act("stop-keep")}><Square size={14} /> Stop & keep</Button>}
         {job?.state === "paused" && <Button disabled={busy} onClick={() => act("resume")}><Play size={15} /> Resume</Button>}
         {job && job.clips.some((clip) => clip.state === "failed") && <Button disabled={busy} onClick={() => act("retry-failed")}><RefreshCw size={15} /> Retry failed</Button>}
         <Button variant="primary" disabled={!selectedIds.length || busy} onClick={exportSelected}><Download size={15} /> Download ZIP <span className="button-count">{selectedIds.length}</span></Button>
       </div>
     </div>
 
-    {error && <div className="workspace-alert" role="alert"><AlertTriangle size={16} /> {error}<button onClick={() => setError(null)}>Dismiss</button></div>}
-    {job && !["complete", "failed", "cancelled_kept"].includes(job.state) && <div className="job-strip"><div><strong>{job.stageLabel}</strong><span>{job.currentItem && job.totalItems ? ` · ${job.currentItem} of ${job.totalItems}` : ""}</span></div><Progress value={job.progress} label={job.stageLabel} /></div>}
+    {waitingForEngine && <div className="workspace-offline" role="status">Waiting for the S6 Cut engine…</div>}
+    {error && !waitingForEngine && <div className="workspace-alert" role="alert"><AlertTriangle size={16} /> {error}<button onClick={() => setError(null)}>Dismiss</button></div>}
+    {job?.state === "failed" && <div className="failure-strip" role="alert"><AlertTriangle size={17} /><div><strong>Project failed</strong><span>{job.error || "The engine could not finish this project. Completed outputs, if any, are still preserved."}</span></div><div><Button disabled={busy} onClick={() => act("retry-failed")}><RefreshCw size={14} /> Retry failed work</Button>{providerCouldHelp && <Button onClick={onConfigureProviders}>Configure providers</Button>}{canContinueLocally && <Button disabled={busy} onClick={() => act("retry-failed")}>Continue with local fallback</Button>}</div></div>}
+    {job && !["complete", "failed", "cancelled_kept"].includes(job.state) && <div className="job-strip"><div><strong>{job.stageLabel}</strong><span>{job.currentItem > 0 && job.totalItems > 0 ? ` · ${job.currentItem} of ${job.totalItems}` : ""}</span></div><Progress value={job.progress} label={job.stageLabel} /></div>}
     {job?.warnings.map((warning) => <div className="warning-strip" key={warning}><AlertTriangle size={14} /><span>{warning}</span></div>)}
 
     <div className="workspace-grid">
@@ -96,7 +142,7 @@ export function WorkspaceView({ project, onProjectUpdated, onGoProjects }: { pro
         <div className="viewer-toolbar"><span>Output · 9:16</span><div><IconButton label="Toggle safe areas"><Eye size={15} /></IconButton><IconButton label="Mute preview"><Volume2 size={15} /></IconButton></div></div>
         <div className="viewer-stage">
           <div className={`viewer-frame ${project.mode}`}>
-            {selectedClip?.state === "complete" && selectedClip.downloadUrl ? <video key={selectedClip.downloadUrl} src={selectedClip.downloadUrl} controls preload="metadata" /> : <div className="viewer-placeholder">
+            {selectedClip?.state === "complete" && selectedClip.downloadUrl ? <video key={selectedClip.downloadUrl} src={selectedClip.downloadUrl} controls preload="metadata" /> : job && (["active", "queued", "paused", "recovered"].includes(job.state) || waitingForEngine) ? <ProcessingState job={job} waitingForEngine={waitingForEngine} /> : <div className="viewer-placeholder">
               <div className="safe-area" />
               <img src="/app-icon.png" alt="" />
               <span>{job?.state === "failed" ? "Render unavailable" : job?.stageLabel || "Preparing project"}</span>
@@ -114,6 +160,7 @@ export function WorkspaceView({ project, onProjectUpdated, onGoProjects }: { pro
           {(["score", "captions", "asset", "info"] as const).map((tab) => <button key={tab} className={inspectorTab === tab ? "active" : ""} onClick={() => setInspectorTab(tab)}>{tab}</button>)}
         </div>
         <div className="inspector-content">
+          {!hasSelectedProvider && !providerCalloutDismissed && <div className="provider-callout compact"><Sparkles size={15} /><div><strong>Add optional AI providers</strong><span>Connect OpenRouter for enhanced planning and ElevenLabs for premium narration. Local fallbacks remain available.</span></div><div><Button onClick={onConfigureProviders}>Configure providers</Button><Button variant="ghost" onClick={() => setProviderCalloutDismissed(true)}>Continue locally</Button></div></div>}
           {inspectorTab === "score" && (selectedClip ? <ScoreInspector clip={selectedClip} /> : <p className="muted">Select a clip to inspect its auditable score.</p>)}
           {inspectorTab === "captions" && <><div className="inspector-section"><label>Preset</label><select defaultValue="editorial"><option value="editorial">Editorial highlight</option><option value="minimal">Minimal</option><option value="boxed">High contrast box</option></select></div><div className="inspector-note"><Captions size={15} /><span>Caption timing comes from local word timestamps. Preview and export use the same EDL model.</span></div></>}
           {inspectorTab === "asset" && <><div className="inspector-section"><label>Visual intention</label><strong>{selectedClip?.visualLabel || job?.beats[0]?.concept || "No visual beat selected"}</strong></div><div className="inspector-section"><label>Source</label><span>{selectedClip?.provenance[0]?.provider || job?.beats[0]?.source || "Text-card fallback"}</span></div><div className="inspector-note"><Sparkles size={15} /><span>{selectedClip?.provenance[0]?.matchReason || job?.beats[0]?.matchReason || "A relevant text card is preferred over unrelated media."}</span></div></>}
@@ -126,7 +173,7 @@ export function WorkspaceView({ project, onProjectUpdated, onGoProjects }: { pro
       <div className="board-header"><div><strong>{project.mode === "clip" ? "Clip board" : "Beat board"}</strong><span>{project.mode === "clip" ? `${job?.clips.length || 0} planned · ${job?.clips.filter((clip) => clip.state === "complete").length || 0} ready` : `${job?.beats.length || 0} visual beats`}</span></div><div className="board-filters"><button className="active">All</button><button>Selected</button><button>Failed</button></div></div>
       {project.mode === "clip" ? <div className="clip-board">{job?.clips.map((clip) => <article key={clip.id} className={`clip-tile ${selectedClipId === clip.id ? "active" : ""} ${clip.state}`} onClick={() => setSelectedClipId(clip.id)}>
         <div className="clip-thumb"><span className="clip-number">{String(clip.index).padStart(2, "0")}</span>{clip.state === "complete" ? <><Film size={24} /><span className="score-ring">{Math.round(clip.score.total)}</span></> : clip.state === "failed" ? <AlertTriangle size={24} /> : <RefreshCw size={24} className="spin" />}</div>
-        <div className="clip-tile-body"><strong>{clip.openingLine || `Candidate ${clip.index}`}</strong><span>{formatDuration(clip.duration)} · {clip.state}</span><label onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={clip.selected} disabled={clip.state !== "complete"} onChange={() => toggleClip(clip)} /> Include in export</label></div>
+        <div className="clip-tile-body"><strong>{clip.openingLine || `Candidate ${clip.index}`}</strong><span>{formatDuration(clip.duration)} · {clip.state}</span>{clip.state === "failed" ? <Button disabled={busy} onClick={(event) => { event.stopPropagation(); void retryOneClip(clip); }}><RefreshCw size={12} /> Retry clip</Button> : <label onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={clip.selected} disabled={clip.state !== "complete"} onChange={() => toggleClip(clip)} /> Include in export</label>}</div>
       </article>) || <div className="board-placeholder">Candidates appear here after local transcription and selection.</div>}</div>
         : <div className="beat-board">{job?.beats.map((beat, index) => <article key={beat.id} className="beat-tile"><div className="beat-visual"><span>{String(index + 1).padStart(2, "0")}</span><Sparkles size={22} /></div><div><strong>{beat.concept}</strong><p>{beat.text}</p><span>{formatDuration(beat.start)}–{formatDuration(beat.end)} · {beat.source} · {Math.round(beat.confidence * 100)}%</span></div><StatusBadge state={beat.source === "library" ? "ready" : "fallback"} label={beat.ruleState || beat.source} /></article>)}</div>}
     </section>

@@ -135,6 +135,11 @@ export const healthSchema = z.object({
 });
 export type Health = z.infer<typeof healthSchema>;
 
+export const providerConnectionStatusSchema = z.enum([
+  "not_configured", "configured", "connected", "invalid_credentials", "rate_limited",
+  "timeout_offline", "unavailable_model_or_voice", "malformed_response",
+]);
+
 export const profileSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -146,6 +151,10 @@ export const profileSchema = z.object({
   elevenlabsConfigured: z.boolean(),
   openrouterMasked: z.string().nullable().optional(),
   elevenlabsMasked: z.string().nullable().optional(),
+  openrouterStatus: providerConnectionStatusSchema.default("not_configured"),
+  elevenlabsStatus: providerConnectionStatusSchema.default("not_configured"),
+  openrouterMessage: z.string().nullable().optional(),
+  elevenlabsMessage: z.string().nullable().optional(),
   status: z.string(),
   capabilities: z.array(z.string()),
   fallbacks: z.record(z.string()),

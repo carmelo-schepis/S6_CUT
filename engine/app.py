@@ -14,8 +14,10 @@ from pathlib import Path
 from typing import Annotated, AsyncIterator, Literal
 
 from fastapi import Body, FastAPI, File, Form, HTTPException, Query, Request, UploadFile, status
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from . import __version__
 from .config import settings
@@ -52,6 +54,13 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="S6_cut Media Engine", version=__version__, docs_url="/api/docs", openapi_url="/api/openapi.json", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=list(settings.allowed_origins), allow_credentials=False, allow_methods=["GET", "POST", "PUT", "DELETE"], allow_headers=["Content-Type"])
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+    if request.url.path.startswith("/api/v1/profiles"):
+        return JSONResponse(status_code=422, content={"detail": "Provider profile validation failed"})
+    return await request_validation_exception_handler(request, exc)
 
 
 def _rate_limit(request: Request) -> None:
@@ -357,7 +366,7 @@ async def test_profile(profile_id: str) -> ProviderProfile:
     except KeyError as exc:
         raise _not_found("Profile") from exc
     except Exception as exc:
-        raise HTTPException(422, str(exc)) from exc
+        raise HTTPException(422, "Provider test could not be completed safely") from exc
 
 
 @app.delete("/api/v1/profiles/{profile_id}", status_code=204)

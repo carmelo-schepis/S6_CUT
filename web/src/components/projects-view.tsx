@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { FileText, Film, FolderOpen, Link2, Plus, UploadCloud } from "lucide-react";
+import { FileText, Film, FolderOpen, Link2, Plus, Sparkles, UploadCloud } from "lucide-react";
 import { createClipJob, createScriptJob, readableError } from "../api";
 import type { Health, Project, Style } from "../types";
 import { Button, Field, PageHeader, Progress, StatusBadge, formatAge } from "./common";
@@ -11,9 +11,11 @@ const styles: { id: Style; label: string; note: string }[] = [
   { id: "hype", label: "Hype", note: "Hooks & high energy" },
 ];
 
-export function ProjectsView({ projects, health, onCreated, onOpen, onRefresh }: {
+export function ProjectsView({ projects, health, hasSelectedProvider = true, onConfigureProviders = () => undefined, onCreated, onOpen, onRefresh }: {
   projects: Project[];
   health: Health | null;
+  hasSelectedProvider?: boolean;
+  onConfigureProviders?: () => void;
   onCreated: (project: Project) => void;
   onOpen: (id: string) => void;
   onRefresh: () => Promise<void>;
@@ -32,6 +34,7 @@ export function ProjectsView({ projects, health, onCreated, onOpen, onRefresh }:
   const [narration, setNarration] = useState<"auto" | "local" | "silent">("auto");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [providerCalloutDismissed, setProviderCalloutDismissed] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const scriptInput = useRef<HTMLInputElement>(null);
 
@@ -71,6 +74,8 @@ export function ProjectsView({ projects, health, onCreated, onOpen, onRefresh }:
         </div>
       </div>
 
+      {!hasSelectedProvider && !providerCalloutDismissed && <div className="provider-callout"><Sparkles size={17} /><div><strong>Add optional AI providers</strong><span>Connect OpenRouter for enhanced planning and ElevenLabs for premium narration. Local fallbacks remain available.</span></div><div><Button onClick={onConfigureProviders}>Configure providers</Button><Button variant="ghost" onClick={() => setProviderCalloutDismissed(true)}>Continue locally</Button></div></div>}
+
       <div className="create-grid">
         <div className="create-step source-step">
           <div className="step-label"><span>1</span>{mode === "clip" ? "Add source" : "Add script"}</div>
@@ -98,7 +103,7 @@ export function ProjectsView({ projects, health, onCreated, onOpen, onRefresh }:
             </button>)}
           </div>
           {mode === "clip" ? <Field label="Clips requested"><div className="count-control"><button onClick={() => setCount(Math.max(1, count - 1))} aria-label="Fewer clips">−</button><strong>{count}</strong><button onClick={() => setCount(Math.min(30, count + 1))} aria-label="More clips">+</button></div></Field>
-            : <Field label="Narration"><select value={narration} onChange={(event) => setNarration(event.target.value as typeof narration)}><option value="auto">Automatic fallback</option><option value="local">Local voice only</option><option value="silent">No narration</option></select></Field>}
+            : <Field label="Narration" hint="ElevenLabs is optional. Automatic uses local voice when needed, then a clearly labelled silent render."><select value={narration} onChange={(event) => setNarration(event.target.value as typeof narration)}><option value="auto">Automatic fallback</option><option value="local">Local voice only</option><option value="silent">Silent render (no narration)</option></select></Field>}
         </div>
 
         <div className="create-step action-step">

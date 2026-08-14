@@ -21,6 +21,21 @@ FALLBACKS = {
 }
 
 
+def provider_runtime_message(error: Exception, service: str) -> str:
+    if isinstance(error, httpx.HTTPStatusError):
+        status_code = error.response.status_code
+        if status_code in {401, 403}:
+            return f"{service} credentials were rejected"
+        if status_code == 429:
+            return f"{service} is rate limited"
+        if status_code in {404, 422}:
+            return f"The configured {service} model or voice is unavailable"
+        return f"{service} is temporarily unavailable"
+    if isinstance(error, (httpx.TimeoutException, httpx.RequestError)):
+        return f"{service} is offline or timed out"
+    return f"{service} returned an unreadable response"
+
+
 class ProfileService:
     def __init__(self, db: Database, vault: SecretVault):
         self.db = db
@@ -60,11 +75,18 @@ class ProfileService:
             "openrouterKey": value.openrouter_key or previous.get("openrouterKey", ""),
             "elevenlabsKey": value.elevenlabs_key or previous.get("elevenlabsKey", ""),
         }
+        previous_profile = existing[0] if existing else None
+        openrouter_unchanged = bool(previous_profile and not value.openrouter_key and value.model_id == previous_profile.model_id)
+        elevenlabs_unchanged = bool(previous_profile and not value.elevenlabs_key and value.voice_id == previous_profile.voice_id)
         profile = ProviderProfile(
             id=profile_id, name=value.name, model_id=value.model_id, voice_id=value.voice_id,
             selected=value.selected, persistence=value.persistence,
             openrouter_configured=bool(secrets["openrouterKey"]), elevenlabs_configured=bool(secrets["elevenlabsKey"]),
             openrouter_masked=mask_secret(secrets["openrouterKey"]), elevenlabs_masked=mask_secret(secrets["elevenlabsKey"]),
+            openrouter_status=previous_profile.openrouter_status if openrouter_unchanged else ("configured" if secrets["openrouterKey"] else "not_configured"),
+            elevenlabs_status=previous_profile.elevenlabs_status if elevenlabs_unchanged else ("configured" if secrets["elevenlabsKey"] else "not_configured"),
+            openrouter_message=previous_profile.openrouter_message if openrouter_unchanged else ("Ready to test" if secrets["openrouterKey"] else "Optional; deterministic local planning remains available"),
+            elevenlabs_message=previous_profile.elevenlabs_message if elevenlabs_unchanged else ("Ready to test" if secrets["elevenlabsKey"] else "Optional; local narration and silent rendering remain available"),
             status="configured" if any(secrets.values()) else "local only",
             capabilities=["structured planning"] if secrets["openrouterKey"] else [], fallbacks=FALLBACKS,
         )
@@ -89,27 +111,67 @@ class ProfileService:
             persistence=profile.persistence, selected=False,
         ))
 
+    @staticmethod
+    def _http_failure(status_code: int, service: str) -> tuple[str, str]:
+        if status_code in {401, 403}:
+            return "invalid_credentials", f"{service} rejected the saved credentials"
+        if status_code == 429:
+            return "rate_limited", f"{service} is rate limited; try again later"
+        if status_code in {404, 422}:
+            return "unavailable_model_or_voice", f"The configured {service} model or voice is unavailable"
+        return "timeout_offline", f"{service} is temporarily unavailable"
+
     async def test(self, profile_id: str) -> ProviderProfile:
         record = self.db.get_profile(profile_id)
         if not record:
             raise KeyError(profile_id)
         profile, _ = record
         secrets = self.secrets(profile_id)
-        errors: list[str] = []
+        profile.openrouter_status = "not_configured"
+        profile.openrouter_message = "Optional; deterministic local planning remains available"
+        profile.elevenlabs_status = "not_configured"
+        profile.elevenlabs_message = "Optional; local narration and silent rendering remain available"
         async with httpx.AsyncClient(timeout=12, follow_redirects=False) as client:
             if key := secrets.get("openrouterKey"):
-                response = await client.get("https://openrouter.ai/api/v1/models", headers={"Authorization": f"Bearer {key}"})
-                if response.status_code >= 400:
-                    errors.append(f"OpenRouter returned {response.status_code}")
+                try:
+                    response = await client.get("https://openrouter.ai/api/v1/models", headers={"Authorization": f"Bearer {key}"})
+                    if response.status_code >= 400:
+                        profile.openrouter_status, profile.openrouter_message = self._http_failure(response.status_code, "OpenRouter")
+                    else:
+                        payload = response.json()
+                        models = payload.get("data") if isinstance(payload, dict) else None
+                        if not isinstance(models, list):
+                            profile.openrouter_status, profile.openrouter_message = "malformed_response", "OpenRouter returned an unreadable response"
+                        elif not any(isinstance(item, dict) and item.get("id") == profile.model_id for item in models):
+                            profile.openrouter_status, profile.openrouter_message = "unavailable_model_or_voice", "The configured OpenRouter model is unavailable"
+                        else:
+                            profile.openrouter_status, profile.openrouter_message = "connected", "Connected; enhanced planning is available"
+                except (httpx.TimeoutException, httpx.RequestError):
+                    profile.openrouter_status, profile.openrouter_message = "timeout_offline", "OpenRouter is offline or timed out; local planning remains available"
+                except (TypeError, ValueError):
+                    profile.openrouter_status, profile.openrouter_message = "malformed_response", "OpenRouter returned an unreadable response"
             if key := secrets.get("elevenlabsKey"):
-                response = await client.get("https://api.elevenlabs.io/v1/voices", headers={"xi-api-key": key})
-                if response.status_code >= 400:
-                    errors.append(f"ElevenLabs returned {response.status_code}")
-        profile.status = "failed" if errors else ("connected" if secrets else "local only")
-        profile.capabilities = [item for item, ready in (("structured planning", bool(secrets.get("openrouterKey"))), ("ElevenLabs narration", bool(secrets.get("elevenlabsKey")))) if ready]
+                try:
+                    response = await client.get("https://api.elevenlabs.io/v1/voices", headers={"xi-api-key": key})
+                    if response.status_code >= 400:
+                        profile.elevenlabs_status, profile.elevenlabs_message = self._http_failure(response.status_code, "ElevenLabs")
+                    else:
+                        payload = response.json()
+                        voices = payload.get("voices") if isinstance(payload, dict) else None
+                        if not isinstance(voices, list):
+                            profile.elevenlabs_status, profile.elevenlabs_message = "malformed_response", "ElevenLabs returned an unreadable response"
+                        elif not profile.voice_id or not any(isinstance(item, dict) and item.get("voice_id") == profile.voice_id for item in voices):
+                            profile.elevenlabs_status, profile.elevenlabs_message = "unavailable_model_or_voice", "Choose an available ElevenLabs voice ID"
+                        else:
+                            profile.elevenlabs_status, profile.elevenlabs_message = "connected", "Connected; premium narration is available"
+                except (httpx.TimeoutException, httpx.RequestError):
+                    profile.elevenlabs_status, profile.elevenlabs_message = "timeout_offline", "ElevenLabs is offline or timed out; local narration remains available"
+                except (TypeError, ValueError):
+                    profile.elevenlabs_status, profile.elevenlabs_message = "malformed_response", "ElevenLabs returned an unreadable response"
+        statuses = {profile.openrouter_status, profile.elevenlabs_status}
+        profile.status = "connected" if "connected" in statuses else ("attention" if secrets else "local only")
+        profile.capabilities = [item for item, ready in (("structured planning", profile.openrouter_status == "connected"), ("ElevenLabs narration", profile.elevenlabs_status == "connected")) if ready]
         self.db.save_profile(profile)
-        if errors:
-            raise RuntimeError("; ".join(errors))
         return profile
 
     def delete(self, profile_id: str) -> None:

@@ -19,7 +19,7 @@ from .media import (
     sha256_file, synthesize_local, transcribe,
 )
 from .models import Clip, Job, Project, ProvenanceRecord, ScoreBreakdown, now_iso
-from .providers import ProfileService
+from .providers import ProfileService, provider_runtime_message
 from .script import align_script_words, plan_beats
 from .security import redact, safe_filename
 from .selection import clip_from_candidate, select_candidates
@@ -243,7 +243,7 @@ class JobManager:
                     if self.profiles.synthesize_elevenlabs(script, candidate):
                         narration = candidate
                 except Exception as exc:
-                    job.warnings.append(f"ElevenLabs unavailable; used the local voice fallback ({redact(str(exc))}).")
+                    job.warnings.append(f"{provider_runtime_message(exc, 'ElevenLabs')}; used the local voice fallback.")
             if narration is None and available(self.settings.local_tts):
                 narration = synthesize_local(script, work / "narration-local.wav", self.settings)
             if narration is None:

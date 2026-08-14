@@ -99,6 +99,10 @@ export async function controlJob(id: string, action: "pause" | "resume" | "stop-
   return jobSchema.parse(await request(`/jobs/${encodeURIComponent(id)}/control/${action}`, { method: "POST" }));
 }
 
+export async function retryClip(jobId: string, clipId: string): Promise<Job> {
+  return jobSchema.parse(await request(`/jobs/${encodeURIComponent(jobId)}/clips/${encodeURIComponent(clipId)}/retry`, { method: "POST" }));
+}
+
 export async function setClipSelection(jobId: string, clipIds: string[]): Promise<Job> {
   return jobSchema.parse(await request(`/jobs/${encodeURIComponent(jobId)}/selection`, {
     method: "PUT",

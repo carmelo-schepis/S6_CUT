@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { BriefcaseBusiness, Film, FolderKanban, HardDrive, Library, Settings, SlidersHorizontal } from "lucide-react";
-import { getHealth, listProjects, readableError } from "./api";
+import { getHealth, listProfiles, listProjects, readableError } from "./api";
 import { JobsView } from "./components/jobs-view";
 import { LibraryView } from "./components/library-view";
 import { ProjectsView } from "./components/projects-view";
 import { SettingsView } from "./components/settings-view";
 import { StatusBadge } from "./components/common";
 import { WorkspaceView } from "./components/workspace-view";
-import type { Health, Project } from "./types";
+import type { Health, Project, ProviderProfile } from "./types";
 
 type Page = "projects" | "library" | "workspace" | "jobs" | "settings";
 
@@ -24,12 +24,14 @@ export function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
+  const [profiles, setProfiles] = useState<ProviderProfile[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    const [nextProjects, nextHealth] = await Promise.all([listProjects(), getHealth()]);
+    const [nextProjects, nextHealth, nextProfiles] = await Promise.all([listProjects(), getHealth(), listProfiles()]);
     setProjects(nextProjects);
     setHealth(nextHealth);
+    setProfiles(nextProfiles);
     setSelectedProjectId((current) => current || nextProjects[0]?.id || null);
     setError(null);
   }, []);
@@ -51,6 +53,8 @@ export function App() {
   };
 
   const selected = projects.find((project) => project.id === selectedProjectId) || null;
+  const hasSelectedProvider = profiles.some((profile) => profile.selected);
+  const openProviders = () => setPage("settings");
 
   return <div className="app-shell">
     <aside className="app-rail" aria-label="Primary navigation">
@@ -86,11 +90,11 @@ export function App() {
       {error && <div className="global-alert" role="alert"><strong>Engine unavailable.</strong> {error} <button onClick={() => refresh()}>Retry</button></div>}
 
       <main id="main-content" tabIndex={-1}>
-        {page === "projects" && <ProjectsView projects={projects} health={health} onCreated={onCreated} onOpen={openProject} onRefresh={refresh} />}
+        {page === "projects" && <ProjectsView projects={projects} health={health} hasSelectedProvider={hasSelectedProvider} onConfigureProviders={openProviders} onCreated={onCreated} onOpen={openProject} onRefresh={refresh} />}
         {page === "library" && <LibraryView />}
-        {page === "workspace" && <WorkspaceView key={selected?.id || "none"} project={selected} onProjectUpdated={refresh} onGoProjects={() => setPage("projects")} />}
+        {page === "workspace" && <WorkspaceView key={selected?.id || "none"} project={selected} health={health} hasSelectedProvider={hasSelectedProvider} onConfigureProviders={openProviders} onProjectUpdated={refresh} onGoProjects={() => setPage("projects")} />}
         {page === "jobs" && <JobsView onOpenProject={openProject} />}
-        {page === "settings" && <SettingsView health={health} onHealthRefresh={refresh} />}
+        {page === "settings" && <SettingsView health={health} onHealthRefresh={refresh} onProfilesChanged={setProfiles} />}
       </main>
     </div>
   </div>;
