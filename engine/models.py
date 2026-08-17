@@ -169,6 +169,7 @@ class Project(ApiModel):
     latest_job_id: str | None = None
     library_folder_id: str = UNSORTED_LIBRARY_FOLDER_ID
     source_blob_id: str | None = None
+    thumbnail_url: str | None = None
     created_at: str = Field(default_factory=now_iso)
     updated_at: str = Field(default_factory=now_iso)
 
