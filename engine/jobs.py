@@ -49,6 +49,9 @@ def _media_fn(name: str):
     return fn
 
 
+# DO-NOT-CHANGE: see DO-NOT-CHANGE/AGENTS.md
+# job state machine, staged publication, immutable sources, and the outer
+# failure guard that preserves already-published clips are hard invariants
 class JobManager:
     def __init__(self, db: Database, rules: LibraryRules, profiles: ProfileService, settings: Settings):
         self.db = db
@@ -141,6 +144,7 @@ class JobManager:
             finally:
                 self.queue.task_done()
 
+    # DO-NOT-CHANGE: always syncs linked Project.state and writes jobs/<id>/state.json
     def _save(self, job: Job, private: dict[str, Any] | None = None) -> None:
         current = self.db.get_job(job.id)
         if current and current.state == "cancelled_kept" and job.state != "cancelled_kept":
@@ -460,6 +464,8 @@ class JobManager:
     #  Pipelines
     # ------------------------------------------------------------------
 
+    # DO-NOT-CHANGE: outer guard — on failure mark job failed/partial but NEVER
+    # roll back clips that were already published
     def _process(self, job_id: str) -> None:
         lock = self.job_locks[job_id]
         if not lock.acquire(blocking=False):
@@ -499,6 +505,8 @@ class JobManager:
                 self.active_workers -= 1
             lock.release()
 
+    # DO-NOT-CHANGE: source is registered as an immutable project-source Library asset
+    # and project.source_blob_id is set; sources are never modified in place
     def _register_source(self, job: Job, private: dict[str, Any], source: Path) -> None:
         metadata = private.get("source_metadata")
         if not isinstance(metadata, dict):
@@ -530,6 +538,8 @@ class JobManager:
             job.warnings.append(warning)
         return effective, warning
 
+    # DO-NOT-CHANGE: staged publication — resolve folder, hash+promote blob, atomic DB commit;
+    # re-publishing the same (origin, project, job, clip) identity must reuse, never duplicate
     def _publish_output(self, job: Job, clip: Clip, output: Path, private: dict[str, Any], *, script: bool = False) -> tuple[Job, Clip, Asset]:
         """Atomically publish one validated clip output to the Clip Board and Media Library.
 
@@ -1037,6 +1047,7 @@ class JobManager:
         self._save(job)
         return job
 
+    # DO-NOT-CHANGE: creates a NEW job reusing the same source; old job stays cancelled_kept
     def _switch_to_fast(self, job: Job) -> Job:
         if job.mode != "clip":
             raise SwitchFastError("Only clip projects can switch to fast cut")

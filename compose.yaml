@@ -1,3 +1,5 @@
+# DO-NOT-CHANGE: see DO-NOT-CHANGE/AGENTS.md — data bind mount (/app/data), engine port
+# and env defaults are contracts; changing them breaks deployments
 name: s6-cut
 
 services:

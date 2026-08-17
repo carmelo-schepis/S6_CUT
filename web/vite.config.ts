@@ -37,6 +37,7 @@ export default defineConfig({
     host: "127.0.0.1",
     port: 5173,
     strictPort: true,
+    // DO-NOT-CHANGE: see DO-NOT-CHANGE/AGENTS.md — proxy maps /api to engine port; keep in sync
     proxy: { "/api": { target: "http://127.0.0.1:8001", changeOrigin: true } },
     fs: { allow: [repoRoot] },
   },

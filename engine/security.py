@@ -18,6 +18,10 @@ SAFE_FILENAME = re.compile(r"[^A-Za-z0-9._-]+")
 YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "music.youtube.com"}
 
 
+# DO-NOT-CHANGE: see DO-NOT-CHANGE/AGENTS.md — HMAC payload format, key files, and
+# confinement are security invariants; changing them breaks every existing signed URL
+
+
 def safe_filename(name: str, fallback: str = "media") -> str:
     leaf = Path(name.replace("\\", "/")).name.strip(" .")
     cleaned = SAFE_FILENAME.sub("-", leaf)[:180].strip("-.")
@@ -26,6 +30,8 @@ def safe_filename(name: str, fallback: str = "media") -> str:
     return cleaned
 
 
+# DO-NOT-CHANGE: path traversal guard — every file-serving endpoint must use this
+# and it must never be loosened
 def confined(root: Path, *parts: str) -> Path:
     target = root.joinpath(*parts).resolve()
     if target != root.resolve() and root.resolve() not in target.parents:
@@ -115,6 +121,8 @@ class MediaSigner:
         os.replace(temp, self.key_path)
         return key
 
+    # DO-NOT-CHANGE: signature payload is f"{relative}\n{expires}" — never change
+    # the format, hash, or key handling or all existing signed links break
     def sign(self, relative_path: str) -> tuple[int, str]:
         expires = int(time.time()) + self.ttl_seconds
         payload = f"{relative_path}\n{expires}".encode()

@@ -34,6 +34,10 @@ from .providers import ProfileService
 from .security import MediaSigner, SecretVault, confined, safe_filename, validate_youtube_url
 
 
+# DO-NOT-CHANGE: see DO-NOT-CHANGE/AGENTS.md
+# signed URLs, confined paths, rate-limited creation, camelCase API contract with frontend
+
+
 settings.prepare()
 db = Database(settings.data_path / "s6-cut.sqlite3")
 vault = SecretVault(settings.data_path / "secrets" / "instance.key")
@@ -85,11 +89,15 @@ def _not_found(kind: str = "Record") -> HTTPException:
     return HTTPException(404, f"{kind} not found")
 
 
+# DO-NOT-CHANGE: signs f"jobs/{relative}" or f"exports/{relative}" — only these prefixes
+# are allowed in download_file; never expose raw paths
 def _download_url(relative: str) -> str:
     expires, signature = signer.sign(relative)
     return f"/api/v1/files/{relative}?expires={expires}&signature={signature}"
 
 
+# DO-NOT-CHANGE: hides unpublished clips (rendering state), clears download_url for
+# incomplete clips, only signs URLs for complete clip outputs
 def public_job(job: Job) -> Job:
     result = job.model_copy(deep=True)
     for clip in result.clips:
@@ -409,6 +417,7 @@ async def export_job(job_id: str, value: SelectionInput) -> dict[str, str]:
 
 
 @app.get("/api/v1/files/{relative_path:path}")
+# DO-NOT-CHANGE: only serves jobs/ and exports/ prefixes; HMAC-verified; confined path
 async def download_file(relative_path: str, expires: int = Query(...), signature: str = Query(...)) -> FileResponse:
     if not relative_path.startswith(("jobs/", "exports/")) or not signer.verify(relative_path, expires, signature):
         raise HTTPException(403, "Download link is invalid or expired")
@@ -467,6 +476,8 @@ def _csv(value: str) -> list[str]:
     return list(dict.fromkeys(item.strip() for item in value.split(",") if item.strip()))[:100]
 
 
+# DO-NOT-CHANGE: signs preview URL with token library-asset:{id}:{blob_id};
+# preview_asset verifies token + confined path
 def _public_asset(asset: Asset) -> Asset:
     token = f"library-asset:{asset.id}:{asset.blob_id}"
     expires, signature = signer.sign(token)
@@ -597,6 +608,7 @@ async def create_asset(
 
 
 @app.get("/api/v1/library/assets/{asset_id}/preview")
+# DO-NOT-CHANGE: verifies token library-asset:{id}:{blob_id}, serves from confined path
 async def preview_asset(asset_id: str, expires: int = Query(...), signature: str = Query(...)) -> FileResponse:
     asset = db.get_asset(asset_id)
     if not asset:

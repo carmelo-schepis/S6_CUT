@@ -15,6 +15,8 @@ def to_camel(value: str) -> str:
     return parts[0] + "".join(part.capitalize() for part in parts[1:])
 
 
+# DO-NOT-CHANGE: see DO-NOT-CHANGE/AGENTS.md
+# camelCase JSON contract with web/src/types.ts zod schemas; extra='forbid'
 class ApiModel(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True, extra="forbid")
 
@@ -65,6 +67,8 @@ class Clip(ApiModel):
     selected: bool = True
     output_name: str | None = None
     blob_id: str | None = None
+    # DO-NOT-CHANGE: engine-set only, after the publication transaction commits —
+    # the UI never displays this from optimistic state
     library_asset_id: str | None = None
     title: str | None = None
     width: int | None = Field(default=None, ge=1)
@@ -147,6 +151,8 @@ class Job(ApiModel):
     updated_at: str = Field(default_factory=now_iso)
 
     @model_validator(mode="after")
+    # DO-NOT-CHANGE: enforces at-most-one-active-step and ready-step completion;
+    # all step transitions must go through JobManager.start/complete/skip/fail_step
     def valid_step_state(self):
         if sum(step.status == "active" for step in self.steps) > 1:
             raise ValueError("at most one processing step may be active")

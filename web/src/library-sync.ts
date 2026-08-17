@@ -1,3 +1,6 @@
+// DO-NOT-CHANGE: see DO-NOT-CHANGE/AGENTS.md
+// debounce semantics keep Library <-> Workspace consistent; keep the bounded revalidation
+
 /**
  * Cross-view Media Library invalidation.
  *

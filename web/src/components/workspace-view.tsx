@@ -68,6 +68,8 @@ export function WorkspaceView({ project, health, hasSelectedProvider = true, onC
   const pollingRef = useRef<number | null>(null);
   // Track the previous clip states so we can detect new publications
   // and emit a library-changed signal for cross-view revalidation.
+  // DO-NOT-CHANGE: this publication detection emits library-changed when a clip completes;
+  // the Library screen depends on it for cross-view consistency
   const prevClipStates = useRef<Map<string, Clip["state"]>>(new Map());
   const jobRef = useRef<Job | null>(null);
 

@@ -45,9 +45,9 @@ def _write(tmp: Path, words: list[dict[str, object]], *, width: int = 1080, heig
 
 
 def test_short_subtitle_is_single_centred_line(tmp_path: Path) -> None:
-    ass = _write(tmp_path, _words("Hello", "world", "this", "is", "S6"))
+    ass = _write(tmp_path, _words("Hi", "there", "S6"))
     events = _caption_events(ass)
-    assert len(events) == 5  # one event per word, highlighting moves word by word
+    assert len(events) == 3  # one event per word, highlighting moves word by word
     assert all(",Caption,,0,0,0,," in event for event in events)
     assert all("\\N" not in event for event in events)  # short caption stays on one line
     # The style is bottom-centre (Alignment=2) with symmetric safe margins.

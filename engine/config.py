@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+# DO-NOT-CHANGE: see DO-NOT-CHANGE/AGENTS.md — env var defaults must match compose.yaml
+# Changing a default or unit (bytes vs MB, seconds vs minutes) silently breaks deployments
+
+
 import os
 from dataclasses import dataclass
 from pathlib import Path

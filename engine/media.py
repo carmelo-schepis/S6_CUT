@@ -158,6 +158,7 @@ def sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
     return digest.hexdigest()
 
 
+# DO-NOT-CHANGE: enforces max_source_seconds via settings; rotation handling is fragile
 def probe(path: Path, settings: Settings) -> dict[str, Any]:
     result = run([settings.ffprobe, "-v", "error", "-show_streams", "-show_format", "-of", "json", str(path)], timeout=120)
     try:
@@ -294,6 +295,8 @@ def extract_audio_16k(source: Path, settings: Settings, *, output: Path | None =
     return target
 
 
+# DO-NOT-CHANGE: Faster-Whisper with word timestamps REQUIRED (captions depend on them);
+# S6_TEST_TRANSCRIPT_JSON env var is the test fixture hook — keep it
 def transcribe(
     path: Path,
     settings: Settings,
@@ -445,6 +448,7 @@ def _ass_style_metrics(width: int, height: int) -> dict[str, int]:
 
 
 def _wrap_caption_words(words: list[dict[str, Any]], max_chars: int) -> list[list[dict[str, Any]]]:
+    # DO-NOT-CHANGE: greedy word-wrap at natural boundaries; never split a single word
     """Greedy word-wrap a caption group at natural word boundaries.
 
     Lines never exceed ``max_chars`` and words are never split. If a single
@@ -475,6 +479,9 @@ def _ass_escape(value: str) -> str:
     return value.replace("\\", r"\\").replace("{", r"\{").replace("}", r"\}").replace("\n", r"\N")
 
 
+# DO-NOT-CHANGE: PlayResX/Y must match the final render canvas; captions stay
+# bottom-centre (Alignment=2) with symmetric margins; word-by-word highlight
+# uses {\\c&H0077D6FF&}; wrapping at word boundaries via _wrap_caption_words
 def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duration: float, visuals: Iterable[tuple[str, float, float]], width: int, height: int) -> None:
     metrics = _ass_style_metrics(width, height)
     fontsize = metrics["fontsize"]
@@ -544,6 +551,8 @@ def _filters(width: int, height: int, overlays: list[tuple[Path, float, float]],
     return ";".join(filters), "outv"
 
 
+# DO-NOT-CHANGE: atomic render (.partial.mp4 + os.replace) with structural output
+# validation (dimensions/audio) before the output is publishable
 def render_clip(source: Path, output: Path, *, start: float, end: float, aspect: str, words: list[dict[str, Any]], visuals: list[tuple[str, float, float]], overlays: list[tuple[Path, float, float]], settings: Settings) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     ass = output.parent / f"{output.stem}.ass"
@@ -665,6 +674,7 @@ def _fast_crop_scale_filter(
     )
 
 
+# DO-NOT-CHANGE: deterministic fast-cut window planning — never make it random or stateful
 def render_fast_clip(
     source: Path,
     output: Path,
@@ -781,6 +791,7 @@ def render_fast_clip(
     os.replace(temp, output)
 
 
+# DO-NOT-CHANGE: script render with atomic .partial + os.replace and output validation
 def render_script(output: Path, *, duration: float, aspect: str, narration: Path | None, words: list[dict[str, Any]], visuals: list[tuple[str, float, float]], overlays: list[tuple[Path, float, float]], settings: Settings) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     ass = output.parent / f"{output.stem}.ass"

@@ -30,6 +30,8 @@ class ResolvedVisual:
     asset_path: Path | None = None
 
 
+# DO-NOT-CHANGE: see DO-NOT-CHANGE/AGENTS.md
+# deterministic matching (explain/resolve) and content-addressed blob store are contracts
 class LibraryRules:
     def __init__(self, db: Database, library_root: Path):
         self.db = db
@@ -39,6 +41,8 @@ class LibraryRules:
     def data_root(self) -> Path:
         return self.library_root.parent
 
+    # DO-NOT-CHANGE: content-addressed store — path is blobs/sha256/<prefix>/<digest><suffix>,
+    # atomic temp+os.replace, hard-link preferred; blobs are immutable once published
     def _publish_blob(self, path: Path, digest: str) -> tuple[Path, str]:
         """Create one content-addressed durable blob, preferring a zero-copy hard link."""
         suffix = path.suffix.casefold() if path.suffix else ".bin"
@@ -105,6 +109,8 @@ class LibraryRules:
             filename=path.name, policy="neutral", licence="Created or supplied by user",
         )
 
+    # DO-NOT-CHANGE: deterministic scoring — exact×45, tags×12, title+20, policy
+    # required+35/prefer+18; never/negative/date reject first; tie-break (-score, id)
     def explain(self, text: str, *, on_date: date | None = None) -> MatchExplanation:
         on_date = on_date or date.today()
         query = normalize(text)

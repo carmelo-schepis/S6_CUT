@@ -11,6 +11,9 @@ from pydantic import BaseModel
 
 from .models import Asset, Clip, Job, LibraryFolder, Project, ProviderProfile, UNSORTED_LIBRARY_FOLDER_ID, now_iso
 
+# DO-NOT-CHANGE: see DO-NOT-CHANGE/AGENTS.md
+# Invariants: additive-only migrations, idempotent publication
+# bidirectional clip<->asset link, content-addressed blob refs, folder redirects
 UNSORTED_FOLDER_ID = UNSORTED_LIBRARY_FOLDER_ID
 MAX_FOLDER_DEPTH = 3
 
@@ -76,6 +79,7 @@ class Database:
             """)
             self._migrate(db)
 
+# DO-NOT-CHANGE: additive-only migrations — never edit/reorder/delete existing blocks
     def _migrate(self, db: sqlite3.Connection) -> None:
         """Apply additive migrations transactionally; safe to repeat after interruption."""
         version = db.execute("SELECT COALESCE(MAX(version), 0) FROM schema_migrations").fetchone()[0]
@@ -314,6 +318,8 @@ class Database:
             ).fetchone()
         return self._asset_from_row(row) if row else None
 
+    # DO-NOT-CHANGE: idempotent — must keep existing metadata (title, tags, policy, folder)
+    # when the stable identity (origin, project, job, clip) already exists
     def register_blob_asset(self, asset: Asset, relative_path: str, byte_size: int) -> Asset:
         """Atomically bind a published blob, durable references, and one idempotent asset."""
         with self._lock, self._connect() as db:
@@ -385,6 +391,8 @@ class Database:
             return UNSORTED_FOLDER_ID, "Selected business folder no longer exists; assets published to Unsorted."
         return effective, None
 
+    # DO-NOT-CHANGE: atomic bidirectional publication — one BEGIN IMMEDIATE transaction
+    # clip.library_asset_id == asset.id AND asset.source_clip_id == clip.id (validated inline)
     def publish_clip_output(
         self,
         job: Job,
@@ -497,6 +505,7 @@ class Database:
 
         return job, clip, asset
 
+    # DO-NOT-CHANGE: idempotent repair — never duplicate assets on repeated calls
     def backfill_missing_assets(self, job: Job) -> tuple[Job, int, list[str]]:
         """Create missing Media Library assets for completed clips that lack one.
 
@@ -586,6 +595,7 @@ class Database:
             row = db.execute("SELECT COUNT(*) FROM media_blob_refs WHERE blob_id=?", (blob_id,)).fetchone()
         return int(row[0])
 
+    # DO-NOT-CHANGE: refuses protected assets; returns whether blob is now unreferenced (caller deletes it)
     def delete_asset(self, asset_id: str) -> tuple[Asset, str | None, bool]:
         with self._lock, self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -701,6 +711,7 @@ class Database:
                 db.execute("UPDATE assets SET folder_id=?,payload=? WHERE id=?", (folder_id, self._json(asset), row["id"]))
         return len(rows)
 
+    # DO-NOT-CHANGE: writes redirect, marks deleted=1, never hard-deletes
     def remove_folder(self, folder_id: str, destination_id: str) -> None:
         folder = self.get_folder(folder_id)
         destination = self.get_folder(destination_id)

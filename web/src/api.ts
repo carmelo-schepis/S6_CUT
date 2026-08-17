@@ -1,3 +1,6 @@
+// DO-NOT-CHANGE: see DO-NOT-CHANGE/AGENTS.md
+// API paths (/api/v1/...), signed URLs from server only, never construct file paths client-side
+
 import {
   assetSchema,
   healthSchema,
