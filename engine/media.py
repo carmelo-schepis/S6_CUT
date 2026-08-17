@@ -411,6 +411,58 @@ def dimensions(aspect: str) -> tuple[int, int]:
     return {"1:1": (1080, 1080), "16:9": (1920, 1080)}.get(aspect, (1080, 1920))
 
 
+# Reference caption metrics tuned against the canonical 9:16 canvas
+# (1080x1920). Every other output aspect ratio scales these values so
+# captions keep the same visual weight and safe margins, and so the ASS
+# coordinate system always matches the final rendered frame.
+_CAPTION_REFERENCE_HEIGHT = 1920
+_CAPTION_REFERENCE_FONT = 72
+_CAPTION_REFERENCE_OUTLINE = 5
+_CAPTION_REFERENCE_SHADOW = 2
+_CAPTION_REFERENCE_MARGIN_X = 80
+_CAPTION_REFERENCE_MARGIN_V = 250
+_CAPTION_WRAP_FRACTION = 0.85  # keep wrapped lines within 85% of the usable width
+_CHAR_WIDTH_FACTOR = 0.55  # average Arial glyph width at 1em
+
+
+def _ass_style_metrics(width: int, height: int) -> dict[str, int]:
+    """Scale caption metrics from the 9:16 reference canvas.
+
+    The font, outline, shadow, and vertical margin scale with the output
+    height so captions look consistent across aspect ratios; the horizontal
+    margin scales with the output width so the same mobile-safe edge band is
+    kept. All values are therefore relative to the final render resolution,
+    never to the source video.
+    """
+    scale = height / _CAPTION_REFERENCE_HEIGHT
+    return {
+        "fontsize": max(28, round(_CAPTION_REFERENCE_FONT * scale)),
+        "outline": max(2, round(_CAPTION_REFERENCE_OUTLINE * scale)),
+        "shadow": max(1, round(_CAPTION_REFERENCE_SHADOW * scale)),
+        "margin_x": max(40, round(_CAPTION_REFERENCE_MARGIN_X * width / 1080)),
+        "margin_v": max(60, round(_CAPTION_REFERENCE_MARGIN_V * scale)),
+    }
+
+
+def _wrap_caption_words(words: list[dict[str, Any]], max_chars: int) -> list[list[dict[str, Any]]]:
+    """Greedy word-wrap a caption group at natural word boundaries.
+
+    Lines never exceed ``max_chars`` and words are never split. If a single
+    word is itself longer than a line it is kept whole; ASS smart wrapping is
+    the last line of defence for that edge case.
+    """
+    lines: list[list[dict[str, Any]]] = [[]]
+    used = 0
+    for word in words:
+        width = len(str(word["text"])) + 1  # word plus one separating space
+        if used + width > max_chars and lines[-1]:
+            lines.append([])
+            used = 0
+        lines[-1].append(word)
+        used += width
+    return lines
+
+
 def _ass_time(seconds: float) -> str:
     value = max(0, seconds)
     hours = int(value // 3600)
@@ -423,18 +475,27 @@ def _ass_escape(value: str) -> str:
     return value.replace("\\", r"\\").replace("{", r"\{").replace("}", r"\}").replace("\n", r"\N")
 
 
-def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duration: float, visuals: Iterable[tuple[str, float, float]]) -> None:
-    header = """[Script Info]
+def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duration: float, visuals: Iterable[tuple[str, float, float]], width: int, height: int) -> None:
+    metrics = _ass_style_metrics(width, height)
+    fontsize = metrics["fontsize"]
+    outline = metrics["outline"]
+    shadow = metrics["shadow"]
+    margin_x = metrics["margin_x"]
+    margin_v = metrics["margin_v"]
+    visual_scale = height / _CAPTION_REFERENCE_HEIGHT
+    usable = max(1, width - 2 * margin_x)
+    max_chars = max(8, int(usable * _CAPTION_WRAP_FRACTION / (_CHAR_WIDTH_FACTOR * fontsize)))
+    header = f"""[Script Info]
 ScriptType: v4.00+
-PlayResX: 1080
-PlayResY: 1920
-WrapStyle: 2
+PlayResX: {width}
+PlayResY: {height}
+WrapStyle: 0
 ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding
-Style: Caption,Arial,72,&H00F1F2F4,&H0097D6FF,&H00000000,&H78000000,-1,0,0,0,100,100,0,0,1,5,2,2,80,80,250,1
-Style: Visual,Arial,56,&H008FA8DD,&H000000FF,&H00110B0C,&HCC110B0C,-1,0,0,0,100,100,1,0,3,2,0,8,90,90,400,1
+Style: Caption,Arial,{fontsize},&H00F1F2F4,&H0097D6FF,&H00000000,&H78000000,-1,0,0,0,100,100,0,0,1,{outline},{shadow},2,{margin_x},{margin_x},{margin_v},1
+Style: Visual,Arial,{max(28, round(56 * visual_scale))},&H008FA8DD,&H000000FF,&H00110B0C,&HCC110B0C,-1,0,0,0,100,100,1,0,3,{max(1, round(2 * visual_scale))},0,8,{margin_x},{margin_x},{max(80, round(400 * visual_scale))},1
 
 [Events]
 Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
@@ -444,13 +505,18 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
     for index, word in enumerate(local):
         group_start = index - index % 5
         group = local[group_start:group_start + 5]
-        bits = []
-        for item in group:
-            text = _ass_escape(str(item["text"]))
-            bits.append(r"{\c&H0077D6FF&}" + text + r"{\c&H00F1F2F4&}" if item is word else text)
+        lines = _wrap_caption_words(group, max_chars)
+        line_bits = []
+        for line in lines:
+            bits = []
+            for item in line:
+                text = _ass_escape(str(item["text"]))
+                bits.append(r"{\c&H0077D6FF&}" + text + r"{\c&H00F1F2F4&}" if item is word else text)
+            line_bits.append(" ".join(bits))
         start = max(0, float(word["start"]) - offset)
         end = min(duration, max(start + .05, float(word["end"]) - offset))
-        events.append(f"Dialogue: 10,{_ass_time(start)},{_ass_time(end)},Caption,,0,0,0,,{' '.join(bits)}")
+        event_text = r"\N".join(line_bits)
+        events.append(f"Dialogue: 10,{_ass_time(start)},{_ass_time(end)},Caption,,0,0,0,,{event_text}")
     for label, start, end in visuals:
         events.append(f"Dialogue: 5,{_ass_time(start)},{_ass_time(end)},Visual,,0,0,0,,{_ass_escape(label)}")
     path.write_text(header + "\n".join(events) + "\n", encoding="utf-8")
@@ -482,8 +548,8 @@ def render_clip(source: Path, output: Path, *, start: float, end: float, aspect:
     output.parent.mkdir(parents=True, exist_ok=True)
     ass = output.parent / f"{output.stem}.ass"
     duration = end - start
-    write_ass(ass, words, offset=start, duration=duration, visuals=visuals)
     width, height = dimensions(aspect)
+    write_ass(ass, words, offset=start, duration=duration, visuals=visuals, width=width, height=height)
     temp = output.with_suffix(".partial.mp4")
     command = [settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{start:.3f}", "-i", str(source), "-t", f"{duration:.3f}"]
     _overlay_inputs(command, overlays)
@@ -718,8 +784,8 @@ def render_fast_clip(
 def render_script(output: Path, *, duration: float, aspect: str, narration: Path | None, words: list[dict[str, Any]], visuals: list[tuple[str, float, float]], overlays: list[tuple[Path, float, float]], settings: Settings) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     ass = output.parent / f"{output.stem}.ass"
-    write_ass(ass, words, offset=0, duration=duration, visuals=visuals)
     width, height = dimensions(aspect)
+    write_ass(ass, words, offset=0, duration=duration, visuals=visuals, width=width, height=height)
     temp = output.with_suffix(".partial.mp4")
     command = [settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", f"color=c=0x08080a:s={width}x{height}:r=30:d={duration:.3f}"]
     audio_index: int | None = None
