@@ -1,6 +1,6 @@
 # Implementation status
 
-Updated: 2026-08-13
+Updated: 2026-08-17
 
 ## Implemented and wired to the UI
 
@@ -19,6 +19,7 @@ Updated: 2026-08-13
 - Validated uploads, YouTube sources, Fast/Smart clips, Script outputs, and retries publish idempotently into a shared content-addressed blob store with durable project/job/clip/Library references and neutral matching defaults.
 - Script exact-span planning every roughly 2-3 seconds, optional ElevenLabs -> local espeak-ng -> silent narration fallback, word alignment, storyboard, captions, visual beats, and render.
 - Provider profiles with configurable OpenRouter model, optional ElevenLabs voice, test/duplicate/delete, masked read API, session-only or Fernet-encrypted persistent secrets.
+- One-command `install.sh` installer and data-preserving `uninstall.sh` for Linux and macOS: prerequisite checks, clone/update into `~/s6_cut`, `.env` bootstrap, build/start, readiness wait, service status, and frontend/backend URL summary.
 - nginx same-origin gateway, private engine service, signed media links, security headers, non-root images, one mounted data directory, Compose/TrueNAS/Portainer documentation, and Windows launcher.
 
 ## Verified evidence
@@ -30,7 +31,7 @@ Updated: 2026-08-13
 - `npm run build` - Vite production build passed; 1,794 modules transformed.
 - `npm install` and container `npm ci` audits - zero known vulnerabilities.
 - Both multi-stage web and engine images built successfully, including FFmpeg, Faster-Whisper, yt-dlp, and espeak-ng in the private engine image.
-- `docker compose config` passed. Only nginx publishes a host port; the engine remains private on the Compose network.
+- `docker compose config` passed. Only nginx publishes a LAN-facing host port; the engine additionally binds the host loopback (127.0.0.1:8001) for local API docs/debugging and stays otherwise private on the Compose network.
 - `docker compose up -d` reached healthy state for both services. The production UI remains available at `http://127.0.0.1:8080`.
 - Gateway health reported SQLite, FFmpeg, FFprobe, Whisper, yt-dlp, local TTS, and `/app/data` ready.
 - Response headers verified CSP, `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`, and COOP.

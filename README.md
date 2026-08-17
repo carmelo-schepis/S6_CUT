@@ -4,23 +4,55 @@ S6_cut is a free, open-source, local-first video studio. Drop a long video or pa
 
 There is no S6_cut account, credit system, watermark, artificial usage limit, or mandatory hosted application backend. The web gateway and private media engine run on hardware you control.
 
-## Quick start — Docker Compose
+## Quick start (Docker)
 
-Requirements: Docker Engine with Compose v2, 8 GB RAM recommended, and enough storage for source media, the Whisper model, temporary renders, and outputs.
+Install S6_cut on any Linux or macOS machine with Docker by running **one command**:
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/carmelo-schepis/S6_CUT/master/install.sh | bash
+```
+
+The installer checks for Git, Docker, and Docker Compose v2, downloads S6_cut into `~/s6_cut` (or updates an existing installation in place), creates `.env` from the template on first run — and never overwrites your configuration — then builds, starts, and waits for the app to become ready. When it finishes you will see:
+
+```text
+✓ S6_cut is running
+
+Frontend: http://localhost:8080
+Backend:  http://localhost:8001
+```
+
+Open the **Frontend** URL in your browser. The backend engine — including its API docs at `/api/docs` — listens on localhost only and is not exposed to your network.
+
+Requirements: Git, curl, and Docker Engine with Compose v2, with 8 GB RAM recommended and enough storage for source media, the Whisper model, temporary renders, and outputs. The installer does not install Docker for you: on Linux, install Docker Engine; on macOS, install Docker Desktop.
+
+- **Update** — re-run the same command. Your `.env`, projects, Library, media, outputs, models, and persistent Docker state are preserved.
+- **Uninstall** (keeps your data) — run the one-command uninstaller:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/carmelo-schepis/S6_CUT/master/uninstall.sh | bash
+```
+
+No-provider Auto jobs use Fast local cut and do not download Whisper. The first explicit Smart clips job downloads the configured Faster-Whisper model into the mounted data path.
+
+## Manual installation (Docker Compose)
+
+Prefer to run the commands yourself, or want to pin a specific revision? Clone and start S6_cut manually:
+
+```bash
+git clone https://github.com/carmelo-schepis/S6_CUT.git
+cd S6_CUT
 cp .env.example .env
 docker compose up -d --build
 docker compose ps
 ```
 
-Open <http://localhost:8080>. No-provider Auto jobs use Fast local cut and do not download Whisper. The first explicit Smart clips job downloads the configured Faster-Whisper model into the mounted data path. To stop without deleting state:
+Open <http://localhost:8080>. To stop without deleting state:
 
 ```bash
 docker compose down
 ```
 
-Only nginx publishes a port. The FastAPI engine stays on the Compose network. Do not expose the raw HTTP port to the public internet; use an authenticated HTTPS reverse proxy or VPN for remote access.
+Only nginx publishes a port to your network. The FastAPI engine stays on the Compose network and additionally binds the host loopback at <http://localhost:8001> (API docs at `/api/docs`) for local debugging. Do not expose the raw engine HTTP port to the public internet; use an authenticated HTTPS reverse proxy or VPN for remote access.
 
 ## Local development
 
@@ -42,7 +74,8 @@ Copy `.env.example` to `.env`. Important values:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `S6_PORT` | `8080` | The one published web/portal port |
+| `S6_PORT` | `8080` | Published web/portal port — the URL you open in a browser and the only port reachable from your network |
+| `S6_ENGINE_PORT` | `8001` | Engine API port, bound to the host loopback only (API docs and debugging) |
 | `S6_DATA_PATH` | `./data` | Persistent database, jobs, uploads, Library, cache, models, exports, and instance secrets |
 | `S6_WHISPER_MODEL` | `base` | CPU-friendly local Faster-Whisper model used only by explicit Smart clips |
 | `S6_WHISPER_DEVICE` | `cpu` | Whisper device: `cpu`, `auto`, or `cuda` |
@@ -100,7 +133,7 @@ temp/               bounded temporary work
 
 Back up or snapshot the complete data directory while the stack is stopped, or use a filesystem-consistent snapshot. Restore by placing the directory at the configured path before starting the same or newer application version. Preserve `secrets/`; otherwise saved provider profiles and existing signed-link identity cannot be recovered.
 
-- Uninstall but keep data: `docker compose down --rmi local`, leaving `S6_DATA_PATH` untouched.
+- Uninstall but keep data: run `uninstall.sh` (or `docker compose down --rmi local` for the manual flow), leaving `S6_DATA_PATH` untouched. `uninstall.sh --purge --yes` additionally deletes the installation directory and everything in it — including your data; use it only when you are sure.
 - Remove data: stop the stack, confirm the exact configured absolute data path, and remove that dataset/directory separately. Compose never declares a named volume that silently deletes the host dataset.
 - Deleting one project never deletes a Library source as a side effect. Removing a Library record likewise leaves project and clip references usable.
 - Business folders are organizational containers, not accounts or access-control boundaries; folder names never become filesystem paths.

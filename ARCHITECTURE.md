@@ -7,7 +7,7 @@ Browser / installed PWA
         |
         | same-origin HTTP + SSE
         v
-nginx web gateway :8080  (only published service)
+nginx web gateway :8080  (only LAN-facing service)
         |
         | private Compose network
         v
@@ -24,6 +24,8 @@ FastAPI media engine :8001
                  v
            mounted /app/data
 ```
+
+For local debugging the engine API is also reachable on the host loopback only (http://127.0.0.1:8001, e.g. `/api/docs`); it is never bound to a network-visible interface.
 
 The browser owns interaction state. The engine is authoritative for projects, jobs, timed transcripts, Library metadata/rules, profiles, provenance, and produced artifacts. Every UI update is derived from a durable record; server-sent events accelerate updates and the workspace falls back to polling after disconnect.
 
@@ -61,7 +63,7 @@ The source file and Library sources are immutable. Manual editing can create lat
 
 S6_cut is single-user software for a trusted LAN or VPN. It is not a hostile multi-tenant service.
 
-- nginx is the only published service; the engine has no host port.
+- nginx is the only service reachable from the network; the engine additionally binds the host loopback (127.0.0.1:8001) so local API docs and debugging work, and is never bound to a network-visible interface.
 - Uploads stream to confined UUID directories, with suffix, byte, duration, and FFprobe validation.
 - URL import only accepts HTTPS YouTube hosts, rejects credentials/custom ports, resolves DNS, and rejects non-public addresses.
 - Download paths are confined under jobs/exports and require expiring HMAC signatures.
