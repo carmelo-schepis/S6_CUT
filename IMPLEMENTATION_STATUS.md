@@ -1,6 +1,6 @@
 # Implementation status
 
-Updated: 2026-08-17
+Updated: 2026-08-18
 
 ## Implemented and wired to the UI
 
@@ -26,11 +26,11 @@ Updated: 2026-08-17
 
 - `npm run lint` - passed with zero warnings.
 - `npm run typecheck` - passed under TypeScript strict mode.
-- `npm test` - 93/93 frontend contract/component/integration tests passed.
-- `python -m pytest engine/tests -q` - 129/129 engine unit/API/security/media/checklist/migration tests passed. One Starlette environment deprecation warning is upstream and does not affect results.
+- `npm test` - 115/115 frontend contract/component/integration tests passed.
+- `python -m pytest engine/tests -q` - 171/171 engine unit/API/security/media/checklist/migration tests passed. One Starlette environment deprecation warning is upstream and does not affect results.
 - `npm run build` - Vite production build passed; 1,794 modules transformed.
 - `npm install` and container `npm ci` audits - zero known vulnerabilities.
-- Both multi-stage web and engine images built successfully, including FFmpeg, Faster-Whisper, yt-dlp, and espeak-ng in the private engine image.
+- Both multi-stage web and engine images built successfully, including FFmpeg, Faster-Whisper, yt-dlp (2026.07.04), deno (v2.1.4), and espeak-ng in the private engine image.
 - `docker compose config` passed. Only nginx publishes a LAN-facing host port; the engine additionally binds the host loopback (127.0.0.1:8001) for local API docs/debugging and stays otherwise private on the Compose network.
 - `docker compose up -d` reached healthy state for both services. The production UI remains available at `http://127.0.0.1:8080`.
 - Gateway health reported SQLite, FFmpeg, FFprobe, Whisper, yt-dlp, local TTS, and `/app/data` ready.
@@ -41,6 +41,7 @@ Updated: 2026-08-17
 - Signed selected-export ZIP was downloaded and inspected: it contains the successful clip, `manifest.json`, and `credits.json` with project/job/style/score/provenance data.
 - Completed jobs remained accessible after the production containers were recreated, exercising the mounted durable data path.
 - Desktop and compact production screenshots were captured after asynchronous health/project data loaded and visually inspected for responsive layout and engine-ready state.
+- **YouTube import fix verified**: `https://www.youtube.com/watch?v=FylHa4_neOA` successfully imports in both Fast and Smart modes. yt-dlp now uses `--extractor-args youtube:player_client=android,web` with format selector `bv*+ba/b` and includes a retry with broader client set (`android,web,web_music`) plus automatic cleanup of stale `.part`/`.ytdl` files on failure. Deno runtime installed in engine container for robust JavaScript player extraction.
 
 ## Honest limitations / next bounded milestone
 

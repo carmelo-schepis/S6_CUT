@@ -6,8 +6,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     S6_DATA_PATH=/app/data
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg espeak-ng ca-certificates tini \
+    && apt-get install -y --no-install-recommends ffmpeg espeak-ng ca-certificates tini curl unzip \
     && rm -rf /var/lib/apt/lists/* \
+    && curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh -s v2.1.4 \
     && groupadd --system --gid 10001 s6cut \
     && useradd --system --uid 10001 --gid 10001 --home-dir /app --shell /usr/sbin/nologin s6cut
 

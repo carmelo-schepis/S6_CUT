@@ -205,18 +205,44 @@ def validate_video_upload(path: Path, original_name: str, settings: Settings) ->
     return probe(path, settings)
 
 
+def _cleanup_partials(target_dir: Path) -> None:
+    """Remove yt-dlp temporary/partial files to avoid stale state on retry."""
+    try:
+        for pattern in ("*.part", "*.ytdl", "*.part-Frag*"):
+            for partial in target_dir.glob(pattern):
+                if partial.is_file():
+                    partial.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def download_youtube(url: str, target_dir: Path, settings: Settings) -> Path:
     validate_youtube_url(url)
     target_dir.mkdir(parents=True, exist_ok=True)
     template = str(target_dir / "source-%(id)s.%(ext)s")
+    # Use multiple player clients for better extraction resilience
+    # Format selector: prefer merged video+audio, fallback to any combined format
     result = run([
         settings.ytdlp, "--no-playlist", "--no-warnings", "--restrict-filenames", "--write-info-json",
         "--max-filesize", str(settings.max_upload_bytes),
-        "--format", "bv*[height<=1080]+ba/b[height<=1080]",
+        "--extractor-args", "youtube:player_client=android,web",
+        "--format", "bv*+ba/b",
         "--merge-output-format", "mp4", "--output", template,
         "--print", "after_move:filepath", url,
     ], timeout=3600)
     candidates = [Path(line.strip()) for line in result.stdout.splitlines() if line.strip()]
+    # If the first attempt yields no file, retry once with a broader format and clean partials
+    if not candidates:
+        _cleanup_partials(target_dir)
+        result = run([
+            settings.ytdlp, "--no-playlist", "--no-warnings", "--restrict-filenames", "--write-info-json",
+            "--max-filesize", str(settings.max_upload_bytes),
+            "--extractor-args", "youtube:player_client=android,web,web_music",
+            "--format", "bv*+ba/b",
+            "--merge-output-format", "mp4", "--output", template,
+            "--print", "after_move:filepath", url,
+        ], timeout=3600)
+        candidates = [Path(line.strip()) for line in result.stdout.splitlines() if line.strip()]
     if not candidates:
         candidates = [item for item in target_dir.glob("source-*") if item.suffix.casefold() in ALLOWED_VIDEO_SUFFIXES]
     if not candidates:
