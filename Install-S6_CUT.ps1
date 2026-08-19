@@ -6,10 +6,10 @@
     then installs/updates using Docker Compose. Preserves existing .env, projects,
     Library, media, outputs, models, and persistent Docker state.
 
-    PRIVATE REPO (authenticated — works now):
+    PRIVATE REPO (authenticated -- works now):
       gh api -H "Accept: application/vnd.github.raw+json" repos/carmelo-schepis/S6_CUT/contents/Install-S6_CUT.ps1 | Invoke-Expression
 
-    PUBLIC REPO (anonymous — works after repository is made public):
+    PUBLIC REPO (anonymous -- works after repository is made public):
       irm https://raw.githubusercontent.com/carmelo-schepis/S6_CUT/master/Install-S6_CUT.ps1 | iex
 .NOTES
     Installs into $HOME\s6_cut by default. Safe to run repeatedly.
@@ -35,10 +35,10 @@ param(
 # --- formatting ---------------------------------------------------------------
 
 function Write-Info { param([string]$Message) Write-Host "`n$Message" -ForegroundColor Cyan }
-function Write-Step { param([string]$Message) Write-Host "  → $Message" -ForegroundColor Gray }
-function Write-Ok   { param([string]$Message) Write-Host "  ✓ $Message" -ForegroundColor Green }
-function Write-Warn { param([string]$Message) Write-Host "  ! $Message" -ForegroundColor Yellow }
-function Write-Fail { param([string]$Message) Write-Host "  ✗ $Message" -ForegroundColor Red }
+function Write-Step { param([string]$Message) Write-Host "  -> $Message" -ForegroundColor Gray }
+function Write-Ok   { param([string]$Message) Write-Host "  [OK] $Message" -ForegroundColor Green }
+function Write-Warn { param([string]$Message) Write-Host "  [!] $Message" -ForegroundColor Yellow }
+function Write-Fail { param([string]$Message) Write-Host "  [FAIL] $Message" -ForegroundColor Red }
 
 function Die {
     param([string]$Message)
@@ -189,10 +189,10 @@ while ([DateTime]::Now -lt $Deadline) {
 if (-not $Ready) {
     Write-Fail "S6_cut did not become ready within ${StartTimeout} seconds."
     Write-Host ""
-    Write-Info "Diagnostics — service status"
+    Write-Info "Diagnostics -- service status"
     docker compose ps
     Write-Host ""
-    Write-Info "Diagnostics — recent container logs"
+    Write-Info "Diagnostics -- recent container logs"
     docker compose logs --tail=60
     Die "S6_cut failed to start. Review the diagnostics above, fix the cause, and re-run the install command."
 }
@@ -218,8 +218,8 @@ Write-Host "  Frontend: http://localhost:$WebPort"
 Write-Host "  Backend:  http://localhost:$EnginePort"
 Write-Host ""
 Write-Info "Next steps"
-Write-Host "  • Open the Frontend URL in your browser to start creating projects."
-Write-Host "  • The Backend engine (and its API docs) listens on localhost only."
-Write-Host "  • Install directory: $InstallDir  (your data lives under ${InstallDir}\data)"
-Write-Host "  • Update S6_cut later: re-run the same install command."
-Write-Host "  • Uninstall (keeps your data): run uninstall.ps1 — see the README."
+Write-Host "  * Open the Frontend URL in your browser to start creating projects."
+Write-Host "  * The Backend engine (and its API docs) listens on localhost only."
+Write-Host "  * Install directory: $InstallDir  (your data lives under ${InstallDir}\data)"
+Write-Host "  * Update S6_cut later: re-run the same install command."
+Write-Host "  * Uninstall (keeps your data): run uninstall.ps1 -- see the README."
