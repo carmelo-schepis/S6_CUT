@@ -1,3 +1,73 @@
+# S6_CUT Project - Ignore home directory junk
+.cache/
+.chocolatey/
+.claude/
+.claude.json
+.claude.json.backup
+.claude_askpass.sh
+.claude_usb_wait.sh
+.codex/
+.config/
+.continue/
+.convex/
+.copilot/
+.cursor/
+.docker/
+.gitconfig
+.lmstudio/
+.lmstudio-home-pointer
+.local/
+.n8n/
+.ollama/
+.pi/
+.pipedocker_engine/
+.poshssh/
+.pytest_cache/
+.ruff_cache/
+.ssh/
+.t3/
+.thumbnails/
+.vscode/
+.vscode-shared/
+AI-Youtube-Shorts-Generator/
+AppData/
+Application Data/
+Claude/
+Contacts/
+Cookies/
+Desktop/
+Documents/
+Downloads/
+Favorites/
+Intel/
+IntelGraphicsProfiles/
+Links/
+Local Settings/
+Music/
+NTUSER.DAT*
+ntuser.dat*
+nul
+openssh-install-status.txt
+ponytail/
+projects/
+start-docker.ps1
+wsl.exe
+~/
+check_*.ps1
+drives.ps1
+move_appdata.ps1
+SF_softwareTEST*/
+Userscharlpi-setup-tmp/
+clippyme/
+OneDrive/
+Pictures/
+Recent/
+Saved Games/
+Searches/
+SendTo/
+Start Menu/
+
+# Project specific ignores
 node_modules/
 web/dist/
 .venv/
@@ -10,3 +80,4 @@ data/
 .env
 test-artifacts/
 .test-data-import/
+ntuser.ini
