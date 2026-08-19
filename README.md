@@ -6,13 +6,33 @@ There is no S6_cut account, credit system, watermark, artificial usage limit, or
 
 ## Quick start (Docker)
 
-Install S6_cut on any Linux or macOS machine with Docker by running **one command**:
+The repository is currently **private**. Authenticated GitHub CLI users can install now using the commands below. Once the repository is made public, the standard anonymous one-liners will work from any device.
 
+### Linux / macOS (bash)
+
+**Private repo / authenticated (works now):**
+```bash
+gh api -H "Accept: application/vnd.github.raw+json" repos/carmelo-schepis/S6_CUT/contents/install.sh | bash
+```
+
+**Public repo / anonymous (works after repository visibility is changed to public):**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/carmelo-schepis/S6_CUT/master/install.sh | bash
 ```
 
-The installer checks for Git, Docker, and Docker Compose v2, downloads S6_cut into `~/s6_cut` (or updates an existing installation in place), creates `.env` from the template on first run — and never overwrites your configuration — then builds, starts, and waits for the app to become ready. When it finishes you will see:
+### Windows (PowerShell)
+
+**Private repo / authenticated (works now):**
+```powershell
+gh api -H "Accept: application/vnd.github.raw+json" repos/carmelo-schepis/S6_CUT/contents/Install-S6_CUT.ps1 | Invoke-Expression
+```
+
+**Public repo / anonymous (works after repository visibility is changed to public):**
+```powershell
+irm https://raw.githubusercontent.com/carmelo-schepis/S6_CUT/master/Install-S6_CUT.ps1 | iex
+```
+
+The installer checks for Git, Docker, and Docker Compose v2, clones S6_cut into `~/s6_cut` (or updates an existing installation in place), creates `.env` from the template on first run — and never overwrites your configuration — then builds, starts, and waits for the app to become ready. When it finishes you will see:
 
 ```text
 ✓ S6_cut is running
@@ -23,14 +43,20 @@ Backend:  http://localhost:8001
 
 Open the **Frontend** URL in your browser. The backend engine — including its API docs at `/api/docs` — listens on localhost only and is not exposed to your network.
 
-Requirements: Git, curl, and Docker Engine with Compose v2, with 8 GB RAM recommended and enough storage for source media, the Whisper model, temporary renders, and outputs. The installer does not install Docker for you: on Linux, install Docker Engine; on macOS, install Docker Desktop.
+Requirements: Git, curl, Docker Engine with Compose v2, with 8 GB RAM recommended and enough storage for source media, the Whisper model, temporary renders, and outputs. The installer does not install Docker for you: on Linux, install Docker Engine; on macOS/Windows, install Docker Desktop.
 
 - **Update** — re-run the same command. Your `.env`, projects, Library, media, outputs, models, and persistent Docker state are preserved.
 - **Uninstall** (keeps your data) — run the one-command uninstaller:
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/carmelo-schepis/S6_CUT/master/uninstall.sh | bash
-```
+  **Linux / macOS:**
+  ```bash
+  bash ~/s6_cut/uninstall.sh
+  ```
+
+  **Windows:**
+  ```powershell
+  & $HOME\s6_cut\uninstall.ps1
+  ```
 
 No-provider Auto jobs use Fast local cut and do not download Whisper. The first explicit Smart clips job downloads the configured Faster-Whisper model into the mounted data path.
 

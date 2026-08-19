@@ -2,8 +2,12 @@
 #
 # S6_cut installer for Linux and macOS
 # ====================================
-# One-command install/update via Docker Compose:
+# One-command install/update via Docker Compose.
 #
+# PRIVATE REPO (authenticated — works now):
+#   gh api -H "Accept: application/vnd.github.raw+json" repos/carmelo-schepis/S6_CUT/contents/install.sh | bash
+#
+# PUBLIC REPO (anonymous — works after repository is made public):
 #   curl -fsSL https://raw.githubusercontent.com/carmelo-schepis/S6_CUT/master/install.sh | bash
 #
 # Installs into ~/s6_cut by default. Safe to run repeatedly: an existing
@@ -11,11 +15,12 @@
 # Library, media, outputs, models, and persistent Docker state are never
 # deleted or overwritten.
 #
-# Environment overrides:
+# Environment overrides (set these before running the command):
 #   S6_INSTALL_DIR    installation directory      (default: ~/s6_cut)
 #   S6_REPO_URL       repository to clone/update  (default: https://github.com/carmelo-schepis/S6_CUT.git)
 #   S6_BRANCH         branch to track             (default: master)
 #   S6_START_TIMEOUT  seconds to wait for startup (default: 300)
+#   S6_FORCE_RECREATE force recreate containers   (default: false)
 
 set -euo pipefail
 
@@ -23,6 +28,7 @@ INSTALL_DIR="${S6_INSTALL_DIR:-$HOME/s6_cut}"
 REPO_URL="${S6_REPO_URL:-https://github.com/carmelo-schepis/S6_CUT.git}"
 BRANCH="${S6_BRANCH:-master}"
 START_TIMEOUT="${S6_START_TIMEOUT:-300}"
+FORCE_RECREATE="${S6_FORCE_RECREATE:-false}"
 COMPOSE_FILE="compose.yaml"
 CURRENT_STEP="starting"
 
@@ -61,7 +67,7 @@ check_os() {
   case "$(uname -s)" in
     Linux|Darwin) : ;;
     MINGW*|MSYS*|CYGWIN*)
-      die "Windows shells are not supported by this installer. On Windows, use START_S6_CUT.cmd from the repository." ;;
+      die "Windows shells are not supported by this installer. On Windows, use Install-S6_CUT.ps1 from the repository." ;;
     *)
       warn "Unrecognised operating system '$(uname -s)'. This installer targets Linux and macOS; continuing anyway." ;;
   esac
@@ -136,7 +142,11 @@ start_containers() {
   CURRENT_STEP="building and starting the containers"
   step "Building S6_cut (the first build can take several minutes)..."
   step "Starting containers..."
-  docker compose up -d --build
+  if [[ "$FORCE_RECREATE" == "true" ]]; then
+    docker compose up -d --build --force-recreate
+  else
+    docker compose up -d --build
+  fi
   ok "Containers started"
 }
 
