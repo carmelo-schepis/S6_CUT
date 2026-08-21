@@ -13,6 +13,13 @@ from .models import ProfileInput, ProviderProfile
 from .security import SecretVault, mask_secret
 
 
+class ProviderError(RuntimeError):
+    def __init__(self, category: str, message: str):
+        super().__init__(message)
+        self.category = category
+        self.safe_message = message
+
+
 FALLBACKS = {
     "planning": "Deterministic sentence and phrase planner",
     "captions": "Canonical timed transcript",
@@ -22,6 +29,8 @@ FALLBACKS = {
 
 
 def provider_runtime_message(error: Exception, service: str) -> str:
+    if isinstance(error, ProviderError):
+        return error.safe_message
     if isinstance(error, httpx.HTTPStatusError):
         status_code = error.response.status_code
         if status_code in {401, 403}:
@@ -60,11 +69,12 @@ class ProfileService:
             return self._decode(self.vault.get_session(profile_id))
         return self._decode(self.vault.decrypt(encrypted))
 
-    def selected_secrets(self) -> tuple[ProviderProfile | None, dict[str, str]]:
+    def selected_secrets(self, *, include_environment: bool = True) -> tuple[ProviderProfile | None, dict[str, str]]:
         profile = next((item for item in self.db.list_profiles() if item.selected), None)
         secrets = self.secrets(profile.id) if profile else {}
-        secrets.setdefault("openrouterKey", os.getenv("OPENROUTER_API_KEY", ""))
-        secrets.setdefault("elevenlabsKey", os.getenv("ELEVENLABS_API_KEY", ""))
+        if include_environment:
+            secrets.setdefault("openrouterKey", os.getenv("OPENROUTER_API_KEY", ""))
+            secrets.setdefault("elevenlabsKey", os.getenv("ELEVENLABS_API_KEY", ""))
         return profile, {key: value for key, value in secrets.items() if value}
 
     def smart_available(self) -> bool:
@@ -204,8 +214,10 @@ class ProfileService:
         output.write_bytes(response.content)
         return output.stat().st_size > 1000
 
-    async def openrouter_json(self, messages: list[dict[str, str]], schema: dict[str, Any]) -> dict[str, Any] | None:
-        profile, secrets = self.selected_secrets()
+    async def openrouter_json(self, messages: list[dict[str, str]], schema: dict[str, Any], *, require_saved_profile: bool = False) -> dict[str, Any] | None:
+        profile, secrets = self.selected_secrets(include_environment=not require_saved_profile)
+        if require_saved_profile and (not profile or profile.openrouter_status != "connected"):
+            return None
         key = secrets.get("openrouterKey")
         if not key or not profile:
             return None
@@ -217,13 +229,28 @@ class ProfileService:
         }
         async with httpx.AsyncClient(timeout=45) as client:
             for attempt in range(2):
-                response = await client.post("https://openrouter.ai/api/v1/chat/completions", headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"}, json=payload)
-                if response.status_code in {408, 429, 500, 502, 503, 504} and attempt == 0:
-                    continue
-                response.raise_for_status()
-                content = response.json()["choices"][0]["message"]["content"]
                 try:
-                    return json.loads(content)
-                except (TypeError, json.JSONDecodeError):
-                    return None
-        return None
+                    response = await client.post("https://openrouter.ai/api/v1/chat/completions", headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"}, json=payload)
+                except (httpx.TimeoutException, httpx.RequestError) as exc:
+                    if attempt == 0:
+                        continue
+                    raise ProviderError("timeout_offline", "OpenRouter could not be reached") from exc
+                if response.status_code in {401, 403}:
+                    raise ProviderError("invalid_credentials", "OpenRouter rejected the saved credentials. Test the profile in Settings.")
+                if response.status_code == 429:
+                    raise ProviderError("rate_limited", "OpenRouter rate limit reached. Wait and retry.")
+                if response.status_code in {404, 422}:
+                    raise ProviderError("unavailable_model", "The selected OpenRouter model is unavailable. Choose another model in Settings.")
+                if response.status_code in {408, 500, 502, 503, 504} and attempt == 0:
+                    continue
+                if response.status_code >= 400:
+                    raise ProviderError("timeout_offline", "OpenRouter could not be reached")
+                try:
+                    content = response.json()["choices"][0]["message"]["content"]
+                    result = json.loads(content)
+                except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError) as exc:
+                    raise ProviderError("malformed_response", "OpenRouter returned a plan that could not be validated.") from exc
+                if not isinstance(result, dict):
+                    raise ProviderError("malformed_response", "OpenRouter returned a plan that could not be validated.")
+                return result
+        raise ProviderError("timeout_offline", "OpenRouter could not be reached")

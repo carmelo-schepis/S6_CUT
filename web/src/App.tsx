@@ -97,7 +97,7 @@ export function App() {
         {page === "library" && <LibraryView />}
         {page === "workspace" && <WorkspaceView key={selected?.id || "none"} project={selected} health={health} hasSelectedProvider={hasSelectedProvider} onConfigureProviders={openProviders} onProjectUpdated={refresh} onGoProjects={() => setPage("projects")} />}
         {page === "shorts-editor" && <ShortsEditorView onJobCreated={refresh} />}
-        {page === "ai-video" && <TopicToVideoView onJobCreated={refresh} />}
+        {page === "ai-video" && <TopicToVideoView profiles={profiles} onConfigureProviders={openProviders} onJobCreated={refresh} />}
         {page === "jobs" && <JobsView onOpenProject={openProject} />}
         {page === "settings" && <SettingsView health={health} onHealthRefresh={refresh} onProfilesChanged={setProfiles} onSkipSetup={() => setPage("projects")} />}
       </main>

@@ -13,7 +13,8 @@ def test_health_is_honest_and_hides_host_path() -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["status"] in {"ready", "degraded", "starting"}
-    assert body["dataPath"] in {"/app/data", "Local mounted data directory"}
+    assert body["dataPath"] in {"Container data directory", "Local mounted data directory"}
+    assert "/app/" not in body["dataPath"]
     assert "planning" in body["fallbacks"]
 
 

@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import importlib.util
 import json
+import math
 import os
 import shutil
 import time
@@ -28,9 +29,9 @@ from .media import MediaError, available, probe, validate_video_upload
 from .models import (
     Asset, AssetMove, AssetOrigin, AssetUpdate, Clip, FolderCreate, FolderMove, FolderUpdate, Health, Job,
     LibraryFolder, MatchExplanation, ProcessingMode, ProfileInput, Project, ProjectFolderUpdate,
-    ProviderProfile, ScriptJobInput, SelectionInput, TopicBeat, TopicVideoInput, TopicVideoPlan, now_iso,
+    ProviderProfile, ScriptJobInput, SelectionInput, ShortsJobInput, TopicBeat, TopicVideoInput, TopicVideoPlan, now_iso,
 )
-from .providers import ProfileService
+from .providers import ProfileService, ProviderError
 from .security import MediaSigner, SecretVault, confined, safe_filename, validate_youtube_url
 
 
@@ -120,7 +121,7 @@ def runtime_health() -> Health:
         status="ready" if ffmpeg and ffprobe and whisper and database else "degraded",
         version=__version__, database=database, ffmpeg=ffmpeg, ffprobe=ffprobe, whisper=whisper,
         ytdlp=available(settings.ytdlp), local_tts=available(settings.local_tts),
-        data_path="/app/data" if str(settings.data_path).startswith("/app/") else "Local mounted data directory",
+        data_path="Container data directory" if str(settings.data_path).startswith("/app/") else "Local mounted data directory",
         free_bytes=shutil.disk_usage(settings.data_path).free, active_workers=manager.active_workers,
         queued_jobs=manager.queue.qsize(),
         fallbacks={
@@ -277,31 +278,125 @@ async def create_clip_job(
     return {"project": project, "job": public_job(job)}
 
 
+def _parse_shorts_form_float(raw: str | None, label: str, *, blank_is_none: bool = False) -> float | None:
+    if raw is None or (blank_is_none and not raw.strip()):
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(422, f"{label} must be a finite number") from exc
+    if not math.isfinite(value):
+        raise HTTPException(422, f"{label} must be a finite number")
+    return value
+
+
+def _validate_shorts_trim(start: float, end: float | None, duration: float | None = None) -> tuple[float, float | None]:
+    if not math.isfinite(start) or start < 0:
+        raise HTTPException(422, "Start seconds must be a finite number at least 0")
+    if end is not None and (not math.isfinite(end) or end <= start):
+        raise HTTPException(422, "End seconds must be blank or a finite number greater than start")
+    if duration is not None and (start >= duration or (end is not None and end > duration)):
+        raise HTTPException(422, f"Trim bounds must fall within the {duration:.2f}-second source")
+    return start, end
+
+
+async def _queue_shorts_job(
+    *, request: Request, source_name: str, source_kind: Literal["upload", "youtube"], source_path: Path | None,
+    source_hash: str | None, source_metadata: dict[str, object] | None, url: str | None,
+    start: float, end: float | None, aspect_ratio: str, library_folder_id: str,
+    job_id: str | None = None,
+) -> dict[str, object]:
+    if manager.queue.full():
+        raise HTTPException(429, "The local processing queue is full. Try again after an active job completes.")
+    selected_folder = db.get_folder(library_folder_id)
+    if not selected_folder:
+        raise _not_found("Library folder")
+    if selected_folder.archived:
+        raise HTTPException(409, "Archived folders cannot receive new projects")
+    _validate_shorts_trim(start, end, float(source_metadata["duration"]) if source_metadata else None)
+    project_id = str(uuid.uuid4())
+    job_id = job_id or str(uuid.uuid4())
+    project = Project(id=project_id, name=f"Short — {Path(source_name).stem}"[:160], mode="clip", style="educational", state="queued", source_name=source_name, source_kind=source_kind, requested_count=1, latest_job_id=job_id, library_folder_id=library_folder_id)
+    clip_end = end if end is not None else max(start + 0.1, 0.1)
+    clip = Clip(id=str(uuid.uuid4()), index=1, state="queued", start=start, end=clip_end, duration=clip_end-start, opening_line="Shorts Editor cut")
+    job = Job(id=job_id, project_id=project_id, library_folder_id=library_folder_id, mode="clip", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style="educational", processing_mode="fast", clips=[clip], total_items=1, steps=manager._fast_steps())
+    timestamp = now_iso()
+    if source_kind == "upload":
+        manager._apply_step(job, job.steps[0], status="complete", detail="Source received and validated", completed_at=timestamp)
+    if source_metadata is not None:
+        manager._apply_step(job, job.steps[1], status="complete", detail="Source duration validated", completed_at=timestamp)
+    manager._apply_step(job, job.steps[2], status="skipped", detail="Trim supplied by Shorts Editor", completed_at=timestamp)
+    private = {"source_path": str(source_path) if source_path else None, "source_hash": source_hash, "source_metadata": source_metadata, "url": url, "trim_start": start, "trim_end": end, "aspect_ratio": aspect_ratio, "count": 1, "min_duration": max(0.1, clip.duration), "max_duration": max(0.1, clip.duration), "processing_mode": "fast", "library_folder_id": library_folder_id}
+    db.save_project(project)
+    db.save_job(job, private)
+    try:
+        await manager.enqueue(job_id)
+    except QueueFullError as exc:
+        job.state, job.stage, job.stage_label, job.error = "failed", "queue", "Queue full", str(exc)
+        manager._save(job)
+        raise HTTPException(429, str(exc)) from exc
+    return {"project": project, "job": public_job(job)}
+
+
 @app.post("/api/v1/jobs/shorts", status_code=status.HTTP_202_ACCEPTED)
-async def create_shorts_job(request: Request, value: dict[str, object]) -> dict[str, object]:
+async def create_shorts_job(request: Request, value: ShortsJobInput) -> dict[str, object]:
     _rate_limit(request)
-    asset_id = str(value.get("assetId") or "")
-    asset = db.get_asset(asset_id)
-    if not asset or not asset.media_type.startswith("video/"):
+    asset = db.get_asset(value.asset_id)
+    if not asset or not asset.media_type.casefold().startswith("video/"):
         raise HTTPException(422, "Select an authorised Library video")
     relative = db.blob_relative_path(asset.blob_id)
     if not relative:
         raise _not_found("Media blob")
     source = confined(settings.data_path, *relative.split("/"))
-    metadata = await asyncio.to_thread(probe, source, settings)
-    start, end = float(value.get("start", 0)), float(value.get("end", metadata["duration"]))
-    if end <= start or end > float(metadata["duration"]):
-        raise HTTPException(422, "Invalid trim bounds")
-    folder_id = str(value.get("libraryFolderId") or UNSORTED_FOLDER_ID)
-    if not db.get_folder(folder_id):
-        raise _not_found("Library folder")
-    project_id, job_id = str(uuid.uuid4()), str(uuid.uuid4())
-    project = Project(id=project_id, name=f"Short — {asset.title}"[:160], mode="clip", style="educational", state="queued", source_name=asset.filename, source_kind="upload", requested_count=1, latest_job_id=job_id, library_folder_id=folder_id)
-    clip = Clip(id=str(uuid.uuid4()), index=1, state="queued", start=start, end=end, duration=end-start, opening_line="Shorts Editor cut")
-    job = Job(id=job_id, project_id=project_id, library_folder_id=folder_id, mode="clip", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style="educational", processing_mode="fast", clips=[clip], total_items=1, steps=manager._fast_steps())
-    private = {"source_path": str(source), "source_hash": asset.content_hash, "source_metadata": metadata, "aspect_ratio": str(value.get("aspectRatio") or "9:16"), "count": 1, "min_duration": end-start, "max_duration": end-start, "processing_mode": "fast", "library_folder_id": folder_id}
-    db.save_project(project); db.save_job(job, private); await manager.enqueue(job_id)
-    return {"project": project, "job": public_job(job)}
+    try:
+        metadata = await asyncio.to_thread(probe, source, settings)
+    except MediaError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return await _queue_shorts_job(request=request, source_name=asset.filename, source_kind="upload", source_path=source, source_hash=asset.content_hash, source_metadata=metadata, url=None, start=value.start, end=value.end, aspect_ratio=value.aspect_ratio, library_folder_id=value.library_folder_id)
+
+
+@app.post("/api/v1/jobs/shorts/source", status_code=status.HTTP_202_ACCEPTED)
+async def create_shorts_source_job(
+    request: Request,
+    file: Annotated[UploadFile | None, File()] = None,
+    url: Annotated[str | None, Form()] = None,
+    start: Annotated[str, Form()] = "0",
+    end: Annotated[str | None, Form()] = None,
+    aspect_ratio: Annotated[Literal["9:16", "16:9", "1:1", "4:5"], Form()] = "9:16",
+    library_folder_id: Annotated[str, Form()] = UNSORTED_FOLDER_ID,
+) -> dict[str, object]:
+    _rate_limit(request)
+    if bool(file) == bool(url and url.strip()):
+        raise HTTPException(422, "Provide exactly one local video or supported YouTube URL")
+    parsed_start = _parse_shorts_form_float(start, "Start seconds")
+    parsed_end = _parse_shorts_form_float(end, "End seconds", blank_is_none=True)
+    if parsed_start is None:
+        raise HTTPException(422, "Start seconds must be a finite number at least 0")
+    _validate_shorts_trim(parsed_start, parsed_end)
+    if file:
+        original = safe_filename(file.filename or "source.mp4", "source.mp4")
+        suffix = Path(original).suffix.casefold()
+        if suffix not in {".mp4", ".mov", ".webm", ".mkv", ".m4v", ".avi"}:
+            raise HTTPException(415, "Unsupported video type. Use MP4, MOV, WebM, MKV, M4V, or AVI.")
+        job_id = str(uuid.uuid4())
+        source = confined(settings.data_path, "jobs", job_id, "source", f"source{suffix}")
+        try:
+            _, source_hash = await _stream_upload(file, source, settings.max_upload_bytes)
+            metadata = await asyncio.to_thread(validate_video_upload, source, original, settings)
+            result = await _queue_shorts_job(request=request, source_name=original, source_kind="upload", source_path=source, source_hash=source_hash, source_metadata=metadata, url=None, start=parsed_start, end=parsed_end, aspect_ratio=aspect_ratio, library_folder_id=library_folder_id, job_id=job_id)
+            return result
+        except MediaError as exc:
+            source.unlink(missing_ok=True)
+            raise HTTPException(422, str(exc)) from exc
+        except HTTPException:
+            if source.exists() and not db.get_job_private(job_id):
+                source.unlink(missing_ok=True)
+            raise
+    try:
+        validated_url = validate_youtube_url(url or "")
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return await _queue_shorts_job(request=request, source_name="YouTube import", source_kind="youtube", source_path=None, source_hash=None, source_metadata=None, url=validated_url, start=parsed_start, end=parsed_end, aspect_ratio=aspect_ratio, library_folder_id=library_folder_id)
 
 
 @app.post("/api/v1/ai/topic-plan", response_model=TopicVideoPlan)
@@ -312,20 +407,19 @@ async def topic_plan(value: TopicVideoInput) -> TopicVideoPlan:
         chunk = max(1, len(words) // 6)
         beats = [TopicBeat(narration=" ".join(words[index:index + chunk]), seconds=max(1, value.duration_seconds / max(1, (len(words) + chunk - 1) // chunk)), keywords=[value.topic]) for index in range(0, len(words), chunk)][:30]
         return TopicVideoPlan(title=value.topic[:200], hook=words[0][:500], narration=narration, beats=beats, estimated_duration=value.duration_seconds)
-    if not profiles.smart_available():
-        raise HTTPException(503, "Configure a selected OpenRouter-compatible provider or enter a custom script.")
     schema = {"type": "object", "additionalProperties": False, "properties": {"title": {"type": "string"}, "hook": {"type": "string"}, "narration": {"type": "string"}, "beats": {"type": "array", "items": {"type": "object", "additionalProperties": False, "properties": {"narration": {"type": "string"}, "seconds": {"type": "number"}, "keywords": {"type": "array", "items": {"type": "string"}}}, "required": ["narration", "seconds", "keywords"]}}, "estimated_duration": {"type": "number"}, "description": {"type": "string"}, "hashtags": {"type": "array", "items": {"type": "string"}}}, "required": ["title", "hook", "narration", "beats", "estimated_duration", "description", "hashtags"]}
     prompt = f"Create a concise video plan in {value.language} about {value.topic!r}. Audience: {value.audience}. Tone: {value.tone}. Target seconds: {value.duration_seconds}. CTA: {value.call_to_action}. Extra instructions: {value.instructions}. Return only JSON matching the schema; use local-library visual keywords and never claim licensing."
     try:
-        result = await profiles.openrouter_json([{"role": "user", "content": prompt}], schema)
-    except Exception as exc:
-        raise HTTPException(502, "The configured script provider could not generate a validated plan") from exc
+        result = await profiles.openrouter_json([{"role": "user", "content": prompt}], schema, require_saved_profile=True)
+    except ProviderError as exc:
+        status_code = {"invalid_credentials": 502, "rate_limited": 429, "timeout_offline": 503, "unavailable_model": 502, "malformed_response": 502}.get(exc.category, 502)
+        raise HTTPException(status_code, exc.safe_message) from exc
     if not result:
-        raise HTTPException(503, "No selected script provider is available. Enter a custom script or configure a provider.")
+        raise HTTPException(503, "OpenRouter is not configured. Add and test a provider in Settings, or enter a custom script.")
     try:
         return TopicVideoPlan.model_validate(result)
     except Exception as exc:
-        raise HTTPException(502, "The script provider returned an invalid plan. Try again or use a custom script.") from exc
+        raise HTTPException(502, "OpenRouter returned a plan that could not be validated.") from exc
 
 
 @app.post("/api/v1/jobs/script", status_code=status.HTTP_202_ACCEPTED)

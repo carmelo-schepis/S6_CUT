@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { FileText, Film, FolderOpen, Link2, Plus, Sparkles, UploadCloud, Zap } from "lucide-react";
+import { FileText, Film, FolderOpen, Plus, Sparkles, Zap } from "lucide-react";
 import { createClipJob, createFolder, createScriptJob, listFolders, readableError } from "../api";
 import type { Health, LibraryFolder, ProcessingMode, Project, Style } from "../types";
 import { Button, Field, PageHeader, Progress, StatusBadge, formatAge } from "./common";
+import { VideoSourcePicker } from "./video-source-picker";
 
 const RECENT_FOLDER_KEY = "s6-cut.recent-library-folder";
 
@@ -40,7 +41,6 @@ export function ProjectsView({ projects, health, hasSelectedProvider = true, onC
   const [providerCalloutDismissed, setProviderCalloutDismissed] = useState(false);
   const [folders, setFolders] = useState<LibraryFolder[]>([]);
   const [libraryFolderId, setLibraryFolderId] = useState("");
-  const fileInput = useRef<HTMLInputElement>(null);
   const scriptInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -104,17 +104,7 @@ export function ProjectsView({ projects, health, hasSelectedProvider = true, onC
       <div className="create-grid">
         <div className="create-step source-step">
           <div className="step-label"><span>1</span>{mode === "clip" ? "Add source" : "Add script"}</div>
-          {mode === "clip" ? <>
-            <div className="mini-tabs">
-              <button className={sourceType === "file" ? "active" : ""} onClick={() => setSourceType("file")}><UploadCloud size={14} /> Local file</button>
-              <button className={sourceType === "url" ? "active" : ""} onClick={() => setSourceType("url")}><Link2 size={14} /> YouTube</button>
-            </div>
-            {sourceType === "file" ? <div className={`drop-zone ${file ? "has-file" : ""}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); setFile(event.dataTransfer.files[0] || null); }}>
-              <input ref={fileInput} type="file" accept="video/mp4,video/quicktime,video/webm,video/x-matroska,.m4v,.avi" onChange={(event) => setFile(event.target.files?.[0] || null)} hidden />
-              {file ? <><Film size={25} /><strong>{file.name}</strong><span>{(file.size / 1024 / 1024).toFixed(1)} MB · ready to validate</span><button onClick={() => fileInput.current?.click()}>Choose another</button></>
-                : <><UploadCloud size={26} /><strong>Drop a video here</strong><span>MP4, MOV, WebM, MKV, M4V or AVI</span><Button onClick={() => fileInput.current?.click()}>Browse files</Button></>}
-            </div> : <Field label="YouTube URL" hint="Public YouTube links only. DRM and access controls are never bypassed."><input type="url" value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://www.youtube.com/watch?v=…" /></Field>}
-          </> : <div className="script-input-wrap">
+          {mode === "clip" ? <VideoSourcePicker mode={sourceType} onModeChange={(next) => setSourceType(next as "file" | "url")} file={file} onFile={(next, pickerError) => { setFile(next); if (pickerError) setError(pickerError); else setError(null); }} url={url} onUrl={setUrl} /> : <div className="script-input-wrap">
             <textarea value={script} onChange={(event) => setScript(event.target.value)} placeholder="Paste the exact script. S6_cut preserves this source text…" rows={8} />
             <div className="script-meta"><span>{script.length.toLocaleString()} characters</span><input ref={scriptInput} type="file" accept=".txt,.md,text/plain,text/markdown" onChange={(event) => loadScriptFile(event.target.files?.[0])} hidden /><button onClick={() => scriptInput.current?.click()}><FolderOpen size={14} /> Upload .txt or .md</button></div>
           </div>}

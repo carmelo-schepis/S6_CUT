@@ -823,6 +823,17 @@ class JobManager:
         if not self._cooperate(job):
             self._save(job)
             return
+        if job.clips:
+            requested_start = float(private.get("trim_start", job.clips[0].start))
+            requested_end = private.get("trim_end")
+            if requested_start < 0 or requested_start >= float(metadata["duration"]):
+                raise MediaError(f"Start trim must fall within the {float(metadata['duration']):.2f}-second source")
+            resolved_end = float(metadata["duration"]) if requested_end is None else float(requested_end)
+            if resolved_end <= requested_start or resolved_end > float(metadata["duration"]):
+                raise MediaError(f"End trim must be greater than start and within the {float(metadata['duration']):.2f}-second source")
+            job.clips = [clip.model_copy(update={"start": requested_start, "end": resolved_end, "duration": resolved_end - requested_start}) for clip in job.clips]
+            job.total_items = len(job.clips)
+            self._save(job, private)
         if not job.clips:
             self.start_step(job, "plan", detail="Planning neutral fast-cut windows", label="Planning neutral fast-cut windows", progress=28, private=private)
             plan = _media_fn("plan_fast_windows")

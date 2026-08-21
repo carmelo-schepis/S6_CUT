@@ -209,6 +209,28 @@ class SelectionInput(ApiModel):
     clip_ids: list[str] = Field(max_length=60)
 
 
+class ShortsJobInput(ApiModel):
+    asset_id: str = Field(min_length=1, max_length=200)
+    start: float = Field(ge=0)
+    end: float | None = Field(default=None, gt=0)
+    aspect_ratio: Literal["9:16", "16:9", "1:1", "4:5"] = "9:16"
+    library_folder_id: str = UNSORTED_LIBRARY_FOLDER_ID
+
+    @field_validator("start", "end")
+    @classmethod
+    def finite_trim(cls, value: float | None) -> float | None:
+        import math
+        if value is not None and not math.isfinite(value):
+            raise ValueError("Trim values must be finite")
+        return value
+
+    @model_validator(mode="after")
+    def valid_trim(self):
+        if self.end is not None and self.end <= self.start:
+            raise ValueError("End must be greater than start")
+        return self
+
+
 class TopicVideoInput(ApiModel):
     topic: str = Field(min_length=1, max_length=500)
     audience: str = Field(default="", max_length=200)
