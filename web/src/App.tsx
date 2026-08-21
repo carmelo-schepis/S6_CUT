@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { BriefcaseBusiness, Film, FolderKanban, HardDrive, Library, Settings, SlidersHorizontal } from "lucide-react";
+import { BriefcaseBusiness, Film, FolderKanban, HardDrive, Library, Scissors, Settings, SlidersHorizontal, Sparkles } from "lucide-react";
 import { getHealth, listProfiles, listProjects, readableError } from "./api";
 import { JobsView } from "./components/jobs-view";
 import { LibraryView } from "./components/library-view";
@@ -7,14 +7,18 @@ import { ProjectsView } from "./components/projects-view";
 import { SettingsView } from "./components/settings-view";
 import { StatusBadge } from "./components/common";
 import { WorkspaceView } from "./components/workspace-view";
+import { ShortsEditorView } from "./components/shorts-editor-view";
+import { TopicToVideoView } from "./components/topic-to-video-view";
 import type { Health, Project, ProviderProfile } from "./types";
 
-type Page = "projects" | "library" | "workspace" | "jobs" | "settings";
+type Page = "projects" | "library" | "workspace" | "shorts-editor" | "ai-video" | "jobs" | "settings";
 
 const nav: { id: Page; label: string; icon: typeof Film }[] = [
   { id: "projects", label: "Projects", icon: FolderKanban },
   { id: "library", label: "Library", icon: Library },
   { id: "workspace", label: "Workspace", icon: SlidersHorizontal },
+  { id: "shorts-editor", label: "Shorts Editor", icon: Scissors },
+  { id: "ai-video", label: "AI Video", icon: Sparkles },
   { id: "jobs", label: "Jobs", icon: BriefcaseBusiness },
   { id: "settings", label: "Settings", icon: Settings },
 ];
@@ -28,12 +32,11 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    const [nextProjects, nextHealth, nextProfiles] = await Promise.all([listProjects(), getHealth(), listProfiles()]);
-    setProjects(nextProjects);
-    setHealth(nextHealth);
-    setProfiles(nextProfiles);
-    setSelectedProjectId((current) => current || nextProjects[0]?.id || null);
-    setError(null);
+    const [projectsResult, healthResult, profilesResult] = await Promise.allSettled([listProjects(), getHealth(), listProfiles()]);
+    if (projectsResult.status === "fulfilled") { setProjects(projectsResult.value); setSelectedProjectId((current) => current || projectsResult.value[0]?.id || null); }
+    if (profilesResult.status === "fulfilled") setProfiles(profilesResult.value);
+    if (healthResult.status === "fulfilled") { setHealth(healthResult.value); setError(null); }
+    else { setHealth(null); setError(readableError(healthResult.reason)); }
   }, []);
 
   useEffect(() => {
@@ -93,6 +96,8 @@ export function App() {
         {page === "projects" && <ProjectsView projects={projects} health={health} hasSelectedProvider={hasSelectedProvider} onConfigureProviders={openProviders} onCreated={onCreated} onOpen={openProject} onRefresh={refresh} />}
         {page === "library" && <LibraryView />}
         {page === "workspace" && <WorkspaceView key={selected?.id || "none"} project={selected} health={health} hasSelectedProvider={hasSelectedProvider} onConfigureProviders={openProviders} onProjectUpdated={refresh} onGoProjects={() => setPage("projects")} />}
+        {page === "shorts-editor" && <ShortsEditorView onJobCreated={refresh} />}
+        {page === "ai-video" && <TopicToVideoView onJobCreated={refresh} />}
         {page === "jobs" && <JobsView onOpenProject={openProject} />}
         {page === "settings" && <SettingsView health={health} onHealthRefresh={refresh} onProfilesChanged={setProfiles} onSkipSetup={() => setPage("projects")} />}
       </main>

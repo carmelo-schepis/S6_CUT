@@ -18,6 +18,8 @@ import {
   type Project,
   type ProviderProfile,
   type Style,
+  topicVideoPlanSchema,
+  type TopicVideoPlan,
 } from "./types";
 
 const API = "/api/v1";
@@ -105,6 +107,15 @@ export async function createScriptJob(input: {
     body: JSON.stringify(input),
   });
   return { project: projectSchema.parse(value.project), job: jobSchema.parse(value.job) };
+}
+
+export async function createShortsJob(input: { assetId: string; start: number; end: number; aspectRatio: "9:16" | "16:9" | "1:1" | "4:5" }): Promise<{ project: Project; job: Job }> {
+  const value = await request<{ project: unknown; job: unknown }>("/jobs/shorts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) });
+  return { project: projectSchema.parse(value.project), job: jobSchema.parse(value.job) };
+}
+
+export async function createTopicPlan(input: { topic: string; audience: string; tone: string; language: string; callToAction: string; instructions: string; durationSeconds: number; aspectRatio: string; variants: number; customScript: string }): Promise<TopicVideoPlan> {
+  return topicVideoPlanSchema.parse(await request("/ai/topic-plan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) }));
 }
 
 export async function listJobs(): Promise<Job[]> {
@@ -231,5 +242,6 @@ export async function explainMatch(query: string): Promise<MatchExplanation> {
 }
 
 export function readableError(error: unknown): string {
+  if (error instanceof ApiError && error.status === 502) return "The web service cannot reach the media engine (502).";
   return error instanceof Error ? error.message : "Something went wrong. Try again.";
 }

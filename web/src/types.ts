@@ -273,4 +273,7 @@ export type MatchExplanation = {
   rejected: { assetId: string; title: string; reason: string }[];
 };
 
+export const topicBeatSchema = z.object({ narration: z.string(), seconds: z.number().positive(), keywords: z.array(z.string()), visualAssetId: z.string().nullable().optional() });
+export const topicVideoPlanSchema = z.object({ title: z.string(), hook: z.string(), narration: z.string(), beats: z.array(topicBeatSchema), estimatedDuration: z.number().positive(), description: z.string(), hashtags: z.array(z.string()) });
+export type TopicVideoPlan = z.infer<typeof topicVideoPlanSchema>;
 export const SCHEMA_VERSION = 1 as const;

@@ -4,6 +4,8 @@ This repository uses third-party packages installed from the locked npm/Python d
 
 ## Behavioural references reviewed
 
+- **MoneyPrinterTurbo** — MIT, commit `1d1d0d25b3c27609be4683c0cf3dc08c5821788a`. Topic-to-video stages (reviewable script, material keywords, narration, captions, composition, and bounded variants) were used as behavioral reference only; no source code, music, fonts, logos, or demo assets were copied.
+
 No source code was copied from the reference repositories during this build. The following local resources informed clean implementation at a behavioural/architectural level:
 
 - **ClippyMe** — MIT. Reviewed its local `S6_CUT_TAKEAWAYS.md` plus documented concepts for TextTiling, boundary cleanup, independent clips, job recovery, composition order, QA, and security. The local resource checkout does not expose Git revision metadata; no direct source file was copied.

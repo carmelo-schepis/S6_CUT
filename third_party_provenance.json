@@ -3,6 +3,7 @@
   "generatedAt": "2026-08-13",
   "directCodeCopies": [],
   "behavioralReferences": [
+    { "name": "MoneyPrinterTurbo", "licence": "MIT", "revision": "1d1d0d25b3c27609be4683c0cf3dc08c5821788a", "filesReviewed": ["LICENSE", "app/controllers/v1/video.py", "app/controllers/v1/llm.py", "app/services/task.py", "app/models/schema.py"], "use": "Behavioral reference for reviewable topic-to-video planning, stage orchestration, and bounded variants; no code or assets copied" },
     { "name": "ClippyMe", "licence": "MIT", "revision": "unavailable in supplied copy", "filesReviewed": ["S6_CUT_TAKEAWAYS.md"], "use": "Boundary, recovery, independent clip and security behavior; clean implementation" },
     { "name": "ReelsGenerator", "licence": "MIT", "revision": "unavailable in supplied copy", "filesReviewed": ["S6_CUT_TAKEAWAYS.md"], "use": "Script, TTS cache and pacing behavior; clean implementation" },
     { "name": "ViralMint", "licence": "AGPL-3.0", "revision": "unavailable in supplied copy", "filesReviewed": ["S6_CUT_TAKEAWAYS.md"], "use": "Provider health, scoring and storyboard behavior; clean implementation" },

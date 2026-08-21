@@ -200,13 +200,43 @@ class ScriptJobInput(ApiModel):
     script: str = Field(min_length=10, max_length=200_000)
     name: str | None = Field(default=None, max_length=160)
     style: Style = "educational"
-    aspect_ratio: Literal["9:16", "1:1", "16:9"] = "9:16"
+    aspect_ratio: Literal["9:16", "16:9", "1:1", "4:5"] = "9:16"
     narration: Literal["auto", "local", "silent"] = "auto"
     library_folder_id: str = UNSORTED_LIBRARY_FOLDER_ID
 
 
 class SelectionInput(ApiModel):
     clip_ids: list[str] = Field(max_length=60)
+
+
+class TopicVideoInput(ApiModel):
+    topic: str = Field(min_length=1, max_length=500)
+    audience: str = Field(default="", max_length=200)
+    tone: str = Field(default="educational", max_length=100)
+    language: str = Field(default="English", max_length=80)
+    call_to_action: str = Field(default="", max_length=300)
+    instructions: str = Field(default="", max_length=2_000)
+    duration_seconds: int = Field(default=45, ge=10, le=180)
+    aspect_ratio: Literal["9:16", "16:9", "1:1", "4:5"] = "9:16"
+    variants: int = Field(default=1, ge=1, le=3)
+    custom_script: str = Field(default="", max_length=200_000)
+
+
+class TopicBeat(ApiModel):
+    narration: str = Field(min_length=1, max_length=2_000)
+    seconds: float = Field(gt=0, le=60)
+    keywords: list[str] = Field(max_length=10)
+    visual_asset_id: str | None = None
+
+
+class TopicVideoPlan(ApiModel):
+    title: str = Field(min_length=1, max_length=200)
+    hook: str = Field(min_length=1, max_length=500)
+    narration: str = Field(min_length=1, max_length=200_000)
+    beats: list[TopicBeat] = Field(min_length=1, max_length=30)
+    estimated_duration: float = Field(gt=0, le=600)
+    description: str = Field(default="", max_length=2_000)
+    hashtags: list[str] = Field(default_factory=list, max_length=30)
 
 
 class ProjectFolderUpdate(ApiModel):

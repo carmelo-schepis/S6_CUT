@@ -26,9 +26,9 @@ from .jobs import JobManager, QueueFullError, SwitchFastError
 from .library import LibraryRules
 from .media import MediaError, available, probe, validate_video_upload
 from .models import (
-    Asset, AssetMove, AssetOrigin, AssetUpdate, FolderCreate, FolderMove, FolderUpdate, Health, Job,
+    Asset, AssetMove, AssetOrigin, AssetUpdate, Clip, FolderCreate, FolderMove, FolderUpdate, Health, Job,
     LibraryFolder, MatchExplanation, ProcessingMode, ProfileInput, Project, ProjectFolderUpdate,
-    ProviderProfile, ScriptJobInput, SelectionInput, now_iso,
+    ProviderProfile, ScriptJobInput, SelectionInput, TopicBeat, TopicVideoInput, TopicVideoPlan, now_iso,
 )
 from .providers import ProfileService
 from .security import MediaSigner, SecretVault, confined, safe_filename, validate_youtube_url
@@ -275,6 +275,57 @@ async def create_clip_job(
         manager._save(job)
         raise HTTPException(429, str(exc)) from exc
     return {"project": project, "job": public_job(job)}
+
+
+@app.post("/api/v1/jobs/shorts", status_code=status.HTTP_202_ACCEPTED)
+async def create_shorts_job(request: Request, value: dict[str, object]) -> dict[str, object]:
+    _rate_limit(request)
+    asset_id = str(value.get("assetId") or "")
+    asset = db.get_asset(asset_id)
+    if not asset or not asset.media_type.startswith("video/"):
+        raise HTTPException(422, "Select an authorised Library video")
+    relative = db.blob_relative_path(asset.blob_id)
+    if not relative:
+        raise _not_found("Media blob")
+    source = confined(settings.data_path, *relative.split("/"))
+    metadata = await asyncio.to_thread(probe, source, settings)
+    start, end = float(value.get("start", 0)), float(value.get("end", metadata["duration"]))
+    if end <= start or end > float(metadata["duration"]):
+        raise HTTPException(422, "Invalid trim bounds")
+    folder_id = str(value.get("libraryFolderId") or UNSORTED_FOLDER_ID)
+    if not db.get_folder(folder_id):
+        raise _not_found("Library folder")
+    project_id, job_id = str(uuid.uuid4()), str(uuid.uuid4())
+    project = Project(id=project_id, name=f"Short — {asset.title}"[:160], mode="clip", style="educational", state="queued", source_name=asset.filename, source_kind="upload", requested_count=1, latest_job_id=job_id, library_folder_id=folder_id)
+    clip = Clip(id=str(uuid.uuid4()), index=1, state="queued", start=start, end=end, duration=end-start, opening_line="Shorts Editor cut")
+    job = Job(id=job_id, project_id=project_id, library_folder_id=folder_id, mode="clip", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style="educational", processing_mode="fast", clips=[clip], total_items=1, steps=manager._fast_steps())
+    private = {"source_path": str(source), "source_hash": asset.content_hash, "source_metadata": metadata, "aspect_ratio": str(value.get("aspectRatio") or "9:16"), "count": 1, "min_duration": end-start, "max_duration": end-start, "processing_mode": "fast", "library_folder_id": folder_id}
+    db.save_project(project); db.save_job(job, private); await manager.enqueue(job_id)
+    return {"project": project, "job": public_job(job)}
+
+
+@app.post("/api/v1/ai/topic-plan", response_model=TopicVideoPlan)
+async def topic_plan(value: TopicVideoInput) -> TopicVideoPlan:
+    if value.custom_script.strip():
+        narration = value.custom_script.strip()
+        words = narration.split()
+        chunk = max(1, len(words) // 6)
+        beats = [TopicBeat(narration=" ".join(words[index:index + chunk]), seconds=max(1, value.duration_seconds / max(1, (len(words) + chunk - 1) // chunk)), keywords=[value.topic]) for index in range(0, len(words), chunk)][:30]
+        return TopicVideoPlan(title=value.topic[:200], hook=words[0][:500], narration=narration, beats=beats, estimated_duration=value.duration_seconds)
+    if not profiles.smart_available():
+        raise HTTPException(503, "Configure a selected OpenRouter-compatible provider or enter a custom script.")
+    schema = {"type": "object", "additionalProperties": False, "properties": {"title": {"type": "string"}, "hook": {"type": "string"}, "narration": {"type": "string"}, "beats": {"type": "array", "items": {"type": "object", "additionalProperties": False, "properties": {"narration": {"type": "string"}, "seconds": {"type": "number"}, "keywords": {"type": "array", "items": {"type": "string"}}}, "required": ["narration", "seconds", "keywords"]}}, "estimated_duration": {"type": "number"}, "description": {"type": "string"}, "hashtags": {"type": "array", "items": {"type": "string"}}}, "required": ["title", "hook", "narration", "beats", "estimated_duration", "description", "hashtags"]}
+    prompt = f"Create a concise video plan in {value.language} about {value.topic!r}. Audience: {value.audience}. Tone: {value.tone}. Target seconds: {value.duration_seconds}. CTA: {value.call_to_action}. Extra instructions: {value.instructions}. Return only JSON matching the schema; use local-library visual keywords and never claim licensing."
+    try:
+        result = await profiles.openrouter_json([{"role": "user", "content": prompt}], schema)
+    except Exception as exc:
+        raise HTTPException(502, "The configured script provider could not generate a validated plan") from exc
+    if not result:
+        raise HTTPException(503, "No selected script provider is available. Enter a custom script or configure a provider.")
+    try:
+        return TopicVideoPlan.model_validate(result)
+    except Exception as exc:
+        raise HTTPException(502, "The script provider returned an invalid plan. Try again or use a custom script.") from exc
 
 
 @app.post("/api/v1/jobs/script", status_code=status.HTTP_202_ACCEPTED)

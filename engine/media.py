@@ -437,7 +437,7 @@ def synthesize_local(text: str, output: Path, settings: Settings) -> Path:
 
 
 def dimensions(aspect: str) -> tuple[int, int]:
-    return {"1:1": (1080, 1080), "16:9": (1920, 1080)}.get(aspect, (1080, 1920))
+    return {"1:1": (1080, 1080), "16:9": (1920, 1080), "4:5": (1080, 1350)}.get(aspect, (1080, 1920))
 
 
 # Reference caption metrics tuned against the canonical 9:16 canvas
