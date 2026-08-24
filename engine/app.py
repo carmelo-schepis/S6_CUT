@@ -209,7 +209,8 @@ async def create_clip_job(
     count: Annotated[int, Form(ge=1, le=30)] = 5,
     min_duration: Annotated[float, Form(ge=8, le=120)] = 20,
     max_duration: Annotated[float, Form(ge=10, le=180)] = 60,
-    aspect_ratio: Annotated[Literal["9:16", "1:1", "16:9"], Form()] = "9:16",
+    aspect_ratio: Annotated[Literal["9:16", "1:1", "16:9", "4:5"], Form()] = "9:16",
+    burn_subtitles: Annotated[bool, Form()] = True,
     library_folder_id: Annotated[str, Form()] = UNSORTED_FOLDER_ID,
 ) -> dict[str, object]:
     _rate_limit(request)
@@ -230,6 +231,7 @@ async def create_clip_job(
     private: dict[str, object] = {
         "count": count, "min_duration": min_duration, "max_duration": max_duration,
         "aspect_ratio": aspect_ratio, "processing_mode": mode,
+        "burn_subtitles": burn_subtitles,
         "use_openrouter": mode == "smart" and smart_available,
         "library_folder_id": library_folder_id,
     }
@@ -266,7 +268,7 @@ async def create_clip_job(
             steps[1].status = "complete"
             steps[1].detail = f"Source validated - {float(source_metadata['duration']):.1f}s"
             steps[1].started_at = steps[1].completed_at = checkpoint_time
-    job = Job(id=job_id, project_id=project_id, library_folder_id=library_folder_id, mode="clip", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style=style, processing_mode=mode, steps=steps)
+    job = Job(id=job_id, project_id=project_id, library_folder_id=library_folder_id, mode="clip", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style=style, processing_mode=mode, burn_subtitles=burn_subtitles, steps=steps)
     db.save_project(project)
     db.save_job(job, private)
     try:
@@ -319,14 +321,14 @@ async def _queue_shorts_job(
     project = Project(id=project_id, name=f"Short — {Path(source_name).stem}"[:160], mode="clip", style="educational", state="queued", source_name=source_name, source_kind=source_kind, requested_count=1, latest_job_id=job_id, library_folder_id=library_folder_id)
     clip_end = end if end is not None else max(start + 0.1, 0.1)
     clip = Clip(id=str(uuid.uuid4()), index=1, state="queued", start=start, end=clip_end, duration=clip_end-start, opening_line="Shorts Editor cut")
-    job = Job(id=job_id, project_id=project_id, library_folder_id=library_folder_id, mode="clip", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style="educational", processing_mode="fast", clips=[clip], total_items=1, steps=manager._fast_steps())
+    job = Job(id=job_id, project_id=project_id, library_folder_id=library_folder_id, mode="clip", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style="educational", processing_mode="fast", burn_subtitles=True, clips=[clip], total_items=1, steps=manager._fast_steps())
     timestamp = now_iso()
     if source_kind == "upload":
         manager._apply_step(job, job.steps[0], status="complete", detail="Source received and validated", completed_at=timestamp)
     if source_metadata is not None:
         manager._apply_step(job, job.steps[1], status="complete", detail="Source duration validated", completed_at=timestamp)
     manager._apply_step(job, job.steps[2], status="skipped", detail="Trim supplied by Shorts Editor", completed_at=timestamp)
-    private = {"source_path": str(source_path) if source_path else None, "source_hash": source_hash, "source_metadata": source_metadata, "url": url, "trim_start": start, "trim_end": end, "aspect_ratio": aspect_ratio, "count": 1, "min_duration": max(0.1, clip.duration), "max_duration": max(0.1, clip.duration), "processing_mode": "fast", "library_folder_id": library_folder_id}
+    private = {"source_path": str(source_path) if source_path else None, "source_hash": source_hash, "source_metadata": source_metadata, "url": url, "trim_start": start, "trim_end": end, "aspect_ratio": aspect_ratio, "count": 1, "min_duration": max(0.1, clip.duration), "max_duration": max(0.1, clip.duration), "processing_mode": "fast", "burn_subtitles": True, "library_folder_id": library_folder_id}
     db.save_project(project)
     db.save_job(job, private)
     try:

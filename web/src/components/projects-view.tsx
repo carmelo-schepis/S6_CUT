@@ -36,6 +36,7 @@ export function ProjectsView({ projects, health, hasSelectedProvider = true, onC
   const [aspectRatio, setAspectRatio] = useState("9:16");
   const [narration, setNarration] = useState<"auto" | "local" | "silent">("auto");
   const [processingMode, setProcessingMode] = useState<ProcessingMode>("auto");
+  const [burnSubtitles, setBurnSubtitles] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [providerCalloutDismissed, setProviderCalloutDismissed] = useState(false);
@@ -70,7 +71,7 @@ export function ProjectsView({ projects, health, hasSelectedProvider = true, onC
     setSubmitting(true);
     try {
       const result = mode === "clip"
-        ? await createClipJob({ file: sourceType === "file" ? file || undefined : undefined, url: sourceType === "url" ? url.trim() : undefined, style, count, minDuration, maxDuration, aspectRatio, processingMode, libraryFolderId: libraryFolderId || undefined })
+        ? await createClipJob({ file: sourceType === "file" ? file || undefined : undefined, url: sourceType === "url" ? url.trim() : undefined, style, count, minDuration, maxDuration, aspectRatio, processingMode, burnSubtitles, libraryFolderId: libraryFolderId || undefined })
         : await createScriptJob({ script, style, aspectRatio, narration, libraryFolderId: libraryFolderId || undefined });
       if (libraryFolderId) localStorage.setItem(RECENT_FOLDER_KEY, libraryFolderId);
       onCreated(result.project);
@@ -148,9 +149,10 @@ export function ProjectsView({ projects, health, hasSelectedProvider = true, onC
                   : <p className="mode-note"><Zap size={12} /> Fast runs deterministically on this machine — no provider needed.</p>}
           </div>}
           <div className="folder-picker"><Field label="Business folder"><select value={libraryFolderId} onChange={(event) => setLibraryFolderId(event.target.value)}>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></Field><Button variant="ghost" onClick={addFolder}><Plus size={13} /> Create folder</Button></div>
+          {mode === "clip" && <label className="subtitle-toggle"><input type="checkbox" checked={burnSubtitles} onChange={(event) => setBurnSubtitles(event.target.checked)} /> <span><strong>Burn in subtitles</strong><small>Accurate local word timing; enabled by default. Fast transcribes selected windows only.</small></span></label>}
           <button className="advanced-toggle" onClick={() => setAdvanced(!advanced)} aria-expanded={advanced}>Advanced controls <span>{advanced ? "−" : "+"}</span></button>
           {advanced && <div className="advanced-grid">
-            <Field label="Aspect"><select value={aspectRatio} onChange={(event) => setAspectRatio(event.target.value)}><option>9:16</option><option>1:1</option><option>16:9</option></select></Field>
+            <Field label="Aspect"><select value={aspectRatio} onChange={(event) => setAspectRatio(event.target.value)}><option>9:16</option><option>1:1</option><option>16:9</option><option>4:5</option></select></Field>
             {mode === "clip" && <><Field label="Minimum seconds"><input type="number" min={8} max={120} value={minDuration} onChange={(event) => setMinDuration(Number(event.target.value))} /></Field><Field label="Maximum seconds"><input type="number" min={10} max={180} value={maxDuration} onChange={(event) => setMaxDuration(Number(event.target.value))} /></Field></>}
           </div>}
           {error && <p className="form-error" role="alert">{error}</p>}

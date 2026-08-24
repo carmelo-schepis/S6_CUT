@@ -136,6 +136,7 @@ export const jobSchema = z.object({
   totalItems: z.number().default(0),
   style: styleSchema,
   processingMode: processingModeSchema.default("smart"),
+  burnSubtitles: z.boolean().optional(),
   warnings: z.array(z.string()).default([]),
   error: z.string().nullable().optional(),
   clips: z.array(clipSchema).default([]),

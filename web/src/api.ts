@@ -75,6 +75,7 @@ type ClipJobInput = {
   maxDuration: number;
   aspectRatio: string;
   processingMode?: ProcessingMode;
+  burnSubtitles?: boolean;
   libraryFolderId?: string;
 };
 
@@ -88,6 +89,7 @@ export async function createClipJob(input: ClipJobInput): Promise<{ project: Pro
   form.set("max_duration", String(input.maxDuration));
   form.set("aspect_ratio", input.aspectRatio);
   if (input.processingMode) form.set("processing_mode", input.processingMode);
+  form.set("burn_subtitles", String(input.burnSubtitles ?? true));
   if (input.libraryFolderId) form.set("library_folder_id", input.libraryFolderId);
   const value = await request<{ project: unknown; job: unknown }>("/jobs/clip", { method: "POST", body: form });
   return { project: projectSchema.parse(value.project), job: jobSchema.parse(value.job) };

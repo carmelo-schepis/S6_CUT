@@ -561,7 +561,7 @@ class JobManager:
             output_metadata = probe(output, self.settings)
             width, height = int(output_metadata["width"]), int(output_metadata["height"])
         except MediaError:
-            width, height = {"9:16": (1080, 1920), "1:1": (1080, 1080), "16:9": (1920, 1080)}[str(private["aspect_ratio"])]
+            width, height = {"9:16": (1080, 1920), "1:1": (1080, 1080), "16:9": (1920, 1080), "4:5": (1080, 1350)}[str(private["aspect_ratio"])]
         project = self.db.get_project(job.project_id)
         project_name = project.name if project else "Project"
         title = f"{project_name} — Script video" if script else f"{project_name} — Cut {clip.index:02d}"
@@ -791,12 +791,19 @@ class JobManager:
             job.current_item = completed_before
             job.total_items = len(job.clips)
             output = output_dir / f"{position:02d}-{safe_filename(clip.opening_line[:36], 'short')}.mp4"
+            subtitles_enabled = bool(private.get("burn_subtitles", private.get("subtitles_enabled", job.burn_subtitles)))
             clip_words = [word for word in words if float(word["end"]) >= clip.start and float(word["start"]) <= clip.end]
             visual = self.rules.resolve(" ".join(str(word["text"]) for word in clip_words))
             overlays = [(visual.asset_path, .65, min(3.4, clip.duration - .2))] if visual.asset_path and visual.asset_path.exists() and clip.duration > 1 else []
             visuals = [(clip.visual_label or "Key idea", .45, min(3.0, clip.duration))]
             try:
-                render_clip(source, output, start=clip.start, end=clip.end, aspect=private["aspect_ratio"], words=words, visuals=visuals, overlays=overlays, settings=self.settings)
+                try:
+                    render_clip(source, output, start=clip.start, end=clip.end, aspect=private["aspect_ratio"], words=clip_words if subtitles_enabled else [], visuals=visuals, overlays=overlays, settings=self.settings, style=job.style)
+                except TypeError as exc:
+                    if "unexpected keyword argument 'style'" not in str(exc):
+                        raise
+                    # Compatibility for editor/test render adapters from older jobs.
+                    render_clip(source, output, start=clip.start, end=clip.end, aspect=private["aspect_ratio"], words=clip_words if subtitles_enabled else [], visuals=visuals, overlays=overlays, settings=self.settings)
                 job, clip, _ = self._publish_output(job, clip, output, private)
             except Exception as exc:
                 clip = clip.model_copy(update={"state": "failed", "error": redact(str(exc)), "selected": False})
@@ -808,6 +815,58 @@ class JobManager:
         successful = [clip for clip in job.clips if clip.state == "complete"]
         failed = [clip for clip in job.clips if clip.state == "failed"]
         self._finish_render_steps(job, private, successful, failed, output_dir, "clip(s)", "clips ready")
+
+    def _transcribe_fast_window(self, job: Job, private: dict[str, Any], source: Path, clip: Clip, output_dir: Path) -> list[dict[str, Any]]:
+        """Transcribe only one selected window; returned timings are clip-relative."""
+        source_hash = str(private.get("source_hash") or sha256_file(source))
+        private["source_hash"] = source_hash
+        cache_key = (
+            f"fast-transcript:v1:{source_hash}:{clip.start:.6f}:{clip.end:.6f}:"
+            f"{self.settings.whisper_model}:{self.settings.whisper_device}:"
+            f"{self.settings.whisper_compute_type}:beam{self.settings.whisper_beam_size}:words1"
+        )
+        transcripts = private.setdefault("fast_transcripts", {})
+        cached = self.db.cache_get(cache_key)
+        if isinstance(cached, dict) and isinstance(cached.get("words"), list):
+            if isinstance(transcripts, dict):
+                transcripts[cache_key] = cached["words"]
+            return cached["words"]
+        if isinstance(transcripts, dict) and isinstance(transcripts.get(cache_key), list):
+            return transcripts[cache_key]
+        if not self._cooperate(job):
+            raise media_module.TranscriptionCancelled("Fast caption transcription cancelled")
+        audio = media_module.extract_audio_16k(
+            source, self.settings,
+            output=output_dir.parent / "transcription" / f"{clip.id}-audio-16k.wav",
+            start=clip.start,
+            duration=clip.duration,
+            cancellation_callback=lambda: not self._cooperate(job),
+        )
+        render_step = self._step_by_id(job, "render")
+        model_detail = "Preparing local caption model" if media_module.is_whisper_model_cached(self.settings) else "Downloading local caption model (real progress begins after download)"
+        self._apply_step(job, render_step, status="active", detail=f"{model_detail} — selected fast window {clip.index}", current=0, total=1)
+        self._save(job, private)
+        transcript = media_module.transcribe(
+            audio, self.settings,
+            progress_callback=lambda fraction, _: self._fast_transcription_progress(job, private, fraction),
+            cancellation_callback=lambda: not self._cooperate(job),
+            word_timestamps=True,
+        )
+        words = [
+            {**word, "start": max(0.0, float(word["start"])), "end": min(clip.duration, float(word["end"]))}
+            for word in transcript.get("words", [])
+            if float(word.get("end", 0)) > 0 and float(word.get("start", 0)) < clip.duration
+        ]
+        self.db.cache_put(cache_key, now_iso(), {"words": words})
+        if isinstance(transcripts, dict):
+            transcripts[cache_key] = words
+        self._save(job, private)
+        return words
+
+    def _fast_transcription_progress(self, job: Job, private: dict[str, Any], fraction: float) -> None:
+        step = self._step_by_id(job, "render")
+        self._apply_step(job, step, status="active", detail=f"Transcribing selected fast window ({min(100, max(0, int(fraction * 100)))}%)")
+        self._save(job, private)
 
     def _process_clip_fast(self, job: Job, private: dict[str, Any]) -> None:
         source = self._source(job, private)
@@ -862,6 +921,10 @@ class JobManager:
         output_dir.mkdir(parents=True, exist_ok=True)
         render = _media_fn("render_fast_clip")
         has_audio = bool(metadata["audio"])
+        if not has_audio:
+            warning = "Source has no audio; exported fast clips without captions."
+            if warning not in job.warnings:
+                job.warnings.append(warning)
         for position, clip in enumerate(job.clips, 1):
             if clip.state == "complete":
                 continue
@@ -880,8 +943,25 @@ class JobManager:
             job.current_item = completed_before
             job.total_items = len(job.clips)
             output = output_dir / f"{position:02d}-cut.mp4"
+            subtitles_enabled = bool(private.get("burn_subtitles", private.get("subtitles_enabled", job.burn_subtitles)))
+            words: list[dict[str, Any]] = []
             try:
-                render(source, output, start=clip.start, end=clip.end, aspect=private["aspect_ratio"], has_audio=has_audio, settings=self.settings)
+                if subtitles_enabled and has_audio:
+                    try:
+                        words = self._transcribe_fast_window(job, private, source, clip, output_dir)
+                    except media_module.TranscriptionCancelled:
+                        raise
+                    except MediaError as exc:
+                        detail = redact(str(exc))
+                        if "No speech was detected" in detail:
+                            warning = f"Clip {clip.index}: No speech detected; exported without captions."
+                        else:
+                            warning = f"Clip {clip.index}: Local captioning unavailable; exported without captions. ({detail})"
+                        job.warnings.append(warning)
+                render_kwargs: dict[str, Any] = {"start": clip.start, "end": clip.end, "aspect": private["aspect_ratio"], "has_audio": has_audio, "settings": self.settings}
+                if subtitles_enabled and words:
+                    render_kwargs.update({"words": words, "style": job.style, "subtitles_enabled": True})
+                render(source, output, **render_kwargs)
                 job, clip, _ = self._publish_output(job, clip, output, private)
             except Exception as exc:
                 clip = clip.model_copy(update={"state": "failed", "error": redact(str(exc)), "selected": False})
@@ -980,7 +1060,12 @@ class JobManager:
         self.start_step(job, "render", detail="Rendering narration, captions, and visual beats", label="Rendering narration, captions, and visual beats", progress=67, current=1, total=1, private=private)
         output = work / "clips" / "01-script-video.mp4"
         try:
-            render_script(output, duration=duration, aspect=private["aspect_ratio"], narration=narration, words=words, visuals=visuals, overlays=overlays, settings=self.settings)
+            try:
+                render_script(output, duration=duration, aspect=private["aspect_ratio"], narration=narration, words=words, visuals=visuals, overlays=overlays, settings=self.settings, style=job.style)
+            except TypeError as exc:
+                if "unexpected keyword argument 'style'" not in str(exc):
+                    raise
+                render_script(output, duration=duration, aspect=private["aspect_ratio"], narration=narration, words=words, visuals=visuals, overlays=overlays, settings=self.settings)
         except Exception as exc:
             clip.state = "failed"
             clip.error = redact(str(exc))
@@ -1084,7 +1169,7 @@ class JobManager:
             id=new_id, project_id=job.project_id, library_folder_id=job.library_folder_id,
             source_blob_id=job.source_blob_id, mode="clip", processing_mode="fast",
             state="queued", stage="queued", stage_label="Queued on this machine",
-            progress=0, style=job.style, steps=self._fast_steps(),
+            progress=0, style=job.style, burn_subtitles=bool(new_private.get("burn_subtitles", job.burn_subtitles)), steps=self._fast_steps(),
         )
         self.db.save_job(new_job, new_private)
         self._save(new_job)

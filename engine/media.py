@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import threading
+import time
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
@@ -139,9 +140,31 @@ def available(command: str) -> bool:
     return shutil.which(command) is not None or Path(command).is_file()
 
 
-def run(command: list[str], *, cwd: Path | None = None, timeout: int = 3600) -> subprocess.CompletedProcess[str]:
+def run(command: list[str], *, cwd: Path | None = None, timeout: int = 3600, cancellation_callback: Callable[[], bool] | None = None) -> subprocess.CompletedProcess[str]:
     try:
-        result = subprocess.run(command, cwd=cwd, capture_output=True, text=True, timeout=timeout, check=False)
+        if cancellation_callback is None:
+            result = subprocess.run(command, cwd=cwd, capture_output=True, text=True, timeout=timeout, check=False)
+        else:
+            process = subprocess.Popen(command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            started = time.monotonic()
+            while process.poll() is None:
+                if cancellation_callback():
+                    process.terminate()
+                    try:
+                        process.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait()
+                    raise TranscriptionCancelled("Media operation cancelled")
+                if time.monotonic() - started > timeout:
+                    process.kill()
+                    process.wait()
+                    raise MediaError(f"{Path(command[0]).name} timed out")
+                time.sleep(.05)
+            stdout, stderr = process.communicate()
+            result = subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+    except TranscriptionCancelled:
+        raise
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise MediaError(redact(str(exc))) from exc
     if result.returncode:
@@ -281,7 +304,7 @@ def _media_duration(path: Path, settings: Settings) -> float:
         return float(probe(path, settings)["duration"])
 
 
-def extract_audio_16k(source: Path, settings: Settings, *, output: Path | None = None) -> Path:
+def extract_audio_16k(source: Path, settings: Settings, *, output: Path | None = None, start: float | None = None, duration: float | None = None, cancellation_callback: Callable[[], bool] | None = None) -> Path:
     """Extract a 16 kHz mono PCM WAV for Whisper consumption.
 
     Faster-Whisper decodes media with its own FFmpeg invocation; extracting a
@@ -310,12 +333,14 @@ def extract_audio_16k(source: Path, settings: Settings, *, output: Path | None =
     """
     target = output or (settings.data_path / "temp" / f"whisper-{os.urandom(6).hex()}.wav")
     target.parent.mkdir(parents=True, exist_ok=True)
-    run([
-        settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
-        "-i", str(source),
-        "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le",
-        str(target),
-    ], timeout=900)
+    command = [settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y"]
+    if start is not None:
+        command.extend(["-ss", f"{max(0.0, start):.3f}"])
+    command.extend(["-i", str(source)])
+    if duration is not None:
+        command.extend(["-t", f"{max(0.1, duration):.3f}"])
+    command.extend(["-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(target)])
+    run(command, timeout=900, cancellation_callback=cancellation_callback)
     if not target.is_file() or target.stat().st_size < 44:
         raise MediaError("Audio extraction did not produce a usable 16 kHz WAV")
     return target
@@ -437,7 +462,7 @@ def synthesize_local(text: str, output: Path, settings: Settings) -> Path:
 
 
 def dimensions(aspect: str) -> tuple[int, int]:
-    return {"1:1": (1080, 1080), "16:9": (1920, 1080), "4:5": (1080, 1350)}.get(aspect, (1080, 1920))
+    return {"1:1": (1080, 1080), "16:9": (1920, 1080), "4:5": (1080, 1350), "9:16": (1080, 1920)}.get(aspect, (1080, 1920))
 
 
 # Reference caption metrics tuned against the canonical 9:16 canvas
@@ -452,6 +477,18 @@ _CAPTION_REFERENCE_MARGIN_X = 80
 _CAPTION_REFERENCE_MARGIN_V = 250
 _CAPTION_WRAP_FRACTION = 0.85  # keep wrapped lines within 85% of the usable width
 _CHAR_WIDTH_FACTOR = 0.55  # average Arial glyph width at 1em
+
+# Data-driven treatments keep one renderer/timing foundation across modes.
+_SUBTITLE_PRESETS = {
+    "funny": {"font": 78, "outline": 6, "shadow": 3, "primary": "&H00F7F0E8&", "highlight": "&H0055B7FF&", "bold": -1, "group": 4},
+    "serious": {"font": 68, "outline": 4, "shadow": 2, "primary": "&H00F4F5F7&", "highlight": "&H00D6A56A&", "bold": 0, "group": 5},
+    "educational": {"font": 70, "outline": 5, "shadow": 2, "primary": "&H00F1F2F4&", "highlight": "&H0077D6FF&", "bold": -1, "group": 6},
+    "hype": {"font": 82, "outline": 7, "shadow": 3, "primary": "&H00FFFFFF&", "highlight": "&H0048B8FF&", "bold": -1, "group": 3},
+}
+
+
+def _subtitle_preset(style: str) -> dict[str, Any]:
+    return _SUBTITLE_PRESETS.get(style, _SUBTITLE_PRESETS["educational"])
 
 
 def _ass_style_metrics(width: int, height: int) -> dict[str, int]:
@@ -493,6 +530,18 @@ def _wrap_caption_words(words: list[dict[str, Any]], max_chars: int) -> list[lis
     return lines
 
 
+def _caption_group_for_index(local: list[dict[str, Any]], index: int, desired: int, max_chars: int) -> list[dict[str, Any]]:
+    """Choose a timed word group that always fits a maximum two-line block."""
+    start = index - index % desired
+    end = min(len(local), start + desired)
+    while end - start > 1 and len(_wrap_caption_words(local[start:end], max_chars)) > 2:
+        end -= 1
+    if index >= end:
+        start = max(0, index - 1)
+        end = index + 1
+    return local[start:end]
+
+
 def _ass_time(seconds: float) -> str:
     value = max(0, seconds)
     hours = int(value // 3600)
@@ -508,11 +557,13 @@ def _ass_escape(value: str) -> str:
 # DO-NOT-CHANGE: PlayResX/Y must match the final render canvas; captions stay
 # bottom-centre (Alignment=2) with symmetric margins; word-by-word highlight
 # uses {\\c&H0077D6FF&}; wrapping at word boundaries via _wrap_caption_words
-def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duration: float, visuals: Iterable[tuple[str, float, float]], width: int, height: int) -> None:
+def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duration: float, visuals: Iterable[tuple[str, float, float]], width: int, height: int, style: str = "educational") -> None:
+    preset = _subtitle_preset(style)
     metrics = _ass_style_metrics(width, height)
-    fontsize = metrics["fontsize"]
-    outline = metrics["outline"]
-    shadow = metrics["shadow"]
+    scale = height / _CAPTION_REFERENCE_HEIGHT
+    fontsize = max(28, round(preset["font"] * scale))
+    outline = max(2, round(preset["outline"] * scale))
+    shadow = max(1, round(preset["shadow"] * scale))
     margin_x = metrics["margin_x"]
     margin_v = metrics["margin_v"]
     visual_scale = height / _CAPTION_REFERENCE_HEIGHT
@@ -527,7 +578,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding
-Style: Caption,Arial,{fontsize},&H00F1F2F4,&H0097D6FF,&H00000000,&H78000000,-1,0,0,0,100,100,0,0,1,{outline},{shadow},2,{margin_x},{margin_x},{margin_v},1
+Style: Caption,Arial,{fontsize},{preset["primary"]},{preset["highlight"]},&H00000000,&H78000000,{preset["bold"]},0,0,0,100,100,0,0,1,{outline},{shadow},2,{margin_x},{margin_x},{margin_v},1
 Style: Visual,Arial,{max(28, round(56 * visual_scale))},&H008FA8DD,&H000000FF,&H00110B0C,&HCC110B0C,-1,0,0,0,100,100,1,0,3,{max(1, round(2 * visual_scale))},0,8,{margin_x},{margin_x},{max(80, round(400 * visual_scale))},1
 
 [Events]
@@ -536,15 +587,15 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
     events: list[str] = []
     local = [word for word in words if float(word["end"]) >= offset and float(word["start"]) <= offset + duration]
     for index, word in enumerate(local):
-        group_start = index - index % 5
-        group = local[group_start:group_start + 5]
-        lines = _wrap_caption_words(group, max_chars)
+        group_size = int(preset["group"])
+        group = _caption_group_for_index(local, index, group_size, max_chars)
+        lines = _wrap_caption_words(group, max_chars)[:2]
         line_bits = []
         for line in lines:
             bits = []
             for item in line:
                 text = _ass_escape(str(item["text"]))
-                bits.append(r"{\c&H0077D6FF&}" + text + r"{\c&H00F1F2F4&}" if item is word else text)
+                bits.append(f"{{\\c{preset['highlight']}}}{text}{{\\c{preset['primary']}}}" if item is word else text)
             line_bits.append(" ".join(bits))
         start = max(0, float(word["start"]) - offset)
         end = min(duration, max(start + .05, float(word["end"]) - offset))
@@ -579,20 +630,25 @@ def _filters(width: int, height: int, overlays: list[tuple[Path, float, float]],
 
 # DO-NOT-CHANGE: atomic render (.partial.mp4 + os.replace) with structural output
 # validation (dimensions/audio) before the output is publishable
-def render_clip(source: Path, output: Path, *, start: float, end: float, aspect: str, words: list[dict[str, Any]], visuals: list[tuple[str, float, float]], overlays: list[tuple[Path, float, float]], settings: Settings) -> None:
+def render_clip(source: Path, output: Path, *, start: float, end: float, aspect: str, words: list[dict[str, Any]], visuals: list[tuple[str, float, float]], overlays: list[tuple[Path, float, float]], settings: Settings, style: str = "educational", has_audio: bool = True) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     ass = output.parent / f"{output.stem}.ass"
     duration = end - start
     width, height = dimensions(aspect)
-    write_ass(ass, words, offset=start, duration=duration, visuals=visuals, width=width, height=height)
+    write_ass(ass, words, offset=start, duration=duration, visuals=visuals, width=width, height=height, style=style)
     temp = output.with_suffix(".partial.mp4")
     command = [settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{start:.3f}", "-i", str(source), "-t", f"{duration:.3f}"]
     _overlay_inputs(command, overlays)
     filters, mapped = _filters(width, height, overlays, 1, ass.name)
-    command.extend(["-filter_complex", filters, "-map", f"[{mapped}]", "-map", "0:a:0", "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-movflags", "+faststart", "-shortest", str(temp)])
+    command.extend(["-filter_complex", filters, "-map", f"[{mapped}]"])
+    if has_audio:
+        command.extend(["-map", "0:a:0", "-c:a", "aac", "-b:a", "160k", "-ar", "48000"])
+    else:
+        command.append("-an")
+    command.extend(["-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-shortest", str(temp)])
     run(command, cwd=output.parent, timeout=7200)
     metadata = probe(temp, settings)
-    if metadata["width"] != width or metadata["height"] != height or not metadata["audio"]:
+    if metadata["width"] != width or metadata["height"] != height or (has_audio and not metadata["audio"]):
         raise MediaError("Rendered clip failed structural output validation")
     os.replace(temp, output)
 
@@ -710,21 +766,27 @@ def render_fast_clip(
     aspect: str,
     settings: Settings,
     has_audio: bool = True,
+    words: list[dict[str, Any]] | None = None,
+    style: str = "educational",
+    subtitles_enabled: bool = True,
 ) -> None:
-    """Render a fast clip with no captions, overlays, or visual beats.
+    """Render a fast clip with optional captions and no overlays or visual beats.
 
-    This is a lightweight render path that bypasses the ASS/caption/overlay
-    pipeline entirely.  It performs:
+    This is a lightweight render path that shares the ASS caption renderer
+    while bypassing the overlay/visual-beat pipeline. It performs:
 
     * Efficient input seeking (``-ss`` before ``-i``).
     * Centre-crop to the requested ``aspect`` without needless upscaling.
     * H.264 ``veryfast`` encoding.
     * AAC audio **only** when the source provides an audio track.
+    * Optional word-timed ASS subtitles using the shared caption renderer.
     * Output validation (dimensions, audio presence).
     * Atomic publish via a temporary ``.partial.mp4`` then ``os.replace``.
 
     The output canvas matches ``dimensions(aspect)`` only when the source is
     large enough; smaller sources keep their native resolution (no upscaling).
+    When ``words`` are supplied, the same ASS renderer used by Smart and Script
+    burns accurate, clip-relative captions into the output.
 
     Parameters
     ----------
@@ -757,6 +819,11 @@ def render_fast_clip(
     if meta["rotation"] % 180:
         src_width, src_height = src_height, src_width
     vf = _fast_crop_scale_filter(src_width, src_height, width, height)
+    ass: Path | None = None
+    if subtitles_enabled and words:
+        ass = output.parent / f"{output.stem}.ass"
+        write_ass(ass, words, offset=0, duration=duration, visuals=[], width=width, height=height, style=style)
+        vf = f"{vf},subtitles={ass.name}"
 
     command = [
         settings.ffmpeg,
@@ -818,11 +885,11 @@ def render_fast_clip(
 
 
 # DO-NOT-CHANGE: script render with atomic .partial + os.replace and output validation
-def render_script(output: Path, *, duration: float, aspect: str, narration: Path | None, words: list[dict[str, Any]], visuals: list[tuple[str, float, float]], overlays: list[tuple[Path, float, float]], settings: Settings) -> None:
+def render_script(output: Path, *, duration: float, aspect: str, narration: Path | None, words: list[dict[str, Any]], visuals: list[tuple[str, float, float]], overlays: list[tuple[Path, float, float]], settings: Settings, style: str = "educational") -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     ass = output.parent / f"{output.stem}.ass"
     width, height = dimensions(aspect)
-    write_ass(ass, words, offset=0, duration=duration, visuals=visuals, width=width, height=height)
+    write_ass(ass, words, offset=0, duration=duration, visuals=visuals, width=width, height=height, style=style)
     temp = output.with_suffix(".partial.mp4")
     command = [settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", f"color=c=0x08080a:s={width}x{height}:r=30:d={duration:.3f}"]
     audio_index: int | None = None

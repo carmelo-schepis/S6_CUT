@@ -79,6 +79,12 @@ def test_long_subtitle_wraps_without_splitting_words(tmp_path: Path) -> None:
     assert any(r"\N" in event for event in events)
 
 
+def test_caption_blocks_never_exceed_two_lines(tmp_path: Path) -> None:
+    words = _words(*(["longword"] * 30))
+    ass = _write(tmp_path, words)
+    assert all(event.count(r"\\N") <= 1 for event in _caption_events(ass))
+
+
 def test_wrap_never_splits_a_single_long_word(tmp_path: Path) -> None:
     words = _words("Supercalifragilisticexpialidocious", "next")
     lines = _wrap_caption_words(words, max_chars=8)
@@ -96,6 +102,22 @@ def test_square_uses_square_playres(tmp_path: Path) -> None:
     ass = _write(tmp_path, _words("Hello", "world"), width=1080, height=1080)
     assert "PlayResX: 1080" in ass
     assert "PlayResY: 1080" in ass
+
+
+def test_four_by_five_uses_final_canvas_and_unicode_escaping(tmp_path: Path) -> None:
+    ass = _write(tmp_path, _words("Café", "世界", "{safe}"), width=1080, height=1350)
+    assert "PlayResX: 1080" in ass and "PlayResY: 1350" in ass
+    assert r"\{safe\}" in ass
+
+
+def test_style_presets_change_caption_treatment(tmp_path: Path) -> None:
+    outputs = {}
+    for style in ("funny", "serious", "educational", "hype"):
+        path = tmp_path / f"{style}.ass"
+        write_ass(path, _words("one", "two", "three", "four"), offset=0, duration=10, visuals=[], width=1080, height=1920, style=style)
+        outputs[style] = path.read_text(encoding="utf-8")
+    assert len({text.split("Style: Caption,")[1].split("\n", 1)[0] for text in outputs.values()}) == 4
+    assert all("\\c&H" in text for text in outputs.values())
 
 
 def test_sixteen_by_nine_uses_landscape_playres_and_scaled_margins(tmp_path: Path) -> None:

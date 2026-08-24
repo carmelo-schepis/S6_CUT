@@ -62,12 +62,12 @@ def test_fast_pipeline_real_smoke_never_enters_smart_services(monkeypatch: pytes
     )
     job = Job(
         id=job_id, project_id=project_id, mode="clip", processing_mode="fast",
-        state="queued", stage="queued", stage_label="Queued", progress=0, style="educational",
+        state="queued", stage="queued", stage_label="Queued", progress=0, style="educational", burn_subtitles=False,
     )
     database.save_project(project)
     database.save_job(job, {
         "source_path": str(source), "processing_mode": "fast", "count": 2,
-        "min_duration": 2, "max_duration": 2.5, "aspect_ratio": "9:16",
+        "min_duration": 2, "max_duration": 2.5, "aspect_ratio": "9:16", "burn_subtitles": False,
     })
 
     manager._process(job_id)

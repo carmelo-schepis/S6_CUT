@@ -142,6 +142,8 @@ class Job(ApiModel):
     total_items: int = Field(default=0, ge=0)
     style: Style
     processing_mode: ProcessingMode = "smart"
+    # Snapshot of the user's caption choice; legacy payloads default safely on.
+    burn_subtitles: bool = True
     warnings: list[str] = Field(default_factory=list)
     error: str | None = None
     clips: list[Clip] = Field(default_factory=list)
