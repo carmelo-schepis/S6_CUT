@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from engine.media import _ass_style_metrics, _wrap_caption_words, write_ass
+from engine.media import _ass_style_metrics, _wrap_caption_words, caption_words_for_clip, write_ass
 
 
 def _word(text: str, start: float = 0.0, end: float = 1.0) -> dict[str, object]:
@@ -42,6 +42,32 @@ def _write(tmp: Path, words: list[dict[str, object]], *, width: int = 1080, heig
     path = tmp / "test.ass"
     write_ass(path, words, offset=0, duration=30.0, visuals=[], width=width, height=height)
     return path.read_text(encoding="utf-8")
+
+
+def test_source_words_convert_to_clip_local_time_at_boundaries() -> None:
+    words = [
+        _word("before", -1, 0), _word("first", 9.999999, 10.4),
+        _word("middle", 11, 12), _word("last", 12.8, 14), _word("after", 14, 15),
+    ]
+    local = caption_words_for_clip(words, 10, 14)
+    assert [word["text"] for word in local] == ["first", "middle", "last"]
+    assert local[0]["start"] == 0
+    assert local[-1]["end"] == 4
+
+
+def test_malformed_caption_words_are_ignored() -> None:
+    assert caption_words_for_clip([{"text": "bad", "start": "nope", "end": 2}, {"text": "ok", "start": 0, "end": 1}], 0, 2)[0]["text"] == "ok"
+
+
+def test_preview_and_export_timing_model_produce_identical_cues(tmp_path: Path) -> None:
+    source_time = [_word("Hello", 10.0, 10.5), _word("世界", 10.5, 11.0)]
+    local = caption_words_for_clip(source_time, 10, 12)
+    preview_path = tmp_path / "preview.ass"
+    export_path = tmp_path / "export.ass"
+    preview_path.parent.mkdir(parents=True, exist_ok=True)
+    write_ass(preview_path, local, offset=0, duration=2, visuals=[], width=1080, height=1920)
+    write_ass(export_path, source_time, offset=10, duration=2, visuals=[], width=1080, height=1920)
+    assert _caption_events(preview_path.read_text()) == _caption_events(export_path.read_text())
 
 
 def test_short_subtitle_is_single_centred_line(tmp_path: Path) -> None:
@@ -108,6 +134,12 @@ def test_four_by_five_uses_final_canvas_and_unicode_escaping(tmp_path: Path) -> 
     ass = _write(tmp_path, _words("Café", "世界", "{safe}"), width=1080, height=1350)
     assert "PlayResX: 1080" in ass and "PlayResY: 1350" in ass
     assert r"\{safe\}" in ass
+
+
+def test_punctuation_apostrophe_and_backslash_are_escaped(tmp_path: Path) -> None:
+    ass = _write(tmp_path, _words("don't", r"C:\\media", "okay"))
+    assert "don't" in ass
+    assert r"C:\\\\media" in ass
 
 
 def test_style_presets_change_caption_treatment(tmp_path: Path) -> None:

@@ -5,7 +5,7 @@ import type { LibraryAsset } from "../types";
 import { ShortsEditorView } from "./shorts-editor-view";
 
 vi.mock("../api", () => ({
-  createShortsJob: vi.fn(), createShortsSourceJob: vi.fn(), listAssets: vi.fn(), readableError: (error: unknown) => error instanceof Error ? error.message : "Request failed",
+  createShortsJob: vi.fn(), createShortsSourceJob: vi.fn(), listAssets: vi.fn(), listJobs: vi.fn().mockResolvedValue([]), readableError: (error: unknown) => error instanceof Error ? error.message : "Request failed",
 }));
 
 const asset: LibraryAsset = { id: "asset-1", title: "Library clip", description: "", mediaType: "video/mp4", filename: "clip.mp4", tags: [], triggers: [], aliases: [], negativeTriggers: [], policy: "neutral", protected: false, minSpacingSeconds: 0, maxUsesPerProject: 0, licence: "User", attribution: "", contentHash: "hash", brands: [], people: [], folderId: "folder", origin: "manual-import", blobId: "blob", createdAt: "2026-01-01T00:00:00Z" };

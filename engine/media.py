@@ -659,6 +659,30 @@ def _ass_escape(value: str) -> str:
     return value.replace("\\", r"\\").replace("{", r"\{").replace("}", r"\}").replace("\n", r"\N")
 
 
+def caption_words_for_clip(words: Iterable[dict[str, Any]], start: float, end: float) -> list[dict[str, Any]]:
+    """Select source-time words and convert their timestamps to clip-local time."""
+    clip_start, clip_end = float(start), float(end)
+    if not math.isfinite(clip_start) or not math.isfinite(clip_end) or clip_end <= clip_start:
+        return []
+    selected: list[dict[str, Any]] = []
+    for word in words:
+        try:
+            word_start, word_end = float(word["start"]), float(word["end"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not math.isfinite(word_start) or not math.isfinite(word_end) or word_end <= word_start:
+            continue
+        overlap_start = max(clip_start, word_start)
+        overlap_end = min(clip_end, word_end)
+        if overlap_end <= overlap_start:
+            continue
+        item = dict(word)
+        item["start"] = overlap_start - clip_start
+        item["end"] = overlap_end - clip_start
+        selected.append(item)
+    return selected
+
+
 # DO-NOT-CHANGE: PlayResX/Y must match the final render canvas; captions stay
 # bottom-centre (Alignment=2) with symmetric margins; word-by-word highlight
 # uses {\\c&H0077D6FF&}; wrapping at word boundaries via _wrap_caption_words
@@ -690,7 +714,7 @@ Style: Visual,Arial,{max(28, round(56 * visual_scale))},&H008FA8DD,&H000000FF,&H
 Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
 """
     events: list[str] = []
-    local = [word for word in words if float(word["end"]) >= offset and float(word["start"]) <= offset + duration]
+    local = caption_words_for_clip(words, offset, offset + duration)
     for index, word in enumerate(local):
         group_size = int(preset["group"])
         group = _caption_group_for_index(local, index, group_size, max_chars)
@@ -702,8 +726,8 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
                 text = _ass_escape(str(item["text"]))
                 bits.append(f"{{\\c{preset['highlight']}}}{text}{{\\c{preset['primary']}}}" if item is word else text)
             line_bits.append(" ".join(bits))
-        start = max(0, float(word["start"]) - offset)
-        end = min(duration, max(start + .05, float(word["end"]) - offset))
+        start = max(0, float(word["start"]))
+        end = min(duration, max(start + .05, float(word["end"])))
         event_text = r"\N".join(line_bits)
         events.append(f"Dialogue: 10,{_ass_time(start)},{_ass_time(end)},Caption,,0,0,0,,{event_text}")
     for label, start, end in visuals:

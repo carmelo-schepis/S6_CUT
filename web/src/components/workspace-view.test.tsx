@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Health, Job, LibraryFolder, Project } from "../types";
+import type { Health, Job, LibraryAsset, LibraryFolder, Project } from "../types";
 import { WorkspaceView } from "./workspace-view";
 
 // ---------------------------------------------------------------
@@ -9,12 +9,13 @@ import { WorkspaceView } from "./workspace-view";
 vi.mock("../api", () => {
   const readableError = (e: unknown) =>
     e instanceof Error ? e.message : "Something went wrong. Try again.";
-  return { readableError, getJob: vi.fn(), controlJob: vi.fn(), jobEventsUrl: vi.fn(() => ""), createZip: vi.fn(), retryClip: vi.fn(), setClipSelection: vi.fn(), listFolders: vi.fn().mockResolvedValue([]), changeProjectFolder: vi.fn() };
+  return { readableError, getJob: vi.fn(), controlJob: vi.fn(), jobEventsUrl: vi.fn(() => ""), createZip: vi.fn(), retryClip: vi.fn(), setClipSelection: vi.fn(), listAssets: vi.fn(), listFolders: vi.fn().mockResolvedValue([]), changeProjectFolder: vi.fn() };
 });
 
-import { controlJob, getJob, listFolders } from "../api";
+import { controlJob, getJob, listAssets, listFolders } from "../api";
 const mockGetJob = vi.mocked(getJob);
 const mockControlJob = vi.mocked(controlJob);
+const mockListAssets = vi.mocked(listAssets);
 const mockListFolders = vi.mocked(listFolders);
 
 const health: Health = {
@@ -191,6 +192,91 @@ describe("WorkspaceView – processing checklist placement", () => {
 });
 
 // ---------------------------------------------------------------
+describe("WorkspaceView – Media source tab", () => {
+  const sourceAsset: LibraryAsset = {
+    id: "source-asset", title: "Source footage", description: "", mediaType: "video/mp4", filename: "test.mp4",
+    tags: [], triggers: [], aliases: [], negativeTriggers: [], policy: "neutral", protected: true,
+    minSpacingSeconds: 0, maxUsesPerProject: 1, activeFrom: null, activeUntil: null,
+    licence: "User supplied", attribution: "", contentHash: "source-hash", folderId: "unsorted",
+    origin: "project-source", blobId: "source-blob", sourceProjectId: "p1", sourceJobId: "j1", sourceClipId: null,
+    durationSeconds: 30, width: 1920, height: 1080, previewUrl: "/source-preview", aspectRatio: "16:9",
+    publishedAt: "2026-08-13T00:00:00Z", brands: [], people: [], createdAt: "2026-08-13T00:00:00Z",
+  };
+  const clipAsset: LibraryAsset = { ...sourceAsset, id: "clip-asset", title: "Generated clip", filename: "cut-01.mp4", origin: "generated-clip", sourceClipId: "c1", previewUrl: "/clip-preview" };
+  const unrelatedAsset: LibraryAsset = { ...sourceAsset, id: "other-asset", title: "Other project", sourceProjectId: "other", sourceJobId: "other-job", sourceClipId: "other-clip" };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetJob.mockResolvedValue(staleSmartJobWithOutputs);
+    mockListAssets.mockResolvedValue([]);
+  });
+
+  it("provides accessible Transcript and Media tabs without mutating workspace state", async () => {
+    renderView();
+    const transcriptTab = await screen.findByRole("tab", { name: "Transcript" });
+    const mediaTab = screen.getByRole("tab", { name: "Media" });
+    expect(screen.getByRole("tablist", { name: "Source material" })).toBeInTheDocument();
+    expect(transcriptTab).toHaveAttribute("aria-selected", "true");
+    expect(mediaTab).toHaveAttribute("aria-selected", "false");
+    expect(mockListAssets).not.toHaveBeenCalled();
+
+    fireEvent.click(mediaTab);
+    expect(mediaTab).toHaveAttribute("aria-selected", "true");
+    expect(transcriptTab).toHaveAttribute("aria-selected", "false");
+    expect(await screen.findByText("No project media yet")).toBeInTheDocument();
+    expect(mockListAssets).toHaveBeenCalledWith();
+    expect(mockControlJob).not.toHaveBeenCalled();
+  });
+
+  it("supports arrow-key tab navigation and caches repeated media visits", async () => {
+    renderView();
+    const transcriptTab = await screen.findByRole("tab", { name: "Transcript" });
+    const mediaTab = screen.getByRole("tab", { name: "Media" });
+    fireEvent.keyDown(transcriptTab, { key: "ArrowRight" });
+    expect(mediaTab).toHaveFocus();
+    expect(mediaTab).toHaveAttribute("aria-selected", "true");
+    await screen.findByText("No project media yet");
+    fireEvent.click(transcriptTab);
+    fireEvent.click(mediaTab);
+    expect(mockListAssets).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a loading state while reading project media", async () => {
+    let resolveAssets: (assets: LibraryAsset[]) => void = () => undefined;
+    mockListAssets.mockImplementation(() => new Promise((resolve) => { resolveAssets = resolve; }));
+    renderView();
+    fireEvent.click(await screen.findByRole("tab", { name: "Media" }));
+    expect(await screen.findByText("Loading project media…")).toBeInTheDocument();
+    resolveAssets([]);
+    expect(await screen.findByText("No project media yet")).toBeInTheDocument();
+  });
+
+  it("shows only assets linked to this project or its clips", async () => {
+    mockListAssets.mockResolvedValue([sourceAsset, clipAsset, unrelatedAsset]);
+    renderView();
+    fireEvent.click(await screen.findByRole("tab", { name: "Media" }));
+
+    expect(await screen.findByText("Source footage")).toBeInTheDocument();
+    expect(screen.getByText("Generated clip")).toBeInTheDocument();
+    expect(screen.getByText("Generated clip · Clip 1")).toBeInTheDocument();
+    expect(screen.queryByText("Other project")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Transcript" }));
+    expect(screen.getAllByText("Hello world").length).toBeGreaterThan(0);
+    expect(screen.getByText("0:00 / 0:10")).toBeInTheDocument();
+  });
+
+  it("renders a retryable media loading error", async () => {
+    mockListAssets.mockRejectedValueOnce(new Error("Media service unavailable")).mockResolvedValueOnce([sourceAsset]);
+    renderView();
+    fireEvent.click(await screen.findByRole("tab", { name: "Media" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Media service unavailable");
+
+    fireEvent.click(screen.getByRole("button", { name: /Retry/i }));
+    expect(await screen.findByText("Source footage")).toBeInTheDocument();
+    expect(mockListAssets).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("WorkspaceView – publication metadata, Details rename, read-only captions", () => {
   const folders: LibraryFolder[] = [
     { id: "acme", name: "Acme Corp", parentId: null, description: "", color: null, archived: false, system: false, createdAt: "2026-01-01", updatedAt: "2026-01-01" },

@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { AlertTriangle, Captions, Check, Clock, Download, Eye, FileText, Film, Pause, Play, RefreshCw, RotateCcw, SlidersHorizontal, Sparkles, Square, Volume2, Zap } from "lucide-react";
-import { changeProjectFolder, controlJob, createZip, getJob, jobEventsUrl, listFolders, readableError, retryClip, setClipSelection } from "../api";
+import { changeProjectFolder, controlJob, createZip, getJob, jobEventsUrl, listAssets, listFolders, readableError, retryClip, setClipSelection } from "../api";
 import { emitLibraryChanged } from "../library-sync";
-import { jobSchema, type Clip, type Health, type Job, type LibraryFolder, type Project } from "../types";
+import { jobSchema, type Clip, type Health, type Job, type LibraryAsset, type LibraryFolder, type Project } from "../types";
 import { Button, EmptyState, IconButton, Progress, StatusBadge, formatBytes, formatDuration } from "./common";
 import { isTerminalJob, ProcessingState } from "./processing-state";
 import { ProcessChecklist } from "./process-checklist";
@@ -57,6 +57,10 @@ function ClipThumb({ clip }: { clip: Clip }) {
 export function WorkspaceView({ project, health, hasSelectedProvider = true, onConfigureProviders = () => undefined, onProjectUpdated, onGoProjects }: { project: Project | null; health?: Health | null; hasSelectedProvider?: boolean; onConfigureProviders?: () => void; onProjectUpdated: () => Promise<void>; onGoProjects: () => void }) {
   const [job, setJob] = useState<Job | null>(null);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
+  const [sourceTab, setSourceTab] = useState<"transcript" | "media">("transcript");
+  const [mediaAssets, setMediaAssets] = useState<LibraryAsset[]>([]);
+  const [mediaLoading, setMediaLoading] = useState(false);
+  const [mediaError, setMediaError] = useState<string | null>(null);
   const [detailsTab, setDetailsTab] = useState<"score" | "captions" | "asset" | "info">("score");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -66,6 +70,7 @@ export function WorkspaceView({ project, health, hasSelectedProvider = true, onC
   const [folders, setFolders] = useState<LibraryFolder[]>([]);
   const [now, setNow] = useState(() => Date.now());
   const pollingRef = useRef<number | null>(null);
+  const mediaLoadedKey = useRef<string | null>(null);
   // Track the previous clip states so we can detect new publications
   // and emit a library-changed signal for cross-view revalidation.
   // DO-NOT-CHANGE: this publication detection emits library-changed when a clip completes;
@@ -162,6 +167,10 @@ export function WorkspaceView({ project, health, hasSelectedProvider = true, onC
   }, [project?.id, project?.latestJobId]);
 
   const selectedClip = useMemo(() => job?.clips.find((clip) => clip.id === selectedClipId) || null, [job, selectedClipId]);
+  const relevantMediaAssets = useMemo(() => {
+    const clipIds = new Set(job?.clips.map((clip) => clip.id));
+    return mediaAssets.filter((asset) => asset.sourceProjectId === project?.id || asset.sourceJobId === job?.id || (asset.sourceClipId != null && clipIds.has(asset.sourceClipId)));
+  }, [job, mediaAssets, project?.id]);
   const selectedIds = job?.clips.filter((clip) => clip.selected && clip.state === "complete").map((clip) => clip.id) || [];
   const savedCount = job?.clips.filter((clip) => clip.state === "complete" && clip.libraryAssetId).length || 0;
   const providerRelatedFailure = Boolean(job?.error && /openrouter|elevenlabs|provider|credential|api key|model|voice/i.test(job.error));
@@ -202,6 +211,29 @@ export function WorkspaceView({ project, health, hasSelectedProvider = true, onC
     } catch (cause) { setError(readableError(cause)); } finally { setBusy(false); }
   };
 
+  const mediaKey = project ? `${project.id}:${project.latestJobId || "none"}` : "";
+  const loadMedia = useCallback(async (force = false) => {
+    if (!project || (!force && mediaLoadedKey.current === mediaKey)) return;
+    setMediaLoading(true);
+    setMediaError(null);
+    try { setMediaAssets(await listAssets()); mediaLoadedKey.current = mediaKey; } catch (cause) { setMediaError(readableError(cause)); } finally { setMediaLoading(false); }
+  }, [mediaKey, project]);
+
+  useEffect(() => {
+    if (sourceTab !== "media") return;
+    const timer = window.setTimeout(() => void loadMedia(), 0);
+    return () => window.clearTimeout(timer);
+  }, [loadMedia, sourceTab]);
+
+  const moveSourceTab = (next: "transcript" | "media") => setSourceTab(next);
+  const handleSourceTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const next = sourceTab === "transcript" ? "media" : "transcript";
+    moveSourceTab(next);
+    document.getElementById(`workspace-${next}-tab`)?.focus();
+  };
+
   const selectClipForPreview = (clip: Clip) => {
     setSelectedClipId(clip.id);
     // Scroll the viewer into view on compact screens
@@ -236,12 +268,22 @@ export function WorkspaceView({ project, health, hasSelectedProvider = true, onC
 
     <div className="workspace-grid">
       <aside className="source-panel panel">
-        <div className="panel-tabs"><button className="active">{project.mode === "clip" ? "Transcript" : "Script"}</button><button>Media</button></div>
+        <div className="panel-tabs" role="tablist" aria-label="Source material">
+          <button type="button" role="tab" id="workspace-transcript-tab" aria-controls="workspace-transcript-panel" aria-selected={sourceTab === "transcript"} tabIndex={sourceTab === "transcript" ? 0 : -1} className={sourceTab === "transcript" ? "active" : ""} onClick={() => moveSourceTab("transcript")} onKeyDown={handleSourceTabKeyDown}>{project.mode === "clip" ? "Transcript" : "Script"}</button>
+          <button type="button" role="tab" id="workspace-media-tab" aria-controls="workspace-media-panel" aria-selected={sourceTab === "media"} tabIndex={sourceTab === "media" ? 0 : -1} className={sourceTab === "media" ? "active" : ""} onClick={() => moveSourceTab("media")} onKeyDown={handleSourceTabKeyDown}>Media</button>
+        </div>
         <div className="source-content">
-          <div className="source-card"><div className="source-icon">{project.mode === "clip" ? <Film /> : <FileText />}</div><div><strong>{project.sourceName}</strong><span>{project.sourceKind} · preserved source</span></div></div>
-          {project.mode === "clip" ? <div className="transcript-placeholder">
-            {selectedClip ? <><span className="timecode">{formatDuration(selectedClip.start)}</span><p>{selectedClip.openingLine}</p><span className="timecode">{formatDuration(selectedClip.end)}</span><p className="muted">The complete canonical timed-word transcript remains in the engine project record. Select another clip to inspect its source range.</p></> : <p className="muted">Timed words will appear when transcription completes.</p>}
-          </div> : <div className="beat-source-list">{job?.beats.map((beat) => <button key={beat.id}><span>{formatDuration(beat.start)}</span><p>{beat.text}</p></button>)}</div>}
+          {sourceTab === "transcript" ? <div id="workspace-transcript-panel" role="tabpanel" aria-labelledby="workspace-transcript-tab" tabIndex={0}>
+            <div className="source-card"><div className="source-icon">{project.mode === "clip" ? <Film /> : <FileText />}</div><div><strong>{project.sourceName}</strong><span>{project.sourceKind} · preserved source</span></div></div>
+            {project.mode === "clip" ? <div className="transcript-placeholder">
+              {selectedClip ? <><span className="timecode">{formatDuration(selectedClip.start)}</span><p>{selectedClip.openingLine}</p><span className="timecode">{formatDuration(selectedClip.end)}</span><p className="muted">The complete canonical timed-word transcript remains in the engine project record. Select another clip to inspect its source range.</p></> : <p className="muted">Timed words will appear when transcription completes.</p>}
+            </div> : <div className="beat-source-list">{job?.beats.map((beat) => <button key={beat.id}><span>{formatDuration(beat.start)}</span><p>{beat.text}</p></button>)}</div>}
+          </div> : <div id="workspace-media-panel" role="tabpanel" aria-labelledby="workspace-media-tab" tabIndex={0}>
+            {mediaLoading && <p className="source-state" role="status">Loading project media…</p>}
+            {mediaError && <div className="source-error" role="alert"><span>{mediaError}</span><Button onClick={() => void loadMedia(true)}><RefreshCw size={14} /> Retry</Button></div>}
+            {!mediaLoading && !mediaError && !relevantMediaAssets.length && <EmptyState icon={<Film size={24} />} title="No project media yet">Linked source and generated clip assets will appear here without changing the project or Library.</EmptyState>}
+            {!mediaLoading && !mediaError && relevantMediaAssets.length > 0 && <div className="workspace-media-list">{relevantMediaAssets.map((asset) => <WorkspaceMediaAsset key={asset.id} asset={asset} clip={job?.clips.find((item) => item.id === asset.sourceClipId)} />)}</div>}
+          </div>}
         </div>
       </aside>
 
@@ -287,6 +329,25 @@ export function WorkspaceView({ project, health, hasSelectedProvider = true, onC
     </section>
 
   </div>;
+}
+
+const mediaOriginLabels: Record<LibraryAsset["origin"], string> = {
+  "project-source": "Project source",
+  "generated-clip": "Generated clip",
+  "script-output": "Script output",
+  "manual-import": "Manual import",
+};
+
+function WorkspaceMediaAsset({ asset, clip }: { asset: LibraryAsset; clip?: Clip }) {
+  const mediaType = asset.mediaType.toLowerCase();
+  const preview = mediaType.startsWith("video/") && asset.previewUrl ? <video src={asset.previewUrl} controls muted preload="metadata" aria-label={`${asset.title} preview`} />
+    : mediaType.startsWith("image/") && asset.previewUrl ? <img src={asset.previewUrl} alt={`${asset.title} preview`} />
+      : mediaType.startsWith("audio/") && asset.previewUrl ? <audio src={asset.previewUrl} controls aria-label={`${asset.title} preview`} />
+        : <FileText size={24} aria-hidden="true" />;
+  return <article className="workspace-media-card">
+    <div className="workspace-media-preview">{preview}</div>
+    <div className="workspace-media-card-body"><strong>{asset.title}</strong><span>{mediaOriginLabels[asset.origin]}{clip ? ` · Clip ${clip.index}` : ""}</span><span className="muted">{asset.filename}{asset.width && asset.height ? ` · ${asset.width}×${asset.height}` : ""}</span></div>
+  </article>;
 }
 
 function ScoreInspector({ clip }: { clip: Clip }) {

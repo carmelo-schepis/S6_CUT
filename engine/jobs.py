@@ -848,7 +848,13 @@ class JobManager:
             job.total_items = len(job.clips)
             output = output_dir / f"{position:02d}-{safe_filename(clip.opening_line[:36], 'short')}.mp4"
             subtitles_enabled = bool(private.get("burn_subtitles", private.get("subtitles_enabled", job.burn_subtitles)))
-            clip_words = [word for word in words if float(word["end"]) >= clip.start and float(word["start"]) <= clip.end]
+            clip_words = media_module.caption_words_for_clip(words, clip.start, clip.end)
+            # render_clip receives source-time words; write_ass performs the
+            # same bounded local conversion for Smart and Script outputs.
+            clip_words = [
+                {**word, "start": float(word["start"]) + clip.start, "end": float(word["end"]) + clip.start}
+                for word in clip_words
+            ]
             visual = self.rules.resolve(" ".join(str(word["text"]) for word in clip_words))
             overlays = [(visual.asset_path, .65, min(3.4, clip.duration - .2))] if visual.asset_path and visual.asset_path.exists() and clip.duration > 1 else []
             visuals = [(clip.visual_label or "Key idea", .45, min(3.0, clip.duration))]
@@ -909,9 +915,8 @@ class JobManager:
             word_timestamps=True,
         )
         words = [
-            {**word, "start": max(0.0, float(word["start"])), "end": min(clip.duration, float(word["end"]))}
-            for word in transcript.get("words", [])
-            if float(word.get("end", 0)) > 0 and float(word.get("start", 0)) < clip.duration
+            word
+            for word in media_module.caption_words_for_clip(transcript.get("words", []), 0, clip.duration)
         ]
         self.db.cache_put(cache_key, now_iso(), {"words": words})
         if isinstance(transcripts, dict):
