@@ -68,6 +68,7 @@ export async function changeProjectFolder(id: string, folderId: string, moveExis
 
 type ClipJobInput = {
   file?: File;
+  name?: string;
   url?: string;
   style: Style;
   count: number;
@@ -83,6 +84,7 @@ export async function createClipJob(input: ClipJobInput): Promise<{ project: Pro
   const form = new FormData();
   if (input.file) form.set("file", input.file);
   if (input.url) form.set("url", input.url);
+  if (input.name?.trim()) form.set("name", input.name.trim());
   form.set("style", input.style);
   form.set("count", String(input.count));
   form.set("min_duration", String(input.minDuration));
@@ -111,19 +113,21 @@ export async function createScriptJob(input: {
   return { project: projectSchema.parse(value.project), job: jobSchema.parse(value.job) };
 }
 
-export async function createShortsJob(input: { assetId: string; start: number; end?: number; aspectRatio: "9:16" | "16:9" | "1:1" | "4:5"; libraryFolderId?: string }): Promise<{ project: Project; job: Job }> {
+export async function createShortsJob(input: { assetId: string; name?: string; burnSubtitles?: boolean; start: number; end?: number; aspectRatio: "9:16" | "16:9" | "1:1" | "4:5"; libraryFolderId?: string }): Promise<{ project: Project; job: Job }> {
   const value = await request<{ project: unknown; job: unknown }>("/jobs/shorts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) });
   return { project: projectSchema.parse(value.project), job: jobSchema.parse(value.job) };
 }
 
-export async function createShortsSourceJob(input: { file?: File; url?: string; start: number; end?: number; aspectRatio: "9:16" | "16:9" | "1:1" | "4:5"; libraryFolderId?: string }): Promise<{ project: Project; job: Job }> {
+export async function createShortsSourceJob(input: { file?: File; url?: string; name?: string; burnSubtitles?: boolean; start: number; end?: number; aspectRatio: "9:16" | "16:9" | "1:1" | "4:5"; libraryFolderId?: string }): Promise<{ project: Project; job: Job }> {
   const form = new FormData();
   if (input.file) form.set("file", input.file);
   if (input.url) form.set("url", input.url);
+  if (input.name?.trim()) form.set("name", input.name.trim());
   form.set("start", String(input.start));
   if (input.end !== undefined) form.set("end", String(input.end));
   form.set("aspect_ratio", input.aspectRatio);
   if (input.libraryFolderId) form.set("library_folder_id", input.libraryFolderId);
+  form.set("burn_subtitles", String(input.burnSubtitles ?? true));
   const value = await request<{ project: unknown; job: unknown }>("/jobs/shorts/source", { method: "POST", body: form });
   return { project: projectSchema.parse(value.project), job: jobSchema.parse(value.job) };
 }

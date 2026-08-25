@@ -73,6 +73,17 @@ describe("Projects create flow", () => {
     expect(screen.getByText(/local Whisper and deterministic planning/i)).toBeInTheDocument();
   });
 
+  it("trims and sends an explicit project name", async () => {
+    const created: Project = { ...project, id: "named-id", name: "QA Browser Test" };
+    mockCreateScriptJob.mockResolvedValue({ project: created, job: { ...undefinedJob, projectId: "named-id" } });
+    render(<ProjectsView projects={[]} health={health} hasSelectedProvider={false} onCreated={vi.fn()} onOpen={vi.fn()} onRefresh={vi.fn(async () => undefined)} />);
+    fireEvent.click(screen.getByRole("button", { name: /Script mode/i }));
+    fireEvent.change(screen.getByLabelText("Project name"), { target: { value: "  QA Browser Test  " } });
+    fireEvent.change(screen.getByPlaceholderText(/Paste the exact script/i), { target: { value: "This is a script long enough to create a project." } });
+    fireEvent.click(screen.getByRole("button", { name: /Create script video/i }));
+    await waitFor(() => expect(mockCreateScriptJob).toHaveBeenCalledWith(expect.objectContaining({ name: "QA Browser Test" })));
+  });
+
   it("does not send processingMode through the script API", async () => {
     const created: Project = { ...project, id: "new-id" };
     mockCreateScriptJob.mockResolvedValue({ project: created, job: { ...undefinedJob, projectId: "new-id" } });

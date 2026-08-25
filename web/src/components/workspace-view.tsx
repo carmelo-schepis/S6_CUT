@@ -65,6 +65,7 @@ export function WorkspaceView({ project, health, hasSelectedProvider = true, onC
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [waitingForEngine, setWaitingForEngine] = useState(false);
+  const [subscriptionNonce, setSubscriptionNonce] = useState(0);
   const [providerCalloutDismissed, setProviderCalloutDismissed] = useState(false);
   const [stalledCalloutDismissed, setStalledCalloutDismissed] = useState(false);
   const [folders, setFolders] = useState<LibraryFolder[]>([]);
@@ -100,8 +101,10 @@ export function WorkspaceView({ project, health, hasSelectedProvider = true, onC
     let terminal = false;
     let polling = false;
     let backoff = 1000;
+    let lastUpdatedAt = jobRef.current?.updatedAt || "";
     const update = (next: Job) => {
-      if (disposed) return;
+      if (disposed || (lastUpdatedAt && next.updatedAt < lastUpdatedAt)) return;
+      lastUpdatedAt = next.updatedAt;
       terminal = isTerminalJob(next);
       setWaitingForEngine(false);
       // Detect newly completed clips and emit library-changed signal
@@ -151,7 +154,8 @@ export function WorkspaceView({ project, health, hasSelectedProvider = true, onC
       try { update(jobSchema.parse(JSON.parse(event.data))); } catch { void fetchJob(); }
     };
     events.onerror = () => {
-      events.close();
+      // Keep EventSource open so the browser can perform its native reconnect.
+      // Polling remains an immediate durable-state fallback.
       if (!terminal) {
         polling = true;
         setWaitingForEngine(true);
@@ -164,7 +168,7 @@ export function WorkspaceView({ project, health, hasSelectedProvider = true, onC
       if (pollingRef.current) window.clearTimeout(pollingRef.current);
       pollingRef.current = null;
     };
-  }, [project?.id, project?.latestJobId]);
+  }, [project?.id, project?.latestJobId, subscriptionNonce]);
 
   const selectedClip = useMemo(() => job?.clips.find((clip) => clip.id === selectedClipId) || null, [job, selectedClipId]);
   const relevantMediaAssets = useMemo(() => {
@@ -180,7 +184,13 @@ export function WorkspaceView({ project, health, hasSelectedProvider = true, onC
   const act = async (action: "pause" | "resume" | "stop-keep" | "retry-failed" | "retry-import" | "switch-fast") => {
     if (!job) return;
     setBusy(true);
-    try { setJob(await controlJob(job.id, action)); await onProjectUpdated(); } catch (cause) { setError(readableError(cause)); } finally { setBusy(false); }
+    try {
+      const next = await controlJob(job.id, action);
+      jobRef.current = next;
+      setJob(next);
+      if (!isTerminalJob(next)) setSubscriptionNonce((value) => value + 1);
+      await onProjectUpdated();
+    } catch (cause) { setError(readableError(cause)); } finally { setBusy(false); }
   };
 
   const toggleClip = async (clip: Clip) => {
@@ -262,7 +272,7 @@ export function WorkspaceView({ project, health, hasSelectedProvider = true, onC
     {job?.state === "failed" && <div className="failure-strip" role="alert"><AlertTriangle size={17} /><div><strong>Project failed</strong><span>{job.error || "The engine could not finish this project. Completed outputs, if any, are still preserved."}</span></div><div><Button disabled={busy} onClick={() => act(job.downloadProgress ? "retry-import" : "retry-failed")}><RefreshCw size={14} /> {job.downloadProgress ? "Retry import" : "Retry failed work"}</Button>{providerCouldHelp && <Button onClick={onConfigureProviders}>Configure providers</Button>}{canContinueLocally && <Button disabled={busy} onClick={() => act("retry-failed")}>Continue with local fallback</Button>}</div></div>}
     {job?.state === "stalled" && <div className="failure-strip" role="alert"><AlertTriangle size={17} /><div><strong>YouTube download stalled</strong><span>{job.downloadProgress?.message || "No bytes arrived during the configured inactivity window. The retained partial download is safe to retry."}</span></div><Button disabled={busy} onClick={() => act("retry-import")}><RefreshCw size={14} /> Retry import</Button></div>}
     {job?.state === "cancelled_kept" && job.downloadProgress && <div className="warning-strip" role="status"><AlertTriangle size={14} /><span>Stopped with partial YouTube download retained ({formatBytes(job.downloadProgress.downloadedBytes)}). Retry import to resume it.</span><Button disabled={busy} onClick={() => act("retry-import")}><RefreshCw size={14} /> Retry import</Button></div>}
-    {job && !["complete", "failed", "cancelled_kept"].includes(job.state) && <div className="job-strip"><div><strong>{job.stageLabel}</strong><span>{job.downloadProgress ? ` · ${formatBytes(job.downloadProgress.downloadedBytes)}${job.downloadProgress.totalBytes ? ` of ${formatBytes(job.downloadProgress.totalBytes)}` : ""}` : job.currentItem > 0 && job.totalItems > 0 ? ` · ${job.currentItem} of ${job.totalItems}` : ""}</span></div><Progress value={job.downloadProgress?.percent ?? job.progress} label={job.downloadProgress ? `Download ${job.downloadProgress.phase}` : job.stageLabel} /></div>}
+    {job && !["complete", "failed", "cancelled_kept"].includes(job.state) && <div className="job-strip"><div><strong>{job.stageLabel}</strong><span>{job.downloadProgress ? ` · ${formatBytes(job.downloadProgress.downloadedBytes)}${job.downloadProgress.totalBytes ? ` of ${formatBytes(job.downloadProgress.totalBytes)}` : ""}` : job.currentItem > 0 && job.totalItems > 0 ? ` · ${job.currentItem} of ${job.totalItems}` : ""}</span></div><Progress value={job.downloadProgress?.percent ?? job.progress} indeterminate={Boolean(job.downloadProgress && job.downloadProgress.percent == null)} label={job.downloadProgress ? `Download ${job.downloadProgress.phase}` : job.stageLabel} /></div>}
     {job && job.steps.length > 0 && <ProcessChecklist steps={job.steps} jobState={job.state} compact={isTerminalJob(job)} />}
     {job?.warnings.map((warning) => <div className="warning-strip" key={warning}><AlertTriangle size={14} /><span>{warning}</span></div>)}
 

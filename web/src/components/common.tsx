@@ -30,10 +30,10 @@ export function EmptyState({ icon, title, children, action }: PropsWithChildren<
   </div>;
 }
 
-export function Progress({ value, label }: { value: number; label: string }) {
-  return <div className="progress-wrap" aria-label={`${label}: ${Math.round(value)}%`}>
-    <div className="progress-track"><span style={{ width: `${Math.max(0, Math.min(100, value))}%` }} /></div>
-    <span>{Math.round(value)}%</span>
+export function Progress({ value, label, indeterminate = false }: { value: number; label: string; indeterminate?: boolean }) {
+  return <div className={`progress-wrap${indeterminate ? " indeterminate" : ""}`} aria-label={indeterminate ? `${label}: percentage unavailable` : `${label}: ${Math.round(value)}%`}>
+    <div className="progress-track"><span style={indeterminate ? undefined : { width: `${Math.max(0, Math.min(100, value))}%` }} /></div>
+    <span>{indeterminate ? "—" : `${Math.round(value)}%`}</span>
   </div>;
 }
 

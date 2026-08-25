@@ -27,6 +27,7 @@ export function ProjectsView({ projects, health, hasSelectedProvider = true, onC
   const [sourceType, setSourceType] = useState<"file" | "url">("file");
   const [file, setFile] = useState<File | null>(null);
   const [url, setUrl] = useState("");
+  const [projectName, setProjectName] = useState("");
   const [script, setScript] = useState("");
   const [style, setStyle] = useState<Style>("educational");
   const [count, setCount] = useState(5);
@@ -71,8 +72,8 @@ export function ProjectsView({ projects, health, hasSelectedProvider = true, onC
     setSubmitting(true);
     try {
       const result = mode === "clip"
-        ? await createClipJob({ file: sourceType === "file" ? file || undefined : undefined, url: sourceType === "url" ? url.trim() : undefined, style, count, minDuration, maxDuration, aspectRatio, processingMode, burnSubtitles, libraryFolderId: libraryFolderId || undefined })
-        : await createScriptJob({ script, style, aspectRatio, narration, libraryFolderId: libraryFolderId || undefined });
+        ? await createClipJob({ file: sourceType === "file" ? file || undefined : undefined, url: sourceType === "url" ? url.trim() : undefined, name: projectName.trim() || undefined, style, count, minDuration, maxDuration, aspectRatio, processingMode, burnSubtitles, libraryFolderId: libraryFolderId || undefined })
+        : await createScriptJob({ script, name: projectName.trim() || undefined, style, aspectRatio, narration, libraryFolderId: libraryFolderId || undefined });
       if (libraryFolderId) localStorage.setItem(RECENT_FOLDER_KEY, libraryFolderId);
       onCreated(result.project);
     } catch (cause) {
@@ -148,6 +149,7 @@ export function ProjectsView({ projects, health, hasSelectedProvider = true, onC
                     : <p className="mode-note"><Zap size={12} /> No provider selected — this will run as a <strong>Fast local cut</strong>.</p>
                   : <p className="mode-note"><Zap size={12} /> Fast runs deterministically on this machine — no provider needed.</p>}
           </div>}
+          <Field label="Project name" hint="Optional. Leave blank for a generated name."><input id="project-name" aria-label="Project name" value={projectName} maxLength={160} onChange={(event) => setProjectName(event.target.value)} placeholder="QA Browser Test" /></Field>
           <div className="folder-picker"><Field label="Business folder"><select value={libraryFolderId} onChange={(event) => setLibraryFolderId(event.target.value)}>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></Field><Button variant="ghost" onClick={addFolder}><Plus size={13} /> Create folder</Button></div>
           {mode === "clip" && <label className="subtitle-toggle"><input type="checkbox" checked={burnSubtitles} onChange={(event) => setBurnSubtitles(event.target.checked)} /> <span><strong>Burn in subtitles</strong><small>Accurate local word timing; enabled by default. Fast transcribes selected windows only.</small></span></label>}
           <button className="advanced-toggle" onClick={() => setAdvanced(!advanced)} aria-expanded={advanced}>Advanced controls <span>{advanced ? "−" : "+"}</span></button>

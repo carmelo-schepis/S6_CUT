@@ -2,10 +2,16 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from engine.app import app, db
+from engine.app import _project_name, app, db
 
 
 client = TestClient(app)
+
+
+def test_project_name_normalization_has_safe_fallbacks() -> None:
+    assert _project_name("  QA Browser Test  ", "Fallback") == "QA Browser Test"
+    assert _project_name("\t\n", "Generated source") == "Generated source"
+    assert len(_project_name("x" * 200, "Fallback")) == 160
 
 
 def test_health_is_honest_and_hides_host_path() -> None:

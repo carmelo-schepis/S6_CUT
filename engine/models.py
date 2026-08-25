@@ -226,6 +226,8 @@ class SelectionInput(ApiModel):
 
 
 class ShortsJobInput(ApiModel):
+    name: str | None = Field(default=None, max_length=160)
+    burn_subtitles: bool = True
     asset_id: str = Field(min_length=1, max_length=200)
     start: float = Field(ge=0)
     end: float | None = Field(default=None, gt=0)

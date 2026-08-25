@@ -499,6 +499,10 @@ class JobManager:
                 self._process_script(job, private)
         except media_module.TranscriptionCancelled:
             return
+        except DownloadStalled:
+            # _source() has already persisted the actionable stalled state and
+            # partial-download metadata. Do not downgrade it to generic failed.
+            return
         except Exception as exc:  # scoped outer guard preserves already-published clips
             logger.exception("Job %s failed: %s", job_id, redact(str(exc)))
             job = self.db.get_job(job_id)

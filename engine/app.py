@@ -39,6 +39,12 @@ from .security import MediaSigner, SecretVault, confined, safe_filename, validat
 # signed URLs, confined paths, rate-limited creation, camelCase API contract with frontend
 
 
+def _project_name(value: str | None, fallback: str) -> str:
+    cleaned = " ".join((value or "").split())
+    cleaned = "".join(char for char in cleaned if char.isprintable())[:160].rstrip()
+    return cleaned or fallback[:160]
+
+
 settings.prepare()
 db = Database(settings.data_path / "s6-cut.sqlite3")
 vault = SecretVault(settings.data_path / "secrets" / "instance.key")
@@ -204,6 +210,7 @@ async def create_clip_job(
     request: Request,
     file: Annotated[UploadFile | None, File()] = None,
     url: Annotated[str | None, Form()] = None,
+    name: Annotated[str | None, Form()] = None,
     style: Annotated[Literal["funny", "serious", "educational", "hype"], Form()] = "educational",
     processing_mode: Annotated[Literal["fast", "smart", "auto"], Form()] = "auto",
     count: Annotated[int, Form(ge=1, le=30)] = 5,
@@ -258,7 +265,7 @@ async def create_clip_job(
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         source_name, source_kind = "YouTube import", "youtube"
-    project = Project(id=project_id, name=Path(source_name).stem[:160], mode="clip", style=style, state="queued", source_name=source_name, source_kind=source_kind, requested_count=count, latest_job_id=job_id, library_folder_id=library_folder_id)
+    project = Project(id=project_id, name=_project_name(name, Path(source_name).stem), mode="clip", style=style, state="queued", source_name=source_name, source_kind=source_kind, requested_count=count, latest_job_id=job_id, library_folder_id=library_folder_id)
     steps = manager._fast_steps() if mode == "fast" else manager._smart_steps(bool(private["use_openrouter"]))
     if source_kind == "upload":
         checkpoint_time = now_iso()
@@ -306,7 +313,7 @@ async def _queue_shorts_job(
     *, request: Request, source_name: str, source_kind: Literal["upload", "youtube"], source_path: Path | None,
     source_hash: str | None, source_metadata: dict[str, object] | None, url: str | None,
     start: float, end: float | None, aspect_ratio: str, library_folder_id: str,
-    job_id: str | None = None,
+    name: str | None = None, burn_subtitles: bool = True, job_id: str | None = None,
 ) -> dict[str, object]:
     if manager.queue.full():
         raise HTTPException(429, "The local processing queue is full. Try again after an active job completes.")
@@ -318,17 +325,17 @@ async def _queue_shorts_job(
     _validate_shorts_trim(start, end, float(source_metadata["duration"]) if source_metadata else None)
     project_id = str(uuid.uuid4())
     job_id = job_id or str(uuid.uuid4())
-    project = Project(id=project_id, name=f"Short — {Path(source_name).stem}"[:160], mode="clip", style="educational", state="queued", source_name=source_name, source_kind=source_kind, requested_count=1, latest_job_id=job_id, library_folder_id=library_folder_id)
+    project = Project(id=project_id, name=_project_name(name, f"Short — {Path(source_name).stem}"), mode="clip", style="educational", state="queued", source_name=source_name, source_kind=source_kind, requested_count=1, latest_job_id=job_id, library_folder_id=library_folder_id)
     clip_end = end if end is not None else max(start + 0.1, 0.1)
     clip = Clip(id=str(uuid.uuid4()), index=1, state="queued", start=start, end=clip_end, duration=clip_end-start, opening_line="Shorts Editor cut")
-    job = Job(id=job_id, project_id=project_id, library_folder_id=library_folder_id, mode="clip", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style="educational", processing_mode="fast", burn_subtitles=True, clips=[clip], total_items=1, steps=manager._fast_steps())
+    job = Job(id=job_id, project_id=project_id, library_folder_id=library_folder_id, mode="clip", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style="educational", processing_mode="fast", burn_subtitles=burn_subtitles, clips=[clip], total_items=1, steps=manager._fast_steps())
     timestamp = now_iso()
     if source_kind == "upload":
         manager._apply_step(job, job.steps[0], status="complete", detail="Source received and validated", completed_at=timestamp)
     if source_metadata is not None:
         manager._apply_step(job, job.steps[1], status="complete", detail="Source duration validated", completed_at=timestamp)
     manager._apply_step(job, job.steps[2], status="skipped", detail="Trim supplied by Shorts Editor", completed_at=timestamp)
-    private = {"source_path": str(source_path) if source_path else None, "source_hash": source_hash, "source_metadata": source_metadata, "url": url, "trim_start": start, "trim_end": end, "aspect_ratio": aspect_ratio, "count": 1, "min_duration": max(0.1, clip.duration), "max_duration": max(0.1, clip.duration), "processing_mode": "fast", "burn_subtitles": True, "library_folder_id": library_folder_id}
+    private = {"source_path": str(source_path) if source_path else None, "source_hash": source_hash, "source_metadata": source_metadata, "url": url, "trim_start": start, "trim_end": end, "aspect_ratio": aspect_ratio, "count": 1, "min_duration": max(0.1, clip.duration), "max_duration": max(0.1, clip.duration), "processing_mode": "fast", "burn_subtitles": burn_subtitles, "library_folder_id": library_folder_id}
     db.save_project(project)
     db.save_job(job, private)
     try:
@@ -354,7 +361,7 @@ async def create_shorts_job(request: Request, value: ShortsJobInput) -> dict[str
         metadata = await asyncio.to_thread(probe, source, settings)
     except MediaError as exc:
         raise HTTPException(422, str(exc)) from exc
-    return await _queue_shorts_job(request=request, source_name=asset.filename, source_kind="upload", source_path=source, source_hash=asset.content_hash, source_metadata=metadata, url=None, start=value.start, end=value.end, aspect_ratio=value.aspect_ratio, library_folder_id=value.library_folder_id)
+    return await _queue_shorts_job(request=request, source_name=asset.filename, source_kind="upload", source_path=source, source_hash=asset.content_hash, source_metadata=metadata, url=None, start=value.start, end=value.end, aspect_ratio=value.aspect_ratio, library_folder_id=value.library_folder_id, name=value.name, burn_subtitles=value.burn_subtitles)
 
 
 @app.post("/api/v1/jobs/shorts/source", status_code=status.HTTP_202_ACCEPTED)
@@ -366,6 +373,8 @@ async def create_shorts_source_job(
     end: Annotated[str | None, Form()] = None,
     aspect_ratio: Annotated[Literal["9:16", "16:9", "1:1", "4:5"], Form()] = "9:16",
     library_folder_id: Annotated[str, Form()] = UNSORTED_FOLDER_ID,
+    name: Annotated[str | None, Form()] = None,
+    burn_subtitles: Annotated[bool, Form()] = True,
 ) -> dict[str, object]:
     _rate_limit(request)
     if bool(file) == bool(url and url.strip()):
@@ -385,7 +394,7 @@ async def create_shorts_source_job(
         try:
             _, source_hash = await _stream_upload(file, source, settings.max_upload_bytes)
             metadata = await asyncio.to_thread(validate_video_upload, source, original, settings)
-            result = await _queue_shorts_job(request=request, source_name=original, source_kind="upload", source_path=source, source_hash=source_hash, source_metadata=metadata, url=None, start=parsed_start, end=parsed_end, aspect_ratio=aspect_ratio, library_folder_id=library_folder_id, job_id=job_id)
+            result = await _queue_shorts_job(request=request, source_name=original, source_kind="upload", source_path=source, source_hash=source_hash, source_metadata=metadata, url=None, start=parsed_start, end=parsed_end, aspect_ratio=aspect_ratio, library_folder_id=library_folder_id, name=name, burn_subtitles=burn_subtitles, job_id=job_id)
             return result
         except MediaError as exc:
             source.unlink(missing_ok=True)
@@ -398,7 +407,7 @@ async def create_shorts_source_job(
         validated_url = validate_youtube_url(url or "")
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    return await _queue_shorts_job(request=request, source_name="YouTube import", source_kind="youtube", source_path=None, source_hash=None, source_metadata=None, url=validated_url, start=parsed_start, end=parsed_end, aspect_ratio=aspect_ratio, library_folder_id=library_folder_id)
+    return await _queue_shorts_job(request=request, source_name="YouTube import", source_kind="youtube", source_path=None, source_hash=None, source_metadata=None, url=validated_url, start=parsed_start, end=parsed_end, aspect_ratio=aspect_ratio, library_folder_id=library_folder_id, name=name, burn_subtitles=burn_subtitles)
 
 
 @app.post("/api/v1/ai/topic-plan", response_model=TopicVideoPlan)
@@ -437,7 +446,7 @@ async def create_script_job(request: Request, value: ScriptJobInput) -> dict[str
         raise HTTPException(409, "Archived folders cannot receive new projects")
     project_id, job_id = str(uuid.uuid4()), str(uuid.uuid4())
     first_line = next((line.strip() for line in value.script.splitlines() if line.strip()), "Script project")
-    name = value.name or first_line[:70]
+    name = _project_name(value.name, first_line[:70])
     project = Project(id=project_id, name=name, mode="script", style=value.style, state="queued", source_name=f"{len(value.script)} character script", source_kind="script", requested_count=1, latest_job_id=job_id, library_folder_id=folder_id)
     job = Job(id=job_id, project_id=project_id, library_folder_id=folder_id, mode="script", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style=value.style, steps=manager._script_steps())
     private = {"script": value.script, "aspect_ratio": value.aspect_ratio, "narration": value.narration, "library_folder_id": folder_id}
