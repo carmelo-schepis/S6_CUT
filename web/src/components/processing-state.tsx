@@ -1,5 +1,6 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { Film, Pause, RotateCcw, WifiOff } from "lucide-react";
+import { formatBytes } from "./common";
 import type { Job } from "../types";
 
 const terminalStates = new Set(["complete", "partial", "failed", "cancelled_kept"]);
@@ -27,7 +28,10 @@ export function ProcessingState({ job, waitingForEngine = false }: { job: Job; w
 
   const progress = Math.max(0, Math.min(100, job.progress));
   const activeBlocks = Math.max(1, Math.min(5, Math.ceil(progress / 20)));
-  const stageLabel = waitingForEngine ? "Waiting for the S6 Cut engine…" : job.state === "paused" ? "Processing paused" : job.state === "recovered" ? "Recovering checkpointed work" : job.stageLabel;
+  const stageLabel = waitingForEngine ? "Waiting for the S6 Cut engine…" : job.state === "paused" ? "Processing paused" : job.state === "recovered" ? "Recovering checkpointed work" : job.downloadProgress?.phase === "stalled" ? "YouTube download stalled" : job.stageLabel;
+  const download = job.downloadProgress;
+  const downloadText = download ? `${formatBytes(download.downloadedBytes)}${download.totalBytes ? ` of ${formatBytes(download.totalBytes)}` : " downloaded"}` : null;
+  const speedText = download?.speedBytesPerSecond ? `${formatBytes(download.speedBytesPerSecond)}/s` : null;
 
   return <div className={`processing-state state-${job.state}`}>
     <div className="processing-live sr-only" aria-live="polite">{stageLabel}</div>
@@ -41,6 +45,7 @@ export function ProcessingState({ job, waitingForEngine = false }: { job: Job; w
       <div className="filmstrip-perforations bottom" />
     </div>
     <div className="processing-meta"><span>Elapsed {formatElapsed(job.createdAt, now)}</span>{job.currentItem > 0 && job.totalItems > 0 && <span>Item {job.currentItem} / {job.totalItems}</span>}</div>
+    {download && <div className="download-progress-detail" role="status"><strong>{download.phase.replace("_", " ")}</strong><span>{downloadText}{download.percent != null ? ` · ${Math.round(download.percent)}%` : " · total size unknown"}</span>{speedText && <span>{speedText}{download.etaSeconds != null ? ` · about ${Math.ceil(download.etaSeconds / 60)} min left` : ""}</span>}<small>Last byte progress {new Date(download.lastProgressAt).toLocaleTimeString()}</small>{download.message && <small>{download.message}</small>}</div>}
     <p>Processing continues in the local engine if you leave this screen.</p>
   </div>;
 }

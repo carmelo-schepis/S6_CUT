@@ -56,6 +56,12 @@ export function formatAge(value: string): string {
   return `${Math.floor(seconds / 86400)}d ago`;
 }
 
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
 export function formatDuration(seconds: number): string {
   const minutes = Math.floor(seconds / 60);
   const remainder = Math.round(seconds % 60).toString().padStart(2, "0");

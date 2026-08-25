@@ -507,7 +507,7 @@ async def job_events(job_id: str, request: Request) -> StreamingResponse:
 
 
 @app.post("/api/v1/jobs/{job_id}/control/{action}", response_model=Job)
-async def job_control(job_id: str, action: Literal["pause", "resume", "stop-keep", "retry-failed", "switch-fast"]) -> Job:
+async def job_control(job_id: str, action: Literal["pause", "resume", "stop-keep", "retry-failed", "retry-import", "switch-fast"]) -> Job:
     try:
         return public_job(await manager.control(job_id, action))
     except KeyError as exc:
@@ -515,6 +515,8 @@ async def job_control(job_id: str, action: Literal["pause", "resume", "stop-keep
     except QueueFullError as exc:
         raise HTTPException(429, str(exc)) from exc
     except SwitchFastError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except MediaError as exc:
         raise HTTPException(409, str(exc)) from exc
 
 

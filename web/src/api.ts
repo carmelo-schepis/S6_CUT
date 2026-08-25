@@ -140,7 +140,7 @@ export async function getJob(id: string): Promise<Job> {
   return jobSchema.parse(await request(`/jobs/${encodeURIComponent(id)}`));
 }
 
-export async function controlJob(id: string, action: "pause" | "resume" | "stop-keep" | "retry-failed" | "switch-fast"): Promise<Job> {
+export async function controlJob(id: string, action: "pause" | "resume" | "stop-keep" | "retry-failed" | "retry-import" | "switch-fast"): Promise<Job> {
   return jobSchema.parse(await request(`/jobs/${encodeURIComponent(id)}/control/${action}`, { method: "POST" }));
 }
 

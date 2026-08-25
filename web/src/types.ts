@@ -11,6 +11,7 @@ export const jobStateSchema = z.enum([
   "queued",
   "active",
   "paused",
+  "stalled",
   "partial",
   "failed",
   "recovered",
@@ -21,6 +22,19 @@ export type JobState = z.infer<typeof jobStateSchema>;
 
 export const processingModeSchema = z.enum(["auto", "fast", "smart"]);
 export type ProcessingMode = z.infer<typeof processingModeSchema>;
+
+export const downloadProgressSchema = z.object({
+  downloadedBytes: z.number().nonnegative(),
+  totalBytes: z.number().nonnegative().nullable().optional(),
+  percent: z.number().min(0).max(100).nullable().optional(),
+  phase: z.enum(["queued", "connecting", "downloading", "stalled", "retrying", "stopped_partial", "failed", "complete"]),
+  lastProgressAt: z.string(),
+  speedBytesPerSecond: z.number().nonnegative().nullable().optional(),
+  etaSeconds: z.number().nonnegative().nullable().optional(),
+  message: z.string().nullable().optional(),
+  resumable: z.boolean().default(true),
+});
+export type DownloadProgress = z.infer<typeof downloadProgressSchema>;
 
 export const scoreSchema = z.object({
   hook: z.number().min(0).max(100),
@@ -132,6 +146,7 @@ export const jobSchema = z.object({
   stage: z.string(),
   stageLabel: z.string(),
   progress: z.number(),
+  downloadProgress: downloadProgressSchema.nullable().optional(),
   currentItem: z.number().default(0),
   totalItems: z.number().default(0),
   style: styleSchema,
@@ -147,7 +162,7 @@ export const jobSchema = z.object({
 }).superRefine((job, context) => {
   if (job.steps.filter((step) => step.status === "active").length > 1) context.addIssue({ code: z.ZodIssueCode.custom, message: "Only one processing step may be active", path: ["steps"] });
   const ready = job.steps.find((step) => step.id === "ready");
-  if (ready?.status === "complete" && ["queued", "active", "paused", "recovered"].includes(job.state)) context.addIssue({ code: z.ZodIssueCode.custom, message: "Project ready cannot complete while work is active", path: ["steps"] });
+  if (ready?.status === "complete" && ["queued", "active", "paused", "stalled", "recovered"].includes(job.state)) context.addIssue({ code: z.ZodIssueCode.custom, message: "Project ready cannot complete while work is active", path: ["steps"] });
 });
 export type Job = z.infer<typeof jobSchema>;
 

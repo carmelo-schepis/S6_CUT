@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
+import logging
 import os
 import threading
 import time
@@ -16,7 +18,7 @@ from .config import Settings
 from .database import Database
 from .library import LibraryRules
 from .media import (
-    MediaError, available, download_youtube, probe, probe_audio, render_clip, render_script,
+    DownloadStalled, MediaError, available, download_youtube, probe, probe_audio, render_clip, render_script,
     sha256_file, synthesize_local, transcribe, youtube_import_title,
 )
 from .models import (
@@ -26,6 +28,8 @@ from .providers import ProfileService, provider_runtime_message
 from .script import align_script_words, plan_beats
 from .security import redact, safe_filename
 from .selection import clip_from_candidate, select_candidates
+
+logger = logging.getLogger(__name__)
 
 
 class QueueFullError(RuntimeError):
@@ -64,6 +68,8 @@ class JobManager:
         self.job_locks: defaultdict[str, threading.Lock] = defaultdict(threading.Lock)
         self.active_workers = 0
         self._active_lock = threading.Lock()
+        self._queued_ids: set[str] = set()
+        self._queue_lock = threading.Lock()
 
     async def start(self) -> None:
         if self.workers:
@@ -116,7 +122,9 @@ class JobManager:
 
     async def _feed_recovered(self, job_ids: list[str]) -> None:
         for job_id in job_ids:
-            await self.queue.put(job_id)
+            while self.queue.full():
+                await asyncio.sleep(.1)
+            await self.enqueue(job_id, tolerate_full=True)
 
     async def stop(self) -> None:
         if self.recovery_task:
@@ -130,15 +138,22 @@ class JobManager:
         self.workers.clear()
 
     async def enqueue(self, job_id: str, *, tolerate_full: bool = False) -> None:
-        try:
-            self.queue.put_nowait(job_id)
-        except asyncio.QueueFull:
-            if not tolerate_full:
-                raise QueueFullError("The local render queue is full. Wait for an active job or raise S6_MAX_QUEUED_JOBS.")
+        with self._queue_lock:
+            if job_id in self._queued_ids:
+                return
+            try:
+                self.queue.put_nowait(job_id)
+            except asyncio.QueueFull:
+                if not tolerate_full:
+                    raise QueueFullError("The local render queue is full. Wait for an active job or raise S6_MAX_QUEUED_JOBS.")
+                return
+            self._queued_ids.add(job_id)
 
     async def _worker(self, _: int) -> None:
         while True:
             job_id = await self.queue.get()
+            with self._queue_lock:
+                self._queued_ids.discard(job_id)
             try:
                 await asyncio.to_thread(self._process, job_id)
             finally:
@@ -485,6 +500,7 @@ class JobManager:
         except media_module.TranscriptionCancelled:
             return
         except Exception as exc:  # scoped outer guard preserves already-published clips
+            logger.exception("Job %s failed: %s", job_id, redact(str(exc)))
             job = self.db.get_job(job_id)
             if job:
                 successful = any(clip.state == "complete" for clip in job.clips)
@@ -591,6 +607,33 @@ class JobManager:
         job.current_item = published
         return self.db.publish_clip_output(job, clip, asset, relative, output.stat().st_size, private=private)
 
+    def _download_progress(self, job: Job, private: dict[str, Any], update: dict[str, Any]) -> None:
+        previous = job.download_progress
+        phase = str(update.get("phase") or "downloading")
+        downloaded = int(update.get("downloaded_bytes") or (previous.downloaded_bytes if previous else 0))
+        total_raw = update.get("total_bytes")
+        total = int(total_raw) if total_raw is not None else (previous.total_bytes if previous else None)
+        percent_raw = update.get("percent")
+        percent = float(percent_raw) if percent_raw is not None else (downloaded / total * 100 if total else None)
+        from .models import DownloadProgress
+        progress = DownloadProgress(
+            downloaded_bytes=max(0, downloaded), total_bytes=total,
+            percent=max(0, min(100, percent)) if percent is not None else None,
+            phase=phase if phase in {"queued", "connecting", "downloading", "stalled", "retrying", "stopped_partial", "failed", "complete"} else "downloading",
+            last_progress_at=now_iso() if phase != "stalled" else (previous.last_progress_at if previous else now_iso()),
+            speed_bytes_per_second=update.get("speed_bytes_per_second"), eta_seconds=update.get("eta_seconds"),
+            message=str(update.get("message"))[:500] if update.get("message") else None,
+            resumable=True,
+        )
+        job.download_progress = progress
+        if phase == "stalled":
+            job.state, job.stage, job.stage_label = "stalled", "source", "YouTube download stalled"
+        elif phase not in {"complete", "failed"}:
+            job.state, job.stage, job.stage_label = "active", "source", "Downloading YouTube source"
+            if percent is not None:
+                job.progress = min(15, 5 + percent * 0.1)
+        self._save(job, private)
+
     def _source(self, job: Job, private: dict[str, Any]) -> Path:
         if private.get("source_path"):
             source = Path(private["source_path"])
@@ -599,11 +642,24 @@ class JobManager:
                 self.complete_step(job, "source", detail="Source received, validated, and added to library", private=private)
                 return source
         if private.get("url"):
-            self.start_step(job, "source", detail="Importing authorised YouTube source", label="Importing authorised YouTube source", progress=5, private=private)
-            source = download_youtube(private["url"], self.settings.data_path / "jobs" / job.id / "source", self.settings)
+            self.start_step(job, "source", detail="Preparing authorised YouTube import", label="Preparing YouTube import", progress=5, private=private)
+            target_dir = self.settings.data_path / "jobs" / job.id / "source"
+            self._download_progress(job, private, {"phase": "retrying" if private.get("retry_import") else "connecting", "message": "Resuming retained partial download" if private.get("retry_import") else "Connecting to YouTube"})
+            kwargs: dict[str, Any] = {"progress_callback": lambda update: self._download_progress(job, private, update), "cancellation_callback": lambda: not self._cooperate(job), "resume": True}
+            if "progress_callback" not in inspect.signature(download_youtube).parameters:
+                kwargs = {}
+            try:
+                source = download_youtube(private["url"], target_dir, self.settings, **kwargs)
+            except DownloadStalled:
+                self._download_progress(job, private, {"phase": "stalled", "message": "Download timed out after a prolonged period without byte progress"})
+                raise
+            except MediaError:
+                self._download_progress(job, private, {"phase": "failed", "message": "YouTube import failed; retry the import or check the source URL"})
+                raise
             private["source_path"] = str(source)
             private["youtube_title"] = youtube_import_title(source) or "YouTube source"
             self._register_source(job, private, source)
+            self._download_progress(job, private, {"phase": "complete", "downloaded_bytes": source.stat().st_size, "total_bytes": source.stat().st_size, "percent": 100, "message": "Download complete"})
             self.complete_step(job, "source", detail="YouTube source imported, validated, and added to library", private=private)
             return source
         raise MediaError("The source file is missing from the mounted data directory")
@@ -1105,6 +1161,24 @@ class JobManager:
         job = self.db.get_job(job_id)
         if not job:
             raise KeyError(job_id)
+        if action == "retry-import":
+            private = self.db.get_job_private(job.id)
+            if job.mode != "clip" or not private.get("url"):
+                raise MediaError("Only YouTube imports can be retried here")
+            if job.state not in {"failed", "stalled", "cancelled_kept"}:
+                raise MediaError("This import is already queued or running")
+            private["retry_import"] = True
+            job.state, job.stage, job.stage_label, job.error = "queued", "source", "Retrying YouTube import", None
+            if job.download_progress:
+                job.download_progress = job.download_progress.model_copy(update={"phase": "retrying", "message": "Retry queued; retained partial will be resumed"})
+            for step in job.steps:
+                if step.id == "source":
+                    step.status, step.started_at, step.completed_at, step.detail = "pending", None, None, "Retrying YouTube import"
+                elif step.status in {"active", "failed"}:
+                    step.status, step.started_at, step.completed_at, step.detail = "pending", None, None, "Waiting for source retry"
+            await self.enqueue(job.id)
+            self._save(job, private)
+            return job
         if action == "switch-fast":
             if self.queue.full():
                 raise QueueFullError("The local render queue is full. Wait before switching to fast cut.")
@@ -1121,6 +1195,8 @@ class JobManager:
             await self.enqueue(job.id)
         elif action == "stop-keep" and job.state not in {"complete", "failed"}:
             job.state, job.stage_label = "cancelled_kept", "Stopped; completed outputs kept"
+            if job.download_progress and job.download_progress.phase not in {"complete", "failed"}:
+                job.download_progress = job.download_progress.model_copy(update={"phase": "stopped_partial", "message": "Stopped by user; partial download retained"})
             completed_outputs = sum(1 for clip in job.clips if clip.state == "complete" and clip.output_name)
             for step in job.steps:
                 if step.status == "active":

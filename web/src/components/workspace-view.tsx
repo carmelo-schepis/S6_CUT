@@ -3,7 +3,7 @@ import { AlertTriangle, Captions, Check, Clock, Download, Eye, FileText, Film, P
 import { changeProjectFolder, controlJob, createZip, getJob, jobEventsUrl, listFolders, readableError, retryClip, setClipSelection } from "../api";
 import { emitLibraryChanged } from "../library-sync";
 import { jobSchema, type Clip, type Health, type Job, type LibraryFolder, type Project } from "../types";
-import { Button, EmptyState, IconButton, Progress, StatusBadge, formatDuration } from "./common";
+import { Button, EmptyState, IconButton, Progress, StatusBadge, formatBytes, formatDuration } from "./common";
 import { isTerminalJob, ProcessingState } from "./processing-state";
 import { ProcessChecklist } from "./process-checklist";
 
@@ -168,7 +168,7 @@ export function WorkspaceView({ project, health, hasSelectedProvider = true, onC
   const providerCouldHelp = providerRelatedFailure || Boolean(job?.state === "failed" && project?.mode === "script" && !hasSelectedProvider);
   const canContinueLocally = providerRelatedFailure && Boolean(project?.mode === "clip" || health?.localTts);
 
-  const act = async (action: "pause" | "resume" | "stop-keep" | "retry-failed" | "switch-fast") => {
+  const act = async (action: "pause" | "resume" | "stop-keep" | "retry-failed" | "retry-import" | "switch-fast") => {
     if (!job) return;
     setBusy(true);
     try { setJob(await controlJob(job.id, action)); await onProjectUpdated(); } catch (cause) { setError(readableError(cause)); } finally { setBusy(false); }
@@ -219,6 +219,7 @@ export function WorkspaceView({ project, health, hasSelectedProvider = true, onC
         {job && ["active", "queued", "recovered", "paused"].includes(job.state) && <Button disabled={busy} onClick={() => act("stop-keep")}><Square size={14} /> Stop & keep</Button>}
         {job?.state === "paused" && <Button disabled={busy} onClick={() => act("resume")}><Play size={15} /> Resume</Button>}
         {job && job.clips.some((clip) => clip.state === "failed") && <Button disabled={busy} onClick={() => act("retry-failed")}><RefreshCw size={15} /> Retry failed</Button>}
+        {job?.downloadProgress && ["failed", "stalled", "cancelled_kept"].includes(job.state) && <Button disabled={busy} onClick={() => act("retry-import")}><RefreshCw size={15} /> Retry import</Button>}
         <Button variant="primary" disabled={!selectedIds.length || busy} onClick={exportSelected}><Download size={15} /> Download ZIP <span className="button-count">{selectedIds.length}</span></Button>
       </div>
     </div>
@@ -226,8 +227,10 @@ export function WorkspaceView({ project, health, hasSelectedProvider = true, onC
     {waitingForEngine && <div className="workspace-offline" role="status">Waiting for the S6 Cut engine…</div>}
     {error && !waitingForEngine && <div className="workspace-alert" role="alert"><AlertTriangle size={16} /> {error}<button onClick={() => setError(null)}>Dismiss</button></div>}
     {isStalledSmart && <div className="stalled-callout" role="status"><Clock size={16} /><div><strong>Smart processing appears stalled</strong><span>This Smart job has not reported progress for over 90 seconds. You can leave this screen — processing will continue in the engine — or switch to a Fast local cut.</span></div><div><Button disabled={busy} onClick={() => act("switch-fast")}><Zap size={14} /> Switch to fast local</Button><Button onClick={() => setStalledCalloutDismissed(true)}>Keep waiting</Button>{job && job.clips.some((clip) => clip.state === "complete") && <Button disabled={busy} onClick={() => act("stop-keep")}><Square size={14} /> Stop & keep outputs</Button>}</div></div>}
-    {job?.state === "failed" && <div className="failure-strip" role="alert"><AlertTriangle size={17} /><div><strong>Project failed</strong><span>{job.error || "The engine could not finish this project. Completed outputs, if any, are still preserved."}</span></div><div><Button disabled={busy} onClick={() => act("retry-failed")}><RefreshCw size={14} /> Retry failed work</Button>{providerCouldHelp && <Button onClick={onConfigureProviders}>Configure providers</Button>}{canContinueLocally && <Button disabled={busy} onClick={() => act("retry-failed")}>Continue with local fallback</Button>}</div></div>}
-    {job && !["complete", "failed", "cancelled_kept"].includes(job.state) && <div className="job-strip"><div><strong>{job.stageLabel}</strong><span>{job.currentItem > 0 && job.totalItems > 0 ? ` · ${job.currentItem} of ${job.totalItems}` : ""}</span></div><Progress value={job.progress} label={job.stageLabel} /></div>}
+    {job?.state === "failed" && <div className="failure-strip" role="alert"><AlertTriangle size={17} /><div><strong>Project failed</strong><span>{job.error || "The engine could not finish this project. Completed outputs, if any, are still preserved."}</span></div><div><Button disabled={busy} onClick={() => act(job.downloadProgress ? "retry-import" : "retry-failed")}><RefreshCw size={14} /> {job.downloadProgress ? "Retry import" : "Retry failed work"}</Button>{providerCouldHelp && <Button onClick={onConfigureProviders}>Configure providers</Button>}{canContinueLocally && <Button disabled={busy} onClick={() => act("retry-failed")}>Continue with local fallback</Button>}</div></div>}
+    {job?.state === "stalled" && <div className="failure-strip" role="alert"><AlertTriangle size={17} /><div><strong>YouTube download stalled</strong><span>{job.downloadProgress?.message || "No bytes arrived during the configured inactivity window. The retained partial download is safe to retry."}</span></div><Button disabled={busy} onClick={() => act("retry-import")}><RefreshCw size={14} /> Retry import</Button></div>}
+    {job?.state === "cancelled_kept" && job.downloadProgress && <div className="warning-strip" role="status"><AlertTriangle size={14} /><span>Stopped with partial YouTube download retained ({formatBytes(job.downloadProgress.downloadedBytes)}). Retry import to resume it.</span><Button disabled={busy} onClick={() => act("retry-import")}><RefreshCw size={14} /> Retry import</Button></div>}
+    {job && !["complete", "failed", "cancelled_kept"].includes(job.state) && <div className="job-strip"><div><strong>{job.stageLabel}</strong><span>{job.downloadProgress ? ` · ${formatBytes(job.downloadProgress.downloadedBytes)}${job.downloadProgress.totalBytes ? ` of ${formatBytes(job.downloadProgress.totalBytes)}` : ""}` : job.currentItem > 0 && job.totalItems > 0 ? ` · ${job.currentItem} of ${job.totalItems}` : ""}</span></div><Progress value={job.downloadProgress?.percent ?? job.progress} label={job.downloadProgress ? `Download ${job.downloadProgress.phase}` : job.stageLabel} /></div>}
     {job && job.steps.length > 0 && <ProcessChecklist steps={job.steps} jobState={job.state} compact={isTerminalJob(job)} />}
     {job?.warnings.map((warning) => <div className="warning-strip" key={warning}><AlertTriangle size={14} /><span>{warning}</span></div>)}
 
@@ -246,7 +249,7 @@ export function WorkspaceView({ project, health, hasSelectedProvider = true, onC
         <div className="viewer-toolbar"><span>Output · 9:16</span><div><IconButton label="Toggle safe areas"><Eye size={15} /></IconButton><IconButton label="Mute preview"><Volume2 size={15} /></IconButton></div></div>
         <div className="viewer-stage">
           <div className={`viewer-frame ${project.mode}`}>
-            {selectedClip?.state === "complete" && selectedClip.downloadUrl ? <video key={selectedClip.downloadUrl} src={selectedClip.downloadUrl} controls preload="metadata" /> : job && (["active", "queued", "paused", "recovered"].includes(job.state) || waitingForEngine) ? <ProcessingState job={job} waitingForEngine={waitingForEngine} /> : <div className="viewer-placeholder">
+            {selectedClip?.state === "complete" && selectedClip.downloadUrl ? <video key={selectedClip.downloadUrl} src={selectedClip.downloadUrl} controls preload="metadata" /> : job && (["active", "queued", "paused", "stalled", "recovered"].includes(job.state) || waitingForEngine) ? <ProcessingState job={job} waitingForEngine={waitingForEngine} /> : <div className="viewer-placeholder">
               <div className="safe-area" />
               <img src="/app-icon.png" alt="" />
               <span>{job?.state === "failed" ? "Render unavailable" : job?.stageLabel || "Preparing project"}</span>

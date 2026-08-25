@@ -55,8 +55,10 @@ class Settings:
     allowed_origins: tuple[str, ...]
     ffmpeg: str
     ffprobe: str
-    ytdlp: str
-    local_tts: str
+    ytdlp: str = "yt-dlp"
+    ytdlp_connect_timeout: int = 45
+    ytdlp_inactivity_timeout: int = 300
+    local_tts: str = "espeak-ng"
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -86,6 +88,8 @@ class Settings:
             ffmpeg=os.getenv("S6_FFMPEG_BIN", "ffmpeg"),
             ffprobe=os.getenv("S6_FFPROBE_BIN", "ffprobe"),
             ytdlp=os.getenv("S6_YTDLP_BIN", "yt-dlp"),
+            ytdlp_connect_timeout=max(5, min(_int("S6_YTDLP_CONNECT_TIMEOUT", 45), 600)),
+            ytdlp_inactivity_timeout=max(30, min(_int("S6_YTDLP_INACTIVITY_TIMEOUT", 300), 86_400)),
             local_tts=os.getenv("S6_LOCAL_TTS_BIN", "espeak-ng"),
         )
 

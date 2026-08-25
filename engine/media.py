@@ -6,6 +6,7 @@ import math
 import os
 import shutil
 import subprocess
+import selectors
 import threading
 import time
 from collections.abc import Callable, Iterable
@@ -26,12 +27,14 @@ class MediaError(RuntimeError):
 
 
 class TranscriptionCancelled(MediaError):
-    """Raised when a caller-provided cancellation callback reports True.
+    """Raised when a caller-provided cancellation callback reports True."""
 
-    Subclasses :class:`MediaError` so existing failure handling keeps working;
-    callers that wire cancellation can catch this type to mark a job as
-    cancelled instead of failed.
-    """
+
+class DownloadStalled(MediaError):
+    """Raised after a YouTube download has made no measurable progress."""
+
+
+DownloadCallback = Callable[[dict[str, Any]], None]
 
 
 # Stable faster-whisper model-name → Hugging Face repo ID mapping. Only used to
@@ -239,41 +242,143 @@ def _cleanup_partials(target_dir: Path) -> None:
         pass
 
 
-def download_youtube(url: str, target_dir: Path, settings: Settings) -> Path:
+def _download_update(callback: DownloadCallback | None, **values: Any) -> None:
+    if callback:
+        try:
+            callback(values)
+        except Exception:
+            # Progress is observational and must never break an otherwise valid import.
+            pass
+
+
+def _parse_download_line(line: str) -> dict[str, Any] | None:
+    if not line.startswith("download:"):
+        return None
+    parts = line.removeprefix("download:").split("|", 6)
+    if len(parts) != 7:
+        return None
+    status, downloaded, total, estimate, speed, eta, percent = parts
+
+    def number(value: str) -> float | None:
+        try:
+            return float(value) if value and value not in {"NA", "N/A", "none"} else None
+        except ValueError:
+            return None
+
+    downloaded_value = number(downloaded)
+    # An estimate is useful for yt-dlp's own percentage, but is not presented
+    # as a confirmed total to users.
+    total_value = number(total)
+    speed_value = number(speed)
+    eta_value = number(eta)
+    return {
+        "status": status, "downloaded_bytes": int(downloaded_value or 0),
+        "total_bytes": int(total_value) if total_value is not None else None,
+        "speed_bytes_per_second": speed_value, "eta_seconds": eta_value,
+        "percent": number(percent.rstrip("%")),
+    }
+
+
+def _run_ytdlp_download(
+    command: list[str], target_dir: Path, settings: Settings, *,
+    progress_callback: DownloadCallback | None = None,
+    cancellation_callback: Callable[[], bool] | None = None,
+) -> list[Path]:
+    started = time.monotonic()
+    first_progress: float | None = None
+    last_byte_progress = started
+    last_output = started
+    lines: list[str] = []
+    process: subprocess.Popen[str] | None = None
+    try:
+        process = subprocess.Popen(command, cwd=target_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        _download_update(progress_callback, phase="connecting", downloaded_bytes=0, total_bytes=None, percent=None, message="Connecting to YouTube")
+        assert process.stdout is not None
+        selector = selectors.DefaultSelector()
+        selector.register(process.stdout, selectors.EVENT_READ)
+        while True:
+            ready = selector.select(timeout=0.25)
+            now = time.monotonic()
+            if ready:
+                line = process.stdout.readline()
+                if line:
+                    last_output = now
+                    clean = line.strip()
+                    if clean:
+                        lines.append(clean)
+                    update = _parse_download_line(clean)
+                    if update:
+                        if first_progress is None:
+                            first_progress = now
+                        if update["downloaded_bytes"] > 0:
+                            last_byte_progress = now
+                        _download_update(progress_callback, phase="downloading", **update)
+                elif process.poll() is not None:
+                    break
+            elif process.poll() is not None:
+                break
+            if cancellation_callback and cancellation_callback():
+                process.terminate()
+                process.wait(timeout=5)
+                raise TranscriptionCancelled("YouTube import cancelled")
+            if first_progress is None:
+                if now - max(started, last_output) > settings.ytdlp_connect_timeout:
+                    process.kill(); process.wait()
+                    _download_update(progress_callback, phase="stalled", message="Connection/setup timed out")
+                    raise DownloadStalled("YouTube connection setup timed out")
+            elif now - last_byte_progress > settings.ytdlp_inactivity_timeout:
+                process.kill(); process.wait()
+                _download_update(progress_callback, phase="stalled", message="Download stalled with no byte progress")
+                raise DownloadStalled("YouTube download stalled; no bytes arrived within the configured inactivity window")
+        output = process.returncode or 0
+        if output:
+            detail = "\n".join(lines[-8:])
+            raise MediaError(redact(detail or "yt-dlp failed"))
+    except TranscriptionCancelled:
+        raise
+    except DownloadStalled:
+        raise
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        if process and process.poll() is None:
+            process.kill(); process.wait()
+        raise MediaError(redact(str(exc))) from exc
+    return [item for item in target_dir.glob("source-*") if item.suffix.casefold() in ALLOWED_VIDEO_SUFFIXES and item.is_file()]
+
+
+def download_youtube(
+    url: str, target_dir: Path, settings: Settings, *,
+    progress_callback: DownloadCallback | None = None,
+    cancellation_callback: Callable[[], bool] | None = None,
+    resume: bool = True,
+) -> Path:
     validate_youtube_url(url)
     target_dir.mkdir(parents=True, exist_ok=True)
     template = str(target_dir / "source-%(id)s.%(ext)s")
-    # Use multiple player clients for better extraction resilience
-    # Format selector: prefer merged video+audio, fallback to any combined format
-    result = run([
+    common = [
         settings.ytdlp, "--no-playlist", "--no-warnings", "--restrict-filenames", "--write-info-json",
-        "--max-filesize", str(settings.max_upload_bytes),
-        "--extractor-args", "youtube:player_client=android,web",
-        "--format", "bv*+ba/b",
+        "--newline", "--progress", "--progress-delta", "1", "--socket-timeout", str(settings.ytdlp_connect_timeout),
+        "--retries", "3", "--fragment-retries", "3", "--max-filesize", str(settings.max_upload_bytes),
+        "--extractor-args", "youtube:player_client=android,web", "--format", "bv*+ba/b",
         "--merge-output-format", "mp4", "--output", template,
-        "--print", "after_move:filepath", url,
-    ], timeout=3600)
-    candidates = [Path(line.strip()) for line in result.stdout.splitlines() if line.strip()]
-    # If the first attempt yields no file, retry once with a broader format and clean partials
+        "--progress-template", "download:%(progress.status)s|%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s|%(progress._percent_str)s",
+        "--print", "after_move:filepath",
+    ]
+    if resume:
+        common.append("--continue")
+    common.append(url)
+    candidates = _run_ytdlp_download(common, target_dir, settings, progress_callback=progress_callback, cancellation_callback=cancellation_callback)
     if not candidates:
         _cleanup_partials(target_dir)
-        result = run([
-            settings.ytdlp, "--no-playlist", "--no-warnings", "--restrict-filenames", "--write-info-json",
-            "--max-filesize", str(settings.max_upload_bytes),
-            "--extractor-args", "youtube:player_client=android,web,web_music",
-            "--format", "bv*+ba/b",
-            "--merge-output-format", "mp4", "--output", template,
-            "--print", "after_move:filepath", url,
-        ], timeout=3600)
-        candidates = [Path(line.strip()) for line in result.stdout.splitlines() if line.strip()]
+        retry = common.copy()
+        retry[retry.index("android,web")] = "android,web,web_music"
+        candidates = _run_ytdlp_download(retry, target_dir, settings, progress_callback=progress_callback, cancellation_callback=cancellation_callback)
     if not candidates:
-        candidates = [item for item in target_dir.glob("source-*") if item.suffix.casefold() in ALLOWED_VIDEO_SUFFIXES]
-    if not candidates:
-        raise MediaError("YouTube import completed without a usable file")
+        raise MediaError("YouTube import completed without a usable video file")
     source = candidates[-1].resolve()
-    if target_dir.resolve() not in source.parents or not source.is_file():
+    if target_dir.resolve() not in source.parents:
         raise MediaError("YouTube output escaped its job directory")
     probe(source, settings)
+    _download_update(progress_callback, phase="complete", downloaded_bytes=source.stat().st_size, total_bytes=source.stat().st_size, percent=100.0, speed_bytes_per_second=None, eta_seconds=0.0, message="Download complete")
     return source
 
 

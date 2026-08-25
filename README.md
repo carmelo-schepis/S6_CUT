@@ -114,6 +114,8 @@ Copy `.env.example` to `.env`. Important values:
 | `S6_MAX_SOURCE_SECONDS` | `14400` | Four-hour duration ceiling |
 | `S6_JOB_RETENTION_DAYS` | `30` | Operator retention target |
 | `S6_MEDIA_URL_TTL_SECONDS` | `900` | Signed media/download-link lifetime |
+| `S6_YTDLP_CONNECT_TIMEOUT` | `45` | YouTube connection/setup timeout in seconds |
+| `S6_YTDLP_INACTIVITY_TIMEOUT` | `300` | No-byte inactivity period before a download fails; actively progressing large files are not cut off |
 
 Provider profiles can be configured in Settings. Persistent secrets are encrypted with a locally generated instance key and are never returned by read APIs. Headless deployments may set `OPENROUTER_API_KEY` and `ELEVENLABS_API_KEY` in `.env` or Docker secrets orchestration. Protect `.env` like any other credential file.
 
@@ -125,7 +127,7 @@ Smart-mode transcription runs locally with Faster-Whisper. The CPU-friendly defa
 - On an NVIDIA GPU, set `S6_WHISPER_DEVICE=cuda` with `S6_WHISPER_COMPUTE_TYPE=float16` for the fastest decode.
 - `S6_WHISPER_WORD_TIMESTAMPS=false` skips per-word alignment (faster) but disables word-timed captions; keep it `true` for captioned clips.
 
-Whisper job stages report real, incrementally observed progress: each fraction is derived from an actual decoded segment boundary (`segment.end / duration`), never simulated, and stage labels show the text of the segment just decoded. The engine checks the model cache on disk, so a pre-downloaded model (under `S6_DATA_PATH/models`) skips straight to transcription.
+Whisper job stages report real, incrementally observed progress: each fraction is derived from an actual decoded segment boundary (`segment.end / duration`), never simulated, and stage labels show the text of the segment just decoded. YouTube imports likewise persist actual downloader byte counts, known totals, speed, ETA, and the last byte-progress timestamp in the job record. A retained partial can be retried with yt-dlp continuation; the import only cleans partial artifacts inside that job directory when it needs a fallback attempt. The engine checks the model cache on disk, so a pre-downloaded model (under `S6_DATA_PATH/models`) skips straight to transcription.
 
 ## Provider and fallback matrix
 

@@ -24,8 +24,21 @@ class ApiModel(BaseModel):
 ProcessingStepStatus = Literal["pending", "active", "complete", "skipped", "failed"]
 
 Style = Literal["funny", "serious", "educational", "hype"]
-JobState = Literal["queued", "active", "paused", "partial", "failed", "recovered", "cancelled_kept", "complete"]
+JobState = Literal["queued", "active", "paused", "stalled", "partial", "failed", "recovered", "cancelled_kept", "complete"]
 ProcessingMode = Literal["fast", "smart"]
+DownloadPhase = Literal["queued", "connecting", "downloading", "stalled", "retrying", "stopped_partial", "failed", "complete"]
+
+
+class DownloadProgress(ApiModel):
+    downloaded_bytes: int = Field(default=0, ge=0)
+    total_bytes: int | None = Field(default=None, ge=0)
+    percent: float | None = Field(default=None, ge=0, le=100)
+    phase: DownloadPhase = "queued"
+    last_progress_at: str = Field(default_factory=now_iso)
+    speed_bytes_per_second: float | None = Field(default=None, ge=0)
+    eta_seconds: float | None = Field(default=None, ge=0)
+    message: str | None = Field(default=None, max_length=500)
+    resumable: bool = True
 UNSORTED_LIBRARY_FOLDER_ID = "00000000-0000-0000-0000-000000000001"
 
 
@@ -138,6 +151,7 @@ class Job(ApiModel):
     stage: str
     stage_label: str
     progress: float = Field(ge=0, le=100)
+    download_progress: DownloadProgress | None = None
     current_item: int = Field(default=0, ge=0)
     total_items: int = Field(default=0, ge=0)
     style: Style
@@ -159,7 +173,7 @@ class Job(ApiModel):
         if sum(step.status == "active" for step in self.steps) > 1:
             raise ValueError("at most one processing step may be active")
         ready = next((step for step in self.steps if step.id == "ready"), None)
-        if ready and ready.status == "complete" and self.state in {"queued", "active", "paused", "recovered"}:
+        if ready and ready.status == "complete" and self.state in {"queued", "active", "paused", "stalled", "recovered"}:
             raise ValueError("Project ready cannot complete while the job is still processing")
         return self
 
