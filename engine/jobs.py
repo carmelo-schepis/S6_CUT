@@ -162,7 +162,7 @@ class JobManager:
     # DO-NOT-CHANGE: always syncs linked Project.state and writes jobs/<id>/state.json
     def _save(self, job: Job, private: dict[str, Any] | None = None) -> None:
         current = self.db.get_job(job.id)
-        if current and current.state == "cancelled_kept" and job.state != "cancelled_kept":
+        if current and current.state == "cancelled_kept" and job.state != "cancelled_kept" and not (private or {}).get("retry_import"):
             job.state = "cancelled_kept"
             job.stage = current.stage
             job.stage_label = current.stage_label
@@ -489,9 +489,9 @@ class JobManager:
             self.active_workers += 1
         try:
             job = self.db.get_job(job_id)
-            if not job or job.state in {"complete", "cancelled_kept"}:
+            private = self.db.get_job_private(job_id) if job else {}
+            if not job or job.state == "complete" or (job.state == "cancelled_kept" and not private.get("retry_import")):
                 return
-            private = self.db.get_job_private(job_id)
             self._reconcile_steps(job, private)
             if job.mode == "clip":
                 self._process_clip(job, private)
@@ -665,6 +665,8 @@ class JobManager:
             self._register_source(job, private, source)
             self._download_progress(job, private, {"phase": "complete", "downloaded_bytes": source.stat().st_size, "total_bytes": source.stat().st_size, "percent": 100, "message": "Download complete"})
             self.complete_step(job, "source", detail="YouTube source imported, validated, and added to library", private=private)
+            private.pop("retry_import", None)
+            self._save(job, private)
             return source
         raise MediaError("The source file is missing from the mounted data directory")
 
@@ -1185,8 +1187,11 @@ class JobManager:
                     step.status, step.started_at, step.completed_at, step.detail = "pending", None, None, "Retrying YouTube import"
                 elif step.status in {"active", "failed"}:
                     step.status, step.started_at, step.completed_at, step.detail = "pending", None, None, "Waiting for source retry"
-            await self.enqueue(job.id)
+            # Persist the requeue before exposing the id to a worker. Otherwise a
+            # fast worker can observe the old cancelled checkpoint and _save() will
+            # (correctly for ordinary work) restore cancelled_kept.
             self._save(job, private)
+            await self.enqueue(job.id)
             return job
         if action == "switch-fast":
             if self.queue.full():

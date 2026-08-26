@@ -69,6 +69,7 @@ Start Menu/
 
 # Project specific ignores
 node_modules/
+test-artifacts/
 web/dist/
 .venv/
 __pycache__/

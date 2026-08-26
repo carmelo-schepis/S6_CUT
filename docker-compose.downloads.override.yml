@@ -1,0 +1,9 @@
+# Optional additive mount for environments that inspect imported media at
+# /downloads/jobs/... . It deliberately shares the existing persistent data
+# root, preserving the /app/data contract used by the engine and database.
+services:
+  engine:
+    volumes:
+      - type: bind
+        source: ${S6_DOWNLOADS_PATH:-./data}
+        target: /downloads

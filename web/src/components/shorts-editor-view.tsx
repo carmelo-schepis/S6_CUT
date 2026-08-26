@@ -10,6 +10,7 @@ type AspectRatio = typeof aspects[number];
 type EditState = { start: number; end?: number; aspect: AspectRatio; subtitles: boolean };
 type ClipRow = { job: Job; clip: Clip };
 type AssistantMessage = { id: number; role: "assistant" | "user"; text: string };
+type AssistantEdit = { edit: Partial<EditState>; explanation: string };
 
 function clipStatus(clip: Clip, job: Job) {
   if (clip.state === "complete") return "complete";
@@ -18,9 +19,10 @@ function clipStatus(clip: Clip, job: Job) {
   return clip.state === "rendering" ? "rendering" : "queued";
 }
 
-function parseAssistantRequest(text: string, current: EditState): { edit?: Partial<EditState>; explanation: string; unsupported?: boolean } {
+export function parseAssistantRequest(text: string, current: EditState): { edit?: Partial<EditState>; proposal?: AssistantEdit; explanation: string; unsupported?: boolean } {
   const value = text.toLowerCase();
   const edit: Partial<EditState> = {};
+  const proposalIntent = /\b(propose|suggest|preview|recommend)\b/.test(value) || /\b(?:without|don't|do not|not)\s+(?:applying|apply|changing|change|making|make)\b/.test(value);
   const seconds = value.match(/(?:make|trim|duration|length)[^\d]*(\d+(?:\.\d+)?)\s*(?:seconds?|secs?)/);
   const forward = value.match(/start[^\d]*(?:forward|later|ahead)[^\d]*(\d+(?:\.\d+)?)/);
   if (seconds) { edit.end = current.start + Number(seconds[1]); }
@@ -36,7 +38,10 @@ function parseAssistantRequest(text: string, current: EditState): { edit?: Parti
     return { explanation: "That request needs subject tracking or speech analysis that is not exposed by Shorts Editor yet.", unsupported: true };
   }
   if (!Object.keys(edit).length) return { explanation: "I can safely change duration, start/end seconds, aspect ratio, or subtitle preference locally.", unsupported: true };
-  return { edit, explanation: `Proposed change: ${Object.entries(edit).map(([key, item]) => `${key} → ${item}`).join(" · ")}.` };
+  const explanation = `Proposed change: ${Object.entries(edit).map(([key, item]) => `${key} → ${item}`).join(" · ")}.`;
+  return proposalIntent
+    ? { proposal: { edit, explanation }, explanation: `${explanation} Nothing changed. Apply it when you are ready.` }
+    : { edit, explanation };
 }
 
 export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void }) {
@@ -62,6 +67,7 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
   const [assistantInput, setAssistantInput] = useState("");
   const [assistantBusy, setAssistantBusy] = useState(false);
   const [assistantMessages, setAssistantMessages] = useState<AssistantMessage[]>([{ id: 1, role: "assistant", text: "Describe a safe trim or aspect-ratio change. I will propose the edit before applying it." }]);
+  const [pendingProposal, setPendingProposal] = useState<AssistantEdit | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState("");
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -141,13 +147,25 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
     await new Promise((resolve) => window.setTimeout(resolve, 180));
     const parsed = parseAssistantRequest(text, editState);
     if (parsed.unsupported) setAssistantMessages((current) => [...current, { id: Date.now(), role: "assistant", text: parsed.explanation }]);
-    else { updateEdit(parsed.edit || {}); setAssistantMessages((current) => [...current, { id: Date.now(), role: "assistant", text: `${parsed.explanation} Applied locally. Queue the short to render this edit.` }]); }
+    else if (parsed.proposal) {
+      setPendingProposal(parsed.proposal);
+      setAssistantMessages((current) => [...current, { id: Date.now(), role: "assistant", text: parsed.explanation }]);
+    } else {
+      updateEdit(parsed.edit || {});
+      setAssistantMessages((current) => [...current, { id: Date.now(), role: "assistant", text: `${parsed.explanation} Applied locally. Queue the short to render this edit.` }]);
+    }
     setAssistantBusy(false);
   };
 
   const seek = (value: number) => { setCurrentTime(value); if (videoRef.current) videoRef.current.currentTime = value; };
   const togglePlay = () => { if (!videoRef.current) return; if (videoRef.current.paused) { void videoRef.current.play(); setPlaying(true); } else { videoRef.current.pause(); setPlaying(false); } };
   const sourcePreview = previewUrl || (mode === "library" ? assets.find((item) => item.id === assetId)?.previewUrl || null : null);
+  const applyProposal = () => {
+    if (!pendingProposal) return;
+    updateEdit(pendingProposal.edit);
+    setAssistantMessages((current) => [...current, { id: Date.now(), role: "assistant", text: `${pendingProposal.explanation} Applied locally. Queue the short to render this edit.` }]);
+    setPendingProposal(null);
+  };
 
   return <div className="page shorts-workspace-page">
     <form className="shorts-workspace-form" onSubmit={submit}>
@@ -162,7 +180,7 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
       </section>
       <aside className="shorts-right-column">
         <section className="shorts-clips-panel" aria-labelledby="clips-panel-title"><div className="workspace-panel-heading"><div><span className="panel-kicker">Project output</span><h2 id="clips-panel-title">Clips <span className="count-pill">{rows.length}</span></h2></div><select aria-label="Filter clips" value={filter} onChange={(event) => setFilter(event.target.value)}><option value="all">All clips</option><option value="queued">Queued</option><option value="rendering">Rendering</option><option value="complete">Complete</option><option value="failed">Failed</option></select></div><div className="clip-browser">{rows.length ? rows.map((row) => <ClipBrowserItem key={`${row.job.id}-${row.clip.id}`} row={row} active={row.clip.id === selectedClipId} onSelect={() => selectClip(row)} onRetry={() => void retryClip(row.job.id, row.clip.id).then(refresh).catch((cause) => setError(readableError(cause)))} onStop={() => void controlJob(row.job.id, "stop-keep").then(refresh).catch((cause) => setError(readableError(cause)))} />) : <div className="clips-empty"><Film size={24} /><strong>No clips yet</strong><span>Queue a source from the editor and its durable render will appear here.</span></div>}</div></section>
-        <section className="shorts-assistant-panel" aria-labelledby="assistant-panel-title"><div className="workspace-panel-heading"><div><span className="panel-kicker">Safe local controls</span><h2 id="assistant-panel-title"><WandSparkles size={17} /> AI editing assistant</h2></div><span className="assistant-context">{contextName}</span></div><div className="assistant-messages" aria-live="polite">{assistantMessages.map((message) => <div key={message.id} className={`assistant-message ${message.role}`}><span>{message.role === "assistant" ? <Sparkles size={13} /> : <MessageSquare size={13} />}</span><p>{message.text}</p></div>)}</div><div className="assistant-composer"><input aria-label="Editing request" value={assistantInput} onChange={(event) => setAssistantInput(event.target.value)} placeholder="Ask for a trim or aspect change…" disabled={assistantBusy} /><button type="button" onClick={() => void sendAssistant()} aria-label="Send editing request" disabled={assistantBusy || !assistantInput.trim()}><Send size={16} /></button></div><small className="assistant-note">Requests are parsed into bounded edits; shell commands and secret configuration are never exposed.</small></section>
+        <section className="shorts-assistant-panel" aria-labelledby="assistant-panel-title"><div className="workspace-panel-heading"><div><span className="panel-kicker">Safe local controls</span><h2 id="assistant-panel-title"><WandSparkles size={17} /> AI editing assistant</h2></div><span className="assistant-context">{contextName}</span></div><div className="assistant-messages" aria-live="polite">{assistantMessages.map((message) => <div key={message.id} className={`assistant-message ${message.role}`}><span>{message.role === "assistant" ? <Sparkles size={13} /> : <MessageSquare size={13} />}</span><p>{message.text}</p></div>)}</div>{pendingProposal && <div className="assistant-proposal" role="status"><strong>Proposal ready</strong><span>{pendingProposal.explanation}</span><div><Button type="button" variant="primary" onClick={applyProposal}>Apply proposal</Button><Button type="button" onClick={() => setPendingProposal(null)}>Reject</Button></div></div>}<div className="assistant-composer"><input aria-label="Editing request" value={assistantInput} onChange={(event) => setAssistantInput(event.target.value)} placeholder="Ask for a trim or aspect change…" disabled={assistantBusy} /><button type="button" onClick={() => void sendAssistant()} aria-label="Send editing request" disabled={assistantBusy || !assistantInput.trim()}><Send size={16} /></button></div><small className="assistant-note">Requests are parsed into bounded edits; shell commands and secret configuration are never exposed.</small></section>
       </aside>
     </main>
     </form>

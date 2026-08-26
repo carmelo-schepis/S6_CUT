@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createShortsJob, createShortsSourceJob, listAssets } from "../api";
 import type { LibraryAsset } from "../types";
-import { ShortsEditorView } from "./shorts-editor-view";
+import { ShortsEditorView, parseAssistantRequest } from "./shorts-editor-view";
 
 vi.mock("../api", () => ({
   createShortsJob: vi.fn(), createShortsSourceJob: vi.fn(), listAssets: vi.fn(), listJobs: vi.fn().mockResolvedValue([]), readableError: (error: unknown) => error instanceof Error ? error.message : "Request failed",
@@ -25,6 +25,20 @@ describe("ShortsEditorView", () => {
     fireEvent.click(screen.getByRole("tab", { name: /Library/ }));
     expect(await screen.findByText("No Library videos available")).toBeInTheDocument();
   });
+  it("keeps proposal-only assistant requests uncommitted until Apply", async () => {
+    const current = { start: 0, end: 4, aspect: "9:16" as const, subtitles: true };
+    const parsed = parseAssistantRequest("Propose changing the aspect ratio to 1:1 without applying it.", current);
+    expect(parsed.proposal?.edit).toEqual({ aspect: "1:1" });
+    expect(parsed.edit).toBeUndefined();
+    expect(parsed.explanation).not.toMatch(/Applied locally/);
+  });
+
+  it("preserves direct assistant changes as apply-now actions", () => {
+    const parsed = parseAssistantRequest("Change the aspect ratio to 1:1 now.", { start: 0, end: 4, aspect: "9:16", subtitles: true });
+    expect(parsed.edit).toEqual({ aspect: "1:1" });
+    expect(parsed.proposal).toBeUndefined();
+  });
+
   it("rejects invalid trim values and submits YouTube through multipart API", async () => {
     render(<ShortsEditorView onJobCreated={vi.fn()} />);
     await waitFor(() => expect(screen.getByText("YouTube")).toBeInTheDocument());

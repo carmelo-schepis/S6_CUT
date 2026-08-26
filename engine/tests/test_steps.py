@@ -707,6 +707,33 @@ def test_stop_keep_skips_pending_and_preserves_terminal(monkeypatch: pytest.Monk
         assert step.completed_at is not None
 
 
+def test_retry_import_requeues_stopped_attempt_and_deduplicates(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    tmp_path = _tmpdir()
+    test_db, test_manager = _cluster(tmp_path)
+    _project(test_db, "youtube-retry-project")
+    job = Job(
+        id="youtube-retry", project_id="youtube-retry-project", mode="clip", processing_mode="fast",
+        state="cancelled_kept", stage="source", stage_label="Stopped; completed outputs kept", progress=5, style="educational",
+    )
+    private = {"url": "https://www.youtube.com/watch?v=fixture", "processing_mode": "fast"}
+    test_db.save_job(job, private)
+
+    result = asyncio.run(test_manager.control("youtube-retry", "retry-import"))
+    assert result.state == "queued"
+    assert result.stage_label == "Retrying YouTube import"
+    assert test_db.get_job("youtube-retry").state == "queued"
+    assert test_manager.queue.qsize() == 1
+
+    called: list[str] = []
+    monkeypatch.setattr(test_manager, "_process_clip", lambda current, _: called.append(current.id))
+    test_manager._process("youtube-retry")
+    assert called == ["youtube-retry"]
+
+    with pytest.raises(MediaError, match="already queued or running"):
+        asyncio.run(test_manager.control("youtube-retry", "retry-import"))
+    assert test_manager.queue.qsize() == 1
+
+
 def test_retry_resets_only_render_verify_ready(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
