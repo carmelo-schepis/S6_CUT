@@ -7,10 +7,14 @@ import { VideoSourcePicker, type VideoSourceMode } from "./video-source-picker";
 
 const aspects = ["9:16", "16:9", "1:1", "4:5"] as const;
 type AspectRatio = typeof aspects[number];
-type EditState = { start: number; end?: number; aspect: AspectRatio; subtitles: boolean };
+type EditState = { start: number; end?: number; aspect: AspectRatio; subtitles: boolean; projectName?: string };
 type ClipRow = { job: Job; clip: Clip };
 type AssistantMessage = { id: number; role: "assistant" | "user"; text: string };
 type AssistantEdit = { edit: Partial<EditState>; explanation: string };
+
+function sameEditState(left: EditState, right: EditState) {
+  return left.start === right.start && left.end === right.end && left.aspect === right.aspect && left.subtitles === right.subtitles && (left.projectName || "") === (right.projectName || "");
+}
 
 function clipStatus(clip: Clip, job: Job) {
   if (clip.state === "complete") return "complete";
@@ -62,7 +66,7 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
   const [playing, setPlaying] = useState(false);
   const [filter, setFilter] = useState("all");
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
-  const [dirty, setDirty] = useState(false);
+  const [savedBaseline, setSavedBaseline] = useState<EditState>({ start: 0, end: undefined, aspect: "9:16", subtitles: true, projectName: "" });
   const [history, setHistory] = useState<EditState[]>([]);
   const [assistantInput, setAssistantInput] = useState("");
   const [assistantBusy, setAssistantBusy] = useState(false);
@@ -85,7 +89,6 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
 
   const rows = useMemo<ClipRow[]>(() => jobs.flatMap((job) => job.clips.map((clip) => ({ job, clip }))).filter(({ clip, job }) => filter === "all" || clipStatus(clip, job) === filter), [filter, jobs]);
   const selectedRow = rows.find(({ clip }) => clip.id === selectedClipId) || jobs.flatMap((job) => job.clips.map((clip) => ({ job, clip }))).find(({ clip }) => clip.id === selectedClipId);
-  const editState: EditState = { start: Number(start) || 0, end: end.trim() ? Number(end) : undefined, aspect, subtitles };
   const contextName = selectedRow ? selectedRow.clip.title || `Clip ${String(selectedRow.clip.index).padStart(2, "0")}` : file?.name || assets.find((item) => item.id === assetId)?.title || (url ? "YouTube source" : "No clip selected");
 
   useEffect(() => {
@@ -100,9 +103,10 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
   const selectClip = (row: ClipRow) => {
     if (dirty && !window.confirm("Discard unsaved Shorts Editor changes?")) return;
     setSelectedClipId(row.clip.id);
-    setStart(String(row.clip.start)); setEnd(String(row.clip.end));
-    setAspect(row.clip.width && row.clip.height && row.clip.width / row.clip.height < 1 ? "9:16" : aspect);
-    setDirty(false); setHistory([]);
+    const nextAspect = row.clip.width && row.clip.height && row.clip.width / row.clip.height < 1 ? "9:16" : aspect;
+    const nextBaseline = { start: row.clip.start, end: row.clip.end, aspect: nextAspect, subtitles: row.job.burnSubtitles !== false, projectName: "" } as EditState;
+    setStart(String(nextBaseline.start)); setEnd(String(nextBaseline.end));
+    setAspect(nextBaseline.aspect); setSavedBaseline(nextBaseline); setHistory([]);
     if (row.clip.previewUrl || row.clip.downloadUrl) setPreviewUrl(row.clip.previewUrl || row.clip.downloadUrl || null);
     setAssistantMessages((current) => [...current, { id: Date.now(), role: "assistant", text: `Context switched to ${row.clip.title || `Clip ${row.clip.index}`}.` }]);
   };
@@ -110,19 +114,18 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
   const updateEdit = (next: Partial<EditState>) => {
     setHistory((current) => [...current.slice(-9), editState]);
     if (next.start !== undefined) setStart(String(next.start));
-    if (next.end !== undefined) setEnd(String(next.end));
+    if ("end" in next) setEnd(next.end === undefined ? "" : String(next.end));
     if (next.aspect !== undefined) setAspect(next.aspect);
     if (next.subtitles !== undefined) setSubtitles(next.subtitles);
-    setDirty(true);
   };
   const undo = () => {
     const previous = history.at(-1);
     if (!previous) return;
-    setStart(String(previous.start)); setEnd(previous.end === undefined ? "" : String(previous.end)); setAspect(previous.aspect); setSubtitles(previous.subtitles);
-    setHistory((current) => current.slice(0, -1)); setDirty(true);
+    setStart(String(previous.start)); setEnd(previous.end === undefined ? "" : String(previous.end)); setAspect(previous.aspect); setSubtitles(previous.subtitles); setProjectName(previous.projectName || "");
+    setHistory((current) => current.slice(0, -1));
   };
 
-  const loadFile = (next: File | null, pickerError?: string) => { setFile(next); setError(pickerError || null); if (next) { setMode("file"); setSelectedClipId(null); setDirty(false); } };
+  const loadFile = (next: File | null, pickerError?: string) => { setFile(next); setError(pickerError || null); if (next) { setMode("file"); setSelectedClipId(null); setSavedBaseline(editState); setHistory([]); } };
   const submit = async (event?: FormEvent) => {
     event?.preventDefault(); if (assistantBusy) return;
     setError(null); setStatus("");
@@ -137,7 +140,7 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
       setStatus(mode === "file" ? "Uploading and validating source…" : mode === "url" ? "Importing and validating YouTube source…" : "Validating Library source…");
       if (mode === "library") await createShortsJob({ assetId, name: projectName.trim() || undefined, burnSubtitles: subtitles, start: from, end: to, aspectRatio: aspect });
       else await createShortsSourceJob({ file: mode === "file" ? file || undefined : undefined, url: mode === "url" ? url.trim() : undefined, name: projectName.trim() || undefined, burnSubtitles: subtitles, start: from, end: to, aspectRatio: aspect });
-      setStatus("Short queued successfully."); setDirty(false); await refresh(); onJobCreated();
+      setStatus("Short queued successfully."); setSavedBaseline(editState); setHistory([]); await refresh(); onJobCreated();
     } catch (cause) { setError(readableError(cause)); setStatus(""); } finally { setAssistantBusy(false); }
   };
 
@@ -160,6 +163,8 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
   const seek = (value: number) => { setCurrentTime(value); if (videoRef.current) videoRef.current.currentTime = value; };
   const togglePlay = () => { if (!videoRef.current) return; if (videoRef.current.paused) { void videoRef.current.play(); setPlaying(true); } else { videoRef.current.pause(); setPlaying(false); } };
   const sourcePreview = previewUrl || (mode === "library" ? assets.find((item) => item.id === assetId)?.previewUrl || null : null);
+  const editState: EditState = { start: Number(start) || 0, end: end.trim() ? Number(end) : undefined, aspect, subtitles, projectName };
+  const dirty = !sameEditState(editState, savedBaseline);
   const applyProposal = () => {
     if (!pendingProposal) return;
     updateEdit(pendingProposal.edit);
@@ -175,7 +180,7 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
       <section className="shorts-editor-panel" aria-labelledby="editor-panel-title">
         <div className="workspace-panel-heading"><div><span className="panel-kicker">Editor</span><h2 id="editor-panel-title">{contextName}</h2></div><StatusBadge state={selectedRow ? selectedRow.job.state : "local"} label={selectedRow ? selectedRow.job.stageLabel : "Source ready"} /></div>
         {!sourcePreview && <div className="shorts-source-empty"><div className="empty-icon"><Film size={28} /></div><h3>Bring a source into the editor</h3><p>Choose a local file, authorised YouTube URL, or a video from your Library.</p><VideoSourcePicker mode={mode} onModeChange={setMode} file={file} onFile={loadFile} url={url} onUrl={setUrl}><div className="field"><label className="field-label" htmlFor="shorts-source">Library video</label><select id="shorts-source" value={assetId} onChange={(event) => setAssetId(event.target.value)} disabled={!assets.length}><option value="">{assets.length ? "Select Library video" : "No Library videos available"}</option>{assets.map((asset) => <option key={asset.id} value={asset.id}>{asset.title}</option>)}</select><small>{assets.length ? "Private media stays on this machine." : "Add a video in Library first."}</small></div></VideoSourcePicker><div className="trim-inputs shorts-empty-trim"><label>Start <input aria-label="Start seconds" type="number" min="0" step=".1" value={start} onChange={(event) => setStart(event.target.value)} /></label><label>End <input aria-label="End seconds" type="number" min="0" step=".1" value={end} onChange={(event) => setEnd(event.target.value)} placeholder="Source remainder" /></label></div></div>}
-        {sourcePreview && <div className="video-editing-stage"><div className={`shorts-video-frame aspect-${aspect.replace(":", "-")}`}><video ref={videoRef} src={sourcePreview} onLoadedMetadata={(event) => setSourceDuration(event.currentTarget.duration)} onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} controls={false} /></div><div className="video-controls"><button type="button" className="icon-button" onClick={togglePlay} aria-label={playing ? "Pause preview" : "Play preview"}>{playing ? <Pause size={17} /> : <Play size={17} />}</button><span className="video-time">{formatDuration(currentTime)} / {formatDuration(sourceDuration || Number(end) || 0)}</span><input aria-label="Preview position" type="range" min="0" max={sourceDuration || 1} step=".1" value={Math.min(currentTime, sourceDuration || 1)} onChange={(event) => seek(Number(event.target.value))} /><button type="button" className="icon-button" aria-label="Preview volume"><Volume2 size={16} /></button><button type="button" className="icon-button" aria-label="Expand preview"><Maximize2 size={16} /></button></div><div className="timeline-wrap"><div className="timeline-label"><span>Trim range</span><span>{formatDuration(Number(start) || 0)} – {end ? formatDuration(Number(end)) : "source end"}</span></div><input className="timeline-range" aria-label="Trim start" type="range" min="0" max={sourceDuration || 1} step=".1" value={Math.min(Number(start) || 0, sourceDuration || 1)} onChange={(event) => updateEdit({ start: Number(event.target.value) })} /><div className="trim-inputs"><label>Start <input aria-label="Start seconds" type="number" min="0" step=".1" value={start} onChange={(event) => updateEdit({ start: Number(event.target.value) })} /></label><label>End <input aria-label="End seconds" type="number" min="0" step=".1" value={end} onChange={(event) => { const value = event.target.value; setEnd(value); setDirty(true); }} placeholder="Source end" /></label><label>Aspect <select aria-label="Aspect ratio" value={aspect} onChange={(event) => updateEdit({ aspect: event.target.value as AspectRatio })}>{aspects.map((value) => <option key={value}>{value}</option>)}</select></label></div><div className="editor-options"><label className="shorts-project-name">Project name <input value={projectName} maxLength={160} onChange={(event) => { setProjectName(event.target.value); setDirty(true); }} placeholder="Optional project name" /></label><label><input type="checkbox" checked={subtitles} onChange={(event) => updateEdit({ subtitles: event.target.checked })} /> Subtitles</label><span>{mode === "url" ? "YouTube preview becomes available after import." : file ? file.name : "Library source"}</span><Button type="button" onClick={() => { setPreviewUrl(null); setFile(null); }}>Change source</Button></div></div></div>}
+        {sourcePreview && <div className="video-editing-stage"><div className={`shorts-video-frame aspect-${aspect.replace(":", "-")}`}><video ref={videoRef} src={sourcePreview} onLoadedMetadata={(event) => setSourceDuration(event.currentTarget.duration)} onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} controls={false} /></div><div className="video-controls"><button type="button" className="icon-button" onClick={togglePlay} aria-label={playing ? "Pause preview" : "Play preview"}>{playing ? <Pause size={17} /> : <Play size={17} />}</button><span className="video-time">{formatDuration(currentTime)} / {formatDuration(sourceDuration || Number(end) || 0)}</span><input aria-label="Preview position" type="range" min="0" max={sourceDuration || 1} step=".1" value={Math.min(currentTime, sourceDuration || 1)} onChange={(event) => seek(Number(event.target.value))} /><button type="button" className="icon-button" aria-label="Preview volume"><Volume2 size={16} /></button><button type="button" className="icon-button" aria-label="Expand preview"><Maximize2 size={16} /></button></div><div className="timeline-wrap"><div className="timeline-label"><span>Trim range</span><span>{formatDuration(Number(start) || 0)} – {end ? formatDuration(Number(end)) : "source end"}</span></div><input className="timeline-range" aria-label="Trim start" type="range" min="0" max={sourceDuration || 1} step=".1" value={Math.min(Number(start) || 0, sourceDuration || 1)} onChange={(event) => updateEdit({ start: Number(event.target.value) })} /><div className="trim-inputs"><label>Start <input aria-label="Start seconds" type="number" min="0" step=".1" value={start} onChange={(event) => updateEdit({ start: Number(event.target.value) })} /></label><label>End <input aria-label="End seconds" type="number" min="0" step=".1" value={end} onChange={(event) => { const value = event.target.value; updateEdit({ end: value.trim() ? Number(value) : undefined }); }} placeholder="Source end" /></label><label>Aspect <select aria-label="Aspect ratio" value={aspect} onChange={(event) => updateEdit({ aspect: event.target.value as AspectRatio })}>{aspects.map((value) => <option key={value}>{value}</option>)}</select></label></div><div className="editor-options"><label className="shorts-project-name">Project name <input value={projectName} maxLength={160} onChange={(event) => { setHistory((current) => [...current.slice(-9), editState]); setProjectName(event.target.value); }} placeholder="Optional project name" /></label><label><input type="checkbox" checked={subtitles} onChange={(event) => updateEdit({ subtitles: event.target.checked })} /> Subtitles</label><span>{mode === "url" ? "YouTube preview becomes available after import." : file ? file.name : "Library source"}</span><Button type="button" onClick={() => { setPreviewUrl(null); setFile(null); }}>Change source</Button></div></div></div>}
         {status && <div className="shorts-inline-status" role="status"><Clock3 size={15} />{status}</div>}
       </section>
       <aside className="shorts-right-column">

@@ -105,18 +105,47 @@ test("Docker-served studio acceptance workflow", async ({ page, request }) => {
   // Shorts Editor: real source preview, local assistant proposal, and output list.
   await open(page, "Shorts Editor");
   await expect(page.getByRole("heading", { name: "Shorts Editor" })).toBeVisible();
+  await page.setViewportSize({ width: 768, height: 1024 });
+  const tabletMeasure = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth, innerWidth: window.innerWidth }));
+  await fs.writeFile(path.join(artifactDir, "responsive-measurements.json"), JSON.stringify(tabletMeasure, null, 2));
+  expect(tabletMeasure.scrollWidth).toBeLessThanOrEqual(tabletMeasure.clientWidth);
+  await expect(page.getByRole("heading", { name: "AI editing assistant" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Queue short" })).toBeVisible();
+  await capture(page, "shorts-editor-tablet");
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await page.locator('input[aria-label="Choose video file"]').setInputFiles(path.join(root, "test-video.mp4"));
   await expect(page.getByLabel("Aspect ratio")).toHaveValue("9:16");
   await page.locator('input[aria-label="Editing request"]').fill("Propose changing the aspect ratio to 1:1 without applying it.");
   await page.getByRole("button", { name: "Send editing request" }).click();
   await expect(page.getByText(/Nothing changed/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Apply proposal" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Reject" })).toBeVisible();
   await expect(page.getByLabel("Aspect ratio")).toHaveValue("9:16");
   await expect(page.getByText("Unsaved edits")).not.toBeVisible();
   await expect(page.getByRole("button", { name: "Undo" })).not.toBeVisible();
+  await capture(page, "proposal-pending");
+  await page.getByRole("button", { name: "Reject" }).click();
+  await expect(page.getByLabel("Aspect ratio")).toHaveValue("9:16");
+  await expect(page.getByText("All changes saved")).toBeVisible();
+  await capture(page, "proposal-rejected");
+  await page.locator('input[aria-label="Editing request"]').fill("Propose changing the aspect ratio to 1:1 without applying it.");
+  await page.getByRole("button", { name: "Send editing request" }).click();
   await page.getByRole("button", { name: "Apply proposal" }).click();
   await expect(page.getByLabel("Aspect ratio")).toHaveValue("1:1");
   await expect(page.getByText("Unsaved edits")).toBeVisible();
   await expect(page.getByRole("button", { name: "Undo" })).toBeVisible();
+  await capture(page, "proposal-applied");
+  await page.getByRole("button", { name: "Undo" }).click();
+  await expect(page.getByLabel("Aspect ratio")).toHaveValue("9:16");
+  await expect(page.getByText("All changes saved")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Undo" })).not.toBeVisible();
+  await capture(page, "proposal-undone");
+  await page.locator('input[aria-label="Editing request"]').fill("Change the aspect ratio to 1:1 now.");
+  await page.getByRole("button", { name: "Send editing request" }).click();
+  await expect(page.getByText(/Applied locally/)).toBeVisible();
+  await expect(page.getByLabel("Aspect ratio")).toHaveValue("1:1");
+  await page.getByRole("button", { name: "Undo" }).click();
+  await expect(page.getByText("All changes saved")).toBeVisible();
   await capture(page, "shorts-editor");
 
   // AI assistant / Topic to Video local custom-script path (no provider or mock involved).
@@ -154,6 +183,7 @@ test("Docker-served studio acceptance workflow", async ({ page, request }) => {
   await page.getByRole("button", { name: /Stop & keep/ }).click();
   await expect(page.getByText(/Stopped|cancelled|partial/i).first()).toBeVisible({ timeout: 30_000 });
   const retryImport = page.getByRole("button", { name: /Retry import/ }).first();
+  await expect(retryImport).toBeVisible({ timeout: 30_000 });
   if (await retryImport.isVisible()) {
     await retryImport.click();
     // The response itself is the durable retry evidence: the same job must
