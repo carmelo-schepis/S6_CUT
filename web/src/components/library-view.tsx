@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type ChangeEvent, type KeyboardEvent, type MouseEvent } from "react";
 import { Archive, FileImage, Folder, FolderPlus, ImagePlus, Info, Library, RefreshCw, Search, ShieldCheck, Sparkles, Upload } from "lucide-react";
 import { archiveFolder, createFolder, deleteAsset, explainMatch, getHealth, listAssets, listFolders, moveAssets, moveFolder, readableError, removeFolder, updateAsset, updateFolder, uploadAsset } from "../api";
 import { bindRevalidationOnFocus, createBoundedRevalidation, onLibraryChanged } from "../library-sync";
@@ -135,7 +135,7 @@ export function LibraryView() {
 
       <section className="library-centre panel"><div className="library-toolbar"><div className="search-box"><Search size={15} /><input aria-label="Search media" placeholder="Search titles, tags, people, brands…" value={query} onChange={(event) => setQuery(event.target.value)} /></div><select aria-label="Media type" value={mediaType} onChange={(event) => setMediaType(event.target.value)}><option value="all">All media</option><option value="image">Images</option><option value="video">Video</option><option value="audio">Audio</option></select><select aria-label="Asset origin" value={origin} onChange={(event) => setOrigin(event.target.value as AssetOrigin | "all")}><option value="all">All origins</option><option value="project-source">Sources</option><option value="generated-clip">Generated clips</option><option value="script-output">Script outputs</option><option value="manual-import">Manual imports</option></select></div>
         {selectedIds.length > 0 && <div className="bulk-bar"><strong>{selectedIds.length} selected</strong><select aria-label="Move selected assets" defaultValue="" onChange={(event) => { if (event.target.value) void moveSelected(event.target.value); }}><option value="" disabled>Move to…</option>{folders.filter((folder) => !folder.archived).map((folder) => <option value={folder.id} key={folder.id}>{folder.name}</option>)}</select></div>}
-        {visibleAssets.length ? <div className="asset-grid">{visibleAssets.map((asset) => { const canPreview = asset.mediaType.startsWith("video/") && !!asset.previewUrl; return <article key={asset.id} className={`asset-card ${selected?.id === asset.id ? "active" : ""}`}><label className="asset-select"><input aria-label={`Select ${asset.title}`} type="checkbox" checked={selectedIds.includes(asset.id)} onChange={(event) => setSelectedIds((current) => event.target.checked ? [...current, asset.id] : current.filter((id) => id !== asset.id))} /></label>{canPreview && <button className="asset-preview-trigger" aria-label={`Preview ${asset.title}`} type="button" onClick={(event) => openPreview(asset, event.currentTarget)}><AssetPreview asset={asset} /></button>}<button className="asset-card-details" aria-label={`Select ${asset.title} for Rule Inspector`} type="button" onClick={() => setSelected(asset)}>{!canPreview && <AssetPreview asset={asset} />}<div><strong>{asset.title}</strong><span>{asset.tags.slice(0, 3).join(" · ") || asset.filename}</span><span className="origin-badge">{originLabels[asset.origin]}</span><StatusBadge state={asset.policy === "never" ? "failed" : asset.policy === "required" ? "fallback" : "local"} label={asset.policy} /></div></button></article>; })}</div>
+        {visibleAssets.length ? <div className="asset-grid">{visibleAssets.map((asset) => <LibraryAssetCard key={asset.id} asset={asset} isSelected={selectedIds.includes(asset.id)} isInspected={selected?.id === asset.id} onPreview={openPreview} onInspect={setSelected} onToggleSelected={(assetId, checked) => setSelectedIds((current) => checked ? [...current, assetId] : current.filter((id) => id !== assetId))} />)}</div>
           : <EmptyState icon={<Library size={30} />} title={assets.length ? "No media matches these filters" : "Build your private resolver"} action={!assets.length ? <Button variant="primary" onClick={() => setShowImport(true)}><Upload size={15} /> Import first asset</Button> : undefined}>Try another folder, search, or media type. Existing media remains safely stored.</EmptyState>}
         {loading && <p className="loading-note" role="status">Refreshing local media…</p>}
       </section>
@@ -158,6 +158,33 @@ export function LibraryView() {
 
     <section className="match-bench panel"><div><span className="eyebrow">Why it matched</span><h2>Test the rule engine</h2><p>Search terms above filter media; this text tests deterministic matching.</p></div><div className="match-input"><textarea value={query} onChange={(event) => setQuery(event.target.value)} placeholder="e.g. The Beatles changed popular music…" rows={3} /><Button onClick={runMatch}><Sparkles size={15} /> Explain match</Button></div>{explanation && <div className="match-result"><div className="match-decision"><Info size={17} /><div><span>{explanation.selected ? "Selected local asset" : "No eligible local asset"}</span><strong>{explanation.selected?.title || "Continue to licensed source or text card"}</strong><p>{explanation.reason}</p></div><span className="score-box">{Math.round(explanation.score)}</span></div></div>}</section>
   </div>;
+}
+
+function LibraryAssetCard({ asset, isSelected, isInspected, onPreview, onInspect, onToggleSelected }: { asset: LibraryAsset; isSelected: boolean; isInspected: boolean; onPreview: (asset: LibraryAsset, opener: HTMLButtonElement) => void; onInspect: (asset: LibraryAsset) => void; onToggleSelected: (assetId: string, checked: boolean) => void }) {
+  const canPreview = asset.mediaType.startsWith("video/") && !!asset.previewUrl;
+  const handlePreview = (event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onPreview(asset, event.currentTarget);
+  };
+  const handleInspect = (event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onInspect(asset);
+  };
+  const handleToggleSelected = (event: ChangeEvent<HTMLInputElement>) => {
+    event.stopPropagation();
+    onToggleSelected(asset.id, event.currentTarget.checked);
+  };
+  const details = <div className="asset-card-details-content" aria-hidden="true"><strong>{asset.title}</strong><span>{asset.tags.slice(0, 3).join(" · ") || asset.filename}</span><span className="origin-badge">{originLabels[asset.origin]}</span><StatusBadge state={asset.policy === "never" ? "failed" : asset.policy === "required" ? "fallback" : "local"} label={asset.policy} /></div>;
+
+  return <article className={`asset-card ${isInspected ? "active" : ""}`}>
+    <label className="asset-select"><input aria-label={`Select ${asset.title}`} type="checkbox" checked={isSelected} onChange={handleToggleSelected} /></label>
+    {canPreview ? <>
+      <button className="asset-preview-trigger" aria-label={`Preview ${asset.title}`} type="button" onClick={handlePreview}><AssetPreview asset={asset} /></button>
+      <button className="asset-card-details" aria-label={`Select ${asset.title} for Rule Inspector`} type="button" onClick={handleInspect}>{details}</button>
+    </> : <button className="asset-card-details asset-card-details-full" aria-label={`Select ${asset.title} for Rule Inspector`} type="button" onClick={handleInspect}><AssetPreview asset={asset} />{details}</button>}
+  </article>;
 }
 
 function AssetPreview({ asset }: { asset: LibraryAsset }) {

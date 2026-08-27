@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { emitLibraryChanged } from "../library-sync";
 import type { LibraryAsset, LibraryFolder } from "../types";
@@ -71,6 +71,71 @@ describe("LibraryView", () => {
     expect(screen.getAllByRole("button", { name: "Select Acme launch for Rule Inspector" })).toHaveLength(1);
     expect(screen.getAllByLabelText("Select Acme launch")).toHaveLength(1);
     expect(document.body.style.overflow).toBe("");
+  });
+
+  it("isolates realistic details pointer sequences and nested content from preview", async () => {
+    render(<LibraryView />);
+    expect(await screen.findByText("Acme launch")).toBeInTheDocument();
+    const details = screen.getByRole("button", { name: "Select Acme launch for Rule Inspector" });
+    fireEvent.pointerDown(details);
+    fireEvent.mouseDown(details);
+    fireEvent.pointerUp(details);
+    fireEvent.mouseUp(details);
+    fireEvent.click(details);
+    expect(screen.getByDisplayValue("Acme launch")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(document.body.style.overflow).toBe("");
+
+    const nestedDetails = screen.getByRole("button", { name: "Select Acme launch for Rule Inspector" });
+    fireEvent.click(within(nestedDetails).getByText("Acme launch", { selector: "strong" }));
+    fireEvent.click(within(nestedDetails).getByText("campaign"));
+    fireEvent.click(within(nestedDetails).getByText("Generated clip"));
+    fireEvent.click(within(nestedDetails).getByText("neutral"));
+    expect(screen.getByDisplayValue("Acme launch")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("keeps preview, details, and checkbox actions independent across keyboard and rapid use", async () => {
+    render(<LibraryView />);
+    expect(await screen.findByText("Acme launch")).toBeInTheDocument();
+    const details = screen.getByRole("button", { name: "Select Acme launch for Rule Inspector" });
+    const checkbox = screen.getByLabelText("Select Acme launch");
+    fireEvent.click(screen.getByRole("button", { name: "Select Other logo for Rule Inspector" }));
+    fireEvent.click(checkbox);
+    expect(checkbox).toBeChecked();
+    expect(screen.getByDisplayValue("Other logo")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview Acme launch" }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close video preview" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.keyDown(details, { key: "Enter" });
+    fireEvent.click(details);
+    expect(screen.getByDisplayValue("Acme launch")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.keyDown(details, { key: " " });
+    fireEvent.click(details);
+    expect(screen.getByDisplayValue("Acme launch")).toBeInTheDocument();
+    const preview = screen.getByRole("button", { name: "Preview Acme launch" });
+    fireEvent.keyDown(preview, { key: "Enter" });
+    fireEvent.click(preview);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Acme launch")).toBeInTheDocument();
+  });
+
+  it("renders isolated card controls without nested buttons or article activation", async () => {
+    render(<LibraryView />);
+    expect(await screen.findByText("Acme launch")).toBeInTheDocument();
+    const article = screen.getByRole("button", { name: "Select Acme launch for Rule Inspector" }).closest("article");
+    expect(article).toBeInTheDocument();
+    expect(article).not.toHaveAttribute("role");
+    expect(article?.querySelectorAll("button")).toHaveLength(2);
+    expect(article?.querySelectorAll("input[type=checkbox]")).toHaveLength(1);
+    expect(article?.querySelector(".asset-preview-trigger .asset-card-details")).toBeNull();
+    expect(article?.querySelector(".asset-card-details .asset-preview-trigger")).toBeNull();
+    expect(screen.getAllByRole("button", { name: "Preview Acme launch" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Select Acme launch for Rule Inspector" })).toHaveLength(1);
   });
 
   it("does not offer preview activation for a video without a preview URL or for images", async () => {
