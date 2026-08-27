@@ -260,6 +260,7 @@ class TopicVideoInput(ApiModel):
     aspect_ratio: Literal["9:16", "16:9", "1:1", "4:5"] = "9:16"
     variants: int = Field(default=1, ge=1, le=3)
     custom_script: str = Field(default="", max_length=200_000)
+    model_id: str | None = Field(default=None, max_length=200)
 
 
 class TopicBeat(ApiModel):
@@ -298,6 +299,12 @@ ProviderConnectionStatus = Literal[
     "not_configured", "configured", "connected", "invalid_credentials", "rate_limited",
     "timeout_offline", "unavailable_model_or_voice", "malformed_response",
 ]
+
+
+class OpenRouterModel(ApiModel):
+    id: str = Field(min_length=1, max_length=200)
+    name: str = Field(min_length=1, max_length=300)
+    context_length: int | None = Field(default=None, ge=1)
 
 
 class ProviderProfile(ApiModel):

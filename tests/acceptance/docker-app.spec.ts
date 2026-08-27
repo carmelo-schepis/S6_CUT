@@ -100,6 +100,7 @@ test("Docker-served studio acceptance workflow", async ({ page, request }) => {
     const exportPath = path.join(artifactDir, await download.suggestedFilename());
     await download.saveAs(exportPath);
     expect((await fs.stat(exportPath)).size).toBeGreaterThan(0);
+    await capture(page, "export-ready");
   }
 
   // Shorts Editor: real source preview, local assistant proposal, and output list.
@@ -192,6 +193,11 @@ test("Docker-served studio acceptance workflow", async ({ page, request }) => {
     await expect(retryImport).not.toBeVisible();
     await expect(page.getByText(/Retrying YouTube import|Downloading YouTube source/).first()).toBeVisible({ timeout: 30_000 });
   }
+  await capture(page, "youtube-retry-active");
+  const stopAfterRetry = page.getByRole("button", { name: /Stop & keep/ }).first();
+  await expect(stopAfterRetry).toBeVisible({ timeout: 30_000 });
+  await stopAfterRetry.click();
+  await expect(page.getByText(/Stopped|cancelled|partial/i).first()).toBeVisible({ timeout: 30_000 });
   await capture(page, "youtube-stop");
 
   await fs.writeFile(path.join(artifactDir, "browser-diagnostics.json"), JSON.stringify({ consoleErrors, pageErrors, failedRequests, abortedRequests, note: "Chromium may emit a COOP warning when testing the HTTP IP origin; that known browser limitation is intentionally excluded from consoleErrors." }, null, 2));

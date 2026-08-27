@@ -7,6 +7,7 @@ import {
   jobSchema,
   libraryFolderSchema,
   profileSchema,
+  openRouterModelSchema,
   projectSchema,
   type Health,
   type Job,
@@ -17,6 +18,7 @@ import {
   type ProcessingMode,
   type Project,
   type ProviderProfile,
+  type OpenRouterModel,
   type Style,
   topicVideoPlanSchema,
   type TopicVideoPlan,
@@ -132,7 +134,11 @@ export async function createShortsSourceJob(input: { file?: File; url?: string; 
   return { project: projectSchema.parse(value.project), job: jobSchema.parse(value.job) };
 }
 
-export async function createTopicPlan(input: { topic: string; audience: string; tone: string; language: string; callToAction: string; instructions: string; durationSeconds: number; aspectRatio: string; variants: number; customScript: string }): Promise<TopicVideoPlan> {
+export async function listOpenRouterModels(): Promise<OpenRouterModel[]> {
+  return openRouterModelSchema.array().parse(await request("/openrouter/models"));
+}
+
+export async function createTopicPlan(input: { topic: string; audience: string; tone: string; language: string; callToAction: string; instructions: string; durationSeconds: number; aspectRatio: string; variants: number; customScript: string; modelId?: string }): Promise<TopicVideoPlan> {
   return topicVideoPlanSchema.parse(await request("/ai/topic-plan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) }));
 }
 

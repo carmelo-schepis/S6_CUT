@@ -6,7 +6,7 @@ import { LibraryView } from "./library-view";
 
 const folders: LibraryFolder[] = [{ id: "unsorted", name: "Unsorted", parentId: null, description: "", color: null, archived: false, system: true, createdAt: "2026-01-01", updatedAt: "2026-01-01" }, { id: "acme", name: "Acme", parentId: null, description: "", color: null, archived: false, system: false, createdAt: "2026-01-01", updatedAt: "2026-01-01" }];
 const assets: LibraryAsset[] = [
-  { id: "a1", title: "Acme launch", description: "", mediaType: "video/mp4", filename: "launch.mp4", tags: ["campaign"], triggers: [], aliases: [], negativeTriggers: [], policy: "neutral", protected: false, minSpacingSeconds: 0, maxUsesPerProject: 1, licence: "Owned", attribution: "", contentHash: "h1", folderId: "acme", origin: "generated-clip", blobId: "b1", brands: ["Acme"], people: [], createdAt: "2026-01-01" },
+  { id: "a1", title: "Acme launch", description: "", mediaType: "video/mp4", filename: "launch.mp4", previewUrl: "/api/v1/library/assets/a1/preview?expires=123&signature=signed",  tags: ["campaign"], triggers: [], aliases: [], negativeTriggers: [], policy: "neutral", protected: false, minSpacingSeconds: 0, maxUsesPerProject: 1, licence: "Owned", attribution: "", contentHash: "h1", folderId: "acme", origin: "generated-clip", blobId: "b1", brands: ["Acme"], people: [], createdAt: "2026-01-01" },
   { id: "a2", title: "Other logo", description: "", mediaType: "image/png", filename: "logo.png", tags: [], triggers: [], aliases: [], negativeTriggers: [], policy: "required", protected: false, minSpacingSeconds: 0, maxUsesPerProject: 1, licence: "Owned", attribution: "", contentHash: "h2", folderId: "unsorted", origin: "manual-import", blobId: "b2", brands: [], people: [], createdAt: "2026-01-01" },
 ];
 
@@ -33,6 +33,29 @@ describe("LibraryView", () => {
     fireEvent.change(screen.getByLabelText("Asset origin"), { target: { value: "generated-clip" } });
     expect(screen.getByText("Acme launch")).toBeInTheDocument();
     expect(screen.queryByText("Other logo")).not.toBeInTheDocument();
+  });
+
+  it("opens the signed video preview without changing the Library page", async () => {
+    render(<LibraryView />);
+    expect(await screen.findByText("Acme launch")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Preview Acme launch" }));
+    const dialog = screen.getByRole("dialog", { name: "Acme launch video preview" });
+    expect(dialog.querySelector("video")).toHaveAttribute("src", assets[0].previewUrl);
+    fireEvent.click(screen.getByRole("button", { name: "Close video preview" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByDisplayValue("Acme launch")).toBeInTheDocument();
+  });
+
+  it("keeps checkbox, details, and non-preview assets out of the video dialog", async () => {
+    mockListAssets.mockResolvedValueOnce([{ ...assets[0], previewUrl: undefined }, assets[1]]);
+    render(<LibraryView />);
+    expect(await screen.findByText("Acme launch")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Select Acme launch"));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Acme launch/ }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Other logo/ }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("preserves loaded media and offers retry after a transient engine failure", async () => {

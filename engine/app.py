@@ -29,7 +29,7 @@ from .media import MediaError, available, probe, validate_video_upload
 from .models import (
     Asset, AssetMove, AssetOrigin, AssetUpdate, Clip, FolderCreate, FolderMove, FolderUpdate, Health, Job,
     LibraryFolder, MatchExplanation, ProcessingMode, ProfileInput, Project, ProjectFolderUpdate,
-    ProviderProfile, ScriptJobInput, SelectionInput, ShortsJobInput, TopicBeat, TopicVideoInput, TopicVideoPlan, now_iso,
+    OpenRouterModel, ProviderProfile, ScriptJobInput, SelectionInput, ShortsJobInput, TopicBeat, TopicVideoInput, TopicVideoPlan, now_iso,
 )
 from .providers import ProfileService, ProviderError
 from .security import MediaSigner, SecretVault, confined, safe_filename, validate_youtube_url
@@ -421,9 +421,9 @@ async def topic_plan(value: TopicVideoInput) -> TopicVideoPlan:
     schema = {"type": "object", "additionalProperties": False, "properties": {"title": {"type": "string"}, "hook": {"type": "string"}, "narration": {"type": "string"}, "beats": {"type": "array", "items": {"type": "object", "additionalProperties": False, "properties": {"narration": {"type": "string"}, "seconds": {"type": "number"}, "keywords": {"type": "array", "items": {"type": "string"}}}, "required": ["narration", "seconds", "keywords"]}}, "estimated_duration": {"type": "number"}, "description": {"type": "string"}, "hashtags": {"type": "array", "items": {"type": "string"}}}, "required": ["title", "hook", "narration", "beats", "estimated_duration", "description", "hashtags"]}
     prompt = f"Create a concise video plan in {value.language} about {value.topic!r}. Audience: {value.audience}. Tone: {value.tone}. Target seconds: {value.duration_seconds}. CTA: {value.call_to_action}. Extra instructions: {value.instructions}. Return only JSON matching the schema; use local-library visual keywords and never claim licensing."
     try:
-        result = await profiles.openrouter_json([{"role": "user", "content": prompt}], schema, require_saved_profile=True)
+        result = await profiles.openrouter_json([{"role": "user", "content": prompt}], schema, require_saved_profile=True, model_id=value.model_id)
     except ProviderError as exc:
-        status_code = {"invalid_credentials": 502, "rate_limited": 429, "timeout_offline": 503, "unavailable_model": 502, "malformed_response": 502}.get(exc.category, 502)
+        status_code = {"not_configured": 503, "invalid_credentials": 502, "rate_limited": 429, "timeout_offline": 503, "unavailable_model": 422, "malformed_response": 502}.get(exc.category, 502)
         raise HTTPException(status_code, exc.safe_message) from exc
     if not result:
         raise HTTPException(503, "OpenRouter is not configured. Add and test a provider in Settings, or enter a custom script.")
@@ -586,6 +586,15 @@ async def download_file(relative_path: str, expires: int = Query(...), signature
     if not target.is_file():
         raise _not_found("File")
     return FileResponse(target, filename=safe_filename(target.name, "s6-cut-download"), media_type="application/zip" if target.suffix == ".zip" else "video/mp4")
+
+
+@app.get("/api/v1/openrouter/models", response_model=list[OpenRouterModel])
+async def list_openrouter_models() -> list[OpenRouterModel]:
+    try:
+        return await profiles.openrouter_models()
+    except ProviderError as exc:
+        status_code = {"not_configured": 503, "invalid_credentials": 502, "rate_limited": 429, "timeout_offline": 503, "malformed_response": 502}.get(exc.category, 502)
+        raise HTTPException(status_code, exc.safe_message) from exc
 
 
 @app.get("/api/v1/profiles", response_model=list[ProviderProfile])

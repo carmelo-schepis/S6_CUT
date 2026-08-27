@@ -4,6 +4,7 @@ import { archiveFolder, createFolder, deleteAsset, explainMatch, getHealth, list
 import { bindRevalidationOnFocus, createBoundedRevalidation, onLibraryChanged } from "../library-sync";
 import type { AssetOrigin, Health, LibraryAsset, LibraryFolder, MatchExplanation } from "../types";
 import { Button, EmptyState, Field, PageHeader, StatusBadge, formatAge } from "./common";
+import { VideoPreviewDialog } from "./video-preview-dialog";
 
 const originLabels = { "manual-import": "Manual", "project-source": "Source", "generated-clip": "Generated clip", "script-output": "Script output" } as const;
 const sleep = (milliseconds: number) => new Promise((resolve) => window.setTimeout(resolve, milliseconds));
@@ -24,6 +25,8 @@ export function LibraryView() {
   const [error, setError] = useState<string | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
   const [loading, setLoading] = useState(false);
+  const [previewAsset, setPreviewAsset] = useState<LibraryAsset | null>(null);
+  const [previewOpener, setPreviewOpener] = useState<HTMLButtonElement | null>(null);
 
   const load = useCallback(async (retry = true) => {
     setLoading(true);
@@ -106,6 +109,13 @@ export function LibraryView() {
     if (!destination || !window.confirm(`Remove “${folder.name}”? Its assets and child folders will move to ${destination.name}; no media will be deleted.`)) return;
     try { await removeFolder(folder.id, destination.id); setFolderId(destination.id); await load(false); } catch (cause) { setError(readableError(cause)); }
   };
+  const openPreview = (asset: LibraryAsset, opener: HTMLButtonElement) => {
+    if (!asset.mediaType.startsWith("video/") || !asset.previewUrl) return;
+    setSelected(asset);
+    setPreviewOpener(opener);
+    setPreviewAsset(asset);
+  };
+  const closePreview = () => setPreviewAsset(null);
   const moveSelected = async (destination: string) => {
     if (!selectedIds.length) return;
     try { await moveAssets(selectedIds, destination); setAssets((current) => current.map((asset) => selectedIds.includes(asset.id) ? { ...asset, folderId: destination } : asset)); setSelectedIds([]); } catch (cause) { setError(readableError(cause)); }
@@ -126,7 +136,7 @@ export function LibraryView() {
 
       <section className="library-centre panel"><div className="library-toolbar"><div className="search-box"><Search size={15} /><input aria-label="Search media" placeholder="Search titles, tags, people, brands…" value={query} onChange={(event) => setQuery(event.target.value)} /></div><select aria-label="Media type" value={mediaType} onChange={(event) => setMediaType(event.target.value)}><option value="all">All media</option><option value="image">Images</option><option value="video">Video</option><option value="audio">Audio</option></select><select aria-label="Asset origin" value={origin} onChange={(event) => setOrigin(event.target.value as AssetOrigin | "all")}><option value="all">All origins</option><option value="project-source">Sources</option><option value="generated-clip">Generated clips</option><option value="script-output">Script outputs</option><option value="manual-import">Manual imports</option></select></div>
         {selectedIds.length > 0 && <div className="bulk-bar"><strong>{selectedIds.length} selected</strong><select aria-label="Move selected assets" defaultValue="" onChange={(event) => { if (event.target.value) void moveSelected(event.target.value); }}><option value="" disabled>Move to…</option>{folders.filter((folder) => !folder.archived).map((folder) => <option value={folder.id} key={folder.id}>{folder.name}</option>)}</select></div>}
-        {visibleAssets.length ? <div className="asset-grid">{visibleAssets.map((asset) => <article key={asset.id} className={`asset-card ${selected?.id === asset.id ? "active" : ""}`}><label className="asset-select"><input aria-label={`Select ${asset.title}`} type="checkbox" checked={selectedIds.includes(asset.id)} onChange={(event) => setSelectedIds((current) => event.target.checked ? [...current, asset.id] : current.filter((id) => id !== asset.id))} /></label><button onClick={() => setSelected(asset)}><AssetPreview asset={asset} /><div><strong>{asset.title}</strong><span>{asset.tags.slice(0, 3).join(" · ") || asset.filename}</span><span className="origin-badge">{originLabels[asset.origin]}</span><StatusBadge state={asset.policy === "never" ? "failed" : asset.policy === "required" ? "fallback" : "local"} label={asset.policy} /></div></button></article>)}</div>
+        {visibleAssets.length ? <div className="asset-grid">{visibleAssets.map((asset) => { const canPreview = asset.mediaType.startsWith("video/") && !!asset.previewUrl; return <article key={asset.id} className={`asset-card ${selected?.id === asset.id ? "active" : ""}`}><label className="asset-select"><input aria-label={`Select ${asset.title}`} type="checkbox" checked={selectedIds.includes(asset.id)} onChange={(event) => setSelectedIds((current) => event.target.checked ? [...current, asset.id] : current.filter((id) => id !== asset.id))} /></label>{canPreview && <button className="asset-preview-trigger" aria-label={`Preview ${asset.title}`} type="button" onClick={(event) => openPreview(asset, event.currentTarget)}><AssetPreview asset={asset} /></button>}<button className="asset-card-details" type="button" onClick={() => setSelected(asset)}>{!canPreview && <AssetPreview asset={asset} />}<div><strong>{asset.title}</strong><span>{asset.tags.slice(0, 3).join(" · ") || asset.filename}</span><span className="origin-badge">{originLabels[asset.origin]}</span><StatusBadge state={asset.policy === "never" ? "failed" : asset.policy === "required" ? "fallback" : "local"} label={asset.policy} /></div></button></article>; })}</div>
           : <EmptyState icon={<Library size={30} />} title={assets.length ? "No media matches these filters" : "Build your private resolver"} action={!assets.length ? <Button variant="primary" onClick={() => setShowImport(true)}><Upload size={15} /> Import first asset</Button> : undefined}>Try another folder, search, or media type. Existing media remains safely stored.</EmptyState>}
         {loading && <p className="loading-note" role="status">Refreshing local media…</p>}
       </section>
@@ -145,12 +155,14 @@ export function LibraryView() {
       </div> : <p className="muted inspector-empty">Select an asset to edit its deterministic matching rules.</p>}</aside>
     </div>
 
+    {previewAsset && <VideoPreviewDialog asset={previewAsset} opener={previewOpener} onClose={closePreview} />}
+
     <section className="match-bench panel"><div><span className="eyebrow">Why it matched</span><h2>Test the rule engine</h2><p>Search terms above filter media; this text tests deterministic matching.</p></div><div className="match-input"><textarea value={query} onChange={(event) => setQuery(event.target.value)} placeholder="e.g. The Beatles changed popular music…" rows={3} /><Button onClick={runMatch}><Sparkles size={15} /> Explain match</Button></div>{explanation && <div className="match-result"><div className="match-decision"><Info size={17} /><div><span>{explanation.selected ? "Selected local asset" : "No eligible local asset"}</span><strong>{explanation.selected?.title || "Continue to licensed source or text card"}</strong><p>{explanation.reason}</p></div><span className="score-box">{Math.round(explanation.score)}</span></div></div>}</section>
   </div>;
 }
 
 function AssetPreview({ asset }: { asset: LibraryAsset }) {
-  if (asset.mediaType.startsWith("video/") && asset.previewUrl) return <div className="asset-preview"><video src={asset.previewUrl} muted controls preload="metadata" aria-label={`${asset.title} preview`} /></div>;
+  if (asset.mediaType.startsWith("video/") && asset.previewUrl) return <div className="asset-preview"><video src={asset.previewUrl} muted preload="metadata" aria-hidden="true" tabIndex={-1} /></div>;
   return <div className="asset-preview"><FileImage size={29} /><span>{asset.mediaType.split("/")[1]?.toUpperCase() || "MEDIA"}</span>{asset.protected && <ShieldCheck size={14} />}</div>;
 }
 

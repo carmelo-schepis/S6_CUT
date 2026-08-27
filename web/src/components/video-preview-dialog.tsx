@@ -1,0 +1,93 @@
+import { useLayoutEffect, useRef, useState } from "react";
+import type { LibraryAsset } from "../types";
+
+export function VideoPreviewDialog({ asset, opener, onClose }: { asset: LibraryAsset; opener: HTMLButtonElement | null; onClose: () => void }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [hasPlayed, setHasPlayed] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useLayoutEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    closeRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const dialog = event.currentTarget as HTMLElement;
+      const focusable = [...dialog.querySelectorAll<HTMLElement>("button, [href], input, select, textarea, video[controls], [tabindex]:not([tabindex=\"-1\"])")]
+        .filter((element) => !element.hasAttribute("disabled"));
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable.at(-1) || first;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    const dialog = document.getElementById(`video-preview-${asset.id}`);
+    dialog?.addEventListener("keydown", onKeyDown);
+    const video = videoRef.current;
+    return () => {
+      dialog?.removeEventListener("keydown", onKeyDown);
+      video?.pause();
+      if (video) {
+        try { video.currentTime = 0; } catch { /* Some media implementations reject seeking before metadata loads. */ }
+      }
+      document.body.style.overflow = previousOverflow;
+      if (opener?.isConnected) opener.focus();
+    };
+  }, [asset.id, onClose, opener]);
+
+  const play = async () => {
+    const video = videoRef.current;
+    if (!video) return;
+    setError(null);
+    try {
+      await video.play();
+    } catch {
+      setError("This video preview could not be played.");
+    }
+  };
+
+  return <div className="video-preview-backdrop" onClick={onClose}>
+    <section
+      id={`video-preview-${asset.id}`}
+      className="video-preview-dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={`video-preview-title-${asset.id}`}
+      tabIndex={-1}
+      onClick={(event) => event.stopPropagation()}
+    >
+      <div className="video-preview-header">
+        <h2 id={`video-preview-title-${asset.id}`}>{asset.title} video preview</h2>
+        <button ref={closeRef} className="icon-button video-preview-close" type="button" aria-label="Close video preview" onClick={onClose}>×</button>
+      </div>
+      <div className="video-preview-stage">
+        <video
+          ref={videoRef}
+          className="video-preview-video"
+          src={asset.previewUrl}
+          controls
+          playsInline
+          preload="metadata"
+          onPlay={() => { setPlaying(true); setHasPlayed(true); }}
+          onPause={() => setPlaying(false)}
+          onEnded={() => { setPlaying(false); setHasPlayed(true); }}
+          onError={() => { setPlaying(false); setError("This video preview could not be loaded."); }}
+        />
+        {!playing && <button className="video-preview-play" type="button" aria-label={hasPlayed ? "Replay video" : "Play video"} onClick={() => void play()}>{hasPlayed ? "Replay video" : "Play video"}</button>}
+      </div>
+      {error && <p className="video-preview-error" role="alert">{error}</p>}
+    </section>
+  </div>;
+}

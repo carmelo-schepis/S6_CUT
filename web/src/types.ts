@@ -201,6 +201,13 @@ export const healthSchema = z.object({
 });
 export type Health = z.infer<typeof healthSchema>;
 
+export const openRouterModelSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  contextLength: z.number().int().positive().nullable().optional(),
+});
+export type OpenRouterModel = z.infer<typeof openRouterModelSchema>;
+
 export const providerConnectionStatusSchema = z.enum([
   "not_configured", "configured", "connected", "invalid_credentials", "rate_limited",
   "timeout_offline", "unavailable_model_or_voice", "malformed_response",

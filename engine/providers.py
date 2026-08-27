@@ -9,7 +9,7 @@ from typing import Any
 import httpx
 
 from .database import Database
-from .models import ProfileInput, ProviderProfile
+from .models import OpenRouterModel, ProfileInput, ProviderProfile
 from .security import SecretVault, mask_secret
 
 
@@ -195,6 +195,45 @@ class ProfileService:
         self.db.save_profile(profile)
         return profile
 
+    async def openrouter_models(self) -> list[OpenRouterModel]:
+        profile, secrets = self.selected_secrets(include_environment=False)
+        if not profile or not profile.openrouter_configured or profile.openrouter_status != "connected":
+            raise ProviderError("not_configured", "OpenRouter is not configured and connected. Test the selected profile in Settings.")
+        key = secrets.get("openrouterKey")
+        if not key:
+            raise ProviderError("not_configured", "OpenRouter is not configured and connected. Test the selected profile in Settings.")
+        try:
+            async with httpx.AsyncClient(timeout=12, follow_redirects=False) as client:
+                response = await client.get("https://openrouter.ai/api/v1/models", headers={"Authorization": f"Bearer {key}"})
+        except (httpx.TimeoutException, httpx.RequestError) as exc:
+            raise ProviderError("timeout_offline", "OpenRouter is offline or timed out. Try refreshing models.") from exc
+        if response.status_code in {401, 403}:
+            raise ProviderError("invalid_credentials", "OpenRouter rejected the saved credentials. Test the profile in Settings.")
+        if response.status_code == 429:
+            raise ProviderError("rate_limited", "OpenRouter rate limit reached. Try refreshing models later.")
+        if response.status_code >= 400 or response.status_code in {301, 302, 307, 308}:
+            raise ProviderError("timeout_offline", "OpenRouter models are temporarily unavailable. Try again later.")
+        try:
+            payload = response.json()
+            entries = payload.get("data") if isinstance(payload, dict) else None
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise ProviderError("malformed_response", "OpenRouter returned an unreadable model list.") from exc
+        if not isinstance(entries, list):
+            raise ProviderError("malformed_response", "OpenRouter returned an unreadable model list.")
+        models: dict[str, OpenRouterModel] = {}
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            model_id = entry.get("id")
+            if not isinstance(model_id, str) or not model_id.strip():
+                continue
+            raw_name = entry.get("name")
+            name = raw_name.strip() if isinstance(raw_name, str) and raw_name.strip() else model_id
+            raw_context = entry.get("context_length")
+            context_length = raw_context if isinstance(raw_context, int) and not isinstance(raw_context, bool) and raw_context > 0 else None
+            models.setdefault(model_id, OpenRouterModel(id=model_id, name=name, context_length=context_length))
+        return [models[model_id] for model_id in sorted(models)]
+
     def delete(self, profile_id: str) -> None:
         self.vault.delete_session(profile_id)
         self.db.delete_profile(profile_id)
@@ -214,20 +253,24 @@ class ProfileService:
         output.write_bytes(response.content)
         return output.stat().st_size > 1000
 
-    async def openrouter_json(self, messages: list[dict[str, str]], schema: dict[str, Any], *, require_saved_profile: bool = False) -> dict[str, Any] | None:
+    async def openrouter_json(self, messages: list[dict[str, str]], schema: dict[str, Any], *, require_saved_profile: bool = False, model_id: str | None = None) -> dict[str, Any] | None:
         profile, secrets = self.selected_secrets(include_environment=not require_saved_profile)
         if require_saved_profile and (not profile or profile.openrouter_status != "connected"):
             return None
         key = secrets.get("openrouterKey")
         if not key or not profile:
             return None
+        if model_id:
+            models = await self.openrouter_models()
+            if not any(model.id == model_id for model in models):
+                raise ProviderError("unavailable_model", "The selected OpenRouter model is no longer available. Refresh models and choose another.")
         payload = {
-            "model": profile.model_id,
+            "model": model_id or profile.model_id,
             "messages": messages,
             "temperature": 0,
             "response_format": {"type": "json_schema", "json_schema": {"name": "s6_result", "strict": True, "schema": schema}},
         }
-        async with httpx.AsyncClient(timeout=45) as client:
+        async with httpx.AsyncClient(timeout=45, follow_redirects=False) as client:
             for attempt in range(2):
                 try:
                     response = await client.post("https://openrouter.ai/api/v1/chat/completions", headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"}, json=payload)
