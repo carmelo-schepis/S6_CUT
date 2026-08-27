@@ -35,26 +35,51 @@ describe("LibraryView", () => {
     expect(screen.queryByText("Other logo")).not.toBeInTheDocument();
   });
 
-  it("opens the signed video preview without changing the Library page", async () => {
+  it("opens a preview without changing the existing Rule Inspector selection", async () => {
     render(<LibraryView />);
     expect(await screen.findByText("Acme launch")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Select Other logo for Rule Inspector" }));
+    expect(screen.getByDisplayValue("Other logo")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Search media"), { target: { value: "launch" } });
+    fireEvent.change(screen.getByLabelText("Media type"), { target: { value: "video" } });
+    fireEvent.change(screen.getByLabelText("Asset origin"), { target: { value: "generated-clip" } });
     fireEvent.click(screen.getByRole("button", { name: "Preview Acme launch" }));
     const dialog = screen.getByRole("dialog", { name: "Acme launch video preview" });
     expect(dialog.querySelector("video")).toHaveAttribute("src", assets[0].previewUrl);
+    expect(screen.getByDisplayValue("Other logo")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Close video preview" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.getByDisplayValue("Acme launch")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Other logo")).toBeInTheDocument();
+    expect(screen.getByLabelText("Search media")).toHaveValue("launch");
+    expect(screen.getByLabelText("Media type")).toHaveValue("video");
+    expect(screen.getByLabelText("Asset origin")).toHaveValue("generated-clip");
   });
 
-  it("keeps checkbox, details, and non-preview assets out of the video dialog", async () => {
+  it("keeps the video details button and checkbox independent from preview", async () => {
+    render(<LibraryView />);
+    expect(await screen.findByText("Acme launch")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Select Other logo for Rule Inspector" }));
+    fireEvent.click(screen.getByLabelText("Select Acme launch"));
+    expect(screen.getByLabelText("Select Acme launch")).toBeChecked();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByDisplayValue("Other logo")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Select Acme launch for Rule Inspector" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByDisplayValue("Acme launch")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Preview Acme launch" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Preview Acme launch" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Select Acme launch for Rule Inspector" })).toHaveLength(1);
+    expect(screen.getAllByLabelText("Select Acme launch")).toHaveLength(1);
+    expect(document.body.style.overflow).toBe("");
+  });
+
+  it("does not offer preview activation for a video without a preview URL or for images", async () => {
     mockListAssets.mockResolvedValueOnce([{ ...assets[0], previewUrl: undefined }, assets[1]]);
     render(<LibraryView />);
     expect(await screen.findByText("Acme launch")).toBeInTheDocument();
-    fireEvent.click(screen.getByLabelText("Select Acme launch"));
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Acme launch/ }));
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Other logo/ }));
+    expect(screen.queryByRole("button", { name: "Preview Acme launch" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Select Acme launch for Rule Inspector" }));
+    fireEvent.click(screen.getByRole("button", { name: "Select Other logo for Rule Inspector" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
