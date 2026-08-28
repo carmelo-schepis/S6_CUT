@@ -22,7 +22,7 @@ from .media import (
     sha256_file, synthesize_local, transcribe, youtube_import_title,
 )
 from .models import (
-    Asset, Clip, Job, ProcessingMode, ProcessingStep, ProvenanceRecord, ScoreBreakdown, now_iso,
+    Asset, Clip, ContentFormat, Job, ProcessingMode, ProcessingStep, ProvenanceRecord, ScoreBreakdown, now_iso,
 )
 from .providers import ProfileService, provider_runtime_message
 from .script import align_script_words, plan_beats
@@ -54,6 +54,17 @@ def job_processing_mode(job: Job, private: dict[str, Any]) -> ProcessingMode:
     """Resolved processing mode: private snapshot first, public record next, legacy jobs default to smart."""
     value = private.get("processing_mode") or job.processing_mode or "smart"
     return value if value in {"fast", "smart"} else "smart"
+
+
+def job_content_format(job: Job, private: dict[str, Any]) -> ContentFormat:
+    value = private.get("content_format") or job.content_format or "short"
+    return value if value in {"short", "long"} else "short"
+
+
+def probe_source(job: Job, private: dict[str, Any], source: Path, settings: Settings):
+    if job_content_format(job, private) == "long":
+        return probe(source, settings, max_seconds=settings.max_long_source_seconds)
+    return probe(source, settings)
 
 
 def _media_fn(name: str):
@@ -553,7 +564,7 @@ class JobManager:
     def _register_source(self, job: Job, private: dict[str, Any], source: Path) -> None:
         metadata = private.get("source_metadata")
         if not isinstance(metadata, dict):
-            metadata = probe(source, self.settings)
+            metadata = probe_source(job, private, source, self.settings)
         project = self.db.get_project(job.project_id)
         title = str(private.get("youtube_title") or "YouTube source") if private.get("url") else (project.name if project else source.stem)
         publication_folder, _ = self._publication_folder(job)
@@ -686,9 +697,12 @@ class JobManager:
             self.start_step(job, "source", detail="Preparing authorised YouTube import", label="Preparing YouTube import", progress=5, private=private)
             target_dir = self.settings.data_path / "jobs" / job.id / "source"
             self._download_progress(job, private, {"phase": "retrying" if private.get("retry_import") else "connecting", "message": "Resuming retained partial download" if private.get("retry_import") else "Connecting to YouTube"})
-            kwargs: dict[str, Any] = {"progress_callback": lambda update: self._download_progress(job, private, update), "cancellation_callback": lambda: not self._cooperate(job), "resume": True}
-            if "progress_callback" not in inspect.signature(download_youtube).parameters:
+            kwargs: dict[str, Any] = {"progress_callback": lambda update: self._download_progress(job, private, update), "cancellation_callback": lambda: not self._cooperate(job), "resume": True, "max_seconds": self.settings.max_long_source_seconds if job_content_format(job, private) == "long" else self.settings.max_source_seconds}
+            parameters = inspect.signature(download_youtube).parameters
+            if "progress_callback" not in parameters:
                 kwargs = {}
+            elif "max_seconds" not in parameters:
+                kwargs.pop("max_seconds", None)
             try:
                 source = download_youtube(private["url"], target_dir, self.settings, **kwargs)
             except DownloadStalled:
@@ -711,6 +725,9 @@ class JobManager:
         rerender = private.get("caption_rerender")
         if isinstance(rerender, dict) and rerender.get("run_id"):
             self._process_caption_rerender(job, private, rerender)
+            return
+        if job_content_format(job, private) == "long":
+            self._process_clip_fast(job, private)
             return
         mode = job_processing_mode(job, private)
         if mode == "fast":
@@ -1073,8 +1090,10 @@ class JobManager:
             job.total_items = len(job.clips)
             self._save(job, private)
         if not job.clips:
-            self.start_step(job, "plan", detail="Planning neutral fast-cut windows", label="Planning neutral fast-cut windows", progress=28, private=private)
-            plan = _media_fn("plan_fast_windows")
+            is_long_form = job_content_format(job, private) == "long"
+            plan_label = "Planning deterministic landscape scenes" if is_long_form else "Planning neutral fast-cut windows"
+            self.start_step(job, "plan", detail=plan_label, label=plan_label, progress=28, private=private)
+            plan = _media_fn("plan_long_form_windows" if is_long_form else "plan_fast_windows")
             windows, warning = plan(
                 metadata["duration"], int(private["count"]), float(private["min_duration"]),
                 float(private["max_duration"]), self.settings.fast_guard_seconds,
@@ -1089,13 +1108,13 @@ class JobManager:
             job.clips = [
                 Clip(
                     id=str(uuid.uuid4()), index=index, state="queued", start=start, end=end,
-                    duration=end - start, opening_line=f"Cut {index:02d}", score=None,
+                    duration=end - start, opening_line=(f"Scene {index:02d}" if is_long_form else f"Cut {index:02d}"), score=None,
                 )
                 for index, (start, end) in enumerate(windows, 1)
             ]
             job.total_items = len(job.clips)
             self._save(job, private)
-            self.complete_step(job, "plan", detail=f"{len(job.clips)} windows planned", private=private)
+            self.complete_step(job, "plan", detail=f"{len(job.clips)} {'landscape scenes' if is_long_form else 'windows'} planned across the source", private=private)
         output_dir = self.settings.data_path / "jobs" / job.id / "clips"
         output_dir.mkdir(parents=True, exist_ok=True)
         render = _media_fn("render_fast_clip")
@@ -1122,7 +1141,7 @@ class JobManager:
             self._apply_step(job, render_step, status="active", detail=f"Rendering fast cut {position} of {len(job.clips)}", current=completed_before, total=len(job.clips))
             job.state = "active"
             job.stage = "render"
-            job.stage_label = f"Rendering fast cut {position} of {len(job.clips)}"
+            job.stage_label = f"Rendering {'landscape scene' if job_content_format(job, private) == 'long' else 'fast cut'} {position} of {len(job.clips)}"
             job.progress = 40 + (position - 1) / max(len(job.clips), 1) * 54
             job.current_item = completed_before
             job.total_items = len(job.clips)
@@ -1159,7 +1178,9 @@ class JobManager:
             self._save(job, private)
         successful = [clip for clip in job.clips if clip.state == "complete"]
         failed = [clip for clip in job.clips if clip.state == "failed"]
-        self._finish_render_steps(job, private, successful, failed, output_dir, "fast cut(s)", "fast cuts ready")
+        result_label = "landscape scene(s)" if job_content_format(job, private) == "long" else "fast cut(s)"
+        ready_label = "landscape clips ready" if job_content_format(job, private) == "long" else "fast cuts ready"
+        self._finish_render_steps(job, private, successful, failed, output_dir, result_label, ready_label)
 
     def _process_script(self, job: Job, private: dict[str, Any]) -> None:
         script = str(private["script"])
@@ -1383,7 +1404,7 @@ class JobManager:
         new_id = str(uuid.uuid4())
         new_job = Job(
             id=new_id, project_id=job.project_id, library_folder_id=job.library_folder_id,
-            source_blob_id=job.source_blob_id, mode="clip", processing_mode="fast",
+            source_blob_id=job.source_blob_id, mode="clip", content_format=job.content_format, processing_mode="fast",
             state="queued", stage="queued", stage_label="Queued on this machine",
             progress=0, style=job.style, burn_subtitles=bool(new_private.get("burn_subtitles", job.burn_subtitles)), steps=self._fast_steps(),
         )

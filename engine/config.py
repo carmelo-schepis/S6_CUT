@@ -60,6 +60,7 @@ class Settings:
     ytdlp_inactivity_timeout: int = 300
     local_tts: str = "espeak-ng"
     transcription_stall_seconds: int = 180
+    max_long_source_seconds: int = 28_800
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -80,6 +81,7 @@ class Settings:
             max_queued_jobs=max(1, min(_int("S6_MAX_QUEUED_JOBS", 4), 20)),
             max_upload_bytes=max(50_000_000, _int("S6_MAX_UPLOAD_BYTES", 20_000_000_000)),
             max_source_seconds=max(60, _int("S6_MAX_SOURCE_SECONDS", 14_400)),
+            max_long_source_seconds=max(60, _int("S6_MAX_LONG_SOURCE_SECONDS", 28_800)),
             max_output_count=max(1, min(_int("S6_MAX_OUTPUT_COUNT", 30), 60)),
             retention_days=max(1, _int("S6_JOB_RETENTION_DAYS", 30)),
             max_retained_jobs=max(5, _int("S6_MAX_RETAINED_JOBS", 100)),

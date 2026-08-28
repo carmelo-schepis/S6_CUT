@@ -185,7 +185,7 @@ def sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
 
 
 # DO-NOT-CHANGE: enforces max_source_seconds via settings; rotation handling is fragile
-def probe(path: Path, settings: Settings) -> dict[str, Any]:
+def probe(path: Path, settings: Settings, *, max_seconds: int | None = None) -> dict[str, Any]:
     result = run([settings.ffprobe, "-v", "error", "-show_streams", "-show_format", "-of", "json", str(path)], timeout=120)
     try:
         payload = json.loads(result.stdout)
@@ -197,8 +197,9 @@ def probe(path: Path, settings: Settings) -> dict[str, Any]:
         raise MediaError("FFprobe returned malformed media metadata") from exc
     if not video or duration <= 0:
         raise MediaError("The source does not contain a readable video stream")
-    if duration > settings.max_source_seconds:
-        raise MediaError(f"Source duration exceeds the configured {settings.max_source_seconds}-second limit")
+    duration_limit = settings.max_source_seconds if max_seconds is None else max_seconds
+    if duration > duration_limit:
+        raise MediaError(f"Source duration {duration:.1f}s exceeds the configured {duration_limit}-second limit; choose Long form for sources up to {settings.max_long_source_seconds}s." if max_seconds is None else f"Source duration {duration:.1f}s exceeds the configured {duration_limit}-second limit")
     frame_rate = _rational_to_float(video.get("avg_frame_rate")) or _rational_to_float(video.get("r_frame_rate")) or 0.0
     return {
         "duration": duration,
@@ -225,10 +226,10 @@ def probe_audio(path: Path, settings: Settings) -> dict[str, Any]:
     return {"duration": duration, "audio_codec": audio.get("codec_name")}
 
 
-def validate_video_upload(path: Path, original_name: str, settings: Settings) -> dict[str, Any]:
+def validate_video_upload(path: Path, original_name: str, settings: Settings, *, max_seconds: int | None = None) -> dict[str, Any]:
     if Path(original_name).suffix.casefold() not in ALLOWED_VIDEO_SUFFIXES:
         raise MediaError("Unsupported video type. Use MP4, MOV, WebM, MKV, M4V, or AVI.")
-    return probe(path, settings)
+    return probe(path, settings, max_seconds=max_seconds)
 
 
 def _cleanup_partials(target_dir: Path) -> None:
@@ -350,6 +351,7 @@ def download_youtube(
     progress_callback: DownloadCallback | None = None,
     cancellation_callback: Callable[[], bool] | None = None,
     resume: bool = True,
+    max_seconds: int | None = None,
 ) -> Path:
     validate_youtube_url(url)
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -377,7 +379,7 @@ def download_youtube(
     source = candidates[-1].resolve()
     if target_dir.resolve() not in source.parents:
         raise MediaError("YouTube output escaped its job directory")
-    probe(source, settings)
+    probe(source, settings, max_seconds=max_seconds)
     _download_update(progress_callback, phase="complete", downloaded_bytes=source.stat().st_size, total_bytes=source.stat().st_size, percent=100.0, speed_bytes_per_second=None, eta_seconds=0.0, message="Download complete")
     return source
 
@@ -885,6 +887,25 @@ def plan_fast_windows(
             "unused source time is distributed evenly between clip windows."
         )
 
+    return windows, warning
+
+
+def plan_long_form_windows(
+    duration: float,
+    count: int,
+    min_duration: float,
+    max_duration: float,
+    guard_seconds: float = 1.0,
+) -> tuple[list[tuple[float, float]], str]:
+    """Plan deterministic landscape scenes across the complete source timeline.
+
+    Long-form sources are intentionally sampled across the whole movie rather
+    than clustered near the beginning.  This lightweight fallback remains
+    deterministic when scene detection or transcription is unavailable.
+    """
+    windows, warning = plan_fast_windows(duration, count, min_duration, max_duration, guard_seconds)
+    if warning and "fast-cut" in warning:
+        warning = warning.replace("fast-cut", "long-form")
     return windows, warning
 
 

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { FileText, Film, FolderOpen, Plus, Sparkles, Zap } from "lucide-react";
 import { createClipJob, createFolder, createScriptJob, listFolders, readableError } from "../api";
-import type { Health, LibraryFolder, ProcessingMode, Project, Style } from "../types";
+import type { ContentFormat, Health, LibraryFolder, ProcessingMode, Project, Style } from "../types";
 import { Button, Field, PageHeader, Progress, StatusBadge, formatAge } from "./common";
 import { VideoSourcePicker } from "./video-source-picker";
 
@@ -31,6 +31,7 @@ export function ProjectsView({ projects, health, hasSelectedProvider = true, onC
   const [script, setScript] = useState("");
   const [style, setStyle] = useState<Style>("educational");
   const [count, setCount] = useState(5);
+  const [contentFormat, setContentFormat] = useState<ContentFormat>("short");
   const [advanced, setAdvanced] = useState(false);
   const [minDuration, setMinDuration] = useState(20);
   const [maxDuration, setMaxDuration] = useState(60);
@@ -72,7 +73,7 @@ export function ProjectsView({ projects, health, hasSelectedProvider = true, onC
     setSubmitting(true);
     try {
       const result = mode === "clip"
-        ? await createClipJob({ file: sourceType === "file" ? file || undefined : undefined, url: sourceType === "url" ? url.trim() : undefined, name: projectName.trim() || undefined, style, count, minDuration, maxDuration, aspectRatio, processingMode, burnSubtitles, libraryFolderId: libraryFolderId || undefined })
+        ? await createClipJob({ file: sourceType === "file" ? file || undefined : undefined, url: sourceType === "url" ? url.trim() : undefined, name: projectName.trim() || undefined, style, count, minDuration, maxDuration, aspectRatio: contentFormat === "long" ? "16:9" : aspectRatio, contentFormat, processingMode, burnSubtitles, libraryFolderId: libraryFolderId || undefined })
         : await createScriptJob({ script, name: projectName.trim() || undefined, style, aspectRatio, narration, libraryFolderId: libraryFolderId || undefined });
       if (libraryFolderId) localStorage.setItem(RECENT_FOLDER_KEY, libraryFolderId);
       onCreated(result.project);
@@ -119,7 +120,7 @@ export function ProjectsView({ projects, health, hasSelectedProvider = true, onC
               <span className={`style-swatch ${item.id}`} /><strong>{item.label}</strong><small>{item.note}</small>
             </button>)}
           </div>
-          {mode === "clip" ? <Field label="Clips requested"><div className="count-control"><button onClick={() => setCount(Math.max(1, count - 1))} aria-label="Fewer clips">−</button><strong>{count}</strong><button onClick={() => setCount(Math.min(30, count + 1))} aria-label="More clips">+</button></div></Field>
+          {mode === "clip" ? <Field label={contentFormat === "long" ? "Scenes requested" : "Clips requested"}><div className="count-control"><button onClick={() => setCount(Math.max(1, count - 1))} aria-label="Fewer clips">−</button><strong>{count}</strong><button onClick={() => setCount(Math.min(30, count + 1))} aria-label="More clips">+</button></div></Field>
             : <Field label="Narration" hint="ElevenLabs is optional. Automatic uses local voice when needed, then a clearly labelled silent render."><select value={narration} onChange={(event) => setNarration(event.target.value as typeof narration)}><option value="auto">Automatic fallback</option><option value="local">Local voice only</option><option value="silent">Silent render (no narration)</option></select></Field>}
         </div>
 
@@ -133,7 +134,13 @@ export function ProjectsView({ projects, health, hasSelectedProvider = true, onC
               <li>Deterministic {style} selection</li>
             </ul>
           </div>
-          {mode === "clip" && <div className="mode-field"><div className="step-label"><span>Mode</span></div>
+          {mode === "clip" && <><div className="mode-field format-field"><div className="step-label"><span>Format</span></div>
+            <div className="segmented mode-tabs" aria-label="Content format">
+              <button type="button" className={contentFormat === "short" ? "active" : ""} onClick={() => { setContentFormat("short"); setAspectRatio("9:16"); }}><Film size={13} /> Short form · 9:16</button>
+              <button type="button" className={contentFormat === "long" ? "active" : ""} onClick={() => { setContentFormat("long"); setAspectRatio("16:9"); }}><Film size={13} /> Long form · 16:9</button>
+            </div>
+            <p className="mode-note">{contentFormat === "long" ? "Landscape scenes are selected across the complete source." : "Vertical clips are selected for short-form viewing."}</p>
+          </div><div className="mode-field"><div className="step-label"><span>Mode</span></div>
             <div className="segmented mode-tabs" aria-label="Processing mode">
               <button className={processingMode === "auto" ? "active" : ""} onClick={() => setProcessingMode("auto")}><Sparkles size={13} /> Auto</button>
               <button className={processingMode === "fast" ? "active" : ""} onClick={() => setProcessingMode("fast")}><Zap size={13} /> Fast</button>
@@ -148,17 +155,17 @@ export function ProjectsView({ projects, health, hasSelectedProvider = true, onC
                     ? <p className="mode-note"><Sparkles size={12} /> Auto uses a provider when connected, otherwise Fast local.</p>
                     : <p className="mode-note"><Zap size={12} /> No provider selected — this will run as a <strong>Fast local cut</strong>.</p>
                   : <p className="mode-note"><Zap size={12} /> Fast runs deterministically on this machine — no provider needed.</p>}
-          </div>}
+          </div></>}
           <Field label="Project name" hint="Optional. Leave blank for a generated name."><input id="project-name" aria-label="Project name" value={projectName} maxLength={160} onChange={(event) => setProjectName(event.target.value)} placeholder="QA Browser Test" /></Field>
           <div className="folder-picker"><Field label="Business folder"><select value={libraryFolderId} onChange={(event) => setLibraryFolderId(event.target.value)}>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></Field><Button variant="ghost" onClick={addFolder}><Plus size={13} /> Create folder</Button></div>
           {mode === "clip" && <label className="subtitle-toggle"><input type="checkbox" checked={burnSubtitles} onChange={(event) => setBurnSubtitles(event.target.checked)} /> <span><strong>Burn in subtitles</strong><small>Accurate local word timing; enabled by default. Fast transcribes selected windows only.</small></span></label>}
           <button className="advanced-toggle" onClick={() => setAdvanced(!advanced)} aria-expanded={advanced}>Advanced controls <span>{advanced ? "−" : "+"}</span></button>
           {advanced && <div className="advanced-grid">
-            <Field label="Aspect"><select value={aspectRatio} onChange={(event) => setAspectRatio(event.target.value)}><option>9:16</option><option>1:1</option><option>16:9</option><option>4:5</option></select></Field>
-            {mode === "clip" && <><Field label="Minimum seconds"><input type="number" min={8} max={120} value={minDuration} onChange={(event) => setMinDuration(Number(event.target.value))} /></Field><Field label="Maximum seconds"><input type="number" min={10} max={180} value={maxDuration} onChange={(event) => setMaxDuration(Number(event.target.value))} /></Field></>}
+            <Field label="Aspect"><select value={aspectRatio} disabled={mode === "clip" && contentFormat === "long"} onChange={(event) => setAspectRatio(event.target.value)}><option>9:16</option><option>1:1</option><option>16:9</option><option>4:5</option></select></Field>
+            {mode === "clip" && <><Field label="Minimum seconds"><input type="number" min={8} max={contentFormat === "long" ? 600 : 120} value={minDuration} onChange={(event) => setMinDuration(Number(event.target.value))} /></Field><Field label="Maximum seconds"><input type="number" min={10} max={contentFormat === "long" ? 1800 : 180} value={maxDuration} onChange={(event) => setMaxDuration(Number(event.target.value))} /></Field></>}
           </div>}
           {error && <p className="form-error" role="alert">{error}</p>}
-          <Button variant="primary" className="create-button" disabled={submitting || health?.ffmpeg === false} onClick={submit}>{submitting ? "Creating…" : <><Plus size={17} /> Create {mode === "clip" ? `${count} clips` : "script video"}</>}</Button>
+          <Button variant="primary" className="create-button" disabled={submitting || health?.ffmpeg === false} onClick={submit}>{submitting ? "Creating…" : <><Plus size={17} /> {mode === "clip" ? `Create ${count} ${contentFormat === "long" ? "landscape clips" : "short clips"}` : "Create script video"}</>}</Button>
           <p className="rights-copy">Only process content you own or are authorised to use.</p>
         </div>
       </div>
@@ -168,7 +175,7 @@ export function ProjectsView({ projects, health, hasSelectedProvider = true, onC
       <div className="section-heading"><div><span className="step-number">02</span><h2>Recent projects</h2></div><button onClick={() => onRefresh()}>Refresh</button></div>
       {projects.length ? <div className="project-grid">{projects.map((project) => <button className="project-card" key={project.id} onClick={() => onOpen(project.id)}>
         <div className={`project-thumb ${project.mode}`}><div className="frame-lines" /><span>{project.mode === "clip" ? <Film size={26} /> : <FileText size={26} />}</span>{["active", "queued", "recovered"].includes(project.state) && <Progress value={project.state === "queued" ? 4 : 42} label="Project progress" />}</div>
-        <div className="project-card-body"><div className="project-card-title"><strong>{project.name}</strong><StatusBadge state={project.state} /></div><p>{project.mode === "clip" ? `${project.requestedCount} requested clips` : "Script video"} · {project.style}</p><span>{formatAge(project.updatedAt)} · {project.sourceKind === "youtube" ? "Authorised URL" : "Local source"}</span></div>
+        <div className="project-card-body"><div className="project-card-title"><strong>{project.name}</strong><StatusBadge state={project.state} /></div><p>{project.mode === "clip" ? `${project.requestedCount} ${project.contentFormat === "long" ? "landscape clips" : "short clips"} · ${project.contentFormat === "long" ? "16:9" : "9:16"}` : "Script video"} · {project.style}</p><span>{formatAge(project.updatedAt)} · {project.sourceKind === "youtube" ? "Authorised URL" : "Local source"}</span></div>
       </button>)}</div> : <div className="inline-empty"><Film size={22} /><span>Your projects will appear here after you create the first cut.</span></div>}
     </section>
   </div>;

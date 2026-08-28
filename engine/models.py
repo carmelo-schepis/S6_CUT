@@ -26,6 +26,7 @@ ProcessingStepStatus = Literal["pending", "active", "complete", "skipped", "fail
 Style = Literal["funny", "serious", "educational", "hype"]
 JobState = Literal["queued", "active", "paused", "stalled", "partial", "failed", "recovered", "cancelled_kept", "complete"]
 ProcessingMode = Literal["fast", "smart"]
+ContentFormat = Literal["short", "long"]
 DownloadPhase = Literal["queued", "connecting", "downloading", "stalled", "retrying", "stopped_partial", "failed", "complete"]
 
 
@@ -179,6 +180,7 @@ class Job(ApiModel):
     total_items: int = Field(default=0, ge=0)
     style: Style
     processing_mode: ProcessingMode = "smart"
+    content_format: ContentFormat = "short"
     # Snapshot of the user's caption choice; legacy payloads default safely on.
     burn_subtitles: bool = True
     embed_subtitles: bool = False
@@ -224,6 +226,7 @@ class Project(ApiModel):
     source_name: str
     source_kind: Literal["upload", "youtube", "script"]
     requested_count: int = Field(ge=1, le=60)
+    content_format: ContentFormat = "short"
     latest_job_id: str | None = None
     library_folder_id: str = UNSORTED_LIBRARY_FOLDER_ID
     source_blob_id: str | None = None

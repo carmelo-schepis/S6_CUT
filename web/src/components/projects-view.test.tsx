@@ -12,7 +12,8 @@ vi.mock("../api", () => {
   return { readableError, createClipJob: vi.fn(), createScriptJob: vi.fn(), listFolders: vi.fn(async () => []), createFolder: vi.fn() };
 });
 
-import { createScriptJob } from "../api";
+import { createClipJob, createScriptJob } from "../api";
+const mockCreateClipJob = vi.mocked(createClipJob);
 const mockCreateScriptJob = vi.mocked(createScriptJob);
 
 const health: Health = {
@@ -37,6 +38,7 @@ const undefinedJob: Job = {
 
 describe("Projects create flow", () => {
   beforeEach(() => {
+    mockCreateClipJob.mockReset();
     mockCreateScriptJob.mockReset();
   });
   it("keeps the three-step path and real project card accessible", () => {
@@ -44,9 +46,20 @@ describe("Projects create flow", () => {
     render(<ProjectsView projects={[project]} health={health} onCreated={vi.fn()} onOpen={open} onRefresh={vi.fn(async () => undefined)} />);
     expect(screen.getByRole("heading", { name: "Create a project" })).toBeInTheDocument();
     expect(screen.getByText("Pick style")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Create 5 clips/i })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /Create 5 short clips/i })).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: /Interview/i }));
     expect(open).toHaveBeenCalledWith("project-id");
+  });
+
+  it("selects Long form by keyboard-friendly control and sends landscape format", async () => {
+    mockCreateClipJob.mockResolvedValue({ project: { ...project, contentFormat: "long" }, job: undefinedJob });
+    render(<ProjectsView projects={[]} health={health} onCreated={vi.fn()} onOpen={vi.fn()} onRefresh={vi.fn(async () => undefined)} />);
+    fireEvent.click(screen.getByRole("button", { name: /Long form · 16:9/i }));
+    expect(screen.getByRole("button", { name: /Long form · 16:9/i })).toHaveClass("active");
+    expect(screen.getByRole("button", { name: /Create 5 landscape clips/i })).toBeEnabled();
+    fireEvent.change(screen.getByLabelText("Choose video file"), { target: { files: [new File(["video"], "movie.mp4", { type: "video/mp4" })] } });
+    fireEvent.click(screen.getByRole("button", { name: /Create 5 landscape clips/i }));
+    await waitFor(() => expect(mockCreateClipJob).toHaveBeenCalledWith(expect.objectContaining({ contentFormat: "long", aspectRatio: "16:9" })));
   });
 
   it("switches to exact-source Script mode without a setup gate", () => {

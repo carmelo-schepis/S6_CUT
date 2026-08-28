@@ -28,7 +28,7 @@ from .library import LibraryRules
 from .media import MediaError, available, probe, validate_video_upload
 from .models import (
     Asset, AssetMove, AssetOrigin, AssetUpdate, AssetPage, CaptionCue, CaptionReviewInput, Clip, FolderCreate, FolderMove, FolderUpdate, Health, Job,
-    LibraryFolder, MatchExplanation, ProcessingMode, ProfileInput, Project, ProjectFolderUpdate,
+    LibraryFolder, MatchExplanation, ContentFormat, ProcessingMode, ProfileInput, Project, ProjectFolderUpdate,
     OpenRouterModel, ProviderProfile, ScriptJobInput, SelectionInput, ShortsJobInput, TopicBeat, TopicVideoInput, TopicVideoPlan, now_iso,
 )
 from .providers import ProfileService, ProviderError
@@ -231,7 +231,8 @@ async def create_clip_job(
     processing_mode: Annotated[Literal["fast", "smart", "auto"], Form()] = "auto",
     count: Annotated[int, Form(ge=1, le=30)] = 5,
     min_duration: Annotated[float, Form(ge=8, le=120)] = 20,
-    max_duration: Annotated[float, Form(ge=10, le=180)] = 60,
+    max_duration: Annotated[float, Form(ge=10, le=1800)] = 60,
+    content_format: Annotated[ContentFormat, Form()] = "short",
     aspect_ratio: Annotated[Literal["9:16", "1:1", "16:9", "4:5"], Form()] = "9:16",
     burn_subtitles: Annotated[bool, Form()] = True,
     embed_subtitles: Annotated[bool, Form()] = False,
@@ -249,12 +250,17 @@ async def create_clip_job(
         raise HTTPException(422, "Provide exactly one local video or supported YouTube URL")
     if min_duration >= max_duration:
         raise HTTPException(422, "Minimum duration must be shorter than maximum duration")
+    if content_format == "short" and max_duration > 180:
+        raise HTTPException(422, "Short form clips support a maximum duration of 180 seconds")
+    if content_format == "long":
+        aspect_ratio = "16:9"
+    source_limit = settings.max_long_source_seconds if content_format == "long" else settings.max_source_seconds
     project_id, job_id = str(uuid.uuid4()), str(uuid.uuid4())
     smart_available = profiles.smart_available()
     mode = resolve_processing_mode(processing_mode, smart_available)
     private: dict[str, object] = {
         "count": count, "min_duration": min_duration, "max_duration": max_duration,
-        "aspect_ratio": aspect_ratio, "processing_mode": mode,
+        "aspect_ratio": aspect_ratio, "content_format": content_format, "processing_mode": mode,
         "burn_subtitles": burn_subtitles, "embed_subtitles": embed_subtitles,
         "use_openrouter": mode == "smart" and smart_available,
         "library_folder_id": library_folder_id,
@@ -267,7 +273,7 @@ async def create_clip_job(
         source = settings.data_path / "jobs" / job_id / "source" / f"source{suffix}"
         _, source_hash = await _stream_upload(file, source, settings.max_upload_bytes)
         try:
-            source_metadata = await asyncio.to_thread(validate_video_upload, source, original, settings)
+            source_metadata = await asyncio.to_thread(validate_video_upload, source, original, settings, max_seconds=source_limit)
         except MediaError as exc:
             source.unlink(missing_ok=True)
             raise HTTPException(422, str(exc)) from exc
@@ -282,7 +288,7 @@ async def create_clip_job(
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         source_name, source_kind = "YouTube import", "youtube"
-    project = Project(id=project_id, name=_project_name(name, Path(source_name).stem), mode="clip", style=style, state="queued", source_name=source_name, source_kind=source_kind, requested_count=count, latest_job_id=job_id, library_folder_id=library_folder_id)
+    project = Project(id=project_id, name=_project_name(name, Path(source_name).stem), mode="clip", style=style, state="queued", source_name=source_name, source_kind=source_kind, requested_count=count, content_format=content_format, latest_job_id=job_id, library_folder_id=library_folder_id)
     steps = manager._fast_steps() if mode == "fast" else manager._smart_steps(bool(private["use_openrouter"]))
     if source_kind == "upload":
         checkpoint_time = now_iso()
@@ -292,7 +298,7 @@ async def create_clip_job(
             steps[1].status = "complete"
             steps[1].detail = f"Source validated - {float(source_metadata['duration']):.1f}s"
             steps[1].started_at = steps[1].completed_at = checkpoint_time
-    job = Job(id=job_id, project_id=project_id, library_folder_id=library_folder_id, mode="clip", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style=style, processing_mode=mode, burn_subtitles=burn_subtitles, embed_subtitles=embed_subtitles, steps=steps)
+    job = Job(id=job_id, project_id=project_id, library_folder_id=library_folder_id, mode="clip", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style=style, processing_mode=mode, content_format=content_format, burn_subtitles=burn_subtitles, embed_subtitles=embed_subtitles, steps=steps)
     db.save_project(project)
     db.save_job(job, private)
     try:

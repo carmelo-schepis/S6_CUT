@@ -23,6 +23,9 @@ export type JobState = z.infer<typeof jobStateSchema>;
 export const processingModeSchema = z.enum(["auto", "fast", "smart"]);
 export type ProcessingMode = z.infer<typeof processingModeSchema>;
 
+export const contentFormatSchema = z.enum(["short", "long"]);
+export type ContentFormat = z.infer<typeof contentFormatSchema>;
+
 export const downloadProgressSchema = z.object({
   downloadedBytes: z.number().nonnegative(),
   totalBytes: z.number().nonnegative().nullable().optional(),
@@ -162,6 +165,7 @@ export const jobSchema = z.object({
   totalItems: z.number().default(0),
   style: styleSchema,
   processingMode: processingModeSchema.default("smart"),
+  contentFormat: contentFormatSchema.default("short"),
   burnSubtitles: z.boolean().optional(),
   embedSubtitles: z.boolean().optional(),
   warnings: z.array(z.string()).default([]),
@@ -188,7 +192,7 @@ export const jobSchema = z.object({
   const ready = job.steps.find((step) => step.id === "ready");
   if (ready?.status === "complete" && ["queued", "active", "paused", "stalled", "recovered"].includes(job.state)) context.addIssue({ code: z.ZodIssueCode.custom, message: "Project ready cannot complete while work is active", path: ["steps"] });
 });
-export type Job = z.infer<typeof jobSchema>;
+export type Job = Omit<z.infer<typeof jobSchema>, "contentFormat"> & { contentFormat?: ContentFormat };
 
 export const projectSchema = z.object({
   schemaVersion: z.literal(1),
@@ -200,13 +204,14 @@ export const projectSchema = z.object({
   sourceName: z.string(),
   sourceKind: z.enum(["upload", "youtube", "script"]),
   requestedCount: z.number(),
+  contentFormat: contentFormatSchema.default("short"),
   latestJobId: z.string().nullable().optional(),
   libraryFolderId: z.string().optional(),
   sourceBlobId: z.string().nullable().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
-export type Project = z.infer<typeof projectSchema>;
+export type Project = Omit<z.infer<typeof projectSchema>, "contentFormat"> & { contentFormat?: ContentFormat };
 
 export const healthSchema = z.object({
   status: z.enum(["ready", "degraded", "starting"]),

@@ -16,6 +16,7 @@ import {
   type LibraryAsset,
   type LibraryFolder,
   type MatchExplanation,
+  type ContentFormat,
   type ProcessingMode,
   type Project,
   type ProviderProfile,
@@ -78,6 +79,7 @@ type ClipJobInput = {
   minDuration: number;
   maxDuration: number;
   aspectRatio: string;
+  contentFormat?: ContentFormat;
   processingMode?: ProcessingMode;
   burnSubtitles?: boolean;
   embedSubtitles?: boolean;
@@ -94,6 +96,7 @@ export async function createClipJob(input: ClipJobInput): Promise<{ project: Pro
   form.set("min_duration", String(input.minDuration));
   form.set("max_duration", String(input.maxDuration));
   form.set("aspect_ratio", input.aspectRatio);
+  form.set("content_format", input.contentFormat ?? "short");
   if (input.processingMode) form.set("processing_mode", input.processingMode);
   form.set("burn_subtitles", String(input.burnSubtitles ?? true));
   form.set("embed_subtitles", String(input.embedSubtitles ?? false));
