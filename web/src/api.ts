@@ -2,6 +2,7 @@
 // API paths (/api/v1/...), signed URLs from server only, never construct file paths client-side
 
 import {
+  assetPageSchema,
   assetSchema,
   healthSchema,
   jobSchema,
@@ -79,6 +80,7 @@ type ClipJobInput = {
   aspectRatio: string;
   processingMode?: ProcessingMode;
   burnSubtitles?: boolean;
+  embedSubtitles?: boolean;
   libraryFolderId?: string;
 };
 
@@ -94,6 +96,7 @@ export async function createClipJob(input: ClipJobInput): Promise<{ project: Pro
   form.set("aspect_ratio", input.aspectRatio);
   if (input.processingMode) form.set("processing_mode", input.processingMode);
   form.set("burn_subtitles", String(input.burnSubtitles ?? true));
+  form.set("embed_subtitles", String(input.embedSubtitles ?? false));
   if (input.libraryFolderId) form.set("library_folder_id", input.libraryFolderId);
   const value = await request<{ project: unknown; job: unknown }>("/jobs/clip", { method: "POST", body: form });
   return { project: projectSchema.parse(value.project), job: jobSchema.parse(value.job) };
@@ -115,8 +118,8 @@ export async function createScriptJob(input: {
   return { project: projectSchema.parse(value.project), job: jobSchema.parse(value.job) };
 }
 
-export async function createShortsJob(input: { assetId: string; name?: string; burnSubtitles?: boolean; start: number; end?: number; aspectRatio: "9:16" | "16:9" | "1:1" | "4:5"; libraryFolderId?: string }): Promise<{ project: Project; job: Job }> {
-  const value = await request<{ project: unknown; job: unknown }>("/jobs/shorts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) });
+export async function createShortsJob(input: { assetId: string; name?: string; burnSubtitles?: boolean; embedSubtitles?: boolean; start: number; end?: number; aspectRatio: "9:16" | "16:9" | "1:1" | "4:5"; libraryFolderId?: string }): Promise<{ project: Project; job: Job }> {
+  const value = await request<{ project: unknown; job: unknown }>("/jobs/shorts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...input, embedSubtitles: input.embedSubtitles ?? false }) });
   return { project: projectSchema.parse(value.project), job: jobSchema.parse(value.job) };
 }
 
@@ -156,6 +159,14 @@ export async function controlJob(id: string, action: "pause" | "resume" | "stop-
 
 export async function retryClip(jobId: string, clipId: string): Promise<Job> {
   return jobSchema.parse(await request(`/jobs/${encodeURIComponent(jobId)}/clips/${encodeURIComponent(clipId)}/retry`, { method: "POST" }));
+}
+
+export async function saveCaptionCues(jobId: string, clipId: string, revision: number, cues: Array<{ id: string; start: number; end: number; text: string; confidence?: number | null }>): Promise<Job> {
+  return jobSchema.parse(await request(`/jobs/${encodeURIComponent(jobId)}/clips/${encodeURIComponent(clipId)}/captions`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ revision, cues }) }));
+}
+
+export async function rerenderCaptions(jobId: string, clipId: string, revision: number): Promise<Job> {
+  return jobSchema.parse(await request(`/jobs/${encodeURIComponent(jobId)}/clips/${encodeURIComponent(clipId)}/captions/rerender?revision=${encodeURIComponent(revision)}`, { method: "POST" }));
 }
 
 export async function setClipSelection(jobId: string, clipIds: string[]): Promise<Job> {
@@ -203,6 +214,17 @@ export async function deleteProfile(id: string): Promise<void> {
 }
 
 export type AssetFilters = { folderId?: string; mediaType?: string; origin?: AssetOrigin; search?: string; includeArchived?: boolean };
+
+export async function listAssetsPage(filters: AssetFilters & { page?: number; pageSize?: number } = {}) {
+  const query = new URLSearchParams();
+  if (filters.folderId) query.set("folder_id", filters.folderId);
+  if (filters.mediaType) query.set("media_type", filters.mediaType);
+  if (filters.origin) query.set("origin", filters.origin);
+  if (filters.search) query.set("search", filters.search);
+  if (filters.includeArchived) query.set("include_archived", "true");
+  query.set("page", String(filters.page ?? 1)); query.set("page_size", String(filters.pageSize ?? 40));
+  return assetPageSchema.parse(await request(`/library/assets/page?${query}`));
+}
 
 export async function listAssets(filters: AssetFilters = {}): Promise<LibraryAsset[]> {
   const query = new URLSearchParams();

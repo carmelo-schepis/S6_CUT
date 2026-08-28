@@ -64,6 +64,9 @@ export const provenanceSchema = z.object({
 });
 export type ProvenanceRecord = z.infer<typeof provenanceSchema>;
 
+export const captionDownloadSchema = z.object({ format: z.enum(["ass", "srt", "vtt"]), filename: z.string(), url: z.string() });
+export const captionCueSchema = z.object({ id: z.string(), start: z.number().nonnegative(), end: z.number().positive(), text: z.string().min(1), confidence: z.number().min(0).max(1).nullable().optional(), warnings: z.array(z.string()).default([]) });
+
 export const clipSchema = z.object({
   id: z.string(),
   index: z.number().int().min(1),
@@ -74,6 +77,14 @@ export const clipSchema = z.object({
   openingLine: z.string(),
   score: scoreSchema.nullable().default(null),
   selected: z.boolean(),
+  reviewRequired: z.boolean().optional(),
+  reviewReason: z.string().nullable().optional(),
+  transcriptExcerpt: z.string().nullable().optional(),
+  confidence: z.number().min(0).max(1).nullable().optional(),
+  captionQaWarnings: z.array(z.string()).optional(),
+  captionDownloads: z.array(captionDownloadSchema).optional(),
+  captionCues: z.array(captionCueSchema).optional(),
+  captionRevision: z.number().int().nonnegative().optional(),
   outputName: z.string().nullable().optional(),
   blobId: z.string().nullable().optional(),
   downloadUrl: z.string().nullable().optional(),
@@ -152,7 +163,20 @@ export const jobSchema = z.object({
   style: styleSchema,
   processingMode: processingModeSchema.default("smart"),
   burnSubtitles: z.boolean().optional(),
+  embedSubtitles: z.boolean().optional(),
   warnings: z.array(z.string()).default([]),
+  queuedAt: z.string().nullable().optional(),
+  queuePosition: z.number().int().positive().nullable().optional(),
+  queuedElapsedSeconds: z.number().nonnegative().nullable().optional(),
+  activeElapsedSeconds: z.number().nonnegative().nullable().optional(),
+  blockerSummary: z.string().nullable().optional(),
+  cancellationAvailable: z.boolean().optional(),
+  transcriptionStartedAt: z.string().nullable().optional(),
+  lastHeartbeatAt: z.string().nullable().optional(),
+  transcriptionElapsedSeconds: z.number().nonnegative().nullable().optional(),
+  transcriptionProcessedSeconds: z.number().nonnegative().nullable().optional(),
+  transcriptionTotalSeconds: z.number().nonnegative().nullable().optional(),
+  transcriptionActivity: z.string().nullable().optional(),
   error: z.string().nullable().optional(),
   clips: z.array(clipSchema).default([]),
   beats: z.array(beatSchema).default([]),
@@ -195,6 +219,7 @@ export const healthSchema = z.object({
   localTts: z.boolean(),
   dataPath: z.string(),
   freeBytes: z.number(),
+  configuredWorkers: z.number().int().positive().optional(),
   activeWorkers: z.number(),
   queuedJobs: z.number(),
   fallbacks: z.record(z.string()),
@@ -286,6 +311,9 @@ export const assetSchema = z.object({
   createdAt: z.string(),
 });
 export type LibraryAsset = z.infer<typeof assetSchema>;
+
+export const assetPageSchema = z.object({ items: assetSchema.array(), page: z.number().int().positive(), pageSize: z.number().int().positive(), hasMore: z.boolean() });
+export type AssetPage = z.infer<typeof assetPageSchema>;
 
 export type MatchExplanation = {
   query: string;

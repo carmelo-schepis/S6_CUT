@@ -686,6 +686,33 @@ def caption_words_for_clip(words: Iterable[dict[str, Any]], start: float, end: f
 # DO-NOT-CHANGE: PlayResX/Y must match the final render canvas; captions stay
 # bottom-centre (Alignment=2) with symmetric margins; word-by-word highlight
 # uses {\\c&H0077D6FF&}; wrapping at word boundaries via _wrap_caption_words
+def _caption_cues(words: list[dict[str, Any]], offset: float, duration: float) -> list[tuple[float, float, str]]:
+    cues: list[tuple[float, float, str]] = []
+    for word in caption_words_for_clip(words, offset, offset + duration):
+        text = " ".join(str(word.get("text", "")).split())
+        start = max(0.0, min(duration, float(word["start"])))
+        end = max(start + 0.05, min(duration, float(word["end"])))
+        if text and end > start:
+            cues.append((start, end, text))
+    return cues
+
+
+def _srt_time(seconds: float) -> str:
+    milliseconds = round(max(0.0, seconds) * 1000)
+    hours, remainder = divmod(milliseconds, 3_600_000)
+    minutes, remainder = divmod(remainder, 60_000)
+    seconds_value, millis = divmod(remainder, 1000)
+    return f"{hours:02d}:{minutes:02d}:{seconds_value:02d},{millis:03d}"
+
+
+def write_caption_sidecars(path: Path, words: list[dict[str, Any]], *, offset: float, duration: float) -> None:
+    cues = _caption_cues(words, offset, duration)
+    srt = "\n\n".join(f"{index}\n{_srt_time(start)} --> {_srt_time(end)}\n{text}" for index, (start, end, text) in enumerate(cues, 1)) + ("\n" if cues else "")
+    path.with_suffix(".srt").write_text(srt, encoding="utf-8")
+    vtt = "WEBVTT\n\n" + "\n\n".join(f"{_srt_time(start).replace(',', '.')} --> {_srt_time(end).replace(',', '.')}\n{text}" for start, end, text in cues) + ("\n" if cues else "")
+    path.with_suffix(".vtt").write_text(vtt, encoding="utf-8")
+
+
 def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duration: float, visuals: Iterable[tuple[str, float, float]], width: int, height: int, style: str = "educational") -> None:
     preset = _subtitle_preset(style)
     metrics = _ass_style_metrics(width, height)
@@ -759,21 +786,27 @@ def _filters(width: int, height: int, overlays: list[tuple[Path, float, float]],
 
 # DO-NOT-CHANGE: atomic render (.partial.mp4 + os.replace) with structural output
 # validation (dimensions/audio) before the output is publishable
-def render_clip(source: Path, output: Path, *, start: float, end: float, aspect: str, words: list[dict[str, Any]], visuals: list[tuple[str, float, float]], overlays: list[tuple[Path, float, float]], settings: Settings, style: str = "educational", has_audio: bool = True) -> None:
+def render_clip(source: Path, output: Path, *, start: float, end: float, aspect: str, words: list[dict[str, Any]], visuals: list[tuple[str, float, float]], overlays: list[tuple[Path, float, float]], settings: Settings, style: str = "educational", has_audio: bool = True, embed_subtitles: bool = False, subtitle_language: str = "und") -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     ass = output.parent / f"{output.stem}.ass"
     duration = end - start
     width, height = dimensions(aspect)
     write_ass(ass, words, offset=start, duration=duration, visuals=visuals, width=width, height=height, style=style)
+    write_caption_sidecars(output, words, offset=start, duration=duration)
     temp = output.with_suffix(".partial.mp4")
     command = [settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{start:.3f}", "-i", str(source), "-t", f"{duration:.3f}"]
     _overlay_inputs(command, overlays)
+    subtitle_index = 1 + len(overlays)
+    if embed_subtitles:
+        command.extend(["-i", str(output.with_suffix(".srt"))])
     filters, mapped = _filters(width, height, overlays, 1, ass.name)
     command.extend(["-filter_complex", filters, "-map", f"[{mapped}]"])
     if has_audio:
         command.extend(["-map", "0:a:0", "-c:a", "aac", "-b:a", "160k", "-ar", "48000"])
     else:
         command.append("-an")
+    if embed_subtitles:
+        command.extend(["-map", f"{subtitle_index}:0", "-c:s", "mov_text", "-metadata:s:s:0", f"language={subtitle_language}"])
     command.extend(["-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-shortest", str(temp)])
     run(command, cwd=output.parent, timeout=7200)
     metadata = probe(temp, settings)
@@ -858,14 +891,14 @@ def plan_fast_windows(
 def _fast_crop_scale_filter(
     src_width: int, src_height: int, target_width: int, target_height: int
 ) -> str:
-    """Build a ``-vf`` filter string that centre-crops to the target aspect
-    ratio without needless upscaling.
+    """Centre-crop to the requested aspect and always produce its canvas.
 
-    The largest native-resolution region with the target aspect is centre-
-    cropped, then scaled down only when that region exceeds the target canvas.
-    A source that is already at or below the target resolution is never blown
-    up: the output keeps its native size (even-rounded for H.264 yuv420p).
+    Delivery dimensions are a contract, not a quality heuristic.  Small
+    sources are deliberately upscaled; callers record that loss-of-detail
+    warning separately.  Lanczos keeps the result clean when downscaling.
     """
+    if src_width <= 0 or src_height <= 0:
+        raise MediaError("Source dimensions are unavailable for fast rendering")
     if src_width * target_height >= src_height * target_width:
         # Source is wider (or equal) than the target aspect: crop the width.
         crop_w = round(src_height * target_width / target_height)
@@ -874,14 +907,11 @@ def _fast_crop_scale_filter(
         # Source is taller than the target aspect: crop the height.
         crop_w = src_width
         crop_h = round(src_width * target_height / target_width)
-    factor = min(1.0, target_width / crop_w, target_height / crop_h)
-    out_w = int(crop_w * factor)
-    out_h = int(crop_h * factor)
-    out_w -= out_w % 2
-    out_h -= out_h % 2
+    # The crop has the target aspect, so scaling directly to the canonical
+    # canvas cannot distort the image.  Both target dimensions are even.
     return (
         f"crop={crop_w}:{crop_h}:(iw-{crop_w})/2:(ih-{crop_h})/2,"
-        f"scale={out_w}:{out_h},setsar=1"
+        f"scale={target_width}:{target_height}:flags=lanczos,setsar=1"
     )
 
 
@@ -898,6 +928,8 @@ def render_fast_clip(
     words: list[dict[str, Any]] | None = None,
     style: str = "educational",
     subtitles_enabled: bool = True,
+    embed_subtitles: bool = False,
+    subtitle_language: str = "und",
 ) -> None:
     """Render a fast clip with optional captions and no overlays or visual beats.
 
@@ -912,8 +944,7 @@ def render_fast_clip(
     * Output validation (dimensions, audio presence).
     * Atomic publish via a temporary ``.partial.mp4`` then ``os.replace``.
 
-    The output canvas matches ``dimensions(aspect)`` only when the source is
-    large enough; smaller sources keep their native resolution (no upscaling).
+    The output canvas always matches the canonical ``dimensions(aspect)``.
     When ``words`` are supplied, the same ASS renderer used by Smart and Script
     burns accurate, clip-relative captions into the output.
 
@@ -949,11 +980,12 @@ def render_fast_clip(
         src_width, src_height = src_height, src_width
     vf = _fast_crop_scale_filter(src_width, src_height, width, height)
     ass: Path | None = None
+    if (subtitles_enabled or embed_subtitles) and words:
+        write_caption_sidecars(output, words, offset=0, duration=duration)
     if subtitles_enabled and words:
         ass = output.parent / f"{output.stem}.ass"
         write_ass(ass, words, offset=0, duration=duration, visuals=[], width=width, height=height, style=style)
         vf = f"{vf},subtitles={ass.name}"
-
     command = [
         settings.ffmpeg,
         "-hide_banner",
@@ -966,6 +998,10 @@ def render_fast_clip(
         str(source),
         "-t",
         f"{duration:.3f}",
+    ]
+    if embed_subtitles:
+        command.extend(["-i", str(output.with_suffix(".srt"))])
+    command.extend([
         "-vf",
         vf,
         "-map",
@@ -980,7 +1016,7 @@ def render_fast_clip(
         "yuv420p",
         "-movflags",
         "+faststart",
-    ]
+    ])
     if has_audio:
         command.extend([
             "-map",
@@ -994,16 +1030,17 @@ def render_fast_clip(
         ])
     else:
         command.append("-an")
+    if embed_subtitles:
+        command.extend(["-map", "1:0", "-c:s", "mov_text", "-metadata:s:s:0", f"language={subtitle_language}"])
     command.append(str(temp))
 
     run(command, cwd=output.parent, timeout=7200)
 
     result = probe(temp, settings)
-    aspect_error = abs(result["width"] * height - result["height"] * width) / (width * height)
-    if result["width"] < 2 or result["height"] < 2 or aspect_error > 0.02:
+    if result["width"] != width or result["height"] != height:
         raise MediaError(
-            f"Fast clip failed aspect validation: expected {width}:{height} canvas "
-            f"({width}x{height}), got {result['width']}x{result['height']}"
+            f"Fast clip failed delivery validation: expected {width}x{height}, "
+            f"got {result['width']}x{result['height']}"
         )
     if has_audio and not result["audio"]:
         raise MediaError("Fast clip expected audio but the output has no audio track")
@@ -1019,6 +1056,7 @@ def render_script(output: Path, *, duration: float, aspect: str, narration: Path
     ass = output.parent / f"{output.stem}.ass"
     width, height = dimensions(aspect)
     write_ass(ass, words, offset=0, duration=duration, visuals=visuals, width=width, height=height, style=style)
+    write_caption_sidecars(output, words, offset=0, duration=duration)
     temp = output.with_suffix(".partial.mp4")
     command = [settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", f"color=c=0x08080a:s={width}x{height}:r=30:d={duration:.3f}"]
     audio_index: int | None = None

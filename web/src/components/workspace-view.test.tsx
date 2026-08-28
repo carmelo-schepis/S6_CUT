@@ -329,8 +329,8 @@ describe("WorkspaceView – publication metadata, Details rename, read-only capt
     renderView();
     expect(await screen.findByText("Test — Cut 01")).toBeInTheDocument();
     expect(screen.getByText("Test — Cut 02")).toBeInTheDocument();
-    expect(screen.getByText("0:10 · 1080×1920 · Acme Corp")).toBeInTheDocument();
-    expect(screen.getByText("0:12 · 1080×1920 · Acme Corp")).toBeInTheDocument();
+    expect(screen.getByText(/0:10 · 9:16 · 1080 × 1920 px · Acme Corp/)).toBeInTheDocument();
+    expect(screen.getByText(/0:12 · 9:16 · 1080 × 1920 px · Acme Corp/)).toBeInTheDocument();
   });
 
   it("board header includes the saved-to-Library count", async () => {

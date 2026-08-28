@@ -27,7 +27,7 @@ from .jobs import JobManager, QueueFullError, SwitchFastError
 from .library import LibraryRules
 from .media import MediaError, available, probe, validate_video_upload
 from .models import (
-    Asset, AssetMove, AssetOrigin, AssetUpdate, Clip, FolderCreate, FolderMove, FolderUpdate, Health, Job,
+    Asset, AssetMove, AssetOrigin, AssetUpdate, AssetPage, CaptionCue, CaptionReviewInput, Clip, FolderCreate, FolderMove, FolderUpdate, Health, Job,
     LibraryFolder, MatchExplanation, ProcessingMode, ProfileInput, Project, ProjectFolderUpdate,
     OpenRouterModel, ProviderProfile, ScriptJobInput, SelectionInput, ShortsJobInput, TopicBeat, TopicVideoInput, TopicVideoPlan, now_iso,
 )
@@ -107,6 +107,11 @@ def _download_url(relative: str) -> str:
 # incomplete clips, only signs URLs for complete clip outputs
 def public_job(job: Job) -> Job:
     result = job.model_copy(deep=True)
+    caption_artifacts = db.get_job_private(job.id).get("caption_artifacts", {})
+    result.queue_position = manager.queue_position(job.id) if job.state == "queued" else None
+    result.cancellation_available = job.state in {"queued", "active", "paused", "recovered"}
+    if result.queue_position:
+        result.blocker_summary = f"Waiting for one of {settings.job_workers} configured worker(s)"
     for clip in result.clips:
         if clip.state == "complete" and not clip.library_asset_id:
             clip.state = "rendering"
@@ -115,6 +120,17 @@ def public_job(job: Job) -> Job:
         if clip.state == "complete" and clip.output_name:
             clip.download_url = _download_url(f"jobs/{job.id}/clips/{clip.output_name}")
             clip.preview_url = clip.download_url
+            sidecars = []
+            manifest = caption_artifacts.get(clip.id) if isinstance(caption_artifacts, dict) else None
+            if isinstance(manifest, dict) and manifest.get("output_name") == clip.output_name:
+                for extension in manifest.get("formats", []):
+                    if extension not in {"ass", "srt", "vtt"}:
+                        continue
+                    filename = Path(clip.output_name).with_suffix(f".{extension}").name
+                    relative = f"jobs/{job.id}/clips/{filename}"
+                    expires, signature = signer.sign(relative)
+                    sidecars.append({"format": extension, "filename": filename, "url": f"/api/v1/jobs/{job.id}/clips/{clip.id}/captions/{extension}?expires={expires}&signature={signature}"})
+            clip.caption_downloads = sidecars
     return result
 
 
@@ -128,8 +144,8 @@ def runtime_health() -> Health:
         version=__version__, database=database, ffmpeg=ffmpeg, ffprobe=ffprobe, whisper=whisper,
         ytdlp=available(settings.ytdlp), local_tts=available(settings.local_tts),
         data_path="Container data directory" if str(settings.data_path).startswith("/app/") else "Local mounted data directory",
-        free_bytes=shutil.disk_usage(settings.data_path).free, active_workers=manager.active_workers,
-        queued_jobs=manager.queue.qsize(),
+        free_bytes=shutil.disk_usage(settings.data_path).free, configured_workers=settings.job_workers,
+        active_workers=manager.active_workers, queued_jobs=manager.queue.qsize(),
         fallbacks={
             "transcription": "Local Whisper is required for automatic clip timing",
             "planning": "Deterministic sentence-aware selection and beat planning",
@@ -218,6 +234,7 @@ async def create_clip_job(
     max_duration: Annotated[float, Form(ge=10, le=180)] = 60,
     aspect_ratio: Annotated[Literal["9:16", "1:1", "16:9", "4:5"], Form()] = "9:16",
     burn_subtitles: Annotated[bool, Form()] = True,
+    embed_subtitles: Annotated[bool, Form()] = False,
     library_folder_id: Annotated[str, Form()] = UNSORTED_FOLDER_ID,
 ) -> dict[str, object]:
     _rate_limit(request)
@@ -238,7 +255,7 @@ async def create_clip_job(
     private: dict[str, object] = {
         "count": count, "min_duration": min_duration, "max_duration": max_duration,
         "aspect_ratio": aspect_ratio, "processing_mode": mode,
-        "burn_subtitles": burn_subtitles,
+        "burn_subtitles": burn_subtitles, "embed_subtitles": embed_subtitles,
         "use_openrouter": mode == "smart" and smart_available,
         "library_folder_id": library_folder_id,
     }
@@ -275,7 +292,7 @@ async def create_clip_job(
             steps[1].status = "complete"
             steps[1].detail = f"Source validated - {float(source_metadata['duration']):.1f}s"
             steps[1].started_at = steps[1].completed_at = checkpoint_time
-    job = Job(id=job_id, project_id=project_id, library_folder_id=library_folder_id, mode="clip", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style=style, processing_mode=mode, burn_subtitles=burn_subtitles, steps=steps)
+    job = Job(id=job_id, project_id=project_id, library_folder_id=library_folder_id, mode="clip", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style=style, processing_mode=mode, burn_subtitles=burn_subtitles, embed_subtitles=embed_subtitles, steps=steps)
     db.save_project(project)
     db.save_job(job, private)
     try:
@@ -313,7 +330,7 @@ async def _queue_shorts_job(
     *, request: Request, source_name: str, source_kind: Literal["upload", "youtube"], source_path: Path | None,
     source_hash: str | None, source_metadata: dict[str, object] | None, url: str | None,
     start: float, end: float | None, aspect_ratio: str, library_folder_id: str,
-    name: str | None = None, burn_subtitles: bool = True, job_id: str | None = None,
+    name: str | None = None, burn_subtitles: bool = True, embed_subtitles: bool = False, job_id: str | None = None,
 ) -> dict[str, object]:
     if manager.queue.full():
         raise HTTPException(429, "The local processing queue is full. Try again after an active job completes.")
@@ -328,14 +345,14 @@ async def _queue_shorts_job(
     project = Project(id=project_id, name=_project_name(name, f"Short — {Path(source_name).stem}"), mode="clip", style="educational", state="queued", source_name=source_name, source_kind=source_kind, requested_count=1, latest_job_id=job_id, library_folder_id=library_folder_id)
     clip_end = end if end is not None else max(start + 0.1, 0.1)
     clip = Clip(id=str(uuid.uuid4()), index=1, state="queued", start=start, end=clip_end, duration=clip_end-start, opening_line="Shorts Editor cut")
-    job = Job(id=job_id, project_id=project_id, library_folder_id=library_folder_id, mode="clip", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style="educational", processing_mode="fast", burn_subtitles=burn_subtitles, clips=[clip], total_items=1, steps=manager._fast_steps())
+    job = Job(id=job_id, project_id=project_id, library_folder_id=library_folder_id, mode="clip", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style="educational", processing_mode="fast", burn_subtitles=burn_subtitles, embed_subtitles=embed_subtitles, clips=[clip], total_items=1, steps=manager._fast_steps())
     timestamp = now_iso()
     if source_kind == "upload":
         manager._apply_step(job, job.steps[0], status="complete", detail="Source received and validated", completed_at=timestamp)
     if source_metadata is not None:
         manager._apply_step(job, job.steps[1], status="complete", detail="Source duration validated", completed_at=timestamp)
     manager._apply_step(job, job.steps[2], status="skipped", detail="Trim supplied by Shorts Editor", completed_at=timestamp)
-    private = {"source_path": str(source_path) if source_path else None, "source_hash": source_hash, "source_metadata": source_metadata, "url": url, "trim_start": start, "trim_end": end, "aspect_ratio": aspect_ratio, "count": 1, "min_duration": max(0.1, clip.duration), "max_duration": max(0.1, clip.duration), "processing_mode": "fast", "burn_subtitles": burn_subtitles, "library_folder_id": library_folder_id}
+    private = {"source_path": str(source_path) if source_path else None, "source_hash": source_hash, "source_metadata": source_metadata, "url": url, "trim_start": start, "trim_end": end, "aspect_ratio": aspect_ratio, "count": 1, "min_duration": max(0.1, clip.duration), "max_duration": max(0.1, clip.duration), "processing_mode": "fast", "burn_subtitles": burn_subtitles, "embed_subtitles": embed_subtitles, "library_folder_id": library_folder_id}
     db.save_project(project)
     db.save_job(job, private)
     try:
@@ -361,7 +378,7 @@ async def create_shorts_job(request: Request, value: ShortsJobInput) -> dict[str
         metadata = await asyncio.to_thread(probe, source, settings)
     except MediaError as exc:
         raise HTTPException(422, str(exc)) from exc
-    return await _queue_shorts_job(request=request, source_name=asset.filename, source_kind="upload", source_path=source, source_hash=asset.content_hash, source_metadata=metadata, url=None, start=value.start, end=value.end, aspect_ratio=value.aspect_ratio, library_folder_id=value.library_folder_id, name=value.name, burn_subtitles=value.burn_subtitles)
+    return await _queue_shorts_job(request=request, source_name=asset.filename, source_kind="upload", source_path=source, source_hash=asset.content_hash, source_metadata=metadata, url=None, start=value.start, end=value.end, aspect_ratio=value.aspect_ratio, library_folder_id=value.library_folder_id, name=value.name, burn_subtitles=value.burn_subtitles, embed_subtitles=value.embed_subtitles)
 
 
 @app.post("/api/v1/jobs/shorts/source", status_code=status.HTTP_202_ACCEPTED)
@@ -487,6 +504,80 @@ async def get_job(job_id: str) -> Job:
     return public_job(job)
 
 
+@app.put("/api/v1/jobs/{job_id}/clips/{clip_id}/captions", response_model=Job)
+async def update_captions(job_id: str, clip_id: str, value: CaptionReviewInput) -> Job:
+    job = db.get_job(job_id)
+    if not job:
+        raise _not_found("Job")
+    clip = next((item for item in job.clips if item.id == clip_id), None)
+    if not clip:
+        raise _not_found("Clip")
+    if value.revision != clip.caption_revision:
+        raise HTTPException(409, "Caption revision is stale")
+    duration = clip.duration
+    from .captions import normalize_and_validate
+    cues, findings = normalize_and_validate([cue.model_dump() for cue in value.cues], duration)
+    fatal = [item for item in findings if item["severity"] == "error"]
+    if fatal:
+        raise HTTPException(422, {"message": "Caption cues are invalid", "issues": fatal})
+    clip.caption_cues = [CaptionCue.model_validate(item) for item in cues]
+    clip.caption_revision += 1
+    clip.caption_qa_warnings = [item["message"] for item in findings if item["severity"] == "warning"]
+    clip.review_required = bool(clip.caption_qa_warnings)
+    private = db.get_job_private(job_id)
+    private.setdefault("caption_overrides", {})[clip_id] = {"revision": clip.caption_revision, "cues": cues}
+    db.save_job(job, private)
+    return public_job(job)
+
+
+@app.post("/api/v1/jobs/{job_id}/clips/{clip_id}/captions/rerender", response_model=Job)
+async def rerender_captions(job_id: str, clip_id: str, revision: int = Query(..., ge=1)) -> Job:
+    job = db.get_job(job_id)
+    if not job:
+        raise _not_found("Job")
+    clip = next((item for item in job.clips if item.id == clip_id), None)
+    if not clip:
+        raise _not_found("Clip")
+    private = db.get_job_private(job_id)
+    override = (private.get("caption_overrides") or {}).get(clip_id)
+    if not isinstance(override, dict) or override.get("revision") != revision:
+        raise HTTPException(409, "Caption revision is stale or unavailable")
+    running = private.get("caption_rerender")
+    if isinstance(running, dict) and running.get("clip_id") == clip_id:
+        raise HTTPException(409, "Caption rerender is already queued or active")
+    if manager.queue.full():
+        raise HTTPException(429, "The local render queue is full")
+    private["caption_rerender"] = {"clip_id": clip_id, "revision": revision, "run_id": uuid.uuid4().hex}
+    private.pop("caption_rerender_error", None)
+    job.state, job.stage, job.stage_label = "queued", "render", f"Caption revision {revision} queued"
+    db.save_job(job, private)
+    await manager.enqueue(job.id)
+    return public_job(job)
+
+
+@app.get("/api/v1/jobs/{job_id}/clips/{clip_id}/captions/{format}")
+async def download_caption(job_id: str, clip_id: str, format: Literal["ass", "srt", "vtt"], expires: int = Query(...), signature: str = Query(...)) -> FileResponse:
+    job = db.get_job(job_id)
+    clip = next((item for item in job.clips if item.id == clip_id), None) if job else None
+    if not job or not clip or clip.state != "complete" or not clip.output_name:
+        raise _not_found("Caption")
+    manifest = db.get_job_private(job_id).get("caption_artifacts", {}).get(clip_id)
+    if not isinstance(manifest, dict) or manifest.get("output_name") != clip.output_name or format not in manifest.get("formats", []):
+        raise _not_found("Caption")
+    filename = Path(clip.output_name).with_suffix(f".{format}").name
+    relative = f"jobs/{job_id}/clips/{filename}"
+    if not signer.verify(relative, expires, signature):
+        raise HTTPException(403, "Download link is invalid or expired")
+    try:
+        path = confined(settings.data_path, "jobs", job_id, "clips", filename)
+    except ValueError as exc:
+        raise HTTPException(403, "Caption path is invalid") from exc
+    if not path.is_file() or path.is_symlink():
+        raise _not_found("Caption")
+    media_types = {"ass": "text/x-ass", "srt": "application/x-subrip", "vtt": "text/vtt"}
+    return FileResponse(path, media_type=media_types[format], filename=filename)
+
+
 @app.get("/api/v1/jobs/{job_id}/events")
 async def job_events(job_id: str, request: Request) -> StreamingResponse:
     if not db.get_job(job_id):
@@ -577,7 +668,7 @@ async def export_job(job_id: str, value: SelectionInput) -> dict[str, str]:
 @app.get("/api/v1/files/{relative_path:path}")
 # DO-NOT-CHANGE: only serves jobs/ and exports/ prefixes; HMAC-verified; confined path
 async def download_file(relative_path: str, expires: int = Query(...), signature: str = Query(...)) -> FileResponse:
-    if not relative_path.startswith(("jobs/", "exports/")) or not signer.verify(relative_path, expires, signature):
+    if not relative_path.startswith(("jobs/", "exports/")) or Path(relative_path).suffix.casefold() not in {".mp4", ".zip"} or not signer.verify(relative_path, expires, signature):
         raise HTTPException(403, "Download link is invalid or expired")
     try:
         target = confined(settings.data_path, *relative_path.split("/"))
@@ -721,6 +812,14 @@ async def list_assets(folder_id: str | None = None, media_type: str | None = Non
     if folder_id and not db.get_folder(folder_id):
         raise _not_found("Folder")
     return [_public_asset(asset) for asset in db.list_assets(folder_id=folder_id, media_type=media_type, origin=origin, search=search, include_archived=include_archived)]
+
+
+@app.get("/api/v1/library/assets/page", response_model=AssetPage)
+async def list_assets_page(folder_id: str | None = None, media_type: str | None = None, origin: AssetOrigin | None = None, search: str | None = Query(default=None, max_length=500), include_archived: bool = False, page: int = Query(1, ge=1), page_size: int = Query(40, ge=1, le=100)) -> AssetPage:
+    if folder_id and not db.get_folder(folder_id):
+        raise _not_found("Folder")
+    assets, has_more = db.list_assets_page(folder_id=folder_id, media_type=media_type, origin=origin, search=search, include_archived=include_archived, page=page, page_size=page_size)
+    return AssetPage(items=[_public_asset(asset) for asset in assets], page=page, page_size=page_size, has_more=has_more)
 
 
 @app.post("/api/v1/library/assets/move", response_model=dict[str, int])

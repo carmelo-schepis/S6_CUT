@@ -68,6 +68,21 @@ class ProvenanceRecord(ApiModel):
     content_hash: str | None = None
 
 
+class CaptionDownload(ApiModel):
+    format: Literal["ass", "srt", "vtt"]
+    filename: str
+    url: str
+
+
+class CaptionCue(ApiModel):
+    id: str
+    start: float = Field(ge=0)
+    end: float = Field(gt=0)
+    text: str = Field(min_length=1, max_length=500)
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    warnings: list[str] = Field(default_factory=list)
+
+
 class Clip(ApiModel):
     id: str
     index: int = Field(ge=1)
@@ -78,6 +93,14 @@ class Clip(ApiModel):
     opening_line: str
     score: ScoreBreakdown | None = None
     selected: bool = True
+    review_required: bool = False
+    review_reason: str | None = None
+    transcript_excerpt: str | None = None
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    caption_qa_warnings: list[str] = Field(default_factory=list)
+    caption_downloads: list[CaptionDownload] = Field(default_factory=list)
+    caption_cues: list[CaptionCue] = Field(default_factory=list)
+    caption_revision: int = Field(default=0, ge=0)
     output_name: str | None = None
     blob_id: str | None = None
     # DO-NOT-CHANGE: engine-set only, after the publication transaction commits —
@@ -158,7 +181,20 @@ class Job(ApiModel):
     processing_mode: ProcessingMode = "smart"
     # Snapshot of the user's caption choice; legacy payloads default safely on.
     burn_subtitles: bool = True
+    embed_subtitles: bool = False
     warnings: list[str] = Field(default_factory=list)
+    queued_at: str | None = None
+    queue_position: int | None = Field(default=None, ge=1)
+    queued_elapsed_seconds: float | None = Field(default=None, ge=0)
+    active_elapsed_seconds: float | None = Field(default=None, ge=0)
+    blocker_summary: str | None = None
+    cancellation_available: bool = False
+    transcription_started_at: str | None = None
+    last_heartbeat_at: str | None = None
+    transcription_elapsed_seconds: float | None = Field(default=None, ge=0)
+    transcription_processed_seconds: float | None = Field(default=None, ge=0)
+    transcription_total_seconds: float | None = Field(default=None, ge=0)
+    transcription_activity: str | None = None
     error: str | None = None
     clips: list[Clip] = Field(default_factory=list)
     beats: list[Beat] = Field(default_factory=list)
@@ -207,6 +243,7 @@ class Health(ApiModel):
     local_tts: bool
     data_path: str
     free_bytes: int
+    configured_workers: int = Field(ge=1)
     active_workers: int
     queued_jobs: int
     fallbacks: dict[str, str]
@@ -225,9 +262,15 @@ class SelectionInput(ApiModel):
     clip_ids: list[str] = Field(max_length=60)
 
 
+class CaptionReviewInput(ApiModel):
+    revision: int = Field(ge=0)
+    cues: list[CaptionCue] = Field(max_length=500)
+
+
 class ShortsJobInput(ApiModel):
     name: str | None = Field(default=None, max_length=160)
     burn_subtitles: bool = True
+    embed_subtitles: bool = False
     asset_id: str = Field(min_length=1, max_length=200)
     start: float = Field(ge=0)
     end: float | None = Field(default=None, gt=0)
@@ -425,6 +468,13 @@ class AssetUpdate(ApiModel):
     licence: str | None = Field(default=None, max_length=500)
     attribution: str | None = Field(default=None, max_length=1000)
     folder_id: str | None = None
+
+
+class AssetPage(ApiModel):
+    items: list[Asset]
+    page: int = Field(ge=1)
+    page_size: int = Field(ge=1, le=100)
+    has_more: bool
 
 
 class MatchExplanation(ApiModel):

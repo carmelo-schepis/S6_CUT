@@ -28,6 +28,7 @@ export function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
+  const [healthChecked, setHealthChecked] = useState(false);
   const [profiles, setProfiles] = useState<ProviderProfile[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -37,6 +38,7 @@ export function App() {
     if (profilesResult.status === "fulfilled") setProfiles(profilesResult.value);
     if (healthResult.status === "fulfilled") { setHealth(healthResult.value); setError(null); }
     else { setHealth(null); setError(readableError(healthResult.reason)); }
+    setHealthChecked(true);
   }, []);
 
   useEffect(() => {
@@ -85,7 +87,7 @@ export function App() {
           {selected && page === "workspace" ? <><span className="muted">Workspace</span><span className="crumb">/</span><strong>{selected.name}</strong></> : <strong>{nav.find((item) => item.id === page)?.label}</strong>}
         </div>
         <div className="topbar-state">
-          {health ? <StatusBadge state={health.status === "ready" ? "local" : "fallback"} label={health.status === "ready" ? "Local engine" : "Fallbacks active"} /> : <StatusBadge state="offline" label="Engine offline" />}
+          {health ? <StatusBadge state={health.status === "ready" ? "local" : "fallback"} label={health.status === "ready" ? "Local engine" : "Fallbacks active"} /> : <StatusBadge state={healthChecked ? "offline" : "checking"} label={healthChecked ? "Engine offline" : "Connecting to local engine…"} />}
           <span className="save-state"><HardDrive size={14} /> Saved on this machine</span>
         </div>
       </header>

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, createClipJob, createFolder, getHealth, readableError } from "./api";
+import { ApiError, createClipJob, createFolder, getHealth, readableError, rerenderCaptions, saveCaptionCues } from "./api";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -44,6 +44,18 @@ describe("engine API boundary", () => {
     });
     expect(result.project.id).toBe("p");
     expect(result.job.processingMode).toBe("smart"); // legacy backend omission defaults to Smart
+  });
+
+  it("sends scoped caption save and rerender requests without constructing media URLs", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push(url);
+      if (init?.method === "PUT") expect(init.body).toBe(JSON.stringify({ revision: 2, cues: [{ id: "c", start: 0, end: 1, text: "Reviewed" }] }));
+      return new Response(JSON.stringify({ schemaVersion: 1, id: "j", projectId: "p", mode: "clip", state: "queued", stage: "render", stageLabel: "Queued", progress: 0, style: "serious", warnings: [], clips: [], beats: [], createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }));
+    await saveCaptionCues("j", "c", 2, [{ id: "c", start: 0, end: 1, text: "Reviewed" }]);
+    await rerenderCaptions("j", "c", 2);
+    expect(calls).toEqual(["/api/v1/jobs/j/clips/c/captions", "/api/v1/jobs/j/clips/c/captions/rerender?revision=2"]);
   });
 
   it("uses the typed folder endpoint", async () => {

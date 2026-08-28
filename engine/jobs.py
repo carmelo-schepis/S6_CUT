@@ -9,7 +9,7 @@ import threading
 import time
 import uuid
 import zipfile
-from collections import defaultdict
+from collections import defaultdict, deque
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +30,16 @@ from .security import redact, safe_filename
 from .selection import clip_from_candidate, select_candidates
 
 logger = logging.getLogger(__name__)
+
+
+def _semantic_clip_title(project_name: str, clip: Clip) -> str:
+    """Create a bounded, safe title from the opening meaningful transcript."""
+    phrase = " ".join((clip.opening_line or "").split()).strip(" .,!?:;-")
+    phrase = "".join(char for char in phrase if ord(char) >= 32)
+    if not phrase or phrase.casefold() == f"cut {clip.index:02d}".casefold():
+        return f"{project_name} — Cut {clip.index:02d}"[:200]
+    phrase = phrase[:72].rstrip()
+    return f"{project_name} — {phrase} · Cut {clip.index:02d}"[:200]
 
 
 class QueueFullError(RuntimeError):
@@ -69,6 +79,7 @@ class JobManager:
         self.active_workers = 0
         self._active_lock = threading.Lock()
         self._queued_ids: set[str] = set()
+        self._pending_order: deque[str] = deque()
         self._queue_lock = threading.Lock()
 
     async def start(self) -> None:
@@ -148,12 +159,24 @@ class JobManager:
                     raise QueueFullError("The local render queue is full. Wait for an active job or raise S6_MAX_QUEUED_JOBS.")
                 return
             self._queued_ids.add(job_id)
+            self._pending_order.append(job_id)
+
+    def queue_position(self, job_id: str) -> int | None:
+        with self._queue_lock:
+            try:
+                return list(self._pending_order).index(job_id) + 1
+            except ValueError:
+                return None
 
     async def _worker(self, _: int) -> None:
         while True:
             job_id = await self.queue.get()
             with self._queue_lock:
                 self._queued_ids.discard(job_id)
+                try:
+                    self._pending_order.remove(job_id)
+                except ValueError:
+                    pass
             try:
                 await asyncio.to_thread(self._process, job_id)
             finally:
@@ -584,7 +607,7 @@ class JobManager:
             width, height = {"9:16": (1080, 1920), "1:1": (1080, 1080), "16:9": (1920, 1080), "4:5": (1080, 1350)}[str(private["aspect_ratio"])]
         project = self.db.get_project(job.project_id)
         project_name = project.name if project else "Project"
-        title = f"{project_name} — Script video" if script else f"{project_name} — Cut {clip.index:02d}"
+        title = f"{project_name} — Script video" if script else _semantic_clip_title(project_name, clip)
         origin = "script-output" if script else "generated-clip"
 
         digest = sha256_file(output)
@@ -609,6 +632,20 @@ class JobManager:
         if render_step:
             self._apply_step(job, render_step, status="active", detail=f"{published} of {len(job.clips)} rendered and saved", current=published, total=len(job.clips))
         job.current_item = published
+        formats = [extension for extension in ("ass", "srt", "vtt") if output.with_suffix(f".{extension}").is_file()]
+        # This private manifest is committed by publish_clip_output in the same
+        # transaction as the clip/blob/asset relationship. Files alone are never
+        # public capability; public_job signs only committed manifest entries.
+        manifests = private.setdefault("caption_artifacts", {})
+        manifests[clip.id] = {
+            "revision": clip.caption_revision,
+            "run_id": (private.get("caption_rerender") or {}).get("run_id"),
+            "output_name": output.name,
+            "formats": formats,
+            "burned": bool(private.get("burn_subtitles", job.burn_subtitles)),
+            "embedded": bool(private.get("embed_subtitles", job.embed_subtitles)),
+            "updated_at": now_iso(),
+        }
         return self.db.publish_clip_output(job, clip, asset, relative, output.stat().st_size, private=private)
 
     def _download_progress(self, job: Job, private: dict[str, Any], update: dict[str, Any]) -> None:
@@ -671,25 +708,96 @@ class JobManager:
         raise MediaError("The source file is missing from the mounted data directory")
 
     def _process_clip(self, job: Job, private: dict[str, Any]) -> None:
+        rerender = private.get("caption_rerender")
+        if isinstance(rerender, dict) and rerender.get("run_id"):
+            self._process_caption_rerender(job, private, rerender)
+            return
         mode = job_processing_mode(job, private)
         if mode == "fast":
             self._process_clip_fast(job, private)
         else:
             self._process_clip_smart(job, private)
 
+    def _process_caption_rerender(self, job: Job, private: dict[str, Any], request: dict[str, Any]) -> None:
+        """Render a reviewed snapshot to a new immutable output before publishing it."""
+        clip_id, revision, run_id = request.get("clip_id"), request.get("revision"), request.get("run_id")
+        clip = next((item for item in job.clips if item.id == clip_id), None)
+        override = (private.get("caption_overrides") or {}).get(clip_id)
+        if not clip or not isinstance(override, dict) or override.get("revision") != revision:
+            private.pop("caption_rerender", None)
+            self._save(job, private)
+            return
+        from .captions import normalize_and_validate
+        from .models import CaptionCue
+        cues, issues = normalize_and_validate(list(override.get("cues") or []), clip.duration)
+        if any(issue["severity"] == "error" for issue in issues):
+            private["caption_rerender_error"] = "Reviewed captions are invalid"
+            private.pop("caption_rerender", None)
+            self._save(job, private)
+            return
+        source = self._source(job, private)
+        metadata = probe(source, self.settings)
+        output_dir = self.settings.data_path / "jobs" / job.id / "clips"
+        output = output_dir / f"{clip.index:02d}-caption-r{revision}.mp4"
+        words = [{"text": cue["text"], "start": cue["start"], "end": cue["end"]} for cue in cues]
+        try:
+            render = _media_fn("render_fast_clip")
+            render(source, output, start=clip.start, end=clip.end, aspect=private["aspect_ratio"], settings=self.settings,
+                   has_audio=bool(metadata["audio"]), words=words, style=job.style,
+                   subtitles_enabled=bool(private.get("burn_subtitles", job.burn_subtitles)),
+                   embed_subtitles=bool(private.get("embed_subtitles", job.embed_subtitles)))
+            # publish_clip_output reuses the stable asset identity in its transaction.
+            job, clip, _ = self._publish_output(job, clip, output, private)
+            clip.caption_cues = [CaptionCue.model_validate(cue) for cue in cues]
+            job.clips = [clip if item.id == clip.id else item for item in job.clips]
+            private["caption_rerender_applied_revision"] = revision
+        except Exception as exc:
+            output.unlink(missing_ok=True)
+            for extension in ("ass", "srt", "vtt"):
+                output.with_suffix(f".{extension}").unlink(missing_ok=True)
+            private["caption_rerender_error"] = redact(str(exc))
+        finally:
+            if private.get("caption_rerender", {}).get("run_id") == run_id:
+                private.pop("caption_rerender", None)
+            self._save(job, private)
+
     def _transcribe_with_stages(self, job: Job, audio: Path, duration: float, private: dict[str, Any]) -> dict[str, Any]:
         cached = media_module.is_whisper_model_cached(self.settings)
         model_label = "Preparing transcription model" if cached else "Downloading transcription model"
         self.start_step(job, "transcribe", detail=model_label, label=model_label, progress=16, private=private)
+        started = time.monotonic()
+        job.transcription_started_at = now_iso()
+        job.transcription_total_seconds = duration
+        job.transcription_activity = model_label
+        self._save(job, private)
+
+        def heartbeat() -> None:
+            job.last_heartbeat_at = now_iso()
+            job.transcription_elapsed_seconds = time.monotonic() - started
+            self._save(job, private)
+
         callback = self._transcription_progress(job, private, duration)
         self.start_step(job, "transcribe", detail="Transcribing audio", label="Transcribing audio", progress=18, private=private)
-        transcript = media_module.transcribe(
-            audio,
-            self.settings,
-            progress_callback=callback,
-            cancellation_callback=lambda: not self._cooperate(job),
-            word_timestamps=True,
-        )
+        try:
+            from .transcription import supervise
+            if getattr(media_module.transcribe, "__module__", "engine.media") != "engine.media":
+                # Test/injected adapters remain in-process so their barriers and
+                # cancellation callbacks are observable; production Whisper is
+                # always isolated by supervise().
+                transcript = media_module.transcribe(
+                    audio, self.settings, progress_callback=callback,
+                    cancellation_callback=lambda: not self._cooperate(job), word_timestamps=True,
+                )
+            else:
+                transcript = supervise(
+                    audio, self.settings, progress=callback,
+                    cancelled=lambda: not self._cooperate(job), heartbeat=heartbeat,
+                    meaningful=lambda fraction: setattr(job, "transcription_processed_seconds", min(duration, duration * fraction)),
+                )
+        finally:
+            job.transcription_elapsed_seconds = time.monotonic() - started
+            job.last_heartbeat_at = now_iso()
+            self._save(job, private)
         self.start_step(job, "transcribe", detail="Finalising timed transcript", label="Finalising timed transcript", progress=32, private=private)
         return transcript
 
@@ -710,6 +818,10 @@ class JobManager:
                 current=int(processed), total=max(1, int(duration + .999)),
             )
             self._sync_legacy(job, step, label=label, progress=18 + 14 * fraction)
+            job.transcription_processed_seconds = processed
+            job.transcription_total_seconds = duration
+            job.transcription_activity = label
+            job.last_heartbeat_at = now_iso()
             self._save(job, private)
 
         return report
@@ -866,12 +978,12 @@ class JobManager:
             visuals = [(clip.visual_label or "Key idea", .45, min(3.0, clip.duration))]
             try:
                 try:
-                    render_clip(source, output, start=clip.start, end=clip.end, aspect=private["aspect_ratio"], words=clip_words if subtitles_enabled else [], visuals=visuals, overlays=overlays, settings=self.settings, style=job.style)
+                    render_clip(source, output, start=clip.start, end=clip.end, aspect=private["aspect_ratio"], words=clip_words if subtitles_enabled or bool(private.get("embed_subtitles", job.embed_subtitles)) else [], visuals=visuals, overlays=overlays, settings=self.settings, style=job.style, **({"embed_subtitles": True} if private.get("embed_subtitles", job.embed_subtitles) else {}))
                 except TypeError as exc:
                     if "unexpected keyword argument 'style'" not in str(exc):
                         raise
                     # Compatibility for editor/test render adapters from older jobs.
-                    render_clip(source, output, start=clip.start, end=clip.end, aspect=private["aspect_ratio"], words=clip_words if subtitles_enabled else [], visuals=visuals, overlays=overlays, settings=self.settings)
+                    render_clip(source, output, start=clip.start, end=clip.end, aspect=private["aspect_ratio"], words=clip_words if subtitles_enabled or bool(private.get("embed_subtitles", job.embed_subtitles)) else [], visuals=visuals, overlays=overlays, settings=self.settings, **({"embed_subtitles": True} if private.get("embed_subtitles", job.embed_subtitles) else {}))
                 job, clip, _ = self._publish_output(job, clip, output, private)
             except Exception as exc:
                 clip = clip.model_copy(update={"state": "failed", "error": redact(str(exc)), "selected": False})
@@ -988,6 +1100,11 @@ class JobManager:
         output_dir.mkdir(parents=True, exist_ok=True)
         render = _media_fn("render_fast_clip")
         has_audio = bool(metadata["audio"])
+        target_width, target_height = media_module.dimensions(str(private["aspect_ratio"]))
+        if int(metadata.get("width", 0)) < target_width or int(metadata.get("height", 0)) < target_height:
+            warning = f"Source is below the {target_width}×{target_height} delivery canvas; output was upscaled and may have reduced detail."
+            if warning not in job.warnings:
+                job.warnings.append(warning)
         if not has_audio:
             warning = "Source has no audio; exported fast clips without captions."
             if warning not in job.warnings:
@@ -1013,7 +1130,8 @@ class JobManager:
             subtitles_enabled = bool(private.get("burn_subtitles", private.get("subtitles_enabled", job.burn_subtitles)))
             words: list[dict[str, Any]] = []
             try:
-                if subtitles_enabled and has_audio:
+                captions_required = subtitles_enabled or bool(private.get("embed_subtitles", job.embed_subtitles)) or bool(private.get("caption_downloads_enabled", False)) or bool(private.get("caption_review_enabled", False))
+                if captions_required and has_audio:
                     try:
                         words = self._transcribe_fast_window(job, private, source, clip, output_dir)
                     except media_module.TranscriptionCancelled:
@@ -1026,8 +1144,10 @@ class JobManager:
                             warning = f"Clip {clip.index}: Local captioning unavailable; exported without captions. ({detail})"
                         job.warnings.append(warning)
                 render_kwargs: dict[str, Any] = {"start": clip.start, "end": clip.end, "aspect": private["aspect_ratio"], "has_audio": has_audio, "settings": self.settings}
-                if subtitles_enabled and words:
-                    render_kwargs.update({"words": words, "style": job.style, "subtitles_enabled": True})
+                if private.get("embed_subtitles", job.embed_subtitles):
+                    render_kwargs["embed_subtitles"] = True
+                if words:
+                    render_kwargs.update({"words": words, "style": job.style, "subtitles_enabled": subtitles_enabled})
                 render(source, output, **render_kwargs)
                 job, clip, _ = self._publish_output(job, clip, output, private)
             except Exception as exc:
@@ -1208,6 +1328,12 @@ class JobManager:
             job.state, job.stage_label = "queued", "Queued to resume from checkpoint"
             await self.enqueue(job.id)
         elif action == "stop-keep" and job.state not in {"complete", "failed"}:
+            with self._queue_lock:
+                self._queued_ids.discard(job.id)
+                try:
+                    self._pending_order.remove(job.id)
+                except ValueError:
+                    pass
             job.state, job.stage_label = "cancelled_kept", "Stopped; completed outputs kept"
             if job.download_progress and job.download_progress.phase not in {"complete", "failed"}:
                 job.download_progress = job.download_progress.model_copy(update={"phase": "stopped_partial", "message": "Stopped by user; partial download retained"})
@@ -1291,7 +1417,12 @@ class JobManager:
             for number, clip in enumerate(chosen, 1):
                 source = self.settings.data_path / "jobs" / job.id / "clips" / str(clip.output_name)
                 if source.is_file():
-                    archive.write(source, f"{number:02d}-{safe_filename(source.name, 'short.mp4')}")
+                    base_name = f"{number:02d}-{safe_filename(source.name, 'short.mp4')}"
+                    archive.write(source, base_name)
+                    for suffix in (".srt", ".vtt", ".ass"):
+                        sidecar = source.with_suffix(suffix)
+                        if sidecar.is_file():
+                            archive.write(sidecar, f"{base_name.removesuffix('.mp4')}{suffix}")
             archive.writestr("manifest.json", json.dumps(manifest, indent=2, ensure_ascii=False))
             archive.writestr("credits.json", json.dumps(credits, indent=2, ensure_ascii=False))
             if job.warnings or manifest["failedClips"]:

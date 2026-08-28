@@ -10,12 +10,13 @@ export function IconButton({ label, children, ...props }: ButtonHTMLAttributes<H
   return <button className="icon-button" aria-label={label} title={label} {...props}>{children}</button>;
 }
 
-export function StatusBadge({ state, label }: { state: JobState | "local" | "offline" | "fallback" | "ready"; label?: string }) {
+export function StatusBadge({ state, label }: { state: JobState | "local" | "offline" | "fallback" | "ready" | "checking"; label?: string }) {
   const normalized = state.replace("_", "-");
   const text = label || state.replace("_", " ");
   const icon = state === "complete" || state === "ready" || state === "local" ? <Check size={12} />
     : state === "failed" ? <XCircle size={12} />
       : state === "offline" ? <WifiOff size={12} />
+        : state === "checking" ? <LoaderCircle size={12} className="spin" />
         : state === "active" || state === "queued" || state === "recovered" ? <LoaderCircle size={12} className="spin" />
           : <AlertTriangle size={12} />;
   return <span className={`status status-${normalized}`}>{icon}<span>{text}</span></span>;
@@ -60,6 +61,11 @@ export function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
   return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+export function formatDimensions(aspect: string | null | undefined, width: number | null | undefined, height: number | null | undefined): string {
+  const requested = aspect || "9:16";
+  return width && height ? `${requested} · ${width} × ${height} px` : `${requested} · dimensions unavailable`;
 }
 
 export function formatDuration(seconds: number): string {

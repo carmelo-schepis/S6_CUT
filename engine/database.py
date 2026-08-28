@@ -632,6 +632,29 @@ class Database:
             assets = [asset for asset in assets if needle in " ".join([asset.title, asset.filename, asset.description, *asset.tags, *asset.brands, *asset.people, *asset.aliases]).casefold()]
         return assets
 
+    def list_assets_page(self, *, folder_id: str | None = None, media_type: str | None = None, origin: str | None = None, search: str | None = None, include_archived: bool = False, page: int = 1, page_size: int = 40) -> tuple[list[Asset], bool]:
+        """Return one bounded, deterministically ordered asset page."""
+        if page < 1 or not 1 <= page_size <= 100:
+            raise ValueError("Invalid asset page")
+        clauses, values = [], []
+        if not include_archived:
+            clauses.append("folder_id IN (SELECT id FROM library_folders WHERE archived=0 AND deleted=0)")
+        if folder_id:
+            clauses.append("folder_id=?"); values.append(folder_id)
+        if origin:
+            clauses.append("origin=?"); values.append(origin)
+        if media_type:
+            clauses.append("lower(payload) LIKE ?"); values.append(f'%\"media_type\":\"{media_type.casefold()}%')
+        if search:
+            needle = search.casefold().replace("%", "\\%").replace("_", "\\_")
+            clauses.append("lower(payload) LIKE ? ESCAPE '\\\\'"); values.append(f"%{needle}%")
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        offset = (page - 1) * page_size
+        with self._connect() as db:
+            rows = db.execute("SELECT payload,folder_id,origin,blob_id FROM assets" + where + " ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?", (*values, page_size + 1, offset)).fetchall()
+        assets = [Asset.model_validate_json(row["payload"]).model_copy(update={"folder_id": row["folder_id"] or UNSORTED_FOLDER_ID, "origin": row["origin"], "blob_id": row["blob_id"]}) for row in rows[:page_size]]
+        return assets, len(rows) > page_size
+
     def list_folders(self, include_archived: bool = False) -> list[LibraryFolder]:
         where = " WHERE deleted=0" + ("" if include_archived else " AND archived=0")
         with self._connect() as db:

@@ -88,7 +88,7 @@ def test_rotation_from_stream() -> None:
 def test_fast_crop_scale_filter_16_9_to_9_16() -> None:
     vf = _fast_crop_scale_filter(1920, 1080, 1080, 1920)
     assert "crop=608:1080" in vf, f"Unexpected: {vf}"
-    assert "scale=608:1080" in vf, f"Unexpected: {vf}"
+    assert "scale=1080:1920" in vf, f"Unexpected: {vf}"
 
 
 def test_fast_crop_scale_filter_native_9_16() -> None:
@@ -97,10 +97,10 @@ def test_fast_crop_scale_filter_native_9_16() -> None:
     assert "scale=1080:1920" in vf
 
 
-def test_fast_crop_scale_filter_no_upscale_720p_vertical() -> None:
+def test_fast_crop_scale_filter_upscales_to_delivery_canvas() -> None:
     vf = _fast_crop_scale_filter(720, 1280, 1080, 1920)
     assert "crop=720:1280" in vf
-    assert "scale=720:1280" in vf  # no upscaling
+    assert "scale=1080:1920" in vf
 
 
 def test_fast_crop_scale_filter_4k_downscale() -> None:
@@ -111,7 +111,7 @@ def test_fast_crop_scale_filter_4k_downscale() -> None:
 
 def test_fast_crop_scale_filter_square() -> None:
     vf = _fast_crop_scale_filter(1080, 1080, 1080, 1920)
-    assert "scale=608:1080" in vf or "scale=606:1080" in vf
+    assert "scale=1080:1920" in vf
 
 
 def test_fast_crop_scale_filter_even_output() -> None:
@@ -124,7 +124,7 @@ def test_fast_crop_scale_filter_even_output() -> None:
         (1920, 1080, 1920, 1080),
     ]:
         vf = _fast_crop_scale_filter(src_w, src_h, tgt_w, tgt_h)
-        after_scale = vf.split("scale=")[-1].split(",")[0]
+        after_scale = vf.split("scale=")[-1].split(",")[0].split(":flags")[0]
         ow, oh = (int(x) for x in after_scale.split(":"))
         assert ow % 2 == 0, f"Odd output width {ow} for {src_w}x{src_h} -> {tgt_w}x{tgt_h}: {vf}"
         assert oh % 2 == 0, f"Odd output height {oh} for {src_w}x{src_h} -> {tgt_w}x{tgt_h}: {vf}"
@@ -257,7 +257,7 @@ def test_render_fast_clip_16_9_no_audio(settings: Settings, tmp_path: Path) -> N
     render_fast_clip(src, out, start=0.0, end=1.5, aspect="16:9", settings=settings, has_audio=False)
     meta = probe(out, settings)
     assert meta["audio"] is False
-    assert meta["width"] == 640 and meta["height"] == 360
+    assert meta["width"] == 1920 and meta["height"] == 1080
 
 
 def test_render_fast_clip_1_1(settings: Settings, tmp_path: Path) -> None:
@@ -279,14 +279,14 @@ def test_render_fast_clip_atomic(settings: Settings, tmp_path: Path) -> None:
     assert out.exists()
 
 
-def test_render_fast_clip_no_upscale_when_source_smaller(settings: Settings, tmp_path: Path) -> None:
-    """720p vertical source should keep its native resolution."""
+def test_render_fast_clip_upscales_source_to_delivery_canvas(settings: Settings, tmp_path: Path) -> None:
+    """Small vertical sources still satisfy the delivery canvas contract."""
     src = _make_source(settings, tmp_path, duration=3.0, width=720, height=1280, rate=30, with_audio=True)
     out = tmp_path / "clip.mp4"
     render_fast_clip(src, out, start=0.5, end=2.0, aspect="9:16", settings=settings, has_audio=True)
     meta = probe(out, settings)
-    assert meta["width"] <= 720
-    assert meta["height"] <= 1280
+    assert meta["width"] == 1080
+    assert meta["height"] == 1920
     assert abs(meta["width"] / meta["height"] - 9 / 16) < 0.02
 
 

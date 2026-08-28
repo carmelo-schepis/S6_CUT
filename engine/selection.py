@@ -12,6 +12,8 @@ SENTENCE_END = re.compile(r"[.!?][\"')\]]*$")
 HOOK_WORDS = {"why", "how", "secret", "never", "best", "worst", "truth", "imagine", "mistake", "here's", "what"}
 PRACTICAL_WORDS = {"step", "first", "second", "because", "means", "example", "learn", "use", "tip", "method"}
 ENERGY_WORDS = {"amazing", "incredible", "crazy", "shocking", "love", "hate", "wow", "huge", "always", "never"}
+CREDIT_WORDS = {"credits", "credit", "cast", "starring", "directed", "written", "copyright", "produced", "end", "fin"}
+TITLE_CARD_PHRASES = ("previously on", "coming soon", "the end", "a film by", "presented by")
 
 STYLE_WEIGHTS: dict[Style, dict[str, float]] = {
     "funny": {"hook": 1.25, "coherence": .9, "ending": 1.1, "energy": 1.4, "practical": .55, "visual": 1.15, "complete": .95},
@@ -63,6 +65,36 @@ def _score(words: list[dict[str, Any]], style: Style, target: float) -> ScoreBre
     return ScoreBreakdown(hook=hook, coherence=coherence, ending=ending, energy=energy, practical_value=practical, visual_potential=visual, completeness=complete, penalties=penalties, total=max(0, min(100, total)), explanation=f"Selected for {reason_map[strongest]} with {style} style weighting.")
 
 
+def candidate_quality(words: list[dict[str, Any]], minimum_speech_density: float = 0.18) -> tuple[bool, str, bool]:
+    """Deterministic pre-provider quality gate for transcript candidates."""
+    if not words:
+        return False, "No speech detected", False
+    text = " ".join(str(item.get("text", "")).strip() for item in words).strip()
+    tokens = re.findall(r"[\\w'-]+", text.casefold())
+    if not tokens:
+        return False, "Empty transcript", False
+    try:
+        duration = max(.1, float(words[-1]["end"]) - float(words[0]["start"]))
+    except (KeyError, TypeError, ValueError):
+        return False, "Invalid transcript timing", False
+    density = len(tokens) / duration
+    if density < minimum_speech_density:
+        return False, "Extremely sparse speech", False
+    if set(tokens) & CREDIT_WORDS or any(phrase in text.casefold() for phrase in TITLE_CARD_PHRASES):
+        return False, "Likely title card or credit roll", False
+    confidence_values = []
+    for word in words:
+        try:
+            value = float(word.get("confidence"))
+            if math.isfinite(value):
+                confidence_values.append(value)
+        except (TypeError, ValueError):
+            continue
+    average = sum(confidence_values) / len(confidence_values) if confidence_values else None
+    review = average is not None and average < .55
+    return True, "Low transcript confidence; review recommended" if review else "", review
+
+
 def select_candidates(words: list[dict[str, Any]], style: Style, count: int, minimum: float, maximum: float) -> list[Candidate]:
     if not words:
         return []
@@ -78,6 +110,9 @@ def select_candidates(words: list[dict[str, Any]], style: Style, count: int, min
                 continue
             if duration > maximum:
                 break
+            eligible, _, _ = candidate_quality(segment)
+            if not eligible:
+                continue
             candidates.append(Candidate(float(segment[0]["start"]), float(segment[-1]["end"]), segment, _score(segment, style, target)))
             if duration >= target * .85:
                 break
@@ -86,7 +121,9 @@ def select_candidates(words: list[dict[str, Any]], style: Style, count: int, min
         for index in range(0, len(words), chunk_words):
             segment = words[index:index + chunk_words]
             if segment:
-                candidates.append(Candidate(float(segment[0]["start"]), float(segment[-1]["end"]), segment, _score(segment, style, target)))
+                eligible, _, _ = candidate_quality(segment)
+                if eligible:
+                    candidates.append(Candidate(float(segment[0]["start"]), float(segment[-1]["end"]), segment, _score(segment, style, target)))
     candidates.sort(key=lambda item: (-item.score.total, item.start))
     selected: list[Candidate] = []
     for candidate in candidates:
@@ -100,4 +137,7 @@ def select_candidates(words: list[dict[str, Any]], style: Style, count: int, min
 
 def clip_from_candidate(candidate: Candidate, index: int) -> Clip:
     opening = " ".join(str(item["text"]) for item in candidate.words[:18]).strip()
-    return Clip(id=f"clip-{index}", index=index, state="queued", start=candidate.start, end=candidate.end, duration=max(.1, candidate.end - candidate.start), opening_line=opening, score=candidate.score)
+    eligible, reason, review = candidate_quality(candidate.words)
+    confidence_values = [float(item["confidence"]) for item in candidate.words if isinstance(item.get("confidence"), (int, float))]
+    confidence = sum(confidence_values) / len(confidence_values) if confidence_values else None
+    return Clip(id=f"clip-{index}", index=index, state="queued", start=candidate.start, end=candidate.end, duration=max(.1, candidate.end - candidate.start), opening_line=opening, score=candidate.score, review_required=review, review_reason=reason or None, transcript_excerpt=opening, confidence=confidence)
