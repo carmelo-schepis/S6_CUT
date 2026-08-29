@@ -475,7 +475,12 @@ async def create_script_job(request: Request, value: ScriptJobInput) -> dict[str
     private = {"script": value.script, "aspect_ratio": value.aspect_ratio, "narration": value.narration, "library_folder_id": folder_id}
     db.save_project(project)
     db.save_job(job, private)
-    await manager.enqueue(job_id)
+    try:
+        await manager.enqueue(job_id)
+    except QueueFullError as exc:
+        job.state, job.stage, job.stage_label, job.error = "failed", "queue", "Queue full", str(exc)
+        manager._save(job)
+        raise HTTPException(429, str(exc)) from exc
     return {"project": project, "job": public_job(job)}
 
 

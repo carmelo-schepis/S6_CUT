@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from engine.app import _project_name, app, db
+from engine.app import _project_name, app, db, manager
+from engine.jobs import QueueFullError
 
 
 client = TestClient(app)
@@ -33,6 +34,25 @@ def test_script_job_preserves_exact_source_and_returns_durable_records() -> None
     assert body["job"]["state"] == "queued"
     assert db.get_job_private(body["job"]["id"])["script"] == script
     assert client.get(f"/api/v1/projects/{body['project']['id']}").status_code == 200
+
+
+def test_script_job_returns_queue_full_when_enqueue_races(monkeypatch) -> None:
+    async def reject_enqueue(_job_id: str) -> None:
+        raise QueueFullError("The local processing queue is full")
+
+    previous_ids = {job.id for job in db.list_jobs()}
+    monkeypatch.setattr(manager.queue, "full", lambda: False)
+    monkeypatch.setattr(manager, "enqueue", reject_enqueue)
+
+    response = client.post("/api/v1/jobs/script", json={
+        "script": "A complete script sentence creates a project.",
+        "style": "educational", "aspectRatio": "9:16", "narration": "silent",
+    })
+
+    assert response.status_code == 429
+    created = [job for job in db.list_jobs() if job.id not in previous_ids]
+    assert len(created) == 1
+    assert created[0].state == "failed"
 
 
 def test_provider_secrets_are_masked_and_never_returned() -> None:
