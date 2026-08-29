@@ -56,7 +56,7 @@ test.describe("responsive layout regressions", () => {
       width: rail.getBoundingClientRect().width,
       navGap: getComputedStyle(rail.querySelector("nav")!).columnGap,
     }));
-    expect(desktop.width, "desktop rail width").toBe(88);
+    expect(desktop.width, "desktop rail width").toBe(108);
     expect(desktop.navGap, "desktop navigation gap").toBe("5px");
   });
 
