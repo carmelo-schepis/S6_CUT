@@ -49,7 +49,9 @@ def validate_youtube_url(value: str) -> str:
     try:
         for info in socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM):
             address = ipaddress.ip_address(info[4][0])
-            if address.is_private or address.is_loopback or address.is_link_local or address.is_reserved:
+            # `is_private` alone does not cover multicast or shared-address space.
+            # A downloader must only be allowed to connect to globally routable hosts.
+            if not address.is_global:
                 raise ValueError("The URL resolved to a non-public address")
     except socket.gaierror as exc:
         raise ValueError("The YouTube host could not be resolved") from exc

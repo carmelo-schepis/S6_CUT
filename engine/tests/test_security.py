@@ -22,6 +22,15 @@ def test_url_import_rejects_unsupported_protocol_and_host() -> None:
         validate_youtube_url("https://127.0.0.1/video")
 
 
+def test_url_import_rejects_non_global_resolved_addresses(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "engine.security.socket.getaddrinfo",
+        lambda *_args, **_kwargs: [(None, None, None, None, ("224.0.0.1", 443))],
+    )
+    with pytest.raises(ValueError, match="non-public"):
+        validate_youtube_url("https://youtube.com/watch?v=one")
+
+
 def test_local_tts_terminates_options_before_user_script(tmp_path, monkeypatch) -> None:
     captured: list[str] = []
 
