@@ -680,7 +680,7 @@ async def download_file(relative_path: str, expires: int = Query(...), signature
         target = confined(settings.data_path, *relative_path.split("/"))
     except ValueError as exc:
         raise HTTPException(400, "Invalid download path") from exc
-    if not target.is_file():
+    if not target.is_file() or target.is_symlink():
         raise _not_found("File")
     return FileResponse(target, filename=safe_filename(target.name, "s6-cut-download"), media_type="application/zip" if target.suffix == ".zip" else "video/mp4")
 

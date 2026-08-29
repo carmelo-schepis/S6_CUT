@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from uuid import uuid4
+
 from fastapi.testclient import TestClient
 
-from engine.app import _project_name, app, db
+from engine.app import _project_name, app, db, settings, signer
 
 
 client = TestClient(app)
@@ -113,6 +115,19 @@ def test_library_dedup_and_match_explanation() -> None:
 def test_download_traversal_and_bad_signature_fail_safely() -> None:
     response = client.get("/api/v1/files/jobs/../../secrets/instance.key", params={"expires": 9999999999, "signature": "wrong"})
     assert response.status_code in {403, 404}
+
+
+def test_signed_download_does_not_follow_symlinks() -> None:
+    job_id = f"symlinked-{uuid4().hex}"
+    target = settings.data_path / "jobs" / job_id / "clips" / "escape.mp4"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.symlink_to(settings.data_path / "secrets" / "instance.key")
+    relative = f"jobs/{job_id}/clips/escape.mp4"
+    expires, signature = signer.sign(relative)
+
+    response = client.get(f"/api/v1/files/{relative}", params={"expires": expires, "signature": signature})
+
+    assert response.status_code == 404
 
 
 def test_invalid_url_import_does_not_create_a_project() -> None:
