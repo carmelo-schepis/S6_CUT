@@ -4,6 +4,7 @@ import asyncio
 import inspect
 import json
 import logging
+import math
 import os
 import threading
 import time
@@ -30,6 +31,64 @@ from .security import redact, safe_filename
 from .selection import clip_from_candidate, select_candidates
 
 logger = logging.getLogger(__name__)
+
+
+def _probe_detail(metadata: dict[str, Any]) -> str:
+    details: list[str] = []
+    duration = metadata.get("duration")
+    try:
+        duration_value = float(duration)
+    except (TypeError, ValueError):
+        duration_value = 0.0
+    if math.isfinite(duration_value) and duration_value > 0:
+        details.append(f"{duration_value:.1f}s")
+    dimensions = _displayed_dimensions(metadata)
+    if dimensions:
+        details.append(f"{dimensions[0]}×{dimensions[1]}")
+    try:
+        frame_rate = float(metadata.get("frame_rate"))
+    except (TypeError, ValueError):
+        frame_rate = 0.0
+    if math.isfinite(frame_rate) and frame_rate > 0:
+        details.append(f"{frame_rate:g} fps")
+    if not details:
+        return "Source validated"
+    detail = f"Source validated — {details[0]}"
+    if len(details) > 1:
+        detail += f" at {' / '.join(details[1:])}"
+    return detail
+
+
+def _displayed_dimensions(metadata: dict[str, Any]) -> tuple[int, int] | None:
+    values: list[int] = []
+    for key in ("width", "height"):
+        try:
+            value = float(metadata.get(key))
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(value) or value <= 0 or not value.is_integer():
+            return None
+        values.append(int(value))
+    try:
+        rotation = float(metadata.get("rotation") or 0)
+    except (TypeError, ValueError):
+        rotation = 0.0
+    if math.isfinite(rotation) and int(rotation) % 180:
+        values.reverse()
+    return values[0], values[1]
+
+
+def _source_quality_warnings(metadata: dict[str, Any]) -> list[str]:
+    dimensions = _displayed_dimensions(metadata)
+    if not dimensions:
+        return []
+    width, height = dimensions
+    short_edge = min(width, height)
+    if short_edge <= 360:
+        return [f"Source is {width}×{height} ({metadata.get('video_codec') or 'unknown'}); output resolution does not restore detail missing from 360p-or-lower media."]
+    if short_edge < 720:
+        return [f"Source is {width}×{height}; output resolution will be higher, but genuine source detail remains below 720p."]
+    return []
 
 
 def _semantic_clip_title(project_name: str, clip: Clip) -> str:
@@ -898,7 +957,10 @@ class JobManager:
             self.start_step(job, "probe", detail="Running FFprobe validation", label="Validating source with FFprobe", progress=8, private=private)
             metadata = probe(source, self.settings)
             private["source_metadata"] = metadata
-            self.complete_step(job, "probe", detail=f"Source validated — {metadata['duration']:.1f}s", private=private)
+            self.complete_step(job, "probe", detail=_probe_detail(metadata), private=private)
+        for warning in _source_quality_warnings(metadata):
+            if warning not in job.warnings:
+                job.warnings.append(warning)
         if not metadata["audio"]:
             raise MediaError("This video has no readable audio track. Automatic clips require speech; retain it as a source for manual editing.")
         transcript = private.get("transcript")
@@ -1074,7 +1136,10 @@ class JobManager:
             self.start_step(job, "probe", detail="Running FFprobe validation", label="Validating source for fast cuts", progress=10, private=private)
             metadata = probe(source, self.settings)
             private["source_metadata"] = metadata
-            self.complete_step(job, "probe", detail=f"Source validated — {metadata['duration']:.1f}s", private=private)
+            self.complete_step(job, "probe", detail=_probe_detail(metadata), private=private)
+        for warning in _source_quality_warnings(metadata):
+            if warning not in job.warnings:
+                job.warnings.append(warning)
         if not self._cooperate(job):
             self._save(job)
             return

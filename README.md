@@ -172,6 +172,23 @@ Back up or snapshot the complete data directory while the stack is stopped, or u
 
 See [docs/TRUENAS_PORTAINER.md](docs/TRUENAS_PORTAINER.md) for dataset layout, Stack/Custom App configuration, update, backup, restore, and uninstall procedures.
 
+## Local delivery quality
+
+Final renders use one shared local delivery profile: H.264 (`libx264`), `slow`
+preset, CRF 18, `yuv420p`, `+faststart`, and AAC at 192 kbps/48 kHz. Stereo
+sources remain stereo; mono narration remains mono. This increases render time and
+file size compared with disposable fast encodes, but avoids unnecessary quality
+loss and keeps outputs broadly browser-compatible.
+
+Portrait, square, and 4:5 renders preserve the complete source frame when a
+centre crop would discard substantial detail. The full-frame foreground is fitted
+with Lanczos scaling over a mildly darkened, blurred, aspect-cover background.
+Sources close to the target aspect use a simpler high-quality fit/crop. A 1080×1920
+file made from a 360p source is still only 360p detail enlarged to a delivery
+canvas; ordinary scaling cannot recreate missing detail. 1080p or better sources
+are recommended. All processing remains free and local; no AI upscaler or cloud
+restoration service is used.
+
 ## Quality checks
 
 ```bash

@@ -15,13 +15,27 @@ from engine import media as media_module
 from engine.app import settings
 from engine.config import Settings
 from engine.database import Database
-from engine.jobs import JobManager, QueueFullError
+from engine.jobs import JobManager, QueueFullError, _probe_detail, _source_quality_warnings
 from engine.library import LibraryRules
 from engine.media import MediaError
 from engine.models import Clip, Job, ProcessingStep, Project, ScoreBreakdown
 from engine.providers import ProfileService
 from engine.security import SecretVault
 from engine.selection import Candidate
+
+
+def test_probe_detail_tolerates_legacy_metadata() -> None:
+    assert _probe_detail({"duration": 120, "width": 1920, "height": 1080, "frame_rate": "29.97"}) == "Source validated — 120.0s at 1920×1080 / 29.97 fps"
+    assert _probe_detail({"duration": 120, "width": 1920, "height": 1080}) == "Source validated — 120.0s at 1920×1080"
+    assert _probe_detail({"duration": "120"}) == "Source validated — 120.0s"
+    assert _probe_detail({"duration": 120, "frame_rate": float("nan")}) == "Source validated — 120.0s"
+
+
+def test_source_quality_warnings_are_rotation_aware_and_idempotent_inputs() -> None:
+    assert _source_quality_warnings({"width": 640, "height": 360, "rotation": 0})
+    assert not _source_quality_warnings({"width": 720, "height": 1280, "rotation": 0})
+    assert not _source_quality_warnings({"width": 1920, "height": 1080, "rotation": 0})
+    assert not _source_quality_warnings({"width": 0, "height": 360})
 
 SAMPLE_WORDS = [
     {"text": "The", "start": 0.0, "end": 0.3, "confidence": 0.9},

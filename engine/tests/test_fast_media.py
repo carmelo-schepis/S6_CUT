@@ -10,10 +10,12 @@ from engine.config import Settings
 from engine.media import (
     MediaError,
     _fast_crop_scale_filter,
+    _source_layout_filter,
     _rational_to_float,
     _rotation_from_stream,
     plan_fast_windows,
     probe,
+    render_clip,
     render_fast_clip,
 )
 
@@ -128,6 +130,32 @@ def test_fast_crop_scale_filter_even_output() -> None:
         ow, oh = (int(x) for x in after_scale.split(":"))
         assert ow % 2 == 0, f"Odd output width {ow} for {src_w}x{src_h} -> {tgt_w}x{tgt_h}: {vf}"
         assert oh % 2 == 0, f"Odd output height {oh} for {src_w}x{src_h} -> {tgt_w}x{tgt_h}: {vf}"
+
+
+def test_source_layout_preserves_landscape_foreground() -> None:
+    vf = _source_layout_filter(640, 360, 1080, 1920)
+    assert "split=2" in vf
+    assert "force_original_aspect_ratio=decrease" in vf
+    assert "boxblur" in vf
+    assert "setsar=1" in vf
+
+
+def test_source_layout_uses_simple_path_for_native_portrait() -> None:
+    vf = _source_layout_filter(1080, 1920, 1080, 1920)
+    assert "split=2" not in vf
+    assert "flags=lanczos" in vf
+    assert "setsar=1" in vf
+
+
+@pytest.mark.parametrize("dimensions", [(0, 360), (640, 0), (-1, 360), (640, -1), ("bad", 360), (640, float("inf"))])
+def test_source_layout_rejects_invalid_source_dimensions(dimensions: tuple[object, object]) -> None:
+    with pytest.raises(MediaError, match="Invalid source"):
+        _source_layout_filter(*dimensions, 1080, 1920)
+
+
+def test_source_layout_rejects_odd_yuv420p_target() -> None:
+    with pytest.raises(MediaError, match="even"):
+        _source_layout_filter(641, 361, 1081, 1920)
 
 
 # ---------------------------------------------------------------------------
@@ -288,6 +316,24 @@ def test_render_fast_clip_upscales_source_to_delivery_canvas(settings: Settings,
     assert meta["width"] == 1080
     assert meta["height"] == 1920
     assert abs(meta["width"] / meta["height"] - 9 / 16) < 0.02
+
+
+def test_render_clip_overlay_does_not_extend_requested_duration(settings: Settings, tmp_path: Path):
+    src = _make_source(settings, tmp_path, duration=2.0, with_audio=True)
+    out = tmp_path / "smart-overlay.mp4"
+    render_clip(
+        src,
+        out,
+        start=0,
+        end=1,
+        aspect="9:16",
+        words=[],
+        visuals=[("Visual", 0, .8)],
+        overlays=[(src, 0, .8)],
+        settings=settings,
+        has_audio=True,
+    )
+    assert probe(out, settings)["duration"] == pytest.approx(1, abs=.1)
 
 
 def test_render_fast_clip_raises_on_missing_audio(settings: Settings, tmp_path: Path) -> None:

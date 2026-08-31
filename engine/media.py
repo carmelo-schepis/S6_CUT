@@ -21,6 +21,14 @@ IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 _whisper_lock = threading.Lock()
 _whisper_models: dict[str, Any] = {}
 
+# Shared final-delivery profile: high quality, local, and browser compatible.
+DELIVERY_VIDEO_CODEC = "libx264"
+DELIVERY_PRESET = "slow"
+DELIVERY_CRF = "18"
+DELIVERY_AUDIO_CODEC = "aac"
+DELIVERY_AUDIO_BITRATE = "192k"
+DELIVERY_AUDIO_RATE = "48000"
+
 
 class MediaError(RuntimeError):
     pass
@@ -206,8 +214,16 @@ def probe(path: Path, settings: Settings, *, max_seconds: int | None = None) -> 
         "width": int(video.get("width") or 0),
         "height": int(video.get("height") or 0),
         "video_codec": video.get("codec_name"),
+        "video_bitrate": int(video["bit_rate"]) if str(video.get("bit_rate", "")).isdigit() else None,
+        "pixel_format": video.get("pix_fmt"),
+        "color_space": video.get("color_space"),
+        "color_transfer": video.get("color_transfer"),
+        "color_primaries": video.get("color_primaries"),
         "audio": bool(audio),
         "audio_codec": audio.get("codec_name") if audio else None,
+        "audio_bitrate": int(audio["bit_rate"]) if audio and str(audio.get("bit_rate", "")).isdigit() else None,
+        "audio_sample_rate": int(audio["sample_rate"]) if audio and str(audio.get("sample_rate", "")).isdigit() else None,
+        "audio_channels": int(audio["channels"]) if audio and str(audio.get("channels", "")).isdigit() else None,
         "frame_rate": round(frame_rate, 3),
         "rotation": _rotation_from_stream(video),
     }
@@ -772,8 +788,38 @@ def _overlay_inputs(command: list[str], overlays: list[tuple[Path, float, float]
             command.extend(["-stream_loop", "-1", "-i", str(path)])
 
 
-def _filters(width: int, height: int, overlays: list[tuple[Path, float, float]], asset_start_index: int, ass_name: str) -> tuple[str, str]:
-    filters = [f"[0:v]scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},setsar=1[base]"]
+def _source_layout_filter(src_width: int, src_height: int, target_width: int, target_height: int) -> str:
+    """Keep the complete source visible for materially different aspect ratios."""
+    dimensions: list[int] = []
+    for name, value in (("source width", src_width), ("source height", src_height), ("target width", target_width), ("target height", target_height)):
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError) as exc:
+            raise MediaError(f"Invalid {name} for video layout") from exc
+        if not math.isfinite(numeric) or numeric <= 0 or not numeric.is_integer():
+            raise MediaError(f"Invalid {name} for video layout")
+        dimensions.append(int(numeric))
+    src_width, src_height, target_width, target_height = dimensions
+    if target_width % 2 or target_height % 2:
+        raise MediaError("Target video dimensions must be even for yuv420p")
+    source_aspect = src_width / src_height
+    target_aspect = target_width / target_height
+    if abs(source_aspect / target_aspect - 1) <= 0.12:
+        return f"scale={target_width}:{target_height}:force_original_aspect_ratio=increase:flags=lanczos,crop={target_width}:{target_height},setsar=1[base]"
+    return (
+        "split=2[foreground][background];"
+        f"[background]scale={target_width}:{target_height}:force_original_aspect_ratio=increase:flags=lanczos,"
+        f"crop={target_width}:{target_height},boxblur=luma_radius=10:luma_power=1,eq=brightness=-0.08,setsar=1[bg];"
+        f"[foreground]scale={target_width}:{target_height}:force_original_aspect_ratio=decrease:flags=lanczos,"
+        "setsar=1[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2:format=auto,setsar=1[base]"
+    )
+
+
+def _filters(width: int, height: int, overlays: list[tuple[Path, float, float]], asset_start_index: int, ass_name: str, source_dimensions: tuple[int, int] | None = None) -> tuple[str, str]:
+    if source_dimensions:
+        filters = [f"[0:v]{_source_layout_filter(*source_dimensions, width, height)}"]
+    else:
+        filters = [f"[0:v]scale={width}:{height}:flags=lanczos,setsar=1[base]"]
     current = "base"
     overlay_width, overlay_height = int(width * .86), int(height * .58)
     for number, (_, start, end) in enumerate(overlays):
@@ -793,6 +839,10 @@ def render_clip(source: Path, output: Path, *, start: float, end: float, aspect:
     ass = output.parent / f"{output.stem}.ass"
     duration = end - start
     width, height = dimensions(aspect)
+    source_meta = probe(source, settings)
+    src_width, src_height = source_meta["width"], source_meta["height"]
+    if source_meta["rotation"] % 180:
+        src_width, src_height = src_height, src_width
     write_ass(ass, words, offset=start, duration=duration, visuals=visuals, width=width, height=height, style=style)
     write_caption_sidecars(output, words, offset=start, duration=duration)
     temp = output.with_suffix(".partial.mp4")
@@ -801,15 +851,16 @@ def render_clip(source: Path, output: Path, *, start: float, end: float, aspect:
     subtitle_index = 1 + len(overlays)
     if embed_subtitles:
         command.extend(["-i", str(output.with_suffix(".srt"))])
-    filters, mapped = _filters(width, height, overlays, 1, ass.name)
+    source_dimensions = (src_width, src_height)
+    filters, mapped = _filters(width, height, overlays, 1, ass.name, source_dimensions)
     command.extend(["-filter_complex", filters, "-map", f"[{mapped}]"])
     if has_audio:
-        command.extend(["-map", "0:a:0", "-c:a", "aac", "-b:a", "160k", "-ar", "48000"])
+        command.extend(["-map", "0:a:0", "-c:a", DELIVERY_AUDIO_CODEC, "-b:a", DELIVERY_AUDIO_BITRATE, "-ar", DELIVERY_AUDIO_RATE])
     else:
         command.append("-an")
     if embed_subtitles:
         command.extend(["-map", f"{subtitle_index}:0", "-c:s", "mov_text", "-metadata:s:s:0", f"language={subtitle_language}"])
-    command.extend(["-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-shortest", str(temp)])
+    command.extend(["-c:v", DELIVERY_VIDEO_CODEC, "-preset", DELIVERY_PRESET, "-crf", DELIVERY_CRF, "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-shortest", "-t", f"{duration:.3f}", str(temp)])
     run(command, cwd=output.parent, timeout=7200)
     metadata = probe(temp, settings)
     if metadata["width"] != width or metadata["height"] != height or (has_audio and not metadata["audio"]):
@@ -958,8 +1009,8 @@ def render_fast_clip(
     while bypassing the overlay/visual-beat pipeline. It performs:
 
     * Efficient input seeking (``-ss`` before ``-i``).
-    * Centre-crop to the requested ``aspect`` without needless upscaling.
-    * H.264 ``veryfast`` encoding.
+    * Source-preserving aspect conversion without destructive landscape crops.
+    * High-quality H.264 delivery encoding using the shared delivery profile.
     * AAC audio **only** when the source provides an audio track.
     * Optional word-timed ASS subtitles using the shared caption renderer.
     * Output validation (dimensions, audio presence).
@@ -999,7 +1050,7 @@ def render_fast_clip(
     src_width, src_height = meta["width"], meta["height"]
     if meta["rotation"] % 180:
         src_width, src_height = src_height, src_width
-    vf = _fast_crop_scale_filter(src_width, src_height, width, height)
+    vf = _source_layout_filter(src_width, src_height, width, height).removesuffix("[base]")
     ass: Path | None = None
     if (subtitles_enabled or embed_subtitles) and words:
         write_caption_sidecars(output, words, offset=0, duration=duration)
@@ -1028,11 +1079,11 @@ def render_fast_clip(
         "-map",
         "0:v",
         "-c:v",
-        "libx264",
+        DELIVERY_VIDEO_CODEC,
         "-preset",
-        "veryfast",
+        DELIVERY_PRESET,
         "-crf",
-        "23",
+        DELIVERY_CRF,
         "-pix_fmt",
         "yuv420p",
         "-movflags",
@@ -1043,11 +1094,11 @@ def render_fast_clip(
             "-map",
             "0:a:0",
             "-c:a",
-            "aac",
+            DELIVERY_AUDIO_CODEC,
             "-b:a",
-            "128k",
+            DELIVERY_AUDIO_BITRATE,
             "-ar",
-            "44100",
+            DELIVERY_AUDIO_RATE,
         ])
     else:
         command.append("-an")
@@ -1089,10 +1140,10 @@ def render_script(output: Path, *, duration: float, aspect: str, narration: Path
     filters, mapped = _filters(width, height, overlays, asset_start, ass.name)
     command.extend(["-filter_complex", filters, "-map", f"[{mapped}]"])
     if audio_index is not None:
-        command.extend(["-map", f"{audio_index}:a:0", "-c:a", "aac", "-b:a", "160k", "-ar", "48000"])
+        command.extend(["-map", f"{audio_index}:a:0", "-c:a", DELIVERY_AUDIO_CODEC, "-b:a", DELIVERY_AUDIO_BITRATE, "-ar", DELIVERY_AUDIO_RATE])
     else:
         command.append("-an")
-    command.extend(["-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-t", f"{duration:.3f}", str(temp)])
+    command.extend(["-c:v", DELIVERY_VIDEO_CODEC, "-preset", DELIVERY_PRESET, "-crf", DELIVERY_CRF, "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-t", f"{duration:.3f}", str(temp)])
     run(command, cwd=output.parent, timeout=7200)
     metadata = probe(temp, settings)
     if metadata["width"] != width or metadata["height"] != height or (narration and not metadata["audio"]):

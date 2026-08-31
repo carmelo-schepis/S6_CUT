@@ -70,6 +70,13 @@ export function WorkspaceView({ project, health, hasSelectedProvider = true, onC
   const [stalledCalloutDismissed, setStalledCalloutDismissed] = useState(false);
   const [folders, setFolders] = useState<LibraryFolder[]>([]);
   const [now, setNow] = useState(() => Date.now());
+  const [previewSource, setPreviewSource] = useState<{ identity: string; url: string } | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewPlaying, setPreviewPlaying] = useState(false);
+  const [previewMuted, setPreviewMuted] = useState(false);
+  const [safeAreasVisible, setSafeAreasVisible] = useState(false);
+  const [previewTime, setPreviewTime] = useState(0);
+  const playerRef = useRef<HTMLVideoElement | null>(null);
   const pollingRef = useRef<number | null>(null);
   const mediaLoadedKey = useRef<string | null>(null);
   // Track the previous clip states so we can detect new publications
@@ -171,6 +178,42 @@ export function WorkspaceView({ project, health, hasSelectedProvider = true, onC
   }, [project?.id, project?.latestJobId, subscriptionNonce]);
 
   const selectedClip = useMemo(() => job?.clips.find((clip) => clip.id === selectedClipId) || null, [job, selectedClipId]);
+  const selectedMediaIdentity = selectedClip?.state === "complete" && selectedClip.downloadUrl
+    ? `${selectedClip.id}:${selectedClip.blobId || selectedClip.outputName || selectedClip.downloadUrl.split("?")[0]}`
+    : null;
+
+  useEffect(() => {
+    if (!selectedClip || selectedClip.state !== "complete" || !selectedClip.downloadUrl || !selectedMediaIdentity) {
+      queueMicrotask(() => {
+        setPreviewSource(null);
+        setPreviewLoading(false);
+      });
+      return;
+    }
+    if (previewSource?.identity === selectedMediaIdentity) return;
+    queueMicrotask(() => {
+      setPreviewSource({ identity: selectedMediaIdentity, url: selectedClip.downloadUrl! });
+      setPreviewLoading(true);
+      setPreviewPlaying(false);
+      setPreviewTime(0);
+    });
+  }, [previewSource, selectedClip, selectedMediaIdentity]);
+
+  const refreshPreviewSource = () => {
+    if (!selectedClip?.downloadUrl || !selectedMediaIdentity) return;
+    setPreviewSource({ identity: selectedMediaIdentity, url: selectedClip.downloadUrl });
+    setPreviewLoading(true);
+  };
+  const togglePreviewPlayback = async () => {
+    const player = playerRef.current || document.querySelector<HTMLVideoElement>(".viewer-frame video");
+    if (!player) return;
+    if (player.paused) {
+      try { await player.play(); } catch { setPreviewPlaying(false); }
+    } else {
+      player.pause();
+    }
+  };
+
   const relevantMediaAssets = useMemo(() => {
     const clipIds = new Set(job?.clips.map((clip) => clip.id));
     return mediaAssets.filter((asset) => asset.sourceProjectId === project?.id || asset.sourceJobId === job?.id || (asset.sourceClipId != null && clipIds.has(asset.sourceClipId)));
@@ -298,10 +341,24 @@ export function WorkspaceView({ project, health, hasSelectedProvider = true, onC
       </aside>
 
       <section className="viewer-panel panel" aria-label="Output viewer">
-        <div className="viewer-toolbar"><span>Output · {project.contentFormat === "long" ? "16:9" : "9:16"}</span><div><IconButton label="Toggle safe areas"><Eye size={15} /></IconButton><IconButton label="Mute preview"><Volume2 size={15} /></IconButton></div></div>
+        <div className="viewer-toolbar"><span>Output · {project.contentFormat === "long" ? "16:9" : "9:16"}</span><div><IconButton label="Toggle safe areas" aria-pressed={safeAreasVisible} onClick={() => setSafeAreasVisible((value) => !value)}><Eye size={15} /></IconButton><IconButton label={previewMuted ? "Unmute preview" : "Mute preview"} aria-pressed={previewMuted} onClick={() => { const player = playerRef.current; if (player) player.muted = !player.muted; setPreviewMuted((value) => !value); }}><Volume2 size={15} /></IconButton></div></div>
         <div className="viewer-stage">
-          <div className={`viewer-frame ${project.mode} ${project.contentFormat === "long" ? "landscape" : ""}`}>
-            {selectedClip?.state === "complete" && selectedClip.downloadUrl ? <video key={selectedClip.downloadUrl} src={selectedClip.downloadUrl} controls preload="metadata" /> : job && (["active", "queued", "paused", "stalled", "recovered"].includes(job.state) || waitingForEngine) ? <ProcessingState job={job} waitingForEngine={waitingForEngine} /> : <div className="viewer-placeholder">
+          <div className={`viewer-frame ${project.mode} ${project.contentFormat === "long" ? "landscape" : ""} ${safeAreasVisible ? "show-safe-areas" : ""}`}>
+            {previewSource ? <><video
+              key={previewSource.identity}
+              ref={playerRef}
+              src={previewSource.url}
+              controls
+              preload="auto"
+              playsInline
+              muted={previewMuted}
+              onLoadedMetadata={() => setPreviewLoading(false)}
+              onCanPlay={() => setPreviewLoading(false)}
+              onPlaying={() => setPreviewPlaying(true)}
+              onPause={() => setPreviewPlaying(false)}
+              onTimeUpdate={(event) => setPreviewTime(event.currentTarget.currentTime)}
+              onError={refreshPreviewSource}
+            />{previewLoading && <div className="viewer-loading" role="status">Loading preview…</div>}</> : job && (["active", "queued", "paused", "stalled", "recovered"].includes(job.state) || waitingForEngine) ? <ProcessingState job={job} waitingForEngine={waitingForEngine} /> : <div className="viewer-placeholder">
               <div className="safe-area" />
               <img src="/app-icon.png" alt="" />
               <span>{job?.state === "failed" ? "Render unavailable" : job?.stageLabel || "Preparing project"}</span>
@@ -310,7 +367,7 @@ export function WorkspaceView({ project, health, hasSelectedProvider = true, onC
             </div>}
           </div>
         </div>
-        <div className="transport"><IconButton label="Previous frame"><RotateCcw size={15} /></IconButton><button className="play-button" aria-label="Play"><Play size={17} fill="currentColor" /></button><span className="transport-time">{selectedClip ? `${formatDuration(0)} / ${formatDuration(selectedClip.duration)}` : "0:00 / 0:00"}</span><div className="transport-spacer" /><span>J&nbsp; K&nbsp; L</span></div>
+        <div className="transport"><IconButton label="Previous frame" onClick={() => { const player = playerRef.current; if (player) player.currentTime = Math.max(0, player.currentTime - 1 / 30); }}><RotateCcw size={15} /></IconButton><button className="play-button" aria-label={previewPlaying ? "Pause" : "Play"} aria-pressed={previewPlaying} onClick={() => void togglePreviewPlayback()}>{previewPlaying ? <Pause size={17} fill="currentColor" /> : <Play size={17} fill="currentColor" />}</button><span className="transport-time">{selectedClip ? `${formatDuration(previewTime)} / ${formatDuration(selectedClip.duration)}` : "0:00 / 0:00"}</span><div className="transport-spacer" /><span>J&nbsp; K&nbsp; L</span></div>
       </section>
 
       <aside className="inspector-panel panel">

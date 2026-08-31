@@ -63,6 +63,15 @@ const staleSmartJobWithOutputs: Job = {
   ],
 };
 
+const responsiveJob: Job = {
+  ...staleSmartJobWithOutputs,
+  state: "complete",
+  stage: "done",
+  stageLabel: "Complete",
+  progress: 100,
+  clips: [{ ...staleSmartJobWithOutputs.clips[0], downloadUrl: "/clip.mp4" }],
+};
+
 // Stub EventSource for jsdom
 vi.stubGlobal("EventSource", class { close() {} });
 
@@ -392,5 +401,53 @@ describe("WorkspaceView – publication metadata, Details rename, read-only capt
     expect(screen.queryByText("Layered timeline")).not.toBeInTheDocument();
     // Both ready clips keep their non-destructive include-in-export checkboxes
     expect(screen.getAllByLabelText("Include in export")).toHaveLength(2);
+  });
+});
+
+describe("WorkspaceView – stable responsive media controls", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockListFolders.mockResolvedValue([]);
+    mockGetJob.mockResolvedValue(responsiveJob);
+    Object.defineProperty(HTMLMediaElement.prototype, "play", { configurable: true, value: vi.fn().mockResolvedValue(undefined) });
+    Object.defineProperty(HTMLMediaElement.prototype, "pause", { configurable: true, value: vi.fn() });
+  });
+
+  it("loads the selected output with a visible, responsive main player", async () => {
+    renderView();
+    const video = await waitFor(() => {
+      const element = document.querySelector<HTMLVideoElement>(".viewer-frame video");
+      expect(element).toBeTruthy();
+      return element;
+    });
+    expect(video).toHaveAttribute("preload", "auto");
+    expect(video).toHaveAttribute("playsinline");
+    fireEvent.loadedMetadata(video!);
+    expect(screen.queryByText("Loading preview…")).not.toBeInTheDocument();
+  });
+
+  it("uses the main player's play, pause, and mute controls", async () => {
+    renderView();
+    const video = await waitFor(() => {
+      const element = document.querySelector<HTMLVideoElement>(".viewer-frame video");
+      expect(element).toBeTruthy();
+      return element;
+    });
+    const playMethod = vi.fn().mockResolvedValue(undefined);
+    const pauseMethod = vi.fn();
+    Object.defineProperty(video!, "paused", { configurable: true, value: true });
+    Object.defineProperty(video!, "play", { configurable: true, value: playMethod });
+    Object.defineProperty(video!, "pause", { configurable: true, value: pauseMethod });
+    const viewer = video!.closest(".viewer-panel")!;
+    expect(viewer.querySelector<HTMLButtonElement>(".play-button")).toHaveAttribute("aria-label", "Play");
+    fireEvent.click(viewer.querySelector<HTMLButtonElement>(".play-button")!);
+    await waitFor(() => expect(playMethod).toHaveBeenCalled());
+    Object.defineProperty(video!, "paused", { configurable: true, value: false });
+    fireEvent(video!, new Event("playing"));
+    await waitFor(() => expect(viewer.querySelector<HTMLButtonElement>(".play-button")).toHaveAttribute("aria-label", "Pause"));
+    fireEvent.click(viewer.querySelector<HTMLButtonElement>("[aria-label='Mute preview']")!);
+    expect(video?.muted).toBe(true);
+    fireEvent.click(viewer.querySelector<HTMLButtonElement>(".play-button")!);
+    expect(pauseMethod).toHaveBeenCalled();
   });
 });
