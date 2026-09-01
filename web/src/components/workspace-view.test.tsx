@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Health, Job, LibraryAsset, LibraryFolder, Project } from "../types";
 import { WorkspaceView } from "./workspace-view";
@@ -405,6 +405,8 @@ describe("WorkspaceView – publication metadata, Details rename, read-only capt
 });
 
 describe("WorkspaceView – stable responsive media controls", () => {
+  afterEach(() => vi.useRealTimers());
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockListFolders.mockResolvedValue([]);
@@ -424,6 +426,110 @@ describe("WorkspaceView – stable responsive media controls", () => {
     expect(video).toHaveAttribute("playsinline");
     fireEvent.loadedMetadata(video!);
     expect(screen.queryByText("Loading preview…")).not.toBeInTheDocument();
+  });
+
+  it("bounds media-error retries and returns to an actionable Play state", async () => {
+    renderView();
+    const video = await waitFor(() => {
+      const element = document.querySelector<HTMLVideoElement>(".viewer-frame video");
+      expect(element).toBeTruthy();
+      return element;
+    });
+    fireEvent.error(video!);
+    fireEvent.error(video!);
+    expect(await screen.findByRole("alert")).toHaveTextContent("could not be played in this browser");
+    expect(screen.getByRole("button", { name: "Retry preview" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Play" })).toBeInTheDocument();
+  });
+
+  it("detects a sustained frozen clock, offers explicit muted recovery, and does not reload the source", async () => {
+    renderView();
+    const video = await waitFor(() => {
+      const element = document.querySelector<HTMLVideoElement>(".viewer-frame video");
+      expect(element).toBeTruthy();
+      return element!;
+    });
+    let currentTime = 0;
+    Object.defineProperties(video, {
+      paused: { configurable: true, get: () => false },
+      ended: { configurable: true, get: () => false },
+      readyState: { configurable: true, get: () => 4 },
+      currentTime: { configurable: true, get: () => currentTime, set: (value: number) => { currentTime = value; } },
+      play: { configurable: true, value: vi.fn().mockResolvedValue(undefined) },
+      pause: { configurable: true, value: vi.fn() },
+      load: { configurable: true, value: vi.fn() },
+    });
+    vi.useFakeTimers();
+    fireEvent.playing(video);
+    expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_750); });
+    expect(screen.getByRole("alert")).toHaveTextContent("Playback could not start with this browser’s audio output.");
+    expect(screen.getByRole("button", { name: "Play" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry playback" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Play muted" })).toBeInTheDocument();
+    expect(video.load).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Retry playback" }));
+    await act(async () => {});
+    expect(video.play).toHaveBeenCalledTimes(1);
+    expect(video.load).not.toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_750); });
+    fireEvent.click(screen.getByRole("button", { name: "Play muted" }));
+    await act(async () => {});
+    expect(video.muted).toBe(true);
+    expect(video.play).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("does not classify advancing playback or transient buffering as stalled", async () => {
+    renderView();
+    const video = await waitFor(() => {
+      const element = document.querySelector<HTMLVideoElement>(".viewer-frame video");
+      expect(element).toBeTruthy();
+      return element!;
+    });
+    let currentTime = 0;
+    let readyState = 4;
+    Object.defineProperties(video, {
+      paused: { configurable: true, get: () => false },
+      ended: { configurable: true, get: () => false },
+      readyState: { configurable: true, get: () => readyState },
+      currentTime: { configurable: true, get: () => currentTime },
+    });
+    vi.useFakeTimers();
+    fireEvent.playing(video);
+    await act(async () => { currentTime = 0.5; await vi.advanceTimersByTimeAsync(500); currentTime = 1; await vi.advanceTimersByTimeAsync(2_500); });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    readyState = 2;
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    fireEvent.pause(video);
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("cancels watchdogs after pause, end, source reset, and unmount", async () => {
+    const view = renderView();
+    const video = await waitFor(() => {
+      const element = document.querySelector<HTMLVideoElement>(".viewer-frame video");
+      expect(element).toBeTruthy();
+      return element!;
+    });
+    Object.defineProperties(video, {
+      paused: { configurable: true, get: () => false },
+      ended: { configurable: true, get: () => false },
+      readyState: { configurable: true, get: () => 4 },
+      currentTime: { configurable: true, get: () => 0 },
+    });
+    vi.useFakeTimers();
+    for (const event of ["pause", "ended", "emptied"]) {
+      fireEvent.playing(video);
+      fireEvent(video, new Event(event));
+      await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    }
+    fireEvent.playing(video);
+    view.unmount();
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
   });
 
   it("uses the main player's play, pause, and mute controls", async () => {

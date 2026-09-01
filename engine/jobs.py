@@ -1185,8 +1185,9 @@ class JobManager:
         render = _media_fn("render_fast_clip")
         has_audio = bool(metadata["audio"])
         target_width, target_height = media_module.dimensions(str(private["aspect_ratio"]))
-        if int(metadata.get("width", 0)) < target_width or int(metadata.get("height", 0)) < target_height:
-            warning = f"Source is below the {target_width}×{target_height} delivery canvas; output was upscaled and may have reduced detail."
+        source_dimensions = _displayed_dimensions(metadata)
+        if source_dimensions and min(source_dimensions) < min(target_width, target_height):
+            warning = f"Source is {source_dimensions[0]}×{source_dimensions[1]}, below the {target_width}×{target_height} delivery canvas; output was upscaled and may have reduced detail."
             if warning not in job.warnings:
                 job.warnings.append(warning)
         if not has_audio:

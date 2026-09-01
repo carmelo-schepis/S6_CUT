@@ -119,7 +119,7 @@ def public_job(job: Job) -> Job:
             clip.error = "Publication repair required before this output is ready"
         if clip.state == "complete" and clip.output_name:
             clip.download_url = _download_url(f"jobs/{job.id}/clips/{clip.output_name}")
-            clip.preview_url = clip.download_url
+            clip.preview_url = f"{clip.download_url}&inline=1"
             sidecars = []
             manifest = caption_artifacts.get(clip.id) if isinstance(caption_artifacts, dict) else None
             if isinstance(manifest, dict) and manifest.get("output_name") == clip.output_name:
@@ -673,7 +673,7 @@ async def export_job(job_id: str, value: SelectionInput) -> dict[str, str]:
 
 @app.get("/api/v1/files/{relative_path:path}")
 # DO-NOT-CHANGE: only serves jobs/ and exports/ prefixes; HMAC-verified; confined path
-async def download_file(relative_path: str, expires: int = Query(...), signature: str = Query(...)) -> FileResponse:
+async def download_file(relative_path: str, expires: int = Query(...), signature: str = Query(...), inline: bool = Query(False)) -> FileResponse:
     if not relative_path.startswith(("jobs/", "exports/")) or Path(relative_path).suffix.casefold() not in {".mp4", ".zip"} or not signer.verify(relative_path, expires, signature):
         raise HTTPException(403, "Download link is invalid or expired")
     try:
@@ -682,7 +682,10 @@ async def download_file(relative_path: str, expires: int = Query(...), signature
         raise HTTPException(400, "Invalid download path") from exc
     if not target.is_file():
         raise _not_found("File")
-    return FileResponse(target, filename=safe_filename(target.name, "s6-cut-download"), media_type="application/zip" if target.suffix == ".zip" else "video/mp4")
+    media_type = "application/zip" if target.suffix == ".zip" else "video/mp4"
+    if inline and media_type == "video/mp4":
+        return FileResponse(target, media_type=media_type)
+    return FileResponse(target, filename=safe_filename(target.name, "s6-cut-download"), media_type=media_type)
 
 
 @app.get("/api/v1/openrouter/models", response_model=list[OpenRouterModel])
@@ -897,7 +900,7 @@ async def preview_asset(asset_id: str, expires: int = Query(...), signature: str
         raise HTTPException(400, "Invalid media reference") from exc
     if not target.is_file():
         raise _not_found("Media blob")
-    return FileResponse(target, filename=safe_filename(asset.filename, "library-media"), media_type=asset.media_type)
+    return FileResponse(target, media_type=asset.media_type)
 
 
 @app.delete("/api/v1/library/assets/{asset_id}", status_code=204)

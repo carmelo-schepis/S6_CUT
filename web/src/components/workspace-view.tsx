@@ -72,11 +72,48 @@ export function WorkspaceView({ project, health, hasSelectedProvider = true, onC
   const [now, setNow] = useState(() => Date.now());
   const [previewSource, setPreviewSource] = useState<{ identity: string; url: string } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState(false);
+  const [previewStall, setPreviewStall] = useState(false);
+  const [previewRetryCount, setPreviewRetryCount] = useState(0);
   const [previewPlaying, setPreviewPlaying] = useState(false);
   const [previewMuted, setPreviewMuted] = useState(false);
   const [safeAreasVisible, setSafeAreasVisible] = useState(false);
   const [previewTime, setPreviewTime] = useState(0);
   const playerRef = useRef<HTMLVideoElement | null>(null);
+  const previewStallRef = useRef(false);
+  const playbackWatchdogRef = useRef<number | null>(null);
+  const clearPlaybackWatchdog = useCallback(() => {
+    if (playbackWatchdogRef.current !== null) {
+      window.clearInterval(playbackWatchdogRef.current);
+      playbackWatchdogRef.current = null;
+    }
+  }, []);
+  const startPlaybackWatchdog = useCallback(() => {
+    clearPlaybackWatchdog();
+    const player = playerRef.current;
+    if (!player) return;
+    let lastTime = player.currentTime;
+    let lastProgressAt = Date.now();
+    playbackWatchdogRef.current = window.setInterval(() => {
+      const current = playerRef.current;
+      if (current !== player || player.paused || player.ended || player.readyState < 3) {
+        clearPlaybackWatchdog();
+        return;
+      }
+      const now = Date.now();
+      if (player.currentTime - lastTime >= 0.05) {
+        lastTime = player.currentTime;
+        lastProgressAt = now;
+      } else if (now - lastProgressAt >= 2500) {
+        clearPlaybackWatchdog();
+        previewStallRef.current = true;
+        player.pause();
+        setPreviewLoading(false);
+        setPreviewPlaying(false);
+        setPreviewStall(true);
+      }
+    }, 250);
+  }, [clearPlaybackWatchdog]);
   const pollingRef = useRef<number | null>(null);
   const mediaLoadedKey = useRef<string | null>(null);
   // Track the previous clip states so we can detect new publications
@@ -178,39 +215,108 @@ export function WorkspaceView({ project, health, hasSelectedProvider = true, onC
   }, [project?.id, project?.latestJobId, subscriptionNonce]);
 
   const selectedClip = useMemo(() => job?.clips.find((clip) => clip.id === selectedClipId) || null, [job, selectedClipId]);
-  const selectedMediaIdentity = selectedClip?.state === "complete" && selectedClip.downloadUrl
-    ? `${selectedClip.id}:${selectedClip.blobId || selectedClip.outputName || selectedClip.downloadUrl.split("?")[0]}`
+  const selectedPreviewUrl = selectedClip?.previewUrl || selectedClip?.downloadUrl;
+  const selectedMediaIdentity = selectedClip?.state === "complete" && selectedPreviewUrl
+    ? `${selectedClip.id}:${selectedClip.blobId || selectedClip.outputName || selectedPreviewUrl.split("?")[0]}`
     : null;
 
   useEffect(() => {
-    if (!selectedClip || selectedClip.state !== "complete" || !selectedClip.downloadUrl || !selectedMediaIdentity) {
+    if (!selectedClip || selectedClip.state !== "complete" || !selectedPreviewUrl || !selectedMediaIdentity) {
       queueMicrotask(() => {
         setPreviewSource(null);
         setPreviewLoading(false);
+        setPreviewError(false);
+        previewStallRef.current = false;
+        setPreviewStall(false);
+        setPreviewRetryCount(0);
+        clearPlaybackWatchdog();
       });
       return;
     }
     if (previewSource?.identity === selectedMediaIdentity) return;
+    clearPlaybackWatchdog();
     queueMicrotask(() => {
-      setPreviewSource({ identity: selectedMediaIdentity, url: selectedClip.downloadUrl! });
+      setPreviewSource({ identity: selectedMediaIdentity, url: selectedPreviewUrl });
       setPreviewLoading(true);
+      setPreviewError(false);
+      previewStallRef.current = false;
+      setPreviewStall(false);
+      setPreviewRetryCount(0);
       setPreviewPlaying(false);
       setPreviewTime(0);
     });
-  }, [previewSource, selectedClip, selectedMediaIdentity]);
+  }, [clearPlaybackWatchdog, previewSource, selectedClip, selectedMediaIdentity, selectedPreviewUrl]);
+
+  useEffect(() => clearPlaybackWatchdog, [clearPlaybackWatchdog]);
 
   const refreshPreviewSource = () => {
-    if (!selectedClip?.downloadUrl || !selectedMediaIdentity) return;
-    setPreviewSource({ identity: selectedMediaIdentity, url: selectedClip.downloadUrl });
+    if (!selectedPreviewUrl || !selectedMediaIdentity) return;
+    setPreviewRetryCount(0);
+    clearPlaybackWatchdog();
+    setPreviewError(false);
+    previewStallRef.current = false;
+    setPreviewStall(false);
+    setPreviewSource({ identity: selectedMediaIdentity, url: selectedPreviewUrl });
     setPreviewLoading(true);
+  };
+  const retryPlayback = async () => {
+    const player = playerRef.current;
+    if (!player) return;
+    clearPlaybackWatchdog();
+    previewStallRef.current = false;
+    setPreviewStall(false);
+    setPreviewError(false);
+    try {
+      await player.play();
+      setPreviewPlaying(true);
+      startPlaybackWatchdog();
+    } catch {
+      setPreviewPlaying(false);
+    }
+  };
+  const playMuted = async () => {
+    const player = playerRef.current;
+    if (!player) return;
+    clearPlaybackWatchdog();
+    player.muted = true;
+    setPreviewMuted(true);
+    previewStallRef.current = false;
+    setPreviewStall(false);
+    setPreviewError(false);
+    try {
+      await player.play();
+      setPreviewPlaying(true);
+      startPlaybackWatchdog();
+    } catch {
+      setPreviewPlaying(false);
+    }
+  };
+  const handlePreviewError = () => {
+    clearPlaybackWatchdog();
+    setPreviewPlaying(false);
+    if (previewRetryCount === 0) {
+      setPreviewRetryCount(1);
+      setPreviewSource({ identity: selectedMediaIdentity!, url: selectedPreviewUrl! });
+      playerRef.current?.load();
+      setPreviewLoading(true);
+    } else {
+      setPreviewLoading(false);
+      setPreviewError(true);
+    }
   };
   const togglePreviewPlayback = async () => {
     const player = playerRef.current || document.querySelector<HTMLVideoElement>(".viewer-frame video");
     if (!player) return;
     if (player.paused) {
-      try { await player.play(); } catch { setPreviewPlaying(false); }
+      try {
+        await player.play();
+        setPreviewPlaying(true);
+        startPlaybackWatchdog();
+      } catch { setPreviewPlaying(false); }
     } else {
       player.pause();
+      clearPlaybackWatchdog();
+      setPreviewPlaying(false);
     }
   };
 
@@ -354,11 +460,17 @@ export function WorkspaceView({ project, health, hasSelectedProvider = true, onC
               muted={previewMuted}
               onLoadedMetadata={() => setPreviewLoading(false)}
               onCanPlay={() => setPreviewLoading(false)}
-              onPlaying={() => setPreviewPlaying(true)}
-              onPause={() => setPreviewPlaying(false)}
-              onTimeUpdate={(event) => setPreviewTime(event.currentTarget.currentTime)}
-              onError={refreshPreviewSource}
-            />{previewLoading && <div className="viewer-loading" role="status">Loading preview…</div>}</> : job && (["active", "queued", "paused", "stalled", "recovered"].includes(job.state) || waitingForEngine) ? <ProcessingState job={job} waitingForEngine={waitingForEngine} /> : <div className="viewer-placeholder">
+              onPlay={() => { if (!previewStallRef.current) setPreviewPlaying(true); }}
+              onPlaying={() => { if (!previewStallRef.current) { setPreviewPlaying(true); startPlaybackWatchdog(); } }}
+              onPause={() => { clearPlaybackWatchdog(); setPreviewPlaying(false); }}
+              onEnded={() => { clearPlaybackWatchdog(); setPreviewPlaying(false); }}
+              onAbort={() => { clearPlaybackWatchdog(); setPreviewPlaying(false); }}
+              onEmptied={() => { clearPlaybackWatchdog(); setPreviewPlaying(false); }}
+              onWaiting={() => setPreviewLoading(true)}
+              onStalled={() => setPreviewLoading(true)}
+              onTimeUpdate={(event) => { setPreviewTime(event.currentTarget.currentTime); setPreviewLoading(false); }}
+              onError={handlePreviewError}
+            />{previewStall ? <div className="viewer-error" role="alert">Playback could not start with this browser’s audio output.<div className="viewer-error-actions"><button type="button" onClick={() => void retryPlayback()}>Retry playback</button><button type="button" onClick={() => void playMuted()}>Play muted</button></div></div> : previewError ? <div className="viewer-error" role="alert">This video could not be played in this browser.<button type="button" onClick={refreshPreviewSource}>Retry preview</button></div> : previewLoading && <div className="viewer-loading" role="status">Loading preview…</div>}</> : job && (["active", "queued", "paused", "stalled", "recovered"].includes(job.state) || waitingForEngine) ? <ProcessingState job={job} waitingForEngine={waitingForEngine} /> : <div className="viewer-placeholder">
               <div className="safe-area" />
               <img src="/app-icon.png" alt="" />
               <span>{job?.state === "failed" ? "Render unavailable" : job?.stageLabel || "Preparing project"}</span>

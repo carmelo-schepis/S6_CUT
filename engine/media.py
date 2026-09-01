@@ -28,6 +28,18 @@ DELIVERY_CRF = "18"
 DELIVERY_AUDIO_CODEC = "aac"
 DELIVERY_AUDIO_BITRATE = "192k"
 DELIVERY_AUDIO_RATE = "48000"
+# Prefer YouTube's separate highest-quality streams while bounding acquisition to
+# the delivery ceiling. The progressive branch is only a compatibility fallback
+# for videos that do not expose a mergeable video+audio pair.
+YOUTUBE_FORMAT_SELECTOR = "bv*[height<=1080]+ba/b[height<=1080]"
+# YouTube now binds full-length Google Video Server access to a per-video
+# Proof-of-Origin token for the mweb client. The provider is an internal Compose
+# service; keeping its URL here ensures every production download uses the same
+# token-aware path that exposes the complete high-resolution streams.
+YOUTUBE_EXTRACTOR_ARGS = (
+    "youtube:player_client=mweb",
+    "youtubepot-bgutilhttp:base_url=http://pot-provider:4416",
+)
 
 
 class MediaError(RuntimeError):
@@ -376,11 +388,13 @@ def download_youtube(
         settings.ytdlp, "--no-playlist", "--no-warnings", "--restrict-filenames", "--write-info-json",
         "--newline", "--progress", "--progress-delta", "1", "--socket-timeout", str(settings.ytdlp_connect_timeout),
         "--retries", "3", "--fragment-retries", "3", "--max-filesize", str(settings.max_upload_bytes),
-        "--extractor-args", "youtube:player_client=android,web", "--format", "bv*+ba/b",
+        "--format", YOUTUBE_FORMAT_SELECTOR,
         "--merge-output-format", "mp4", "--output", template,
         "--progress-template", "download:%(progress.status)s|%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s|%(progress._percent_str)s",
         "--print", "after_move:filepath",
     ]
+    for extractor_args in YOUTUBE_EXTRACTOR_ARGS:
+        common.extend(("--extractor-args", extractor_args))
     if resume:
         common.append("--continue")
     common.append(url)
@@ -388,7 +402,7 @@ def download_youtube(
     if not candidates:
         _cleanup_partials(target_dir)
         retry = common.copy()
-        retry[retry.index("android,web")] = "android,web,web_music"
+        retry[-1:-1] = ["--extractor-args", "youtube:player_client=android,web,web_music"]
         candidates = _run_ytdlp_download(retry, target_dir, settings, progress_callback=progress_callback, cancellation_callback=cancellation_callback)
     if not candidates:
         raise MediaError("YouTube import completed without a usable video file")
