@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState, type ChangeEvent, type KeyboardEvent, type MouseEvent } from "react";
-import { Archive, FileImage, Folder, FolderPlus, ImagePlus, Info, Library, RefreshCw, Search, ShieldCheck, Sparkles, Upload } from "lucide-react";
-import { archiveFolder, createFolder, deleteAsset, explainMatch, getHealth, listAssets, listFolders, moveAssets, moveFolder, readableError, removeFolder, updateAsset, updateFolder, uploadAsset } from "../api";
+import { Archive, FileImage, Folder, FolderPlus, ImagePlus, Library, RefreshCw, Search, ShieldCheck, Upload } from "lucide-react";
+import { archiveFolder, createFolder, deleteAsset, getHealth, listAssets, listFolders, moveAssets, moveFolder, readableError, removeFolder, updateAsset, updateFolder, uploadAsset } from "../api";
 import { bindRevalidationOnFocus, createBoundedRevalidation, onLibraryChanged } from "../library-sync";
-import type { AssetOrigin, Health, LibraryAsset, LibraryFolder, MatchExplanation } from "../types";
+import type { AssetOrigin, Health, LibraryAsset, LibraryFolder } from "../types";
 import { Button, EmptyState, Field, PageHeader, StatusBadge, formatAge } from "./common";
 import { VideoPreviewDialog } from "./video-preview-dialog";
 
@@ -20,7 +20,6 @@ export function LibraryView() {
   const [origin, setOrigin] = useState<AssetOrigin | "all">("all");
   const [policy, setPolicy] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
-  const [explanation, setExplanation] = useState<MatchExplanation | null>(null);
   const [showImport, setShowImport] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
@@ -70,7 +69,6 @@ export function LibraryView() {
       (mediaType === "all" || asset.mediaType.startsWith(`${mediaType}/`)) && (!query.trim() || terms.includes(query.trim().toLowerCase()));
   }), [assets, folderId, mediaType, origin, policy, query]);
 
-  const runMatch = async () => { if (query.trim()) try { setExplanation(await explainMatch(query)); } catch { setError("Could not test the local matching rules."); } };
   const saveSelected = async (patch: Record<string, unknown>) => {
     if (!selected) return;
     try { const next = await updateAsset(selected.id, patch); setSelected(next); setAssets((current) => current.map((asset) => asset.id === next.id ? next : asset)); } catch (cause) { setError(readableError(cause)); }
@@ -156,7 +154,6 @@ export function LibraryView() {
 
     {previewAsset && <VideoPreviewDialog asset={previewAsset} opener={previewOpener} onClose={closePreview} />}
 
-    <section className="match-bench panel"><div><span className="eyebrow">Why it matched</span><h2>Test the rule engine</h2><p>Search terms above filter media; this text tests deterministic matching.</p></div><div className="match-input"><textarea value={query} onChange={(event) => setQuery(event.target.value)} placeholder="e.g. The Beatles changed popular music…" rows={3} /><Button onClick={runMatch}><Sparkles size={15} /> Explain match</Button></div>{explanation && <div className="match-result"><div className="match-decision"><Info size={17} /><div><span>{explanation.selected ? "Selected local asset" : "No eligible local asset"}</span><strong>{explanation.selected?.title || "Continue to licensed source or text card"}</strong><p>{explanation.reason}</p></div><span className="score-box">{Math.round(explanation.score)}</span></div></div>}</section>
   </div>;
 }
 

@@ -11,7 +11,7 @@
     "lint": "eslint web/src web/vite.config.ts web/vitest.config.ts",
     "typecheck": "tsc -p web/tsconfig.json --noEmit",
     "test": "vitest run --config web/vitest.config.ts",
-    "test:engine": "python -m pytest engine/tests -q",
+    "test:engine": "node scripts/test-engine.mjs",
     "check": "npm run lint && npm run typecheck && npm test && npm run test:engine && npm run build",
     "test:acceptance": "playwright test --config playwright.config.ts"
   },

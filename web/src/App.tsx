@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { BriefcaseBusiness, Film, FolderKanban, HardDrive, Library, Scissors, Settings, SlidersHorizontal, Sparkles } from "lucide-react";
-import { getHealth, listProfiles, listProjects, readableError } from "./api";
+import { getHealth, listJobs, listProfiles, listProjects, readableError } from "./api";
 import { JobsView } from "./components/jobs-view";
 import { LibraryView } from "./components/library-view";
 import { ProjectsView } from "./components/projects-view";
@@ -9,7 +9,7 @@ import { StatusBadge } from "./components/common";
 import { WorkspaceView } from "./components/workspace-view";
 import { ShortsEditorView } from "./components/shorts-editor-view";
 import { TopicToVideoView } from "./components/topic-to-video-view";
-import type { Health, Project, ProviderProfile } from "./types";
+import type { Health, Job, Project, ProviderProfile } from "./types";
 
 type Page = "projects" | "library" | "workspace" | "shorts-editor" | "ai-video" | "jobs" | "settings";
 
@@ -26,6 +26,7 @@ const nav: { id: Page; label: string; icon: typeof Film }[] = [
 export function App() {
   const [page, setPage] = useState<Page>("projects");
   const [projects, setProjects] = useState<Project[]>([]);
+  const [jobs, setJobs] = useState<Job[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
   const [healthChecked, setHealthChecked] = useState(false);
@@ -33,19 +34,33 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    const [projectsResult, healthResult, profilesResult] = await Promise.allSettled([listProjects(), getHealth(), listProfiles()]);
-    if (projectsResult.status === "fulfilled") { setProjects(projectsResult.value); setSelectedProjectId((current) => current || projectsResult.value[0]?.id || null); }
+    const [projectsResult, healthResult, profilesResult, jobsResult] = await Promise.allSettled([listProjects(), getHealth(), listProfiles(), listJobs()]);
+    if (projectsResult.status === "fulfilled") { setProjects(projectsResult.value); setSelectedProjectId((current) => current && projectsResult.value.some((project) => project.id === current) ? current : projectsResult.value[0]?.id || null); }
     if (profilesResult.status === "fulfilled") setProfiles(profilesResult.value);
+    if (jobsResult.status === "fulfilled") setJobs(jobsResult.value);
     if (healthResult.status === "fulfilled") { setHealth(healthResult.value); setError(null); }
     else { setHealth(null); setError(readableError(healthResult.reason)); }
     setHealthChecked(true);
   }, []);
 
   useEffect(() => {
-    let active = true;
-    Promise.resolve().then(refresh).catch((cause) => { if (active) setError(readableError(cause)); });
-    return () => { active = false; };
+    void Promise.resolve().then(refresh).catch((cause) => setError(readableError(cause)));
   }, [refresh]);
+
+  useEffect(() => {
+    let active = true;
+    const refreshHealth = () => getHealth().then((value) => { if (active) { setHealth(value); setHealthChecked(true); setError(null); } }).catch((cause) => { if (active) { setHealth(null); setHealthChecked(true); setError(readableError(cause)); } });
+    const timer = window.setInterval(() => void refreshHealth(), 5000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, []);
+
+  useEffect(() => {
+    if (page !== "projects") return;
+    let active = true;
+    const refreshProjectJobs = () => listJobs().then(setJobs).catch((cause) => { if (active) setError(readableError(cause)); });
+    const timer = window.setInterval(() => void refreshProjectJobs(), 4000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [page]);
 
   const openProject = (id: string) => {
     setSelectedProjectId(id);
@@ -95,7 +110,7 @@ export function App() {
       {error && <div className="global-alert" role="alert"><strong>Engine unavailable.</strong> {error} <button onClick={() => refresh()}>Retry</button></div>}
 
       <main id="main-content" tabIndex={-1}>
-        {page === "projects" && <ProjectsView projects={projects} health={health} hasSelectedProvider={hasSelectedProvider} onConfigureProviders={openProviders} onCreated={onCreated} onOpen={openProject} onRefresh={refresh} />}
+        {page === "projects" && <ProjectsView projects={projects} jobs={jobs} health={health} hasSelectedProvider={hasSelectedProvider} onConfigureProviders={openProviders} onCreated={onCreated} onOpen={openProject} onRefresh={refresh} />}
         {page === "library" && <LibraryView />}
         {page === "workspace" && <WorkspaceView key={selected?.id || "none"} project={selected} health={health} hasSelectedProvider={hasSelectedProvider} onConfigureProviders={openProviders} onProjectUpdated={refresh} onGoProjects={() => setPage("projects")} />}
         {page === "shorts-editor" && <ShortsEditorView onJobCreated={refresh} />}

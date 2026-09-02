@@ -62,7 +62,7 @@ test("Docker-served studio acceptance workflow", async ({ page, request }) => {
   await page.goto("/");
   await expect(page).toHaveTitle(/S6_cut/i);
   await expect(page.getByRole("heading", { name: "Make the first cut" })).toBeVisible();
-  await expect(page.getByText("All local tools ready")).toBeVisible();
+  await expect(page.getByText("All local tools ready")).toBeVisible({ timeout: 60_000 });
   await capture(page, "desktop-projects");
 
   // Basic keyboard/focus and responsive evidence.
@@ -76,15 +76,22 @@ test("Docker-served studio acceptance workflow", async ({ page, request }) => {
 
   // Create a real local Fast job through the UI using the supplied disposable fixture.
   await page.locator('input[aria-label="Choose video file"]').setInputFiles(path.join(root, "test-video.mp4"));
-  await page.getByLabel("Project name").fill(`Browser acceptance ${Date.now()}`);
+  const browserProjectName = `Browser acceptance ${Date.now()}`;
+  await page.getByLabel("Project name").fill(browserProjectName);
   await page.getByRole("button", { name: "Fast", exact: true }).click();
-  await page.getByRole("button", { name: /Create 5 clips/ }).click();
+  await page.getByRole("button", { name: /Create 5 (?:short )?clips/ }).click();
   await expect(page.getByText(/Local engine ready|Preparing project|fast/i).first()).toBeVisible();
   const progress = await waitForJob(page);
   expect(progress.length).toBeGreaterThan(0);
   await expect(page.getByText(/ready|cut.*ready/i).first()).toBeVisible({ timeout: 150_000 });
   await capture(page, "workspace-complete");
 
+  // The project card must derive the same terminal state and percentage from the linked job.
+  await open(page, "Projects");
+  const completedProjectCard = page.locator(".project-card").filter({ hasText: browserProjectName });
+  await expect(completedProjectCard).toContainText(/ready/i);
+  await expect(completedProjectCard.locator(".progress-wrap")).toHaveAttribute("aria-label", /100%/);
+  await open(page, "Workspace");
   await page.getByRole("tab", { name: "Media" }).click();
   await expect(page.getByRole("tabpanel", { name: "Media" })).toBeVisible();
   await capture(page, "workspace-media");
@@ -106,6 +113,7 @@ test("Docker-served studio acceptance workflow", async ({ page, request }) => {
   // Shorts Editor: real source preview, local assistant proposal, and output list.
   await open(page, "Shorts Editor");
   await expect(page.getByRole("heading", { name: "Shorts Editor" })).toBeVisible();
+  await expect(page.getByText(/Turn an authorised video from your Library, a local file, or a supported YouTube URL into a social-ready clip/)).toBeVisible();
   await page.setViewportSize({ width: 768, height: 1024 });
   const tabletMeasure = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth, innerWidth: window.innerWidth }));
   await fs.writeFile(path.join(artifactDir, "responsive-measurements.json"), JSON.stringify(tabletMeasure, null, 2));
@@ -143,19 +151,30 @@ test("Docker-served studio acceptance workflow", async ({ page, request }) => {
   await capture(page, "proposal-undone");
   await page.locator('input[aria-label="Editing request"]').fill("Change the aspect ratio to 1:1 now.");
   await page.getByRole("button", { name: "Send editing request" }).click();
-  await expect(page.getByText(/Applied locally/)).toBeVisible();
+  await expect(page.locator(".assistant-messages").getByText(/Applied locally/).last()).toBeVisible();
   await expect(page.getByLabel("Aspect ratio")).toHaveValue("1:1");
   await page.getByRole("button", { name: "Undo" }).click();
   await expect(page.getByText("All changes saved")).toBeVisible();
+  const shortResponse = page.waitForResponse((response) => response.request().method() === "POST" && new URL(response.url()).pathname === "/api/v1/jobs/shorts/source");
+  await page.getByRole("button", { name: "Queue short" }).click();
+  expect((await shortResponse).status()).toBe(202);
+  await expect(page.getByText("Short queued successfully.")).toBeVisible();
   await capture(page, "shorts-editor");
 
   // AI assistant / Topic to Video local custom-script path (no provider or mock involved).
   await open(page, "AI Video");
   await expect(page.getByRole("heading", { name: "Topic to Video" })).toBeVisible();
+  await expect(page.getByText(/Turn a topic or your own script into a reviewable video plan/)).toBeVisible();
   await page.getByLabel("Topic or keyword").fill("Browser acceptance local plan");
   await page.getByLabel(/Custom script/).fill("This is a short, exact local script for browser acceptance and review.");
   await page.getByRole("button", { name: "Create / refresh plan" }).click();
   await expect(page.getByRole("region", { name: "Reviewable script plan" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Generate reviewed video" })).toBeEnabled();
+  await page.getByLabel("Variants (1–3)").fill("2");
+  const scriptResponses = Promise.all([1, 2].map(() => page.waitForResponse((response) => response.request().method() === "POST" && new URL(response.url()).pathname === "/api/v1/jobs/script")));
+  await page.getByRole("button", { name: "Generate reviewed videos" }).click();
+  expect((await scriptResponses).map((response) => response.status())).toEqual([202, 202]);
+  await expect(page.getByText("2 variant jobs queued.")).toBeVisible();
   await capture(page, "ai-video-plan");
 
   // Settings: inspect capabilities and verify secret fields are password inputs and masked text is used.
@@ -178,7 +197,7 @@ test("Docker-served studio acceptance workflow", async ({ page, request }) => {
   await page.getByRole("tab", { name: "YouTube" }).click();
   await page.getByLabel("YouTube URL").fill("https://www.youtube.com/watch?v=aqz-KE-bpKQ");
   await page.getByRole("button", { name: "Fast", exact: true }).click();
-  await page.getByRole("button", { name: /Create 5 clips/ }).click();
+  await page.getByRole("button", { name: /Create 5 (?:short )?clips/ }).click();
   await expect(page.getByRole("button", { name: /Stop & keep/ })).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText(/download|import|source/i).first()).toBeVisible();
   await page.getByRole("button", { name: /Stop & keep/ }).click();

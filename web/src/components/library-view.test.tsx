@@ -11,7 +11,7 @@ const assets: LibraryAsset[] = [
 ];
 
 vi.mock("../api", () => ({
-  listAssets: vi.fn(async () => assets), listFolders: vi.fn(async () => folders), getHealth: vi.fn().mockRejectedValue(new Error("offline")), explainMatch: vi.fn(), updateAsset: vi.fn(), deleteAsset: vi.fn(), uploadAsset: vi.fn(), createFolder: vi.fn(), updateFolder: vi.fn(), archiveFolder: vi.fn(), removeFolder: vi.fn(), moveFolder: vi.fn(), moveAssets: vi.fn(), readableError: () => "Error",
+  listAssets: vi.fn(async () => assets), listFolders: vi.fn(async () => folders), getHealth: vi.fn().mockRejectedValue(new Error("offline")), updateAsset: vi.fn(), deleteAsset: vi.fn(), uploadAsset: vi.fn(), createFolder: vi.fn(), updateFolder: vi.fn(), archiveFolder: vi.fn(), removeFolder: vi.fn(), moveFolder: vi.fn(), moveAssets: vi.fn(), readableError: () => "Error",
 }));
 
 import { listAssets, listFolders } from "../api";
@@ -33,6 +33,14 @@ describe("LibraryView", () => {
     fireEvent.change(screen.getByLabelText("Asset origin"), { target: { value: "generated-clip" } });
     expect(screen.getByText("Acme launch")).toBeInTheDocument();
     expect(screen.queryByText("Other logo")).not.toBeInTheDocument();
+  });
+
+  it("does not expose a standalone matching-test panel", async () => {
+    render(<LibraryView />);
+    expect(await screen.findByText("Acme launch")).toBeInTheDocument();
+    expect(screen.queryByText("Why it matched")).not.toBeInTheDocument();
+    expect(screen.queryByText("Test the rule engine")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Explain match" })).not.toBeInTheDocument();
   });
 
   it("opens a preview without changing the existing Rule Inspector selection", async () => {

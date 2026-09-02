@@ -12,8 +12,9 @@ const asset: LibraryAsset = { id: "asset-1", title: "Library clip", description:
 
 describe("ShortsEditorView", () => {
   beforeEach(() => { vi.mocked(listAssets).mockImplementation(async () => [asset]); vi.mocked(createShortsJob).mockResolvedValue({ project: {} as never, job: {} as never }); vi.mocked(createShortsSourceJob).mockResolvedValue({ project: {} as never, job: {} as never }); });
-  it("renders all source tabs and accepts a blank end", async () => {
+  it("explains the accepted source, editing controls, and queued output", async () => {
     render(<ShortsEditorView onJobCreated={vi.fn()} />);
+    expect(screen.getByText("Turn an authorised video from your Library, a local file, or a supported YouTube URL into a social-ready clip. Choose the exact section, output shape, and subtitle setting, then queue it for rendering in S6_cut.")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText("Library")).toBeInTheDocument());
     expect(screen.getByText("Local file")).toBeInTheDocument();
     expect(screen.getByText("YouTube")).toBeInTheDocument();

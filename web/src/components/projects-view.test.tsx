@@ -51,6 +51,16 @@ describe("Projects create flow", () => {
     expect(open).toHaveBeenCalledWith("project-id");
   });
 
+  it("derives card status and progress from the authoritative latest job", () => {
+    const staleProject = { ...project, state: "queued" as const };
+    const completeJob = { ...undefinedJob, state: "complete" as const, stage: "complete", stageLabel: "Project ready", progress: 100 };
+    render(<ProjectsView projects={[staleProject]} jobs={[completeJob]} health={health} onCreated={vi.fn()} onOpen={vi.fn()} onRefresh={vi.fn(async () => undefined)} />);
+    const card = screen.getByRole("button", { name: /Interview/ });
+    expect(card).toHaveTextContent("Project ready");
+    expect(card).toHaveTextContent("100%");
+    expect(card).not.toHaveTextContent("queued");
+  });
+
   it("selects Long form by keyboard-friendly control and sends landscape format", async () => {
     mockCreateClipJob.mockResolvedValue({ project: { ...project, contentFormat: "long" }, job: undefinedJob });
     render(<ProjectsView projects={[]} health={health} onCreated={vi.fn()} onOpen={vi.fn()} onRefresh={vi.fn(async () => undefined)} />);

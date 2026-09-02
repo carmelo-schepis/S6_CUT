@@ -213,7 +213,7 @@ For each asset support:
 - attribution/licence/provenance metadata;
 - perceptual/content hashes for deduplication.
 
-The rule engine must be deterministic and run before external search. A required asset should reserve a valid placement subject to safety and spacing constraints, but remain visibly overridable by the user. A Never asset is excluded before ranking. Add a **Why it matched** inspector showing matched triggers, rules, score, rejected alternatives, and overrides.
+The rule engine must be deterministic and run before external search. A required asset should reserve a valid placement subject to safety and spacing constraints, but remain visibly overridable by the user. A Never asset is excluded before ranking. Preserve matched triggers, rules, score, rejected alternatives, and overrides in the workspace data.
 
 Store library files in the mounted data directory so a TrueNAS dataset can be snapshotted and backed up. Never delete source library files as a side effect of deleting one project; use explicit reference tracking and confirmation.
 

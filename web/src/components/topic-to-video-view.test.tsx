@@ -44,6 +44,11 @@ beforeEach(() => {
 });
 
 describe("TopicToVideoView OpenRouter model picker", () => {
+  it("explains the plan review and local custom-script path", () => {
+    renderView();
+    expect(screen.getByText("Turn a topic or your own script into a reviewable video plan. Choose the audience, tone, language, length, format, and number of versions, review the script and visual beats, then queue the videos for rendering; your own script can be planned locally without an AI provider.")).toBeInTheDocument();
+  });
+
   it("renders exactly the dynamic models and preselects only a returned saved model", async () => {
     renderView();
     const select = await screen.findByLabelText("OpenRouter model");

@@ -68,7 +68,7 @@ async function assertFocusedControlVisible(page: Page) {
 
 test("terminal exact viewport, screenshot, and ZIP evidence", async ({ browser }) => {
   await fs.mkdir(artifacts, { recursive: true });
-  const base = `http://100.108.250.42:8080/?terminal-responsive-retest=${new Date().toISOString()}`;
+  const base = `${process.env.S6_ACCEPTANCE_URL || "http://localhost:8080"}/?terminal-responsive-retest=${new Date().toISOString()}`;
   const diagnostics = { consoleErrors: [] as string[], pageErrors: [] as string[], failedRequests: [] as string[], measurements: [] as unknown[] };
 
   for (const [name, width, height] of viewports) {

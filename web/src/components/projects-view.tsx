@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { FileText, Film, FolderOpen, Plus, Sparkles, Zap } from "lucide-react";
 import { createClipJob, createFolder, createScriptJob, listFolders, readableError } from "../api";
-import type { ContentFormat, Health, LibraryFolder, ProcessingMode, Project, Style } from "../types";
+import type { ContentFormat, Health, Job, LibraryFolder, ProcessingMode, Project, Style } from "../types";
+import { projectStatus } from "../project-status";
 import { Button, Field, PageHeader, Progress, StatusBadge, formatAge } from "./common";
 import { VideoSourcePicker } from "./video-source-picker";
 
@@ -14,8 +15,9 @@ const styles: { id: Style; label: string; note: string }[] = [
   { id: "hype", label: "Hype", note: "Hooks & high energy" },
 ];
 
-export function ProjectsView({ projects, health, hasSelectedProvider = true, onConfigureProviders = () => undefined, onCreated, onOpen, onRefresh }: {
+export function ProjectsView({ projects, jobs = [], health, hasSelectedProvider = true, onConfigureProviders = () => undefined, onCreated, onOpen, onRefresh }: {
   projects: Project[];
+  jobs?: Job[];
   health: Health | null;
   hasSelectedProvider?: boolean;
   onConfigureProviders?: () => void;
@@ -173,10 +175,10 @@ export function ProjectsView({ projects, health, hasSelectedProvider = true, onC
 
     <section className="recent-section">
       <div className="section-heading"><div><span className="step-number">02</span><h2>Recent projects</h2></div><button onClick={() => onRefresh()}>Refresh</button></div>
-      {projects.length ? <div className="project-grid">{projects.map((project) => <button className="project-card" key={project.id} onClick={() => onOpen(project.id)}>
-        <div className={`project-thumb ${project.mode}`}><div className="frame-lines" /><span>{project.mode === "clip" ? <Film size={26} /> : <FileText size={26} />}</span>{["active", "queued", "recovered"].includes(project.state) && <Progress value={project.state === "queued" ? 4 : 42} label="Project progress" />}</div>
-        <div className="project-card-body"><div className="project-card-title"><strong>{project.name}</strong><StatusBadge state={project.state} /></div><p>{project.mode === "clip" ? `${project.requestedCount} ${project.contentFormat === "long" ? "landscape clips" : "short clips"} · ${project.contentFormat === "long" ? "16:9" : "9:16"}` : "Script video"} · {project.style}</p><span>{formatAge(project.updatedAt)} · {project.sourceKind === "youtube" ? "Authorised URL" : "Local source"}</span></div>
-      </button>)}</div> : <div className="inline-empty"><Film size={22} /><span>Your projects will appear here after you create the first cut.</span></div>}
+      {projects.length ? <div className="project-grid">{projects.map((project) => { const status = projectStatus(project, jobs); return <button className="project-card" key={project.id} onClick={() => onOpen(project.id)}>
+        <div className={`project-thumb ${project.mode}`}><div className="frame-lines" /><span>{project.mode === "clip" ? <Film size={26} /> : <FileText size={26} />}</span>{status.progress !== undefined && <Progress value={status.progress} label={status.label || "Project progress"} />}</div>
+        <div className="project-card-body"><div className="project-card-title"><strong>{project.name}</strong><StatusBadge state={status.state} label={status.label || undefined} /></div><p>{project.mode === "clip" ? `${project.requestedCount} ${project.contentFormat === "long" ? "landscape clips" : "short clips"} · ${project.contentFormat === "long" ? "16:9" : "9:16"}` : "Script video"} · {project.style}</p><span>{formatAge(project.updatedAt)} · {project.sourceKind === "youtube" ? "Authorised URL" : "Local source"}</span></div>
+      </button>; })}</div> : <div className="inline-empty"><Film size={22} /><span>Your projects will appear here after you create the first cut.</span></div>}
     </section>
   </div>;
 }

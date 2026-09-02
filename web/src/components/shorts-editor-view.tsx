@@ -174,7 +174,7 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
 
   return <div className="page shorts-workspace-page">
     <form className="shorts-workspace-form" onSubmit={submit}>
-    <header className="shorts-workspace-header"><div><div className="eyebrow">Native editing workflow</div><h1>Shorts Editor</h1><p>Shape one authorised source into a precise, renderable short.</p></div><div className="shorts-header-actions"><span className={dirty ? "edit-state dirty" : "edit-state"}>{dirty ? "Unsaved edits" : "All changes saved"}</span>{history.length > 0 && <Button type="button" onClick={undo}><RotateCcw size={14} /> Undo</Button>}<Button type="submit" variant="primary" disabled={assistantBusy}><Scissors size={14} /> Queue short</Button></div></header>
+    <header className="shorts-workspace-header"><div><div className="eyebrow">Native editing workflow</div><h1>Shorts Editor</h1><p>Turn an authorised video from your Library, a local file, or a supported YouTube URL into a social-ready clip. Choose the exact section, output shape, and subtitle setting, then queue it for rendering in S6_cut.</p></div><div className="shorts-header-actions"><span className={dirty ? "edit-state dirty" : "edit-state"}>{dirty ? "Unsaved edits" : "All changes saved"}</span>{history.length > 0 && <Button type="button" onClick={undo}><RotateCcw size={14} /> Undo</Button>}<Button type="submit" variant="primary" disabled={assistantBusy}><Scissors size={14} /> Queue short</Button></div></header>
     {error && <div className="shorts-global-alert" role="alert"><X size={16} />{error}</div>}
     <main className="shorts-workspace" aria-label="Shorts Editor workspace">
       <section className="shorts-editor-panel" aria-labelledby="editor-panel-title">

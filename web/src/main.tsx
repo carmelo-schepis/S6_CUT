@@ -13,5 +13,9 @@ createRoot(root).render(
 );
 
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
-  window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => undefined));
+  window.addEventListener("load", () => {
+    void navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" }).then((registration) => registration.update()).catch((error: unknown) => {
+      console.error("S6_cut service worker registration failed", error);
+    });
+  }, { once: true });
 }
