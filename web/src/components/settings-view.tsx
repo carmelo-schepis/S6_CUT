@@ -9,6 +9,7 @@ export function SettingsView({ health, onHealthRefresh, onProfilesChanged, onSki
   const [editing, setEditing] = useState<ProviderProfile | "new" | null>(null);
   const [setupDismissed, setSetupDismissed] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [testingId, setTestingId] = useState<string | null>(null);
   const load = useCallback(() => listProfiles().then((next) => { setProfiles(next); onProfilesChanged?.(next); }).catch((cause) => setError(readableError(cause))), [onProfilesChanged]);
   useEffect(() => { void load(); }, [load]);
   // Empty card shows the inline setup form by default so OpenRouter is visible.
@@ -19,7 +20,11 @@ export function SettingsView({ health, onHealthRefresh, onProfilesChanged, onSki
     try { await deleteProfile(id); await load(); } catch (cause) { setError(readableError(cause)); }
   };
   const duplicate = async (id: string) => { try { await duplicateProfile(id); await load(); } catch (cause) { setError(readableError(cause)); } };
-  const test = async (id: string) => { try { await testProfile(id); await load(); } catch (cause) { setError(readableError(cause)); } };
+  const test = async (id: string) => {
+    setTestingId(id);
+    setError(null);
+    try { await testProfile(id); await load(); } catch (cause) { setError(readableError(cause)); } finally { setTestingId(null); }
+  };
   const select = async (profile: ProviderProfile) => {
     try {
       await saveProfile({ name: profile.name, modelId: profile.modelId, voiceId: profile.voiceId, persistence: profile.persistence, selected: true }, profile.id);
@@ -32,7 +37,7 @@ export function SettingsView({ health, onHealthRefresh, onProfilesChanged, onSki
     <div className="settings-grid">
       <section className="settings-card profiles-card" id="provider-profiles"><div className="settings-card-head"><div><KeyRound size={18} /><div><h2>Provider profiles</h2><p>OpenRouter enhances planning. ElevenLabs is an optional narration upgrade, never a requirement.</p></div></div><div className="profile-head-actions"><StatusBadge state={profiles.some((profile) => profile.selected) ? "local" : "fallback"} label={profiles.length ? `${profiles.length} saved` : "Local fallbacks only"} />{profiles.length > 0 && <Button onClick={() => { setSetupDismissed(false); setEditing("new"); }}><Plus size={13} /> Add or update provider</Button>}</div></div>
         {showSetupForm && <ProfileForm initial={editing === "new" || editing === null ? undefined : editing} onUseFastLocal={onSkipSetup} onCancel={() => { setEditing(null); if (!profiles.length) setSetupDismissed(true); }} onSaved={() => { setEditing(null); void load(); }} />}
-        <div className="profile-list">{profiles.map((profile) => <article key={profile.id} className="profile-row"><div className="profile-mark"><KeyRound size={17} /></div><div className="profile-info"><div><strong>{profile.name}</strong>{profile.selected && <span className="selected-label"><Check size={11} /> Active</span>}</div><p>{profile.modelId || "Deterministic local planning"}</p><div><span>OpenRouter {profile.openrouterMasked || "not set"}</span><span>ElevenLabs {profile.elevenlabsMasked || "not set"}</span><span><LockKeyhole size={11} /> {profile.persistence}</span></div><div className="provider-results"><ConnectionResult service="OpenRouter" status={profile.openrouterStatus} message={profile.openrouterMessage} /><ConnectionResult service="ElevenLabs" status={profile.elevenlabsStatus} message={profile.elevenlabsMessage} /></div></div><StatusBadge state={profile.status === "connected" ? "ready" : profile.status === "attention" ? "partial" : "fallback"} label={profile.status} /><div className="profile-actions">{!profile.selected && <Button onClick={() => select(profile)}>Use profile</Button>}<Button onClick={() => test(profile.id)}>Test</Button><button title="Edit" aria-label={`Edit ${profile.name}`} onClick={() => setEditing(profile)}><Pencil size={14} /></button><button title="Duplicate" aria-label={`Duplicate ${profile.name}`} onClick={() => duplicate(profile.id)}><Copy size={14} /></button><button title="Delete" aria-label={`Delete ${profile.name}`} onClick={() => remove(profile.id)}><Trash2 size={14} /></button></div></article>)}</div>
+        <div className="profile-list">{profiles.map((profile) => <article key={profile.id} className="profile-row"><div className="profile-mark"><KeyRound size={17} /></div><div className="profile-info"><div><strong>{profile.name}</strong>{profile.selected && <span className="selected-label"><Check size={11} /> Active</span>}</div><p>{profile.modelId || "Deterministic local planning"}</p><div><span>OpenRouter {profile.openrouterMasked || "not set"}</span><span>ElevenLabs {profile.elevenlabsMasked || "not set"}</span><span><LockKeyhole size={11} /> {profile.persistence}</span></div><div className="provider-results"><ConnectionResult service="OpenRouter" status={testingId === profile.id ? "checking" : profile.openrouterStatus} message={profile.openrouterMessage} lastCheckedAt={profile.openrouterLastCheckedAt} /><ConnectionResult service="ElevenLabs" status={profile.elevenlabsStatus} message={profile.elevenlabsMessage} lastCheckedAt={profile.elevenlabsLastCheckedAt} /></div></div><StatusBadge state={testingId === profile.id ? "fallback" : profile.status === "connected" ? "ready" : profile.status === "attention" ? "partial" : "fallback"} label={testingId === profile.id ? "checking" : profile.status} /><div className="profile-actions">{!profile.selected && <Button onClick={() => select(profile)}>Use profile</Button>}<Button disabled={testingId === profile.id} onClick={() => test(profile.id)}>{testingId === profile.id ? "Checking…" : "Test"}</Button><button title="Edit" aria-label={`Edit ${profile.name}`} onClick={() => setEditing(profile)}><Pencil size={14} /></button><button title="Duplicate" aria-label={`Duplicate ${profile.name}`} onClick={() => duplicate(profile.id)}><Copy size={14} /></button><button title="Delete" aria-label={`Delete ${profile.name}`} onClick={() => remove(profile.id)}><Trash2 size={14} /></button></div></article>)}</div>
         {!profiles.length && !showSetupForm && <div className="settings-empty"><KeyRound size={22} /><div><strong>No provider profile</strong><p>Clip transcription, selection, caption timing, and text-card visuals still use local deterministic engines.</p></div>{onSkipSetup && <Button variant="ghost" onClick={onSkipSetup}>Continue with Fast local cut <ArrowRight size={13} /></Button>}</div>}
       </section>
 
@@ -45,10 +50,17 @@ export function SettingsView({ health, onHealthRefresh, onProfilesChanged, onSki
   </div>;
 }
 
-function ConnectionResult({ service, status, message }: { service: string; status: ProviderProfile["openrouterStatus"]; message?: string | null }) {
+function ConnectionResult({ service, status, message, lastCheckedAt }: { service: string; status: ProviderProfile["openrouterStatus"] | "checking"; message?: string | null; lastCheckedAt?: string | null }) {
   const ready = status === "connected";
+  const checking = status === "checking";
   const idle = status === "not_configured" || status === "configured";
-  return <div className={`connection-result ${ready ? "ready" : idle ? "idle" : "failed"}`}><span>{ready ? <Check size={11} /> : idle ? "·" : <X size={11} />}{service}</span><small>{message || status.replaceAll("_", " ")}</small></div>;
+  const checked = checking ? "Checking now…" : lastCheckedAt ? `Checked ${formatCheckedAt(lastCheckedAt)}` : "Not checked yet";
+  return <div className={`connection-result ${ready ? "ready" : checking ? "checking" : idle ? "idle" : "failed"}`}><span>{ready ? <Check size={11} /> : checking ? "…" : idle ? "·" : <X size={11} />}{service}</span><small>{message || status.replaceAll("_", " ")} · {checked}</small></div>;
+}
+
+function formatCheckedAt(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "recently" : date.toLocaleString([], { dateStyle: "short", timeStyle: "short" });
 }
 
 function ProfileForm({ initial, onUseFastLocal, onCancel, onSaved }: { initial?: ProviderProfile; onUseFastLocal?: () => void; onCancel: () => void; onSaved: () => void }) {

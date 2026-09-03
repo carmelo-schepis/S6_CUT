@@ -8,7 +8,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg espeak-ng ca-certificates tini curl unzip \
     && rm -rf /var/lib/apt/lists/* \
-    && curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh -s v2.3.0 \
+    && curl -fsSL -o /tmp/deno.zip https://github.com/denoland/deno/releases/download/v2.3.0/deno-x86_64-unknown-linux-gnu.zip \
+    && unzip -q /tmp/deno.zip -d /usr/local/bin \
+    && chmod +x /usr/local/bin/deno \
+    && rm /tmp/deno.zip \
     && groupadd --system --gid 10001 s6cut \
     && useradd --system --uid 10001 --gid 10001 --home-dir /app --shell /usr/sbin/nologin s6cut
 

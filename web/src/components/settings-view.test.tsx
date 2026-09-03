@@ -102,9 +102,9 @@ describe("SettingsView – provider profile list", () => {
     const article = await screen.findByRole("article");
     expect(within(article).getByText("Work profile")).toBeInTheDocument();
     expect(within(article).getByText("OpenRouter")).toBeInTheDocument();
-    expect(within(article).getByText("connected")).toBeInTheDocument();
+    expect(within(article).getByText(/connected/i)).toBeInTheDocument();
     expect(within(article).getByText("ElevenLabs")).toBeInTheDocument();
-    expect(within(article).getByText("Invalid API key — check your ElevenLabs key")).toBeInTheDocument();
+    expect(within(article).getByText(/Invalid API key — check your ElevenLabs key/)).toBeInTheDocument();
   });
 
   it("shows the inline setup form by default on an empty card, and the empty state after dismissing it", async () => {

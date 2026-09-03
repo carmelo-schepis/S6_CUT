@@ -9,7 +9,7 @@ from typing import Any
 import httpx
 
 from .database import Database
-from .models import OpenRouterModel, ProfileInput, ProviderProfile
+from .models import OpenRouterModel, ProfileInput, ProviderProfile, now_iso
 from .security import SecretVault, mask_secret
 
 
@@ -107,7 +107,9 @@ class ProfileService:
             openrouter_status=previous_profile.openrouter_status if openrouter_unchanged else ("configured" if secrets["openrouterKey"] else "not_configured"),
             elevenlabs_status=previous_profile.elevenlabs_status if elevenlabs_unchanged else ("configured" if secrets["elevenlabsKey"] else "not_configured"),
             openrouter_message=previous_profile.openrouter_message if openrouter_unchanged else ("Ready to test" if secrets["openrouterKey"] else "Optional; deterministic local planning remains available"),
+            openrouter_last_checked_at=previous_profile.openrouter_last_checked_at if openrouter_unchanged else None,
             elevenlabs_message=previous_profile.elevenlabs_message if elevenlabs_unchanged else ("Ready to test" if secrets["elevenlabsKey"] else "Optional; local narration and silent rendering remain available"),
+            elevenlabs_last_checked_at=previous_profile.elevenlabs_last_checked_at if elevenlabs_unchanged else None,
             status="configured" if any(secrets.values()) else "local only",
             capabilities=["structured planning"] if secrets["openrouterKey"] else [], fallbacks=FALLBACKS,
         )
@@ -150,10 +152,13 @@ class ProfileService:
         secrets = self.secrets(profile_id)
         profile.openrouter_status = "not_configured"
         profile.openrouter_message = "Optional; deterministic local planning remains available"
+        profile.openrouter_last_checked_at = None
         profile.elevenlabs_status = "not_configured"
         profile.elevenlabs_message = "Optional; local narration and silent rendering remain available"
+        profile.elevenlabs_last_checked_at = None
         async with httpx.AsyncClient(timeout=12, follow_redirects=False) as client:
             if key := secrets.get("openrouterKey"):
+                profile.openrouter_last_checked_at = now_iso()
                 try:
                     response = await client.get("https://openrouter.ai/api/v1/models", headers={"Authorization": f"Bearer {key}"})
                     if response.status_code >= 400:
@@ -196,7 +201,8 @@ class ProfileService:
                             else:
                                 try:
                                     content = generation.json()["choices"][0]["message"]["content"]
-                                    valid = isinstance(json.loads(content), dict)
+                                    result = json.loads(content)
+                                    valid = isinstance(result, dict) and result.get("ok") is True
                                 except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError):
                                     valid = False
                                 if valid:
@@ -208,6 +214,7 @@ class ProfileService:
                 except (TypeError, ValueError):
                     profile.openrouter_status, profile.openrouter_message = "malformed_response", "OpenRouter returned an unreadable response"
             if key := secrets.get("elevenlabsKey"):
+                profile.elevenlabs_last_checked_at = now_iso()
                 try:
                     response = await client.get("https://api.elevenlabs.io/v1/voices", headers={"xi-api-key": key})
                     if response.status_code >= 400:

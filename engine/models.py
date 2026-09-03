@@ -367,7 +367,9 @@ class ProviderProfile(ApiModel):
     openrouter_status: ProviderConnectionStatus = "not_configured"
     elevenlabs_status: ProviderConnectionStatus = "not_configured"
     openrouter_message: str | None = None
+    openrouter_last_checked_at: str | None = None
     elevenlabs_message: str | None = None
+    elevenlabs_last_checked_at: str | None = None
     status: str
     capabilities: list[str]
     fallbacks: dict[str, str]

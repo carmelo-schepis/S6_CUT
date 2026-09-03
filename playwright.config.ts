@@ -8,7 +8,7 @@ export default defineConfig({
   workers: 1,
   reporter: [["html", { outputFolder: "test-artifacts/playwright-report", open: "never" }], ["json", { outputFile: "test-artifacts/playwright-results.json" }]],
   use: {
-    baseURL: process.env.S6_ACCEPTANCE_URL || "http://localhost:8080",
+    baseURL: process.env.S6_ACCEPTANCE_URL || "http://127.0.0.1:8080",
     browserName: "chromium",
     headless: true,
     trace: "retain-on-failure",

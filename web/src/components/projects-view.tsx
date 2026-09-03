@@ -99,8 +99,8 @@ export function ProjectsView({ projects, jobs = [], health, hasSelectedProvider 
       <div className="create-topline">
         <div><span className="step-number">01</span><div><h2 id="create-title">Create a project</h2><p>Nothing leaves this machine unless you use a URL or enabled provider.</p></div></div>
         <div className="segmented" aria-label="Creation mode">
-          <button className={mode === "clip" ? "active" : ""} onClick={() => setMode("clip")}><Film size={15} /> Clip mode</button>
-          <button className={mode === "script" ? "active" : ""} onClick={() => setMode("script")}><FileText size={15} /> Script mode</button>
+          <button type="button" aria-pressed={mode === "clip"} className={mode === "clip" ? "active" : ""} onClick={() => setMode("clip")}><Film size={15} /> Clip mode</button>
+          <button type="button" aria-pressed={mode === "script"} className={mode === "script" ? "active" : ""} onClick={() => setMode("script")}><FileText size={15} /> Script mode</button>
         </div>
       </div>
 
@@ -138,8 +138,8 @@ export function ProjectsView({ projects, jobs = [], health, hasSelectedProvider 
           </div>
           {mode === "clip" && <><div className="mode-field format-field"><div className="step-label"><span>Format</span></div>
             <div className="segmented mode-tabs format-tabs" aria-label="Content format">
-              <button type="button" className={contentFormat === "short" ? "active" : ""} onClick={() => { setContentFormat("short"); setAspectRatio("9:16"); }}><Film size={13} /> <span>Short form · 9:16</span></button>
-              <button type="button" className={contentFormat === "long" ? "active" : ""} onClick={() => { setContentFormat("long"); setAspectRatio("16:9"); }}><Film size={13} /> <span>Long form · 16:9</span></button>
+              <button type="button" aria-pressed={contentFormat === "short"} className={contentFormat === "short" ? "active" : ""} onClick={() => { setContentFormat("short"); setAspectRatio("9:16"); }}><Film size={13} /> <span>Short form · 9:16</span></button>
+              <button type="button" aria-pressed={contentFormat === "long"} className={contentFormat === "long" ? "active" : ""} onClick={() => { setContentFormat("long"); setAspectRatio("16:9"); }}><Film size={13} /> <span>Long form · 16:9</span></button>
             </div>
             <div className="mode-note format-note">
               <span className="mode-note-icon" aria-hidden="true"><Film size={12} /></span>
@@ -147,9 +147,9 @@ export function ProjectsView({ projects, jobs = [], health, hasSelectedProvider 
             </div>
           </div><div className="mode-field"><div className="step-label"><span>Mode</span></div>
             <div className="segmented mode-tabs processing-mode-tabs" aria-label="Processing mode">
-              <button type="button" className={processingMode === "auto" ? "active" : ""} onClick={() => setProcessingMode("auto")}><Sparkles size={13} /> <span>Auto</span></button>
-              <button type="button" className={processingMode === "fast" ? "active" : ""} onClick={() => setProcessingMode("fast")}><Zap size={13} /> <span>Fast</span></button>
-              <button type="button" className={processingMode === "smart" ? "active" : ""} onClick={() => setProcessingMode("smart")}><Sparkles size={13} /> <span>Smart</span></button>
+              <button type="button" aria-pressed={processingMode === "auto"} className={processingMode === "auto" ? "active" : ""} onClick={() => setProcessingMode("auto")}><Sparkles size={13} /> <span>Auto</span></button>
+              <button type="button" aria-pressed={processingMode === "fast"} className={processingMode === "fast" ? "active" : ""} onClick={() => setProcessingMode("fast")}><Zap size={13} /> <span>Fast</span></button>
+              <button type="button" aria-pressed={processingMode === "smart"} className={processingMode === "smart" ? "active" : ""} onClick={() => setProcessingMode("smart")}><Sparkles size={13} /> <span>Smart</span></button>
             </div>
             <div className="mode-note" role="note">
               <span className="mode-note-icon" aria-hidden="true">{processingMode === "smart" ? <Sparkles size={12} /> : <Zap size={12} />}</span>
@@ -165,7 +165,7 @@ export function ProjectsView({ projects, jobs = [], health, hasSelectedProvider 
             </div>
           </div></>}
           <Field label="Project name" hint="Optional. Leave blank for a generated name."><input id="project-name" aria-label="Project name" value={projectName} maxLength={160} onChange={(event) => setProjectName(event.target.value)} placeholder="QA Browser Test" /></Field>
-          <div className="folder-picker"><Field label="Business folder"><select value={libraryFolderId} onChange={(event) => setLibraryFolderId(event.target.value)}>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></Field><Button variant="ghost" onClick={addFolder}><Plus size={13} /> Create folder</Button></div>
+          <div className="folder-picker"><Field label="Business folder"><select aria-label="Business folder" value={libraryFolderId} onChange={(event) => setLibraryFolderId(event.target.value)}>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></Field><Button variant="ghost" onClick={addFolder}><Plus size={13} /> Create folder</Button></div>
           {mode === "clip" && <label className="subtitle-toggle"><input type="checkbox" checked={burnSubtitles} onChange={(event) => setBurnSubtitles(event.target.checked)} /> <span><strong>Burn in subtitles</strong><small>Accurate local word timing; enabled by default. Fast transcribes selected windows only.</small></span></label>}
           <button className="advanced-toggle" onClick={() => setAdvanced(!advanced)} aria-expanded={advanced}>Advanced controls <span>{advanced ? "−" : "+"}</span></button>
           {advanced && <div className="advanced-grid">

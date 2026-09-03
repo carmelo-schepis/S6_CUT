@@ -32,10 +32,18 @@ export function ProcessingState({ job, waitingForEngine = false }: { job: Job; w
   const download = job.downloadProgress;
   const downloadText = download ? `${formatBytes(download.downloadedBytes)}${download.totalBytes ? ` of ${formatBytes(download.totalBytes)}` : " downloaded"}` : null;
   const speedText = download?.speedBytesPerSecond ? `${formatBytes(download.speedBytesPerSecond)}/s` : null;
+  const downloadPhase = download?.phase ? download.phase.split("_").map((word) => word[0].toUpperCase() + word.slice(1)).join(" ") : null;
+  const downloadPercent = download?.percent == null ? null : Math.max(0, Math.min(100, download.percent));
 
   return <div className={`processing-state state-${job.state}`}>
     <div className="processing-live sr-only" aria-live="polite">{stageLabel}</div>
-    <div className="processing-heading"><span>{waitingForEngine ? <WifiOff size={18} /> : job.state === "paused" ? <Pause size={18} /> : job.state === "recovered" ? <RotateCcw size={18} /> : <Film size={18} />}</span><div><strong>{stageLabel}</strong><small>{job.currentItem > 0 && job.totalItems > 0 ? `${job.currentItem} of ${job.totalItems} items` : "Working from durable project state"}</small></div><b>{Math.round(progress)}%</b></div>
+    <div className="processing-heading">
+      <span aria-hidden="true">{waitingForEngine ? <WifiOff size={18} /> : job.state === "paused" ? <Pause size={18} /> : job.state === "recovered" ? <RotateCcw size={18} /> : <Film size={18} />}</span>
+      <div><strong>{stageLabel}</strong><small>{job.currentItem > 0 && job.totalItems > 0 ? `${job.currentItem} of ${job.totalItems} items` : "Working from durable project state"}</small></div>
+      <b aria-label={`Overall progress ${Math.round(progress)} percent`}>{Math.round(progress)}%</b>
+    </div>
+    <div className="processing-progress-summary"><span>Overall progress</span></div>
+    <div className="processing-progress-bar" role="progressbar" aria-label="Overall processing progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress)}><span style={{ width: `${progress}%` }} /></div>
     <div className="processing-filmstrip" aria-hidden="true">
       <div className="filmstrip-perforations top" />
       <div className="processing-track">
@@ -45,7 +53,13 @@ export function ProcessingState({ job, waitingForEngine = false }: { job: Job; w
       <div className="filmstrip-perforations bottom" />
     </div>
     <div className="processing-meta"><span>Elapsed {formatElapsed(job.createdAt, now)}</span>{job.currentItem > 0 && job.totalItems > 0 && <span>Item {job.currentItem} / {job.totalItems}</span>}</div>
-    {download && <div className="download-progress-detail" role="status"><strong>{download.phase.replace("_", " ")}</strong><span>{downloadText}{download.percent != null ? ` · ${Math.round(download.percent)}%` : " · total size unknown"}</span>{speedText && <span>{speedText}{download.etaSeconds != null ? ` · about ${Math.ceil(download.etaSeconds / 60)} min left` : ""}</span>}<small>Last byte progress {new Date(download.lastProgressAt).toLocaleTimeString()}</small>{download.message && <small>{download.message}</small>}</div>}
-    <p>Processing continues in the local engine if you leave this screen.</p>
+    {download && <div className="download-progress-detail" role="status" aria-label="Download status">
+      <div className="download-detail-heading"><strong>{downloadPhase}</strong>{downloadPercent != null && <b>{Math.round(downloadPercent)}%</b>}</div>
+      <div className="download-detail-values"><span>{downloadText}</span>{speedText && <span>{speedText}{download.etaSeconds != null ? ` · about ${Math.ceil(download.etaSeconds / 60)} min left` : ""}</span>}</div>
+      {downloadPercent != null && <div className="download-detail-track" aria-hidden="true"><span style={{ width: `${downloadPercent}%` }} /></div>}
+      <div className="download-detail-foot"><span>Last byte progress</span><time dateTime={download.lastProgressAt}>{new Date(download.lastProgressAt).toLocaleTimeString()}</time></div>
+      {download.message && <small className="download-message">{download.message}</small>}
+    </div>}
+    <p className="processing-help">Processing continues in the local engine if you leave this screen.</p>
   </div>;
 }
