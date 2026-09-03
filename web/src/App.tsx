@@ -48,6 +48,10 @@ export function App() {
   }, [refresh]);
 
   useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }, [page]);
+
+  useEffect(() => {
     let active = true;
     const refreshHealth = () => getHealth().then((value) => { if (active) { setHealth(value); setHealthChecked(true); setError(null); } }).catch((cause) => { if (active) { setHealth(null); setHealthChecked(true); setError(readableError(cause)); } });
     const timer = window.setInterval(() => void refreshHealth(), 5000);
@@ -84,7 +88,7 @@ export function App() {
       <nav>
         {nav.map((item) => {
           const Icon = item.icon;
-          return <button key={item.id} className={page === item.id ? "nav-item active" : "nav-item"} onClick={() => setPage(item.id)} aria-current={page === item.id ? "page" : undefined}>
+          return <button key={item.id} className={page === item.id ? "nav-item active" : "nav-item"} onClick={() => setPage(item.id)} aria-label={item.label} aria-current={page === item.id ? "page" : undefined}>
             <Icon size={19} /><span>{item.label}</span>
           </button>;
         })}

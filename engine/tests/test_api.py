@@ -76,6 +76,9 @@ def test_provider_tests_report_each_optional_service_independently(monkeypatch) 
                 return Response(401, {})
             return Response(200, {"voices": [{"voice_id": "voice-ok"}]})
 
+        async def post(self, url: str, **_: object):
+            return Response(200, {"choices": [{"message": {"content": '{"ok":true}'}}]})
+
     monkeypatch.setattr("engine.providers.httpx.AsyncClient", lambda **_: Client())
     response = client.post(f"/api/v1/profiles/{created['id']}/test")
     assert response.status_code == 200
@@ -83,6 +86,41 @@ def test_provider_tests_report_each_optional_service_independently(monkeypatch) 
     assert response.json()["elevenlabsStatus"] == "connected"
     assert "openrouter-secret" not in response.text
     assert "elevenlabs-secret" not in response.text
+
+
+def test_openrouter_test_requires_a_structured_generation(monkeypatch) -> None:
+    created = client.post("/api/v1/profiles", json={
+        "name": "Generation verification", "modelId": "openai/test", "openrouterKey": "verification-secret",
+        "persistence": "encrypted", "selected": True,
+    }).json()
+
+    class Response:
+        status_code = 200
+
+        def __init__(self, payload: dict[str, object]):
+            self.payload = payload
+
+        def json(self):
+            return self.payload
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_: object):
+            return None
+
+        async def get(self, *_: object, **__: object):
+            return Response({"data": [{"id": "openai/test"}]})
+
+        async def post(self, *_: object, **__: object):
+            return Response({"choices": [{"message": {"content": '{"ok":true}'}}]})
+
+    monkeypatch.setattr("engine.providers.httpx.AsyncClient", lambda **_: Client())
+    response = client.post(f"/api/v1/profiles/{created['id']}/test")
+    assert response.status_code == 200
+    assert response.json()["openrouterStatus"] == "connected"
+    assert "structured planning request succeeded" in response.json()["openrouterMessage"]
 
 
 def test_invalid_profile_input_never_echoes_a_raw_key() -> None:

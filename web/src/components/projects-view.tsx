@@ -104,7 +104,7 @@ export function ProjectsView({ projects, jobs = [], health, hasSelectedProvider 
         </div>
       </div>
 
-      {!hasSelectedProvider && !providerCalloutDismissed && <div className="provider-callout"><Sparkles size={17} /><div><strong>Add optional AI providers</strong><span>Connect OpenRouter for enhanced planning and ElevenLabs for premium narration. Local fallbacks remain available.</span></div><div><Button onClick={onConfigureProviders}>Configure providers</Button><Button variant="ghost" onClick={() => setProviderCalloutDismissed(true)}>Continue locally</Button></div></div>}
+      {!hasSelectedProvider && !providerCalloutDismissed && <div className="provider-callout"><Sparkles size={17} /><div><strong>Add optional AI providers</strong><span>Connect OpenRouter for enhanced planning and ElevenLabs for premium narration. Local fallbacks remain available.</span></div><div className="provider-callout-actions"><Button onClick={onConfigureProviders}>Configure providers</Button><Button variant="ghost" onClick={() => setProviderCalloutDismissed(true)}>Continue locally</Button></div></div>}
 
       <div className="create-grid">
         <div className="create-step source-step">
@@ -137,26 +137,32 @@ export function ProjectsView({ projects, jobs = [], health, hasSelectedProvider 
             </ul>
           </div>
           {mode === "clip" && <><div className="mode-field format-field"><div className="step-label"><span>Format</span></div>
-            <div className="segmented mode-tabs" aria-label="Content format">
-              <button type="button" className={contentFormat === "short" ? "active" : ""} onClick={() => { setContentFormat("short"); setAspectRatio("9:16"); }}><Film size={13} /> Short form · 9:16</button>
-              <button type="button" className={contentFormat === "long" ? "active" : ""} onClick={() => { setContentFormat("long"); setAspectRatio("16:9"); }}><Film size={13} /> Long form · 16:9</button>
+            <div className="segmented mode-tabs format-tabs" aria-label="Content format">
+              <button type="button" className={contentFormat === "short" ? "active" : ""} onClick={() => { setContentFormat("short"); setAspectRatio("9:16"); }}><Film size={13} /> <span>Short form · 9:16</span></button>
+              <button type="button" className={contentFormat === "long" ? "active" : ""} onClick={() => { setContentFormat("long"); setAspectRatio("16:9"); }}><Film size={13} /> <span>Long form · 16:9</span></button>
             </div>
-            <p className="mode-note">{contentFormat === "long" ? "Landscape scenes are selected across the complete source." : "Vertical clips are selected for short-form viewing."}</p>
+            <div className="mode-note format-note">
+              <span className="mode-note-icon" aria-hidden="true"><Film size={12} /></span>
+              <span className="mode-note-copy">{contentFormat === "long" ? "Landscape scenes are selected across the complete source." : "Vertical clips are selected for short-form viewing."}</span>
+            </div>
           </div><div className="mode-field"><div className="step-label"><span>Mode</span></div>
-            <div className="segmented mode-tabs" aria-label="Processing mode">
-              <button className={processingMode === "auto" ? "active" : ""} onClick={() => setProcessingMode("auto")}><Sparkles size={13} /> Auto</button>
-              <button className={processingMode === "fast" ? "active" : ""} onClick={() => setProcessingMode("fast")}><Zap size={13} /> Fast</button>
-              <button className={processingMode === "smart" ? "active" : ""} onClick={() => setProcessingMode("smart")}><Sparkles size={13} /> Smart</button>
+            <div className="segmented mode-tabs processing-mode-tabs" aria-label="Processing mode">
+              <button type="button" className={processingMode === "auto" ? "active" : ""} onClick={() => setProcessingMode("auto")}><Sparkles size={13} /> <span>Auto</span></button>
+              <button type="button" className={processingMode === "fast" ? "active" : ""} onClick={() => setProcessingMode("fast")}><Zap size={13} /> <span>Fast</span></button>
+              <button type="button" className={processingMode === "smart" ? "active" : ""} onClick={() => setProcessingMode("smart")}><Sparkles size={13} /> <span>Smart</span></button>
             </div>
-            {processingMode === "smart" && !hasSelectedProvider
-              ? <p className="mode-note" role="note"><strong>Smart local mode.</strong> No connected provider is selected, so Smart will use local Whisper and deterministic planning.</p>
-              : processingMode === "smart"
-                ? <p className="mode-note"><Sparkles size={12} /> Smart uses the selected provider for enhanced planning.</p>
-                : processingMode === "auto"
-                  ? hasSelectedProvider
-                    ? <p className="mode-note"><Sparkles size={12} /> Auto uses a provider when connected, otherwise Fast local.</p>
-                    : <p className="mode-note"><Zap size={12} /> No provider selected — this will run as a <strong>Fast local cut</strong>.</p>
-                  : <p className="mode-note"><Zap size={12} /> Fast runs deterministically on this machine — no provider needed.</p>}
+            <div className="mode-note" role="note">
+              <span className="mode-note-icon" aria-hidden="true">{processingMode === "smart" ? <Sparkles size={12} /> : <Zap size={12} />}</span>
+              <span className="mode-note-copy">{processingMode === "smart" && !hasSelectedProvider
+                ? <><strong>Smart local mode.</strong> No connected provider is selected, so Smart will use local Whisper and deterministic planning.</>
+                : processingMode === "smart"
+                  ? <>Smart uses the selected provider for enhanced planning.</>
+                  : processingMode === "auto"
+                    ? hasSelectedProvider
+                      ? <>Auto uses a provider when connected, otherwise Fast local.</>
+                      : <>No provider selected — this will run as a <strong>Fast local cut</strong>.</>
+                    : <>Fast runs deterministically on this machine — no provider needed.</>}</span>
+            </div>
           </div></>}
           <Field label="Project name" hint="Optional. Leave blank for a generated name."><input id="project-name" aria-label="Project name" value={projectName} maxLength={160} onChange={(event) => setProjectName(event.target.value)} placeholder="QA Browser Test" /></Field>
           <div className="folder-picker"><Field label="Business folder"><select value={libraryFolderId} onChange={(event) => setLibraryFolderId(event.target.value)}>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></Field><Button variant="ghost" onClick={addFolder}><Plus size={13} /> Create folder</Button></div>

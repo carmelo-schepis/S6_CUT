@@ -166,7 +166,43 @@ class ProfileService:
                         elif not any(isinstance(item, dict) and item.get("id") == profile.model_id for item in models):
                             profile.openrouter_status, profile.openrouter_message = "unavailable_model_or_voice", "The configured OpenRouter model is unavailable"
                         else:
-                            profile.openrouter_status, profile.openrouter_message = "connected", "Connected; enhanced planning is available"
+                            # A model-list response only proves that the key can read the
+                            # catalogue.  Verify the exact structured-output boundary used
+                            # by topic planning before advertising this profile as connected.
+                            generation = await client.post(
+                                "https://openrouter.ai/api/v1/chat/completions",
+                                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                                json={
+                                    "model": profile.model_id,
+                                    "messages": [{"role": "user", "content": "Return exactly the JSON object {\\\"ok\\\":true}."}],
+                                    "temperature": 0,
+                                    "response_format": {
+                                        "type": "json_schema",
+                                        "json_schema": {
+                                            "name": "s6_connection_check",
+                                            "strict": True,
+                                            "schema": {
+                                                "type": "object",
+                                                "additionalProperties": False,
+                                                "properties": {"ok": {"type": "boolean"}},
+                                                "required": ["ok"],
+                                            },
+                                        },
+                                    },
+                                },
+                            )
+                            if generation.status_code >= 400:
+                                profile.openrouter_status, profile.openrouter_message = self._http_failure(generation.status_code, "OpenRouter")
+                            else:
+                                try:
+                                    content = generation.json()["choices"][0]["message"]["content"]
+                                    valid = isinstance(json.loads(content), dict)
+                                except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError):
+                                    valid = False
+                                if valid:
+                                    profile.openrouter_status, profile.openrouter_message = "connected", "Connected; a structured planning request succeeded"
+                                else:
+                                    profile.openrouter_status, profile.openrouter_message = "malformed_response", "OpenRouter could not complete a structured planning request"
                 except (httpx.TimeoutException, httpx.RequestError):
                     profile.openrouter_status, profile.openrouter_message = "timeout_offline", "OpenRouter is offline or timed out; local planning remains available"
                 except (TypeError, ValueError):
