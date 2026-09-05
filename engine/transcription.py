@@ -25,7 +25,12 @@ def _child(run_id: str, path: str, settings: Settings, events: Any) -> None:
 
 def supervise(path: Path, settings: Settings, *, progress: Callable[[float, str], None] | None = None, cancelled: Callable[[], bool] | None = None, heartbeat: Callable[[], None] | None = None, meaningful: Callable[[float], None] | None = None, worker: Callable[..., None] = _child) -> dict[str, Any]:
     run_id = uuid.uuid4().hex
-    context = mp.get_context("fork" if "fork" in mp.get_all_start_methods() else "spawn")
+    # Jobs run on background threads. Forking the multithreaded Uvicorn process
+    # can inherit a locked OpenMP/BLAS runtime and leave Faster-Whisper consuming
+    # memory without ever yielding a segment (observed in the Linux container).
+    # A fresh interpreter is slightly slower to start, but avoids that unsafe
+    # inherited native state and is portable across every supported platform.
+    context = mp.get_context("spawn")
     events = context.Queue()
     process = context.Process(target=worker, args=(run_id, str(path), settings, events), name=f"s6-transcription-{run_id[:8]}")
     process.start()

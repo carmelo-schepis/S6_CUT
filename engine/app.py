@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import hashlib
 import importlib.util
 import json
@@ -259,8 +260,8 @@ async def _stream_upload(upload: UploadFile, target: Path, max_bytes: int) -> tu
     temp = target.with_suffix(target.suffix + ".uploading")
     total = 0
     digest = hashlib.sha256()
-    target.parent.mkdir(parents=True, exist_ok=True)
     try:
+        target.parent.mkdir(parents=True, exist_ok=True)
         with temp.open("wb") as handle:
             while chunk := await upload.read(1024 * 1024):
                 total += len(chunk)
@@ -274,6 +275,13 @@ async def _stream_upload(upload: UploadFile, target: Path, max_bytes: int) -> tu
             raise HTTPException(422, "Uploaded file is empty")
         os.replace(temp, target)
         return total, digest.hexdigest()
+    except OSError as exc:
+        if exc.errno == errno.ENOSPC:
+            raise HTTPException(
+                status.HTTP_507_INSUFFICIENT_STORAGE,
+                "Not enough free storage to upload this video. Free space and try again.",
+            ) from exc
+        raise
     finally:
         await upload.close()
         if temp.exists():
