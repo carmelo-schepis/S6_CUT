@@ -101,9 +101,12 @@ describe("SettingsView – provider profile list", () => {
     // Wait for the profile row to appear
     const article = await screen.findByRole("article");
     expect(within(article).getByText("Work profile")).toBeInTheDocument();
-    expect(within(article).getByText("OpenRouter")).toBeInTheDocument();
+    expect(within(article).getByText("OpenRouter", { selector: ".connection-result span" })).toBeInTheDocument();
     expect(within(article).getByText(/connected/i)).toBeInTheDocument();
-    expect(within(article).getByText("ElevenLabs")).toBeInTheDocument();
+    expect(within(article).getByText("ElevenLabs", { selector: ".connection-result span" })).toBeInTheDocument();
+    // Masked keys are labelled values, not a run-together sentence.
+    expect(within(article).getByText("sk-…abcd")).toBeInTheDocument();
+    expect(within(article).getByText("el-…wxyz")).toBeInTheDocument();
     expect(within(article).getByText(/Invalid API key — check your ElevenLabs key/)).toBeInTheDocument();
   });
 
@@ -112,7 +115,7 @@ describe("SettingsView – provider profile list", () => {
     renderView();
     // Inline form is open by default so OpenRouter is visible.
     expect(await screen.findByText("New provider profile")).toBeInTheDocument();
-    expect(screen.getByText("OpenRouter")).toBeInTheDocument();
+    expect(screen.getByText("OpenRouter", { selector: ".provider-fieldset strong" })).toBeInTheDocument();
     expect(screen.getByPlaceholderText("sk-or-v1-…")).toHaveAttribute("type", "password");
     expect(screen.getByRole("button", { name: "Use fast local cutting without APIs" })).toBeInTheDocument();
     // Dismissing the form reveals the empty-state copy.

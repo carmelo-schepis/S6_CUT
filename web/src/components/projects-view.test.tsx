@@ -45,7 +45,7 @@ describe("Projects create flow", () => {
     const open = vi.fn();
     render(<ProjectsView projects={[project]} health={health} onCreated={vi.fn()} onOpen={open} onRefresh={vi.fn(async () => undefined)} />);
     expect(screen.getByRole("heading", { name: "Create a project" })).toBeInTheDocument();
-    expect(screen.getByText("Pick style")).toBeInTheDocument();
+    expect(screen.getByText("Editorial style")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Create 5 short clips/i })).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: /Interview/i }));
     expect(open).toHaveBeenCalledWith("project-id");
@@ -85,14 +85,47 @@ describe("Projects create flow", () => {
     render(<ProjectsView projects={[]} health={health} hasSelectedProvider={false} onCreated={vi.fn()} onOpen={vi.fn()} onRefresh={vi.fn(async () => undefined)} />);
     expect(screen.getByRole("button", { name: "Auto" })).toHaveClass("active");
     // Note text is split across icon and <strong> children, so inspect the .mode-note element's full textContent.
-    const note = screen.getByText((_content, element) => Boolean(element?.classList?.contains("mode-note") && element?.textContent?.includes("No provider selected") && element?.textContent?.includes("Fast local cut")));
-    expect(note).toBeInTheDocument();
+    expect(screen.getByText(/No provider is connected, so Auto runs as a fast local cut\./i)).toBeInTheDocument();
+  });
+
+  it("does not claim a provider is missing before /profiles has answered", () => {
+    render(<ProjectsView projects={[]} health={health} providersLoaded={false} hasSelectedProvider={false} onCreated={vi.fn()} onOpen={vi.fn()} onRefresh={vi.fn(async () => undefined)} />);
+    expect(screen.queryByText(/No provider is connected/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/Checking connected providers/i)).toBeInTheDocument();
+    // The "add a provider" callout is the same claim in another shape.
+    expect(screen.queryByText(/Add optional AI providers/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Smart" }));
+    expect(screen.queryByText(/No provider is connected/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/Checking connected providers/i)).toBeInTheDocument();
+  });
+
+  it("states the no-provider fallback only once /profiles confirms it", () => {
+    render(<ProjectsView projects={[]} health={health} providersLoaded hasSelectedProvider={false} onCreated={vi.fn()} onOpen={vi.fn()} onRefresh={vi.fn(async () => undefined)} />);
+    expect(screen.getByText(/No provider is connected, so Auto runs as a fast local cut\./i)).toBeInTheDocument();
+    expect(screen.getByText(/Add optional AI providers/i)).toBeInTheDocument();
+  });
+
+  it("reports a connected provider once /profiles confirms it", () => {
+    render(<ProjectsView projects={[]} health={health} providersLoaded hasSelectedProvider onCreated={vi.fn()} onOpen={vi.fn()} onRefresh={vi.fn(async () => undefined)} />);
+    expect(screen.getByText(/Auto uses a connected provider, otherwise a fast local cut\./i)).toBeInTheDocument();
+    expect(screen.queryByText(/No provider is connected/i)).not.toBeInTheDocument();
+  });
+
+  it("holds back the local-tools badge and engine summary until health is known", () => {
+    const { rerender } = render(<ProjectsView projects={[]} health={null} healthChecked={false} onCreated={vi.fn()} onOpen={vi.fn()} onRefresh={vi.fn(async () => undefined)} />);
+    expect(screen.queryByText(/Checking local tools/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Checking local engine/i)).not.toBeInTheDocument();
+    expect(document.querySelector(".engine-summary")).toBeNull();
+
+    rerender(<ProjectsView projects={[]} health={health} healthChecked onCreated={vi.fn()} onOpen={vi.fn()} onRefresh={vi.fn(async () => undefined)} />);
+    expect(screen.getByText(/All local tools ready/i)).toBeInTheDocument();
+    expect(document.querySelector(".engine-summary")).toHaveTextContent(/Local engine ready/i);
   });
 
   it("keeps explicit Smart as a local Whisper opt-in without a provider", () => {
     render(<ProjectsView projects={[]} health={health} hasSelectedProvider={false} onCreated={vi.fn()} onOpen={vi.fn()} onRefresh={vi.fn(async () => undefined)} />);
     fireEvent.click(screen.getByRole("button", { name: "Smart" }));
-    expect(screen.getByText(/Smart local mode/i)).toBeInTheDocument();
     expect(screen.getByText(/local Whisper and deterministic planning/i)).toBeInTheDocument();
   });
 

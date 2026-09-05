@@ -66,6 +66,22 @@ async function assertFocusedControlVisible(page: Page) {
   })).toBeTruthy();
 }
 
+// Recent projects shows a capped window with a search box; an older project is
+// reached by searching for it, which is the customer-facing flow.
+async function openProjectByName(page: Page, name: string) {
+  // Wait for the list to load before deciding whether the search box is needed:
+  // it only appears once the history exceeds the visible window.
+  await expect(page.locator(".project-card").first()).toBeVisible({ timeout: 30_000 });
+  const card = page.locator(".project-card").filter({ hasText: name });
+  if (await card.count() === 0) {
+    const search = page.getByLabel("Search projects");
+    await expect(search).toBeVisible({ timeout: 15_000 });
+    await search.fill(name);
+    await expect(card.first()).toBeVisible({ timeout: 15_000 });
+  }
+  await card.first().click();
+}
+
 test("terminal exact viewport, screenshot, and ZIP evidence", async ({ browser }) => {
   await fs.mkdir(artifacts, { recursive: true });
   const base = `${process.env.S6_ACCEPTANCE_URL || "http://localhost:8080"}/?terminal-responsive-retest=${new Date().toISOString()}`;
@@ -84,7 +100,7 @@ test("terminal exact viewport, screenshot, and ZIP evidence", async ({ browser }
     await assertFocusedControlVisible(page);
     await page.screenshot({ path: path.join(artifacts, `${name}-projects.png`), fullPage: true });
 
-    await page.getByRole("button", { name: projectName, exact: false }).first().click();
+    await openProjectByName(page, projectName);
     await page.waitForTimeout(400);
     diagnostics.measurements.push(await measure(page, "workspace", { width, height }));
     await open(page, "Shorts Editor");
@@ -111,7 +127,7 @@ test("terminal exact viewport, screenshot, and ZIP evidence", async ({ browser }
   const page = await context.newPage();
   await page.goto(base);
   await expect(page.getByRole("heading", { name: "Make the first cut" })).toBeVisible();
-  await page.getByRole("button", { name: projectName, exact: false }).first().click();
+  await openProjectByName(page, projectName);
   const downloadButton = page.getByRole("button", { name: /Download ZIP/ }).first();
   await expect(downloadButton).toBeEnabled();
   const downloadWait = page.waitForEvent("download");

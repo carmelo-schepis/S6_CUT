@@ -127,13 +127,13 @@ test.describe("responsive loading and creation controls", () => {
         const button = page.getByRole("button", { name: mode, exact: true });
         await button.click();
         await expect(button).toHaveClass(/active/);
-        await assertContained(page, `.processing-mode-tabs button:has-text("${mode}")`, ".action-step");
+        await assertContained(page, `.processing-mode-tabs button:has-text("${mode}")`, ".create-step");
       }
       for (const format of ["Short form · 9:16", "Long form · 16:9"]) {
         const button = page.getByRole("button", { name: format, exact: true });
         await button.click();
         await expect(button).toHaveClass(/active/);
-        await assertContained(page, `.format-tabs button:has-text("${format.split(" · ")[0]}")`, ".action-step");
+        await assertContained(page, `.format-tabs button:has-text("${format.split(" · ")[0]}")`, ".create-step");
       }
       await page.getByRole("button", { name: "Short form · 9:16", exact: true }).click();
       for (let index = 0; index < 7; index += 1) await page.getByRole("button", { name: "More clips", exact: true }).click();
@@ -148,13 +148,21 @@ test.describe("responsive loading and creation controls", () => {
       await assertContained(page, ".create-button", ".create-panel");
       await page.getByRole("button", { name: /Advanced controls/i }).click();
       await expect(page.getByLabel("Minimum seconds")).toBeHidden();
+      // Segmented controls must be operable from the keyboard with a visible
+      // focus ring. Target each control by name rather than by tab position so
+      // the check does not depend on the order of neighbouring controls.
       const auto = page.getByRole("button", { name: "Auto", exact: true });
       await auto.focus();
       await page.keyboard.press("Space");
       await expect(auto).toHaveClass(/active/);
       expect(await auto.evaluate((element) => getComputedStyle(element).outlineStyle)).not.toBe("none");
-      await page.keyboard.press("Shift+Tab");
+      const fast = page.getByRole("button", { name: "Fast", exact: true });
+      await fast.focus();
       await page.keyboard.press("Enter");
+      await expect(fast).toHaveClass(/active/);
+      await auto.focus();
+      await page.keyboard.press("Enter");
+      await expect(auto).toHaveClass(/active/);
       await page.getByRole("button", { name: "Short form · 9:16", exact: true }).click();
       const create = page.getByRole("button", { name: "Create 12 short clips", exact: true });
       await expect(create).toBeVisible();
@@ -232,7 +240,7 @@ test.describe("responsive loading and creation controls", () => {
     await page.goto("/", { waitUntil: "domcontentloaded" });
     await expect(page.locator(".provider-callout:not(.compact)")).toHaveCount(0);
     await page.getByRole("button", { name: "Smart", exact: true }).click();
-    await expect(page.locator(".mode-note").filter({ hasText: "selected provider" })).toBeVisible();
+    await expect(page.locator(".field-group-hint").filter({ hasText: "selected provider" })).toBeVisible();
     await assertNoOverflow(page);
     await page.screenshot({ path: path.join(artifacts, "creation-connected-smart.png"), fullPage: false });
   });

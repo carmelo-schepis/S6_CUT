@@ -1,6 +1,9 @@
-import type { ButtonHTMLAttributes, PropsWithChildren, ReactNode } from "react";
+import { useCallback, useRef, useState, type ButtonHTMLAttributes, type PropsWithChildren, type ReactNode } from "react";
 import { AlertTriangle, Check, LoaderCircle, WifiOff, XCircle } from "lucide-react";
+import { groupWarnings } from "../status-format";
 import type { JobState } from "../types";
+
+export { formatBytes, formatSeconds, sentenceCase } from "../status-format";
 
 export function Button({ className = "", variant = "secondary", ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "secondary" | "ghost" | "danger" }) {
   return <button className={`button button-${variant} ${className}`} {...props} />;
@@ -22,10 +25,16 @@ export function StatusBadge({ state, label }: { state: JobState | "local" | "off
   return <span className={`status status-${normalized}`}>{icon}<span>{text}</span></span>;
 }
 
-export function EmptyState({ icon, title, children, action }: PropsWithChildren<{ icon: ReactNode; title: string; action?: ReactNode }>) {
+/**
+ * `headingLevel` exists because an empty state is sometimes the *only* thing a
+ * screen renders. On those screens its title is the page title and must be the
+ * `<h1>`; everywhere else it sits under a `PageHeader` and stays an `<h2>`.
+ */
+export function EmptyState({ icon, title, children, action, headingLevel = 2 }: PropsWithChildren<{ icon: ReactNode; title: string; action?: ReactNode; headingLevel?: 1 | 2 }>) {
+  const Heading = headingLevel === 1 ? "h1" : "h2";
   return <div className="empty-state">
     <div className="empty-icon" aria-hidden="true">{icon}</div>
-    <h2>{title}</h2>
+    <Heading>{title}</Heading>
     <div className="muted empty-copy">{children}</div>
     {action}
   </div>;
@@ -57,12 +66,6 @@ export function formatAge(value: string): string {
   return `${Math.floor(seconds / 86400)}d ago`;
 }
 
-export function formatBytes(bytes: number): string {
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
-}
-
 export function formatDimensions(aspect: string | null | undefined, width: number | null | undefined, height: number | null | undefined): string {
   const requested = aspect || "9:16";
   return width && height ? `${requested} · ${width} × ${height} px` : `${requested} · dimensions unavailable`;
@@ -72,4 +75,70 @@ export function formatDuration(seconds: number): string {
   const minutes = Math.floor(seconds / 60);
   const remainder = Math.round(seconds % 60).toString().padStart(2, "0");
   return `${minutes}:${remainder}`;
+}
+
+/**
+ * Groups repeated engine warnings into one bounded panel instead of rendering
+ * one full-width strip per clip. Only the first few rows are shown until the
+ * reader asks for the rest, so a five-clip job cannot push the workspace
+ * content below the fold.
+ */
+export function WarningList({ warnings, label = "Processing notes" }: { warnings: string[]; label?: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const groups = groupWarnings(warnings);
+  if (!groups.length) return null;
+  const visible = expanded ? groups : groups.slice(0, 3);
+  const hidden = groups.length - visible.length;
+  return <section className="notice-panel" aria-label={label}>
+    <div className="notice-panel-head">
+      <AlertTriangle size={13} aria-hidden="true" />
+      <strong>{label}</strong>
+      <span className="notice-count">{groups.length}</span>
+    </div>
+    <ul className="notice-list">
+      {visible.map((group) => <li key={group.message}>
+        {group.scope && <span className="notice-scope">{group.scope}</span>}
+        <span className="notice-message">{group.message}</span>
+      </li>)}
+    </ul>
+    {hidden > 0 && <button type="button" className="notice-more" onClick={() => setExpanded(true)}>Show {hidden} more</button>}
+    {expanded && groups.length > 3 && <button type="button" className="notice-more" onClick={() => setExpanded(false)}>Show fewer</button>}
+  </section>;
+}
+
+/**
+ * A titled block of related controls. Replaces long undifferentiated field
+ * stacks with a scannable group that carries its own heading and spacing.
+ */
+export function FieldGroup({ title, hint, children, columns = 1, headingLevel = 3 }: PropsWithChildren<{ title: string; hint?: string; columns?: 1 | 2; headingLevel?: 2 | 3 }>) {
+  // Screens that place field groups directly under the page `<h1>` pass level 2
+  // so the outline does not jump h1 -> h3. The visual treatment is carried by
+  // `.field-group-head`, not by the tag, so nothing changes on screen.
+  const Heading = headingLevel === 2 ? "h2" : "h3";
+  return <section className="field-group" aria-label={title}>
+    <div className="field-group-head"><Heading>{title}</Heading>{hint && <p className="field-group-hint">{hint}</p>}</div>
+    <div className={columns === 2 ? "field-group-body two-up" : "field-group-body"}>{children}</div>
+  </section>;
+}
+
+/** Neutral placeholder shown while first data is still loading. */
+export function Skeleton({ rows = 3, className = "" }: { rows?: number; className?: string }) {
+  return <div className={`skeleton ${className}`.trim()} aria-hidden="true">
+    {Array.from({ length: rows }, (_, index) => <span key={index} />)}
+  </div>;
+}
+
+/**
+ * Guards an expensive or state-changing action against re-entrant calls.
+ * Disabling a button through React state is not enough on its own: a fast
+ * double-click can dispatch both events before the disabled state is applied,
+ * which would create two jobs from one customer intent.
+ */
+export function useSingleFlight() {
+  const inFlight = useRef(false);
+  return useCallback(async (action: () => Promise<unknown>) => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    try { await action(); } finally { inFlight.current = false; }
+  }, []);
 }

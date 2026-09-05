@@ -43,10 +43,34 @@ beforeEach(() => {
   mockPlan.mockResolvedValue(plan);
 });
 
+describe("TopicToVideoView provider availability", () => {
+  it("reports provider availability as unknown until /profiles has answered", () => {
+    render(<TopicToVideoView profiles={[]} profilesLoaded={false} onConfigureProviders={vi.fn()} onJobCreated={vi.fn()} />);
+    expect(screen.getByText(/Checking connected providers/i)).toBeInTheDocument();
+    expect(screen.queryByText(/OpenRouter is not configured/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Configure OpenRouter/i })).not.toBeInTheDocument();
+  });
+
+  it("states the provider is missing only once /profiles confirms it", () => {
+    render(<TopicToVideoView profiles={[disconnected]} profilesLoaded onConfigureProviders={vi.fn()} onJobCreated={vi.fn()} />);
+    expect(screen.getByText(/OpenRouter is not configured/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Checking connected providers/i)).not.toBeInTheDocument();
+  });
+
+  it("keeps the brief headings one level below the page title", () => {
+    renderView();
+    expect(screen.getByRole("heading", { level: 1, name: "Topic to Video" })).toBeInTheDocument();
+    // h1 -> h3 was an illegal jump; the field groups are the page's sections.
+    expect(screen.getByRole("heading", { level: 2, name: "Brief" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Output" })).toBeInTheDocument();
+    expect(document.querySelectorAll("h3")).toHaveLength(0);
+  });
+});
+
 describe("TopicToVideoView OpenRouter model picker", () => {
   it("explains the plan review and local custom-script path", () => {
     renderView();
-    expect(screen.getByText("Turn a topic or your own script into a reviewable video plan. Choose the audience, tone, language, length, format, and number of versions, review the script and visual beats, then queue the videos for rendering; your own script can be planned locally without an AI provider.")).toBeInTheDocument();
+    expect(screen.getByText("Turn a topic — or your own script — into a reviewable plan, then queue the videos for rendering. A supplied script is planned locally, with no provider needed.")).toBeInTheDocument();
   });
 
   it("renders exactly the dynamic models and preselects only a returned saved model", async () => {

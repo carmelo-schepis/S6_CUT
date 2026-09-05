@@ -17,3 +17,19 @@ export function projectStatus(project: Project, jobs: Job[]) {
     progress: job?.progress ?? (state === "complete" ? 100 : undefined),
   };
 }
+
+/** Job states that mean work is still in flight. */
+const liveJobStates = new Set(["queued", "active", "paused", "recovered", "stalled"]);
+
+export function hasLiveWork(jobs: Job[]): boolean {
+  return jobs.some((job) => liveJobStates.has(job.state));
+}
+
+/**
+ * The job list carries every clip of every job, so it is a large response.
+ * Poll it quickly only while something is actually running; an idle queue does
+ * not need a fresh copy every few seconds.
+ */
+export function jobPollInterval(jobs: Job[]): number {
+  return hasLiveWork(jobs) ? 4_000 : 20_000;
+}

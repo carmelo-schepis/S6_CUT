@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { Check, CircleStop, Clock3, Film, Maximize2, MessageSquare, Pause, Play, RefreshCw, RotateCcw, Scissors, Send, Sparkles, Volume2, WandSparkles, X } from "lucide-react";
 import { controlJob, createShortsJob, createShortsSourceJob, listAssets, listJobs, readableError, retryClip } from "../api";
 import type { Clip, Job, LibraryAsset } from "../types";
-import { Button, StatusBadge, formatDimensions, formatDuration } from "./common";
+import { Button, StatusBadge, formatDimensions, formatDuration, useSingleFlight } from "./common";
 import { VideoSourcePicker, type VideoSourceMode } from "./video-source-picker";
 
 const aspects = ["9:16", "16:9", "1:1", "4:5"] as const;
@@ -48,6 +48,10 @@ export function parseAssistantRequest(text: string, current: EditState): { edit?
     : { edit, explanation };
 }
 
+// The clip browser is a scroll pane, not an archive: mounting every clip
+// (and its <video>) for a large project made the panel slow to settle.
+const CLIP_PAGE = 30;
+
 export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void }) {
   const [assets, setAssets] = useState<LibraryAsset[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -73,6 +77,8 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
   const [assistantMessages, setAssistantMessages] = useState<AssistantMessage[]>([{ id: 1, role: "assistant", text: "Describe a safe trim or aspect-ratio change. I will propose the edit before applying it." }]);
   const [pendingProposal, setPendingProposal] = useState<AssistantEdit | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [clipLimit, setClipLimit] = useState(CLIP_PAGE);
+  const singleFlight = useSingleFlight();
   const [status, setStatus] = useState("");
   const videoRef = useRef<HTMLVideoElement>(null);
   const objectUrl = useRef<string | null>(null);
@@ -126,8 +132,10 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
   };
 
   const loadFile = (next: File | null, pickerError?: string) => { setFile(next); setError(pickerError || null); if (next) { setMode("file"); setSelectedClipId(null); setSavedBaseline(editState); setHistory([]); } };
-  const submit = async (event?: FormEvent) => {
-    event?.preventDefault(); if (assistantBusy) return;
+  const submit = (event?: FormEvent) => {
+    event?.preventDefault();
+    return singleFlight(async () => {
+    if (assistantBusy) return;
     setError(null); setStatus("");
     const from = Number(start); const to = end.trim() === "" ? undefined : Number(end);
     if (!Number.isFinite(from) || from < 0) return setError("Start seconds must be a finite number at least 0.");
@@ -142,6 +150,7 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
       else await createShortsSourceJob({ file: mode === "file" ? file || undefined : undefined, url: mode === "url" ? url.trim() : undefined, name: projectName.trim() || undefined, burnSubtitles: subtitles, start: from, end: to, aspectRatio: aspect });
       setStatus("Short queued successfully."); setSavedBaseline(editState); setHistory([]); await refresh(); onJobCreated();
     } catch (cause) { setError(readableError(cause)); setStatus(""); } finally { setAssistantBusy(false); }
+    });
   };
 
   const sendAssistant = async (event?: FormEvent) => {
@@ -174,20 +183,24 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
 
   return <div className="page shorts-workspace-page">
     <form className="shorts-workspace-form" onSubmit={submit}>
-    <header className="shorts-workspace-header"><div><div className="eyebrow">Native editing workflow</div><h1>Shorts Editor</h1><p>Turn an authorised video from your Library, a local file, or a supported YouTube URL into a social-ready clip. Choose the exact section, output shape, and subtitle setting, then queue it for rendering in S6_cut.</p></div><div className="shorts-header-actions"><span className={dirty ? "edit-state dirty" : "edit-state"}>{dirty ? "Unsaved edits" : "All changes saved"}</span>{history.length > 0 && <Button type="button" onClick={undo}><RotateCcw size={14} /> Undo</Button>}<Button type="submit" variant="primary" disabled={assistantBusy}><Scissors size={14} /> Queue short</Button></div></header>
+    <header className="shorts-workspace-header"><div><div className="eyebrow">Native editing workflow</div><h1>Shorts Editor</h1><p>Trim an authorised video into a social-ready clip. Choose the section, output shape, and subtitles, then queue the render.</p></div><div className="shorts-header-actions"><span className={dirty ? "edit-state dirty" : "edit-state"}>{dirty ? "Unsaved edits" : "All changes saved"}</span>{history.length > 0 && <Button type="button" onClick={undo}><RotateCcw size={14} /> Undo</Button>}<Button type="submit" variant="primary" disabled={assistantBusy}><Scissors size={14} /> Queue short</Button></div></header>
     {error && <div className="shorts-global-alert" role="alert"><X size={16} />{error}</div>}
-    <main className="shorts-workspace" aria-label="Shorts Editor workspace">
+    {/* A <main> here nested a second main landmark inside the shell's
+        #main-content. This element only lays the two columns out — naming it
+        would add a redundant region landmark around the aside below, so the
+        meaningful names stay on the panels themselves. */}
+    <section className="shorts-workspace">
       <section className="shorts-editor-panel" aria-labelledby="editor-panel-title">
         <div className="workspace-panel-heading"><div><span className="panel-kicker">Editor</span><h2 id="editor-panel-title">{contextName}</h2></div><StatusBadge state={selectedRow ? selectedRow.job.state : "local"} label={selectedRow ? selectedRow.job.stageLabel : "Source ready"} /></div>
         {!sourcePreview && <div className="shorts-source-empty"><div className="empty-icon"><Film size={28} /></div><h3>Bring a source into the editor</h3><p>Choose a local file, authorised YouTube URL, or a video from your Library.</p><VideoSourcePicker mode={mode} onModeChange={setMode} file={file} onFile={loadFile} url={url} onUrl={setUrl}><div className="field"><label className="field-label" htmlFor="shorts-source">Library video</label><select id="shorts-source" value={assetId} onChange={(event) => setAssetId(event.target.value)} disabled={!assets.length}><option value="">{assets.length ? "Select Library video" : "No Library videos available"}</option>{assets.map((asset) => <option key={asset.id} value={asset.id}>{asset.title}</option>)}</select><small>{assets.length ? "Private media stays on this machine." : "Add a video in Library first."}</small></div></VideoSourcePicker><div className="trim-inputs shorts-empty-trim"><label>Start <input aria-label="Start seconds" type="number" min="0" step=".1" value={start} onChange={(event) => setStart(event.target.value)} /></label><label>End <input aria-label="End seconds" type="number" min="0" step=".1" value={end} onChange={(event) => setEnd(event.target.value)} placeholder="Source remainder" /></label></div></div>}
         {sourcePreview && <div className="video-editing-stage"><div className={`shorts-video-frame aspect-${aspect.replace(":", "-")}`}><video ref={videoRef} src={sourcePreview} onLoadedMetadata={(event) => setSourceDuration(event.currentTarget.duration)} onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} controls={false} /></div><div className="video-controls"><button type="button" className="icon-button" onClick={togglePlay} aria-label={playing ? "Pause preview" : "Play preview"}>{playing ? <Pause size={17} /> : <Play size={17} />}</button><span className="video-time">{formatDuration(currentTime)} / {formatDuration(sourceDuration || Number(end) || 0)}</span><input aria-label="Preview position" type="range" min="0" max={sourceDuration || 1} step=".1" value={Math.min(currentTime, sourceDuration || 1)} onChange={(event) => seek(Number(event.target.value))} /><button type="button" className="icon-button" aria-label="Preview volume"><Volume2 size={16} /></button><button type="button" className="icon-button" aria-label="Expand preview"><Maximize2 size={16} /></button></div><div className="timeline-wrap"><div className="timeline-label"><span>Trim range</span><span>{formatDuration(Number(start) || 0)} – {end ? formatDuration(Number(end)) : "source end"}</span></div><input className="timeline-range" aria-label="Trim start" type="range" min="0" max={sourceDuration || 1} step=".1" value={Math.min(Number(start) || 0, sourceDuration || 1)} onChange={(event) => updateEdit({ start: Number(event.target.value) })} /><div className="trim-inputs"><label>Start <input aria-label="Start seconds" type="number" min="0" step=".1" value={start} onChange={(event) => updateEdit({ start: Number(event.target.value) })} /></label><label>End <input aria-label="End seconds" type="number" min="0" step=".1" value={end} onChange={(event) => { const value = event.target.value; updateEdit({ end: value.trim() ? Number(value) : undefined }); }} placeholder="Source end" /></label><label>Aspect <select aria-label="Aspect ratio" value={aspect} onChange={(event) => updateEdit({ aspect: event.target.value as AspectRatio })}>{aspects.map((value) => <option key={value}>{value}</option>)}</select></label></div><div className="editor-options"><label className="shorts-project-name">Project name <input value={projectName} maxLength={160} onChange={(event) => { setHistory((current) => [...current.slice(-9), editState]); setProjectName(event.target.value); }} placeholder="Optional project name" /></label><label><input type="checkbox" checked={subtitles} onChange={(event) => updateEdit({ subtitles: event.target.checked })} /> Subtitles</label><span>{mode === "url" ? "YouTube preview becomes available after import." : file ? file.name : "Library source"}</span><Button type="button" onClick={() => { setPreviewUrl(null); setFile(null); }}>Change source</Button></div></div></div>}
         {status && <div className="shorts-inline-status" role="status"><Clock3 size={15} />{status}</div>}
       </section>
-      <aside className="shorts-right-column">
-        <section className="shorts-clips-panel" aria-labelledby="clips-panel-title"><div className="workspace-panel-heading"><div><span className="panel-kicker">Project output</span><h2 id="clips-panel-title">Clips <span className="count-pill">{rows.length}</span></h2></div><select aria-label="Filter clips" value={filter} onChange={(event) => setFilter(event.target.value)}><option value="all">All clips</option><option value="queued">Queued</option><option value="rendering">Rendering</option><option value="complete">Complete</option><option value="failed">Failed</option></select></div><div className="clip-browser">{rows.length ? rows.map((row) => <ClipBrowserItem key={`${row.job.id}-${row.clip.id}`} row={row} active={row.clip.id === selectedClipId} onSelect={() => selectClip(row)} onRetry={() => void retryClip(row.job.id, row.clip.id).then(refresh).catch((cause) => setError(readableError(cause)))} onStop={() => void controlJob(row.job.id, "stop-keep").then(refresh).catch((cause) => setError(readableError(cause)))} />) : <div className="clips-empty"><Film size={24} /><strong>No clips yet</strong><span>Queue a source from the editor and its durable render will appear here.</span></div>}</div></section>
+      <aside className="shorts-right-column" aria-label="Clips and editing assistant">
+        <section className="shorts-clips-panel" aria-labelledby="clips-panel-title"><div className="workspace-panel-heading"><div><span className="panel-kicker">Project output</span><h2 id="clips-panel-title">Clips <span className="count-pill">{rows.length}</span></h2></div><select aria-label="Filter clips" value={filter} onChange={(event) => { setFilter(event.target.value); setClipLimit(CLIP_PAGE); }}><option value="all">All clips</option><option value="queued">Queued</option><option value="rendering">Rendering</option><option value="complete">Complete</option><option value="failed">Failed</option></select></div><div className="clip-browser">{rows.length ? rows.slice(0, clipLimit).map((row) => <ClipBrowserItem key={`${row.job.id}-${row.clip.id}`} row={row} active={row.clip.id === selectedClipId} onSelect={() => selectClip(row)} onRetry={() => void retryClip(row.job.id, row.clip.id).then(refresh).catch((cause) => setError(readableError(cause)))} onStop={() => void controlJob(row.job.id, "stop-keep").then(refresh).catch((cause) => setError(readableError(cause)))} />) : <div className="clips-empty"><Film size={24} /><strong>No clips yet</strong><span>Queue a source from the editor and its durable render will appear here.</span></div>}{rows.length > clipLimit && <button type="button" className="show-all-projects" onClick={() => setClipLimit((value) => value + CLIP_PAGE)}>Show {Math.min(CLIP_PAGE, rows.length - clipLimit)} more of {rows.length}</button>}</div></section>
         <section className="shorts-assistant-panel" aria-labelledby="assistant-panel-title"><div className="workspace-panel-heading"><div><span className="panel-kicker">Safe local controls</span><h2 id="assistant-panel-title"><WandSparkles size={17} /> AI editing assistant</h2></div><span className="assistant-context">{contextName}</span></div><div className="assistant-messages" aria-live="polite">{assistantMessages.map((message) => <div key={message.id} className={`assistant-message ${message.role}`}><span>{message.role === "assistant" ? <Sparkles size={13} /> : <MessageSquare size={13} />}</span><p>{message.text}</p></div>)}</div>{pendingProposal && <div className="assistant-proposal" role="status"><strong>Proposal ready</strong><span>{pendingProposal.explanation}</span><div><Button type="button" variant="primary" onClick={applyProposal}>Apply proposal</Button><Button type="button" onClick={() => setPendingProposal(null)}>Reject</Button></div></div>}<div className="assistant-composer"><input aria-label="Editing request" value={assistantInput} onChange={(event) => setAssistantInput(event.target.value)} placeholder="Ask for a trim or aspect change…" disabled={assistantBusy} /><button type="button" onClick={() => void sendAssistant()} aria-label="Send editing request" disabled={assistantBusy || !assistantInput.trim()}><Send size={16} /></button></div><small className="assistant-note">Requests are parsed into bounded edits; shell commands and secret configuration are never exposed.</small></section>
       </aside>
-    </main>
+    </section>
     </form>
   </div>;
 }

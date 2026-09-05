@@ -1,9 +1,9 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { createScriptJob, createTopicPlan, listOpenRouterModels, readableError } from "../api";
 import type { OpenRouterModel, ProviderProfile, TopicVideoPlan } from "../types";
-import { Button } from "./common";
+import { Button, FieldGroup, useSingleFlight } from "./common";
 
-export function TopicToVideoView({ profiles, onConfigureProviders, onJobCreated }: { profiles: ProviderProfile[]; onConfigureProviders: () => void; onJobCreated: () => void }) {
+export function TopicToVideoView({ profiles, profilesLoaded = true, onConfigureProviders, onJobCreated }: { profiles: ProviderProfile[]; profilesLoaded?: boolean; onConfigureProviders: () => void; onJobCreated: () => void }) {
   const [topic, setTopic] = useState("");
   const [script, setScript] = useState("");
   const [audience, setAudience] = useState("");
@@ -56,8 +56,11 @@ export function TopicToVideoView({ profiles, onConfigureProviders, onJobCreated 
     return () => { active = false; };
   }, [connected, selected?.id, selected?.modelId, modelsRefresh, profileKey]);
 
-  const makePlan = async (event: FormEvent) => {
+  const singleFlight = useSingleFlight();
+
+  const makePlan = (event: FormEvent) => {
     event.preventDefault();
+    return singleFlight(async () => {
     setError(null);
     if (!topic.trim()) return setError("Topic or keyword is required.");
     if (!script.trim() && !connected) return setError("OpenRouter is not configured. Add and test a provider in Settings, or enter a custom script.");
@@ -76,9 +79,10 @@ export function TopicToVideoView({ profiles, onConfigureProviders, onJobCreated 
     } finally {
       setBusy(false);
     }
+    });
   };
 
-  const generate = async () => {
+  const generate = () => singleFlight(async () => {
     if (!plan || (planProvider !== "local" && planProvider !== providerKey) || script.trim().length < 10) return setError("Review a current plan with at least 10 characters first.");
     setBusy(true);
     setError(null);
@@ -94,22 +98,36 @@ export function TopicToVideoView({ profiles, onConfigureProviders, onJobCreated 
     } finally {
       setBusy(false);
     }
-  };
+  });
 
-  return <div className="page"><div className="page-header"><div><div className="eyebrow">AI-assisted, local-first</div><h1>Topic to Video</h1><p>Turn a topic or your own script into a reviewable video plan. Choose the audience, tone, language, length, format, and number of versions, review the script and visual beats, then queue the videos for rendering; your own script can be planned locally without an AI provider.</p></div></div>
+  return <div className="page"><div className="page-header"><div><div className="eyebrow">AI-assisted, local-first</div><h1>Topic to Video</h1><p>Turn a topic — or your own script — into a reviewable plan, then queue the videos for rendering. A supplied script is planned locally, with no provider needed.</p></div></div>
     <form className="panel topic-video-form" onSubmit={makePlan}>
-      <div className={`provider-status ${connected ? "connected" : "unavailable"}`} role="status"><div><strong>{connected ? `OpenRouter connected — ${selected.name} · ${selected.modelId}` : "OpenRouter is not configured."}</strong><span>{connected ? "The selected Settings profile will be used for this request." : "Add and test a provider in Settings, or enter a custom script."}</span></div>{!connected && <Button type="button" onClick={onConfigureProviders}>Configure OpenRouter</Button>}</div>
+      {/* Until /profiles answers, provider availability is unknown — saying it
+          is not configured would be a claim we cannot yet support. */}
+      <div className={`provider-status ${!profilesLoaded ? "checking" : connected ? "connected" : "unavailable"}`} role="status"><div><strong>{!profilesLoaded ? "Checking connected providers…" : connected ? `OpenRouter connected — ${selected.name} · ${selected.modelId}` : "OpenRouter is not configured."}</strong><span>{!profilesLoaded ? "Reading saved provider profiles from the local engine." : connected ? "The selected Settings profile will be used for this request." : "Add and test a provider in Settings, or enter a custom script."}</span></div>{profilesLoaded && !connected && <Button type="button" onClick={onConfigureProviders}>Configure OpenRouter</Button>}</div>
       {connected && <div className="model-picker-row"><div className="field"><label className="field-label" htmlFor="openrouter-model">OpenRouter model</label><select id="openrouter-model" aria-label="OpenRouter model" value={selectedModelId} disabled={loadingModels || !!modelsError || !models.length} onChange={(event) => setSelectedModelId(event.target.value)}><option value="">Choose a model</option>{models.map((model) => <option key={model.id} value={model.id}>{model.name} — {model.id}</option>)}</select></div><Button type="button" onClick={refreshModels} disabled={loadingModels}>Refresh models</Button></div>}
       {connected && loadingModels && <p className="mode-note" role="status">Loading available OpenRouter models…</p>}
       {connected && modelsError && <div className="form-error" role="alert">Unable to load OpenRouter models: {modelsError} <button type="button" onClick={refreshModels}>Retry</button></div>}
       {connected && !loadingModels && !modelsError && !models.length && <p className="form-error" role="status">No OpenRouter models are currently available. Refresh models or use a custom script.</p>}
       {connected && !script.trim() && selectedModelId && <p className="provider-charge-note">This request will use OpenRouter model <strong>{selectedModelId}</strong> and may incur provider charges.</p>}
-      <div className="field"><label className="field-label" htmlFor="topic">Topic or keyword</label><input id="topic" required value={topic} onChange={(event) => setTopic(event.target.value)} placeholder="e.g. How solar panels work" /></div>
-      <div className="topic-three-grid"><div className="field"><label className="field-label" htmlFor="audience">Audience</label><input id="audience" value={audience} onChange={(event) => setAudience(event.target.value)} /></div><div className="field"><label className="field-label" htmlFor="tone">Tone</label><input id="tone" value={tone} onChange={(event) => setTone(event.target.value)} /></div><div className="field"><label className="field-label" htmlFor="language">Language</label><input id="language" value={language} onChange={(event) => setLanguage(event.target.value)} /></div></div>
-      <div className="field"><label className="field-label" htmlFor="cta">Call to action</label><input id="cta" value={cta} onChange={(event) => setCta(event.target.value)} /></div>
-      <div className="field"><label className="field-label" htmlFor="instructions">Additional instructions</label><textarea id="instructions" rows={3} value={instructions} onChange={(event) => setInstructions(event.target.value)} /></div>
-      <div className="field"><label className="field-label" htmlFor="custom-script">Custom script (optional; skips OpenRouter)</label><textarea id="custom-script" rows={5} value={script} onChange={(event) => setScript(event.target.value)} placeholder="Enter your own script, or leave blank to generate one." /></div>
-      <div className="topic-three-grid"><div className="field"><label className="field-label" htmlFor="duration">Target seconds</label><input id="duration" type="number" min="10" max="180" value={duration} onChange={(event) => setDuration(event.target.value)} /></div><div className="field"><label className="field-label" htmlFor="ai-aspect">Aspect ratio</label><select id="ai-aspect" value={aspect} onChange={(event) => setAspect(event.target.value as typeof aspect)}><option>9:16</option><option>16:9</option><option>1:1</option><option>4:5</option></select></div><div className="field"><label className="field-label" htmlFor="variants">Variants (1–3)</label><input id="variants" type="number" min="1" max="3" value={variants} onChange={(event) => setVariants(String(Math.max(1, Math.min(3, Number(event.target.value)))))} /></div></div>
+      <div className="topic-video-grid">
+        <FieldGroup title="Brief" headingLevel={2}>
+          <div className="field"><label className="field-label" htmlFor="topic">Topic or keyword</label><input id="topic" required value={topic} onChange={(event) => setTopic(event.target.value)} placeholder="e.g. How solar panels work" /></div>
+          <div className="topic-three-grid"><div className="field"><label className="field-label" htmlFor="audience">Audience</label><input id="audience" value={audience} onChange={(event) => setAudience(event.target.value)} /></div><div className="field"><label className="field-label" htmlFor="tone">Tone</label><input id="tone" value={tone} onChange={(event) => setTone(event.target.value)} /></div><div className="field"><label className="field-label" htmlFor="language">Language</label><input id="language" value={language} onChange={(event) => setLanguage(event.target.value)} /></div></div>
+          <div className="field"><label className="field-label" htmlFor="cta">Call to action</label><input id="cta" value={cta} onChange={(event) => setCta(event.target.value)} /></div>
+          <div className="field"><label className="field-label" htmlFor="instructions">Additional instructions</label><textarea id="instructions" rows={3} value={instructions} onChange={(event) => setInstructions(event.target.value)} /></div>
+        </FieldGroup>
+        <div className="topic-video-column">
+          <FieldGroup title="Output" columns={2} headingLevel={2}>
+            <div className="field"><label className="field-label" htmlFor="duration">Target seconds</label><input id="duration" type="number" min="10" max="180" value={duration} onChange={(event) => setDuration(event.target.value)} /></div>
+            <div className="field"><label className="field-label" htmlFor="ai-aspect">Aspect ratio</label><select id="ai-aspect" value={aspect} onChange={(event) => setAspect(event.target.value as typeof aspect)}><option>9:16</option><option>16:9</option><option>1:1</option><option>4:5</option></select></div>
+            <div className="field"><label className="field-label" htmlFor="variants">Variants (1–3)</label><input id="variants" type="number" min="1" max="3" value={variants} onChange={(event) => setVariants(String(Math.max(1, Math.min(3, Number(event.target.value)))))} /></div>
+          </FieldGroup>
+          <FieldGroup title="Your own script" hint="Optional. Supplying a script skips OpenRouter and plans locally." headingLevel={2}>
+            <div className="field"><label className="sr-only" htmlFor="custom-script">Custom script</label><textarea id="custom-script" rows={7} value={script} onChange={(event) => setScript(event.target.value)} placeholder="Enter your own script, or leave blank to generate one." /></div>
+          </FieldGroup>
+        </div>
+      </div>
       {plan && <section className="panel plan-review" aria-label="Reviewable script plan">{planProvider !== "local" && planProvider !== providerKey && <p className="form-error">Provider or model changed. Create a new plan for the selected model before generating.</p>}<strong>{plan.title}</strong><p>{plan.hook}</p><p>{plan.narration}</p><small>{plan.beats.length} visual beats · estimated {plan.estimatedDuration.toFixed(0)} seconds · {plan.hashtags.join(" ")}</small></section>}
       {error && <div className="form-error" role="alert">{error}</div>}
       {status && <div className="mode-note" role="status">{status}</div>}

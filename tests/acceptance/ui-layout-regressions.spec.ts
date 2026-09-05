@@ -56,8 +56,8 @@ test.describe("creation and Library layout regressions", () => {
         const modeMeasure = await page.locator(".processing-mode-tabs").evaluate((control) => {
           const buttons = [...control.querySelectorAll<HTMLElement>("button")];
           const rects = buttons.map((item) => item.getBoundingClientRect());
-          const note = control.parentElement?.querySelector<HTMLElement>(".mode-note")?.getBoundingClientRect();
-          const parent = control.parentElement?.getBoundingClientRect();
+          const note = control.closest(".field-group")?.querySelector<HTMLElement>(".field-group-hint")?.getBoundingClientRect();
+          const parent = control.closest(".create-step")?.getBoundingClientRect();
           return { rects, note, parent };
         });
         expect(modeMeasure.rects).toHaveLength(3);
@@ -126,10 +126,17 @@ test.describe("creation and Library layout regressions", () => {
   });
 
   test("provider callout actions remain usable through both safe paths", async ({ page }) => {
+    // This is a no-provider workflow test, so make that precondition explicit
+    // instead of inheriting whichever profile happens to be selected in the
+    // persistent acceptance data set.
+    await page.route("**/api/v1/profiles", async (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+    });
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/", { waitUntil: "domcontentloaded" });
     const callout = page.locator(".provider-callout:not(.compact)");
-    if (!(await callout.count())) test.skip(true, "A provider is already selected in the persistent Docker data set");
+    await expect(callout).toBeVisible();
     await expect(callout.getByRole("button", { name: "Configure providers" })).toBeVisible();
     await callout.getByRole("button", { name: "Configure providers" }).click();
     await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();

@@ -351,14 +351,18 @@ def _run_ytdlp_download(
                 process.wait(timeout=5)
                 raise TranscriptionCancelled("YouTube import cancelled")
             if first_progress is None:
-                if now - max(started, last_output) > settings.ytdlp_connect_timeout:
+                # Setup (player JS fetch, JS-challenge solving, PO-token minting)
+                # is silent for long stretches and is a separate budget from the
+                # per-socket read timeout; using the socket timeout here killed
+                # healthy imports before the first byte.
+                if now - max(started, last_output) > settings.ytdlp_setup_timeout:
                     process.kill(); process.wait()
-                    _download_update(progress_callback, phase="stalled", message="Connection/setup timed out")
-                    raise DownloadStalled("YouTube connection setup timed out")
+                    _download_update(progress_callback, phase="stalled", message="Preparing the download timed out before any data arrived")
+                    raise DownloadStalled("Preparing the YouTube download timed out before any data arrived")
             elif now - last_byte_progress > settings.ytdlp_inactivity_timeout:
                 process.kill(); process.wait()
-                _download_update(progress_callback, phase="stalled", message="Download stalled with no byte progress")
-                raise DownloadStalled("YouTube download stalled; no bytes arrived within the configured inactivity window")
+                _download_update(progress_callback, phase="stalled", message="The download stalled; no data arrived for several minutes")
+                raise DownloadStalled("The download stalled; no data arrived for several minutes")
         output = process.returncode or 0
         if output:
             detail = "\n".join(lines[-8:])

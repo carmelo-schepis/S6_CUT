@@ -136,6 +136,16 @@ def _media_fn(name: str):
 # DO-NOT-CHANGE: see DO-NOT-CHANGE/AGENTS.md
 # job state machine, staged publication, immutable sources, and the outer
 # failure guard that preserves already-published clips are hard invariants
+
+
+def _singularise(label: str) -> str:
+    """`3 fast cuts ready` reads correctly; `1 fast cuts ready` does not.
+    Only the counted noun in these fixed labels is adjusted."""
+    for plural, singular in (("clips", "clip"), ("cuts", "cut")):
+        if plural in label:
+            return label.replace(plural, singular, 1)
+    return label
+
 class JobManager:
     def __init__(self, db: Database, rules: LibraryRules, profiles: ProfileService, settings: Settings):
         self.db = db
@@ -558,7 +568,7 @@ class JobManager:
             verify_step.current_item, verify_step.total_items = 0, total
         job.state = "complete" if successful and not failed else "partial" if successful else "failed"
         job.stage = "complete" if successful else "failed"
-        job.stage_label = f"{len(successful)} {ready_label}" if successful else "No clips rendered"
+        job.stage_label = f"{len(successful)} {_singularise(ready_label) if len(successful) == 1 else ready_label}" if successful else "No clips rendered"
         job.progress = 100
         if failed:
             job.warnings.append(f"{len(failed)} {noun} failed independently and can be retried.")
@@ -764,8 +774,11 @@ class JobManager:
                 kwargs.pop("max_seconds", None)
             try:
                 source = download_youtube(private["url"], target_dir, self.settings, **kwargs)
-            except DownloadStalled:
-                self._download_progress(job, private, {"phase": "stalled", "message": "Download timed out after a prolonged period without byte progress"})
+            except DownloadStalled as stalled:
+                # Keep the specific reason the media layer reported; the previous
+                # blanket message told users "no byte progress" even when the
+                # download never got past setup.
+                self._download_progress(job, private, {"phase": "stalled", "message": redact(str(stalled)) or "The download stopped before it finished"})
                 raise
             except MediaError:
                 self._download_progress(job, private, {"phase": "failed", "message": "YouTube import failed; retry the import or check the source URL"})

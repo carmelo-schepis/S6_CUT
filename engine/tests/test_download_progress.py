@@ -108,6 +108,34 @@ def test_download_stall_is_detected_without_waiting_for_process_exit(tmp_path: P
     assert updates[-1]["phase"] == "stalled"
 
 
+def test_setup_phase_uses_its_own_budget_not_the_socket_timeout(tmp_path: Path, settings) -> None:
+    """A silent setup phase (player fetch, JS challenge, PO token) must not be
+    killed by the per-socket connect timeout before the first byte arrives."""
+    executable = fake_downloader(tmp_path, """
+        time.sleep(.6)
+        print('download:downloading|1000|1000|NA|200|0|100.0%', flush=True)
+        Path('source-fixture.mp4').write_bytes(b'video')
+    """)
+    result = _run_ytdlp_download(
+        [str(executable)], tmp_path,
+        replace(settings, ytdlp_connect_timeout=1, ytdlp_setup_timeout=5, ytdlp_inactivity_timeout=5),
+    )
+    assert result == [tmp_path / "source-fixture.mp4"]
+
+
+def test_setup_timeout_reports_the_setup_reason_not_a_byte_stall(tmp_path: Path, settings) -> None:
+    executable = fake_downloader(tmp_path, "time.sleep(3)")
+    updates: list[dict[str, object]] = []
+    with pytest.raises(DownloadStalled, match="Preparing"):
+        _run_ytdlp_download(
+            [str(executable)], tmp_path,
+            replace(settings, ytdlp_connect_timeout=10, ytdlp_setup_timeout=.3, ytdlp_inactivity_timeout=10),
+            progress_callback=updates.append,
+        )
+    assert updates[-1]["phase"] == "stalled"
+    assert "Preparing" in str(updates[-1]["message"])
+
+
 def test_download_cancellation_terminates_worker_and_keeps_partial_directory(tmp_path: Path, settings) -> None:
     executable = fake_downloader(tmp_path, """
         print('download:downloading|100|1000|NA|100|9|10.0%', flush=True)

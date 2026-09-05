@@ -46,11 +46,11 @@ describe("ProcessingState – stage, progress & items", () => {
     expect(screen.getByText("2 of 5 items")).toBeInTheDocument();
   });
 
-  it("shows 'Working from durable project state' when item count is zero", () => {
+  it("shows 'Working from saved project state' when item count is zero", () => {
     const zeroItem: Job = { ...activeJob, currentItem: 0, totalItems: 0 };
     render(<ProcessingState job={zeroItem} />);
     const headingSmall = document.querySelector(".processing-heading small")!;
-    expect(headingSmall).toHaveTextContent("Working from durable project state");
+    expect(headingSmall).toHaveTextContent("Working from saved project state");
     expect(screen.queryByText("0 of 0 items")).not.toBeInTheDocument();
   });
 
@@ -97,7 +97,7 @@ describe("ProcessingState – waitingForEngine", () => {
   it("shows engine-waiting label and hides job stage label", () => {
     render(<ProcessingState job={activeJob} waitingForEngine />);
     const headingStrong = document.querySelector(".processing-heading strong")!;
-    expect(headingStrong).toHaveTextContent("Waiting for the S6 Cut engine…");
+    expect(headingStrong).toHaveTextContent("Waiting for the local engine");
     expect(screen.queryByText("Transcribing audio")).not.toBeInTheDocument();
   });
 
@@ -143,7 +143,7 @@ describe("ProcessingState – state-dependent labels", () => {
 describe("ProcessingState – elapsed time", () => {
   it("displays elapsed time, starting at 0:00", () => {
     render(<ProcessingState job={activeJob} />);
-    expect(screen.getByText("Elapsed 0:00")).toBeInTheDocument();
+    expect(document.querySelector(".processing-meta")).toHaveTextContent(/Elapsed\s*0:00/);
   });
 
   it("updates elapsed time after advancing fake timers", () => {
@@ -151,28 +151,28 @@ describe("ProcessingState – elapsed time", () => {
     act(() => {
       vi.advanceTimersByTime(5_000);
     });
-    expect(screen.getByText("Elapsed 0:05")).toBeInTheDocument();
+    expect(document.querySelector(".processing-meta")).toHaveTextContent(/Elapsed\s*0:05/);
   });
 
   it("does not tick when job is terminal (complete)", () => {
     const complete: Job = { ...activeJob, state: "complete" };
     render(<ProcessingState job={complete} />);
-    expect(screen.getByText("Elapsed 0:00")).toBeInTheDocument();
+    expect(document.querySelector(".processing-meta")).toHaveTextContent(/Elapsed\s*0:00/);
     act(() => {
       vi.advanceTimersByTime(10_000);
     });
     // Should still be 0:00 — no interval runs
-    expect(screen.getByText("Elapsed 0:00")).toBeInTheDocument();
+    expect(document.querySelector(".processing-meta")).toHaveTextContent(/Elapsed\s*0:00/);
   });
 
   it("does not tick when job is paused", () => {
     const paused: Job = { ...activeJob, state: "paused" };
     render(<ProcessingState job={paused} />);
-    expect(screen.getByText("Elapsed 0:00")).toBeInTheDocument();
+    expect(document.querySelector(".processing-meta")).toHaveTextContent(/Elapsed\s*0:00/);
     act(() => {
       vi.advanceTimersByTime(10_000);
     });
-    expect(screen.getByText("Elapsed 0:00")).toBeInTheDocument();
+    expect(document.querySelector(".processing-meta")).toHaveTextContent(/Elapsed\s*0:00/);
   });
 });
 
@@ -199,7 +199,7 @@ describe("ProcessingState – meta row", () => {
   it("renders elapsed and item count in the meta row", () => {
     render(<ProcessingState job={activeJob} />);
     const meta = document.querySelector(".processing-meta");
-    expect(meta).toHaveTextContent("Elapsed 0:00");
-    expect(meta).toHaveTextContent("Item 2 / 5");
+    expect(meta).toHaveTextContent(/Elapsed\s*0:00/);
+    expect(meta).toHaveTextContent(/Item\s*2 of 5/);
   });
 });

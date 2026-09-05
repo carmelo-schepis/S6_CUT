@@ -57,6 +57,7 @@ class Settings:
     ffprobe: str
     ytdlp: str = "yt-dlp"
     ytdlp_connect_timeout: int = 45
+    ytdlp_setup_timeout: int = 300
     ytdlp_inactivity_timeout: int = 300
     local_tts: str = "espeak-ng"
     transcription_stall_seconds: int = 180
@@ -92,6 +93,7 @@ class Settings:
             ffprobe=os.getenv("S6_FFPROBE_BIN", "ffprobe"),
             ytdlp=os.getenv("S6_YTDLP_BIN", "yt-dlp"),
             ytdlp_connect_timeout=max(5, min(_int("S6_YTDLP_CONNECT_TIMEOUT", 45), 600)),
+            ytdlp_setup_timeout=max(30, min(_int("S6_YTDLP_SETUP_TIMEOUT", 300), 3_600)),
             ytdlp_inactivity_timeout=max(30, min(_int("S6_YTDLP_INACTIVITY_TIMEOUT", 300), 86_400)),
             local_tts=os.getenv("S6_LOCAL_TTS_BIN", "espeak-ng"),
             transcription_stall_seconds=max(30, min(_int("S6_TRANSCRIPTION_STALL_SECONDS", 180), 86_400)),

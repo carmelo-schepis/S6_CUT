@@ -3,11 +3,15 @@ import { Archive, FileImage, Folder, FolderPlus, ImagePlus, Library, RefreshCw, 
 import { archiveFolder, createFolder, deleteAsset, getHealth, listAssets, listFolders, moveAssets, moveFolder, readableError, removeFolder, updateAsset, updateFolder, uploadAsset } from "../api";
 import { bindRevalidationOnFocus, createBoundedRevalidation, onLibraryChanged } from "../library-sync";
 import type { AssetOrigin, Health, LibraryAsset, LibraryFolder } from "../types";
-import { Button, EmptyState, Field, PageHeader, StatusBadge, formatAge } from "./common";
+import { Button, EmptyState, Field, FieldGroup, PageHeader, StatusBadge, formatAge } from "./common";
 import { VideoPreviewDialog } from "./video-preview-dialog";
 
 const originLabels = { "manual-import": "Manual", "project-source": "Source", "generated-clip": "Generated clip", "script-output": "Script output" } as const;
 const sleep = (milliseconds: number) => new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+
+// A full library mounted every card at once — 329 assets meant 332 concurrent
+// <video> elements and a ~15,000px page. Render a page at a time instead.
+const ASSET_PAGE = 60;
 
 export function LibraryView() {
   const [assets, setAssets] = useState<LibraryAsset[]>([]);
@@ -23,7 +27,9 @@ export function LibraryView() {
   const [showImport, setShowImport] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
-  const [loading, setLoading] = useState(false);
+  // The first read is queued from an effect, so start in the loading state:
+  // otherwise the first paint claims an empty Library before anything is read.
+  const [loading, setLoading] = useState(true);
   const [previewAsset, setPreviewAsset] = useState<LibraryAsset | null>(null);
   const [previewOpener, setPreviewOpener] = useState<HTMLButtonElement | null>(null);
 
@@ -62,12 +68,19 @@ export function LibraryView() {
     };
   }, [load]);
 
+  const [assetLimit, setAssetLimit] = useState(ASSET_PAGE);
   const visibleAssets = useMemo(() => assets.filter((asset) => {
     const terms = [asset.title, asset.filename, ...asset.tags, ...asset.brands, ...asset.people].join(" ").toLowerCase();
     return (!folderId || asset.folderId === folderId) && (!policy || asset.policy === policy) &&
       (origin === "all" || asset.origin === origin) &&
       (mediaType === "all" || asset.mediaType.startsWith(`${mediaType}/`)) && (!query.trim() || terms.includes(query.trim().toLowerCase()));
   }), [assets, folderId, mediaType, origin, policy, query]);
+  // Narrowing the filters should always start again from the first page.
+  const filterKey = `${folderId}|${policy}|${origin}|${mediaType}|${query.trim()}`;
+  const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
+  if (prevFilterKey !== filterKey) { setPrevFilterKey(filterKey); setAssetLimit(ASSET_PAGE); }
+  const pagedAssets = visibleAssets.slice(0, assetLimit);
+  const remainingAssets = visibleAssets.length - pagedAssets.length;
 
   const saveSelected = async (patch: Record<string, unknown>) => {
     if (!selected) return;
@@ -113,18 +126,19 @@ export function LibraryView() {
     setPreviewAsset(asset);
   };
   const closePreview = () => setPreviewAsset(null);
+  const clearFilters = () => { setFolderId(null); setPolicy(null); setOrigin("all"); setMediaType("all"); setQuery(""); };
   const moveSelected = async (destination: string) => {
     if (!selectedIds.length) return;
     try { await moveAssets(selectedIds, destination); setAssets((current) => current.map((asset) => selectedIds.includes(asset.id) ? { ...asset, folderId: destination } : asset)); setSelectedIds([]); } catch (cause) { setError(readableError(cause)); }
   };
 
   return <div className="page library-page">
-    <PageHeader eyebrow="Tier 0 resolver" title="Personal Media Library" description="Organise reusable and project media in local business folders. Folders organise content; they are not access boundaries." actions={<Button variant="primary" onClick={() => setShowImport(!showImport)}><ImagePlus size={15} /> Import asset</Button>} />
+    <PageHeader eyebrow="Tier 0 resolver" title="Personal Media Library" description="Organise reusable and project media in local business folders. Folders group content; they are not access boundaries." actions={<Button variant="primary" onClick={() => setShowImport(!showImport)}><ImagePlus size={15} /> Import asset</Button>} />
     {error && <div className="library-error" role="alert"><div><strong>{error}</strong><span>{health ? `Engine: ${health.status}` : "Engine status unavailable"}</span></div><Button onClick={() => void load(false)}><RefreshCw size={14} /> Retry</Button></div>}
     {showImport && <ImportPanel folders={folders} defaultFolderId={folderId || undefined} onDone={() => { setShowImport(false); void load(false); }} />}
 
     <div className="library-layout">
-      <aside className="library-sidebar panel"><strong>Folders</strong><button className={!folderId && !policy ? "active" : ""} onClick={() => { setFolderId(null); setPolicy(null); }}><Library size={15} /><span className="library-control-label">All media</span><span>{assets.length}</span></button>
+      <aside className="library-sidebar panel" aria-label="Folders and policy filters"><strong>Folders</strong><button className={!folderId && !policy ? "active" : ""} onClick={() => { setFolderId(null); setPolicy(null); }}><Library size={15} /><span className="library-control-label">All media</span><span>{assets.length}</span></button>
         <FolderTree folders={folders} assets={assets} selectedId={folderId} onSelect={(id) => { setFolderId(id); setPolicy(null); }} onAdd={addFolder} onRename={rename} onMove={move} onArchive={archive} onRemove={remove} />
         <Button variant="ghost" onClick={() => addFolder()}><FolderPlus size={14} /> New business folder</Button>
         <label className="archived-toggle"><input type="checkbox" checked={showArchived} onChange={(event) => setShowArchived(event.target.checked)} /> Show archived</label>
@@ -133,22 +147,35 @@ export function LibraryView() {
 
       <section className="library-centre panel"><div className="library-toolbar"><div className="search-box"><Search size={15} /><input aria-label="Search media" placeholder="Search titles, tags, people, brands…" value={query} onChange={(event) => setQuery(event.target.value)} /></div><select aria-label="Media type" value={mediaType} onChange={(event) => setMediaType(event.target.value)}><option value="all">All media</option><option value="image">Images</option><option value="video">Video</option><option value="audio">Audio</option></select><select aria-label="Asset origin" value={origin} onChange={(event) => setOrigin(event.target.value as AssetOrigin | "all")}><option value="all">All origins</option><option value="project-source">Sources</option><option value="generated-clip">Generated clips</option><option value="script-output">Script outputs</option><option value="manual-import">Manual imports</option></select></div>
         {selectedIds.length > 0 && <div className="bulk-bar"><strong>{selectedIds.length} selected</strong><select aria-label="Move selected assets" defaultValue="" onChange={(event) => { if (event.target.value) void moveSelected(event.target.value); }}><option value="" disabled>Move to…</option>{folders.filter((folder) => !folder.archived).map((folder) => <option value={folder.id} key={folder.id}>{folder.name}</option>)}</select></div>}
-        {visibleAssets.length ? <div className="asset-grid">{visibleAssets.map((asset) => <LibraryAssetCard key={asset.id} asset={asset} isSelected={selectedIds.includes(asset.id)} isInspected={selected?.id === asset.id} onPreview={openPreview} onInspect={setSelected} onToggleSelected={(assetId, checked) => setSelectedIds((current) => checked ? [...current, assetId] : current.filter((id) => id !== assetId))} />)}</div>
-          : <EmptyState icon={<Library size={30} />} title={assets.length ? "No media matches these filters" : "Build your private resolver"} action={!assets.length ? <Button variant="primary" onClick={() => setShowImport(true)}><Upload size={15} /> Import first asset</Button> : undefined}>Try another folder, search, or media type. Existing media remains safely stored.</EmptyState>}
-        {loading && <p className="loading-note" role="status">Refreshing local media…</p>}
+        {visibleAssets.length ? <><div className="asset-grid">{pagedAssets.map((asset) => <LibraryAssetCard key={asset.id} asset={asset} isSelected={selectedIds.includes(asset.id)} isInspected={selected?.id === asset.id} onPreview={openPreview} onInspect={setSelected} onToggleSelected={(assetId, checked) => setSelectedIds((current) => checked ? [...current, assetId] : current.filter((id) => id !== assetId))} />)}</div>
+          {remainingAssets > 0 && <button className="show-all-projects" onClick={() => setAssetLimit((value) => value + ASSET_PAGE)}>Show {Math.min(ASSET_PAGE, remainingAssets)} more of {visibleAssets.length}</button>}</>
+          : loading && !assets.length ? <EmptyState icon={<Library size={30} />} title="Opening your Library">Reading local media from the engine…</EmptyState>
+            : assets.length
+              ? <EmptyState icon={<Search size={30} />} title="No media matches these filters" action={<Button onClick={clearFilters}>Clear filters</Button>}>No asset in this Library matches the current folder, search, and media-type filters. Existing media remains safely stored.</EmptyState>
+              : <EmptyState icon={<Library size={30} />} title="Build your private resolver" action={<Button variant="primary" onClick={() => setShowImport(true)}><Upload size={15} /> Import first asset</Button>}>Your Library has no assets yet. Import a video, image, or audio file to start the private, local media set that deterministic matching draws on.</EmptyState>}
+        <p className="loading-note" role="status">{loading ? "Refreshing local media…" : visibleAssets.length ? `Showing ${pagedAssets.length} of ${visibleAssets.length} assets` : ""}</p>
       </section>
 
-      <aside className="asset-inspector panel"><div className="panel-title"><strong>Rule Inspector</strong>{selected && <span>{formatAge(selected.createdAt)}</span>}</div>{selected ? <div className="asset-fields">
-        <Field label="Title"><input value={selected.title} onChange={(event) => setSelected({ ...selected, title: event.target.value })} onBlur={() => saveSelected({ title: selected.title })} /></Field>
-        <Field label="Policy"><select value={selected.policy} onChange={(event) => saveSelected({ policy: event.target.value })}><option value="required">Required</option><option value="prefer">Prefer</option><option value="neutral">Neutral</option><option value="never">Never</option></select></Field>
-        <Field label="Trigger phrases"><input value={selected.triggers.join(", ")} onChange={(event) => setSelected({ ...selected, triggers: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} onBlur={() => saveSelected({ triggers: selected.triggers })} /></Field>
-        <Field label="Tags"><input value={selected.tags.join(", ")} onChange={(event) => setSelected({ ...selected, tags: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} onBlur={() => saveSelected({ tags: selected.tags })} /></Field>
-        <Field label="Brands"><input value={selected.brands.join(", ")} onChange={(event) => setSelected({ ...selected, brands: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} onBlur={() => saveSelected({ brands: selected.brands })} /></Field>
-        <Field label="People"><input value={selected.people.join(", ")} onChange={(event) => setSelected({ ...selected, people: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} onBlur={() => saveSelected({ people: selected.people })} /></Field>
-        <div className="rule-grid"><Field label="Minimum spacing"><input type="number" min={0} value={selected.minSpacingSeconds} onChange={(event) => saveSelected({ minSpacingSeconds: Number(event.target.value) })} /></Field><Field label="Max uses"><input type="number" min={1} value={selected.maxUsesPerProject} onChange={(event) => saveSelected({ maxUsesPerProject: Number(event.target.value) })} /></Field></div>
-        <Field label="Licence"><input value={selected.licence} onChange={(event) => setSelected({ ...selected, licence: event.target.value })} onBlur={() => saveSelected({ licence: selected.licence })} /></Field>
-        <label className="check-row"><input type="checkbox" checked={selected.protected} onChange={(event) => saveSelected({ protected: event.target.checked })} /><span><strong>Protected / pinned</strong><small>Prevents accidental removal and marks campaign media.</small></span></label>
-        <Button variant="ghost" disabled={selected.protected} onClick={() => void removeSelectedAsset()}>Remove Library record</Button>
+      <aside className="asset-inspector panel" aria-label="Rule Inspector"><div className="panel-title"><strong>Rule Inspector</strong>{selected && <span>{formatAge(selected.createdAt)}</span>}</div>{selected ? <div className="asset-fields">
+        <FieldGroup title="Identity" headingLevel={2}>
+          <Field label="Title"><input value={selected.title} onChange={(event) => setSelected({ ...selected, title: event.target.value })} onBlur={() => saveSelected({ title: selected.title })} /></Field>
+          <Field label="Policy" hint="Controls whether this asset may be chosen automatically."><select value={selected.policy} onChange={(event) => saveSelected({ policy: event.target.value })}><option value="required">Required</option><option value="prefer">Prefer</option><option value="neutral">Neutral</option><option value="never">Never</option></select></Field>
+        </FieldGroup>
+        <FieldGroup title="Matching" hint="Comma-separated. Used by deterministic selection." headingLevel={2}>
+          <Field label="Trigger phrases"><input value={selected.triggers.join(", ")} onChange={(event) => setSelected({ ...selected, triggers: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} onBlur={() => saveSelected({ triggers: selected.triggers })} /></Field>
+          <Field label="Tags"><input value={selected.tags.join(", ")} onChange={(event) => setSelected({ ...selected, tags: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} onBlur={() => saveSelected({ tags: selected.tags })} /></Field>
+          <Field label="Brands"><input value={selected.brands.join(", ")} onChange={(event) => setSelected({ ...selected, brands: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} onBlur={() => saveSelected({ brands: selected.brands })} /></Field>
+          <Field label="People"><input value={selected.people.join(", ")} onChange={(event) => setSelected({ ...selected, people: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} onBlur={() => saveSelected({ people: selected.people })} /></Field>
+        </FieldGroup>
+        <FieldGroup title="Usage limits" columns={2} headingLevel={2}>
+          <Field label="Min spacing (s)"><input type="number" min={0} value={selected.minSpacingSeconds} onChange={(event) => saveSelected({ minSpacingSeconds: Number(event.target.value) })} /></Field>
+          <Field label="Max uses"><input type="number" min={1} value={selected.maxUsesPerProject} onChange={(event) => saveSelected({ maxUsesPerProject: Number(event.target.value) })} /></Field>
+        </FieldGroup>
+        <FieldGroup title="Rights" headingLevel={2}>
+          <Field label="Licence"><input value={selected.licence} onChange={(event) => setSelected({ ...selected, licence: event.target.value })} onBlur={() => saveSelected({ licence: selected.licence })} /></Field>
+          <label className="check-row"><input type="checkbox" checked={selected.protected} onChange={(event) => saveSelected({ protected: event.target.checked })} /><span><strong>Protected / pinned</strong><small>Prevents accidental removal and marks campaign media.</small></span></label>
+        </FieldGroup>
+        <Button variant="ghost" className="asset-remove" disabled={selected.protected} onClick={() => void removeSelectedAsset()}>Remove Library record</Button>
       </div> : <p className="muted inspector-empty">Select an asset to edit its deterministic matching rules.</p>}</aside>
     </div>
 
@@ -173,7 +200,7 @@ function LibraryAssetCard({ asset, isSelected, isInspected, onPreview, onInspect
     event.stopPropagation();
     onToggleSelected(asset.id, event.currentTarget.checked);
   };
-  const details = <div className="asset-card-details-content" aria-hidden="true"><strong>{asset.title}</strong><span>{asset.tags.slice(0, 3).join(" · ") || asset.filename}</span><span className="origin-badge">{originLabels[asset.origin]}</span><StatusBadge state={asset.policy === "never" ? "failed" : asset.policy === "required" ? "fallback" : "local"} label={asset.policy} /></div>;
+  const details = <div className="asset-card-details-content" aria-hidden="true"><strong title={asset.title}>{asset.title}</strong><span>{asset.tags.slice(0, 3).join(" · ") || asset.filename}</span><span className="origin-badge">{originLabels[asset.origin]}</span><StatusBadge state={asset.policy === "never" ? "failed" : asset.policy === "required" ? "fallback" : "local"} label={asset.policy} /></div>;
 
   return <article className={`asset-card ${isInspected ? "active" : ""}`}>
     <label className="asset-select"><input aria-label={`Select ${asset.title}`} type="checkbox" checked={isSelected} onChange={handleToggleSelected} /></label>
@@ -185,8 +212,11 @@ function LibraryAssetCard({ asset, isSelected, isInspected, onPreview, onInspect
 }
 
 function AssetPreview({ asset }: { asset: LibraryAsset }) {
-  if (asset.mediaType.startsWith("video/") && asset.previewUrl) return <div className="asset-preview"><video src={asset.previewUrl} muted preload="metadata" aria-hidden="true" tabIndex={-1} /></div>;
-  return <div className="asset-preview"><FileImage size={29} /><span>{asset.mediaType.split("/")[1]?.toUpperCase() || "MEDIA"}</span>{asset.protected && <ShieldCheck size={14} />}</div>;
+  const [unavailable, setUnavailable] = useState(false);
+  if (asset.mediaType.startsWith("video/") && asset.previewUrl && !unavailable) {
+    return <div className="asset-preview"><video src={asset.previewUrl} muted preload="metadata" aria-hidden="true" tabIndex={-1} onError={() => setUnavailable(true)} /></div>;
+  }
+  return <div className="asset-preview"><FileImage size={29} /><span>{unavailable ? "UNAVAILABLE" : asset.mediaType.split("/")[1]?.toUpperCase() || "MEDIA"}</span>{asset.protected && <ShieldCheck size={14} />}</div>;
 }
 
 function FolderTree({ folders, assets, selectedId, onSelect, onAdd, onRename, onMove, onArchive, onRemove }: { folders: LibraryFolder[]; assets: LibraryAsset[]; selectedId: string | null; onSelect: (id: string) => void; onAdd: (parentId: string) => void; onRename: (folder: LibraryFolder) => void; onMove: (folder: LibraryFolder) => void; onArchive: (folder: LibraryFolder) => void; onRemove: (folder: LibraryFolder) => void }) {

@@ -35,6 +35,42 @@ describe("LibraryView", () => {
     expect(screen.queryByText("Other logo")).not.toBeInTheDocument();
   });
 
+  it("tells a genuinely empty Library to import, not to change its filters", async () => {
+    mockListAssets.mockResolvedValue([]);
+    render(<LibraryView />);
+    expect(await screen.findByRole("heading", { name: "Build your private resolver" })).toBeInTheDocument();
+    const empty = document.querySelector(".empty-state")!;
+    expect(empty).toHaveTextContent(/no assets yet/i);
+    // The filter advice is meaningless when there is nothing to filter.
+    expect(empty).not.toHaveTextContent(/another folder/i);
+    expect(empty).not.toHaveTextContent(/media type/i);
+    expect(within(empty as HTMLElement).getByRole("button", { name: /Import first asset/i })).toBeInTheDocument();
+  });
+
+  it("tells a filtered-to-zero Library to change its filters, not to import", async () => {
+    render(<LibraryView />);
+    expect(await screen.findByText("Acme launch")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Search media"), { target: { value: "no-such-asset" } });
+
+    expect(await screen.findByRole("heading", { name: "No media matches these filters" })).toBeInTheDocument();
+    const empty = document.querySelector(".empty-state")!;
+    expect(empty).toHaveTextContent(/filters/i);
+    expect(empty).not.toHaveTextContent(/no assets yet/i);
+    expect(within(empty as HTMLElement).queryByRole("button", { name: /Import first asset/i })).toBeNull();
+
+    fireEvent.click(within(empty as HTMLElement).getByRole("button", { name: /Clear filters/i }));
+    expect(await screen.findByText("Acme launch")).toBeInTheDocument();
+  });
+
+  it("names both complementary landmarks so they are distinguishable", async () => {
+    render(<LibraryView />);
+    expect(await screen.findByText("Acme launch")).toBeInTheDocument();
+    const asides = [...document.querySelectorAll("aside")];
+    const names = asides.map((aside) => aside.getAttribute("aria-label"));
+    expect(names).toEqual(["Folders and policy filters", "Rule Inspector"]);
+    expect(new Set(names).size).toBe(names.length);
+  });
+
   it("does not expose a standalone matching-test panel", async () => {
     render(<LibraryView />);
     expect(await screen.findByText("Acme launch")).toBeInTheDocument();

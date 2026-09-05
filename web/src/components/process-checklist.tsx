@@ -1,15 +1,10 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, Check, Circle, LoaderCircle, Minus, Pause } from "lucide-react";
+import { formatSeconds } from "../status-format";
 import type { JobState, ProcessingStep } from "../types";
 
 function formatElapsed(startedAt: string, now: number) {
-  const elapsed = Math.max(0, Math.floor((now - new Date(startedAt).getTime()) / 1000));
-  const hours = Math.floor(elapsed / 3600);
-  const minutes = Math.floor((elapsed % 3600) / 60);
-  const seconds = elapsed % 60;
-  return hours > 0
-    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
-    : `${minutes}:${String(seconds).padStart(2, "0")}`;
+  return formatSeconds(Math.max(0, (now - new Date(startedAt).getTime()) / 1000));
 }
 
 function stepIcon(status: ProcessingStep["status"]) {
@@ -126,15 +121,16 @@ export function ProcessChecklist({ steps, jobState, compact = false, label = "Sh
           return (
             <li key={step.id} className={`checklist-step status-${step.status}${active ? " active-row" : ""}${step.status === "complete" && freshlyCompleted.has(step.id) ? " checkmark-new" : ""}`}>
               <span className="checklist-icon" aria-hidden="true">{stepIcon(step.status)}</span>
-              <span className="checklist-label">{step.label}</span>
+              <span className="checklist-label" title={step.label}>{step.label}</span>
               {progress && <span className="checklist-progress">{progress}</span>}
               {active && (step.detail || step.startedAt || paused) && (
                 <span className="checklist-detail">
                   {paused
                     ? <><Pause size={10} /> Paused</>
-                    : step.startedAt
-                      ? <>Elapsed {formatElapsed(step.startedAt, now)}{step.detail ? ` · ${step.detail}` : ""}</>
-                      : step.detail}
+                    : <>
+                      {step.startedAt && <time className="checklist-elapsed">Elapsed {formatElapsed(step.startedAt, now)}</time>}
+                      {step.detail && <span className="checklist-detail-text">{step.detail}</span>}
+                    </>}
                 </span>
               )}
               {(step.status === "skipped" || step.status === "failed") && step.detail && (

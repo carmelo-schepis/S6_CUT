@@ -580,3 +580,81 @@ def test_repair_publication_api_endpoint(monkeypatch: pytest.MonkeyPatch) -> Non
             assert again.json()["clips"][0]["libraryAssetId"] == asset.id
     finally:
         app_module.db, app_module.manager = app_db, app_manager
+
+
+def test_finished_clip_media_survives_job_directory_pruning() -> None:
+    """A finished clip must keep playing after retention prunes its job directory.
+
+    Job working directories are transient, but the published output is an
+    immutable, still-referenced Library blob. When the job file is gone the
+    clip's media URLs must fall back to the durable Library asset instead of
+    advertising a link that 404s.
+    """
+    tmp_path = _tmpdir()
+    test_db, test_manager, test_rules, test_settings = _cluster(tmp_path)
+    output = tmp_path / "jobs" / "prune-job" / "clips" / "01-cut.mp4"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(b"rendered-output-bytes")
+    asset = test_rules.register_managed_video(
+        output, title="Pruned campaign — Cut 01", origin="generated-clip",
+        project_id="prune-proj", job_id="prune-job", clip_id="prune-clip-1",
+        metadata={"duration": 8.0, "width": 1080, "height": 1920},
+    )
+    test_db.save_project(Project(id="prune-proj", name="Pruned campaign", mode="clip", style="educational",
+                                 state="complete", source_name="x.mp4", source_kind="upload", requested_count=1))
+    clip = Clip(id="prune-clip-1", index=1, state="complete", start=0, end=8, duration=8,
+                opening_line="Cut 01", output_name="01-cut.mp4", blob_id=asset.blob_id,
+                library_asset_id=asset.id)
+    test_db.save_job(Job(id="prune-job", project_id="prune-proj", mode="clip", processing_mode="fast",
+                         state="complete", stage="complete", stage_label="Ready", progress=100,
+                         style="educational", clips=[clip]), {"aspect_ratio": "9:16"})
+
+    import engine.app as app_module
+    original = (app_module.db, app_module.manager, app_module.settings)
+    app_module.db, app_module.manager, app_module.settings = test_db, test_manager, test_settings
+    try:
+        with TestClient(app) as client:
+            live = client.get("/api/v1/jobs/prune-job").json()["clips"][0]
+            # A published clip is served from its durable Library copy.
+            assert live["downloadUrl"].startswith(f"/api/v1/library/assets/{asset.id}/preview")
+
+            # Retention prunes the job working directory; the blob is untouched.
+            output.unlink()
+            pruned = client.get("/api/v1/jobs/prune-job").json()["clips"][0]
+            assert pruned["state"] == "complete"
+            assert pruned["downloadUrl"] == live["downloadUrl"].split("?")[0] + "?" + pruned["downloadUrl"].split("?")[1]
+            assert pruned["previewUrl"] == pruned["downloadUrl"]
+            # Caption sidecars live beside the job output and go with it.
+            assert pruned["captionDownloads"] == []
+            # The link must still serve the media, not 404.
+            served = client.get(pruned["downloadUrl"])
+            assert served.status_code == 200, served.text
+            assert served.content == b"rendered-output-bytes"
+    finally:
+        app_module.db, app_module.manager, app_module.settings = original
+
+
+def test_clip_without_recoverable_media_reports_no_download_link() -> None:
+    """With neither a job file nor a live Library blob, no link is advertised."""
+    tmp_path = _tmpdir()
+    test_db, test_manager, _, test_settings = _cluster(tmp_path)
+    test_db.save_project(Project(id="gone-proj", name="Gone", mode="clip", style="educational",
+                                 state="complete", source_name="x.mp4", source_kind="upload", requested_count=1))
+    # A published clip whose Library record has gone and whose job output was
+    # pruned has nothing serveable left.
+    clip = Clip(id="gone-clip-1", index=1, state="complete", start=0, end=8, duration=8,
+                opening_line="Cut 01", output_name="01-cut.mp4", library_asset_id="no-such-asset")
+    test_db.save_job(Job(id="gone-job", project_id="gone-proj", mode="clip", processing_mode="fast",
+                         state="complete", stage="complete", stage_label="Ready", progress=100,
+                         style="educational", clips=[clip]), {"aspect_ratio": "9:16"})
+
+    import engine.app as app_module
+    original = (app_module.db, app_module.manager, app_module.settings)
+    app_module.db, app_module.manager, app_module.settings = test_db, test_manager, test_settings
+    try:
+        with TestClient(app) as client:
+            payload = client.get("/api/v1/jobs/gone-job").json()["clips"][0]
+            assert payload["downloadUrl"] is None
+            assert payload["previewUrl"] is None
+    finally:
+        app_module.db, app_module.manager, app_module.settings = original

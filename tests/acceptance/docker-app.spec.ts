@@ -97,7 +97,7 @@ test("Docker-served studio acceptance workflow", async ({ page, request }) => {
   await capture(page, "workspace-media");
   await page.getByRole("tab", { name: "Transcript" }).click();
   await page.getByRole("button", { name: "captions", exact: true }).click();
-  await expect(page.getByText(/Caption style and timing are decided/)).toBeVisible();
+  await expect(page.getByText(/Caption style and timing are fixed when the job is created/)).toBeVisible();
 
   const selected = page.locator('input[type="checkbox"]:checked');
   if (await selected.count()) {
@@ -113,7 +113,7 @@ test("Docker-served studio acceptance workflow", async ({ page, request }) => {
   // Shorts Editor: real source preview, local assistant proposal, and output list.
   await open(page, "Shorts Editor");
   await expect(page.getByRole("heading", { name: "Shorts Editor" })).toBeVisible();
-  await expect(page.getByText(/Turn an authorised video from your Library, a local file, or a supported YouTube URL into a social-ready clip/)).toBeVisible();
+  await expect(page.getByText(/Trim an authorised video into a social-ready clip/)).toBeVisible();
   await page.setViewportSize({ width: 768, height: 1024 });
   const tabletMeasure = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth, innerWidth: window.innerWidth }));
   await fs.writeFile(path.join(artifactDir, "responsive-measurements.json"), JSON.stringify(tabletMeasure, null, 2));
@@ -164,7 +164,7 @@ test("Docker-served studio acceptance workflow", async ({ page, request }) => {
   // AI assistant / Topic to Video local custom-script path (no provider or mock involved).
   await open(page, "AI Video");
   await expect(page.getByRole("heading", { name: "Topic to Video" })).toBeVisible();
-  await expect(page.getByText(/Turn a topic or your own script into a reviewable video plan/)).toBeVisible();
+  await expect(page.getByText(/Turn a topic — or your own script — into a reviewable plan/)).toBeVisible();
   await page.getByLabel("Topic or keyword").fill("Browser acceptance local plan");
   await page.getByLabel(/Custom script/).fill("This is a short, exact local script for browser acceptance and review.");
   await page.getByRole("button", { name: "Create / refresh plan" }).click();

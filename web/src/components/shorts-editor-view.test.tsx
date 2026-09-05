@@ -14,12 +14,26 @@ describe("ShortsEditorView", () => {
   beforeEach(() => { vi.mocked(listAssets).mockImplementation(async () => [asset]); vi.mocked(createShortsJob).mockResolvedValue({ project: {} as never, job: {} as never }); vi.mocked(createShortsSourceJob).mockResolvedValue({ project: {} as never, job: {} as never }); });
   it("explains the accepted source, editing controls, and queued output", async () => {
     render(<ShortsEditorView onJobCreated={vi.fn()} />);
-    expect(screen.getByText("Turn an authorised video from your Library, a local file, or a supported YouTube URL into a social-ready clip. Choose the exact section, output shape, and subtitle setting, then queue it for rendering in S6_cut.")).toBeInTheDocument();
+    expect(screen.getByText("Trim an authorised video into a social-ready clip. Choose the section, output shape, and subtitles, then queue the render.")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText("Library")).toBeInTheDocument());
     expect(screen.getByText("Local file")).toBeInTheDocument();
     expect(screen.getByText("YouTube")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Source remainder")).toBeInTheDocument();
   });
+  it("lays the workspace out without opening a second main landmark", async () => {
+    render(<ShortsEditorView onJobCreated={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText("Library")).toBeInTheDocument());
+    // The shell already owns #main-content; a nested <main> is a duplicate
+    // landmark and is not top level.
+    expect(document.querySelectorAll("main, [role='main']")).toHaveLength(0);
+    const workspace = document.querySelector(".shorts-workspace")!;
+    expect(workspace.tagName).toBe("SECTION");
+    // An unnamed section is a layout container, so the aside inside it stays a
+    // top-level complementary landmark.
+    expect(workspace.getAttribute("aria-label")).toBeNull();
+    expect(document.querySelector("aside.shorts-right-column")).toHaveAttribute("aria-label", "Clips and editing assistant");
+  });
+
   it("shows a useful Library empty state when no videos exist", async () => {
     vi.mocked(listAssets).mockResolvedValue([]);
     render(<ShortsEditorView onJobCreated={vi.fn()} />);

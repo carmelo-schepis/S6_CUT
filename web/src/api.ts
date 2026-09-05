@@ -34,13 +34,99 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API}${path}`, init);
+// Engine form fields are snake_case; customers read the UI labels.
+const fieldLabels: Record<string, string> = {
+  min_duration: "Minimum seconds",
+  max_duration: "Maximum seconds",
+  count: "Clips requested",
+  aspect_ratio: "Aspect",
+  content_format: "Format",
+  processing_mode: "Mode",
+  name: "Project name",
+  url: "YouTube URL",
+  file: "Video file",
+  script: "Script",
+  start: "Start seconds",
+  end: "End seconds",
+};
+
+/**
+ * FastAPI reports request-validation problems as an array of objects. Passing
+ * that straight to `Error` rendered "[object Object]" to the customer, so
+ * flatten it into a sentence naming the field they can actually fix.
+ */
+export function readableDetail(detail: unknown, fallback: string): string {
+  if (typeof detail === "string" && detail.trim()) return detail.trim();
+  if (Array.isArray(detail)) {
+    const parts = detail.map((item) => {
+      if (typeof item === "string") return item;
+      if (!item || typeof item !== "object") return "";
+      const record = item as { msg?: unknown; loc?: unknown };
+      const message = typeof record.msg === "string" ? record.msg.replace(/^Value error,\s*/i, "") : "";
+      const field = Array.isArray(record.loc) ? String(record.loc.at(-1) ?? "") : "";
+      const label = fieldLabels[field] || "";
+      return label && message ? `${label}: ${message}` : message;
+    }).filter(Boolean);
+    if (parts.length) return [...new Set(parts)].join(". ");
+  }
+  return fallback;
+}
+
+/**
+ * A request that never came back. A pending promise used to leave the shell on
+ * "Connecting to local engine…" forever, because only a *rejection* reaches the
+ * global alert — so every polled read now fails loudly instead of hanging.
+ */
+export class TimeoutError extends Error {
+  constructor(public readonly timeoutMs: number) {
+    super(`The local engine did not respond within ${Math.round(timeoutMs / 1000)}s.`);
+    this.name = "TimeoutError";
+  }
+}
+
+/** Liveness probe: normally answers in milliseconds, so it fails fast. */
+export const HEALTH_TIMEOUT_MS = 8_000;
+/** List reads are heavier (jobs carries every clip), so they get more room. */
+export const READ_TIMEOUT_MS = 20_000;
+
+type RequestInitWithTimeout = RequestInit & { timeoutMs?: number };
+
+/**
+ * Aborts the fetch once `timeoutMs` elapses and reports it as a `TimeoutError`,
+ * while still honouring a caller-supplied signal (which stays an AbortError so
+ * deliberate cancellation is not mistaken for an unresponsive engine).
+ */
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const caller = init.signal;
+  const abortFromCaller = () => controller.abort(caller?.reason);
+  if (caller?.aborted) abortFromCaller();
+  else caller?.addEventListener("abort", abortFromCaller);
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (cause) {
+    if (timedOut) throw new TimeoutError(timeoutMs);
+    throw cause;
+  } finally {
+    clearTimeout(timer);
+    caller?.removeEventListener("abort", abortFromCaller);
+  }
+}
+
+async function request<T>(path: string, init?: RequestInitWithTimeout): Promise<T> {
+  const { timeoutMs, ...rest } = init ?? {};
+  const response = timeoutMs === undefined
+    // Uploads stream whole video files; they must never be cut off by a timer.
+    ? await fetch(`${API}${path}`, rest)
+    : await fetchWithTimeout(`${API}${path}`, rest, timeoutMs);
   if (!response.ok) {
     let message = `Request failed (${response.status})`;
     try {
-      const body = (await response.json()) as { detail?: string; message?: string };
-      message = body.detail || body.message || message;
+      const body = (await response.json()) as { detail?: unknown; message?: unknown };
+      const detail = readableDetail(body.detail, "");
+      message = detail || (typeof body.message === "string" && body.message) || message;
     } catch {
       // Keep the bounded status-only message when a proxy returns non-JSON.
     }
@@ -51,11 +137,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export async function getHealth(): Promise<Health> {
-  return healthSchema.parse(await request("/health"));
+  return healthSchema.parse(await request("/health", { timeoutMs: HEALTH_TIMEOUT_MS }));
 }
 
 export async function listProjects(): Promise<Project[]> {
-  return projectSchema.array().parse(await request("/projects"));
+  return projectSchema.array().parse(await request("/projects", { timeoutMs: READ_TIMEOUT_MS }));
 }
 
 export async function getProject(id: string): Promise<Project> {
@@ -149,7 +235,7 @@ export async function createTopicPlan(input: { topic: string; audience: string; 
 }
 
 export async function listJobs(): Promise<Job[]> {
-  return jobSchema.array().parse(await request("/jobs"));
+  return jobSchema.array().parse(await request("/jobs", { timeoutMs: READ_TIMEOUT_MS }));
 }
 
 export async function getJob(id: string): Promise<Job> {
@@ -193,7 +279,7 @@ export function jobEventsUrl(jobId: string): string {
 }
 
 export async function listProfiles(): Promise<ProviderProfile[]> {
-  return profileSchema.array().parse(await request("/profiles"));
+  return profileSchema.array().parse(await request("/profiles", { timeoutMs: READ_TIMEOUT_MS }));
 }
 
 export async function saveProfile(input: Record<string, unknown>, id?: string): Promise<ProviderProfile> {
@@ -292,5 +378,6 @@ export async function explainMatch(query: string): Promise<MatchExplanation> {
 
 export function readableError(error: unknown): string {
   if (error instanceof ApiError && error.status === 502) return "The web service cannot reach the media engine (502).";
+  if (error instanceof TimeoutError) return `${error.message} It may still be starting up.`;
   return error instanceof Error ? error.message : "Something went wrong. Try again.";
 }

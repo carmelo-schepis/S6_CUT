@@ -94,6 +94,38 @@ function renderView(props: Partial<Parameters<typeof WorkspaceView>[0]> = {}) {
 }
 
 // ---------------------------------------------------------------
+describe("WorkspaceView – page structure", () => {
+  it("makes the empty workspace title the page heading", () => {
+    renderView({ project: null });
+    // With no project this empty state is the whole page, so its title has to
+    // be the <h1>; there is nothing else to carry it.
+    const heading = screen.getByRole("heading", { level: 1, name: "No project selected" });
+    expect(heading).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+  });
+
+  it("keeps the project name as the page heading when a project is open", () => {
+    renderView();
+    const headings = screen.getAllByRole("heading", { level: 1 });
+    expect(headings).toHaveLength(1);
+    expect(headings[0]).toHaveTextContent(project.name);
+  });
+
+  it("names both complementary landmarks", () => {
+    renderView();
+    const names = [...document.querySelectorAll("aside")].map((aside) => aside.getAttribute("aria-label"));
+    expect(names).toEqual(["Source material", "Clip inspector"]);
+  });
+
+  it("does not offer the provider callout before /profiles has answered", () => {
+    const { rerender } = renderView({ hasSelectedProvider: false, providersLoaded: false });
+    expect(screen.queryByText(/Add optional AI providers/i)).not.toBeInTheDocument();
+    rerender(<WorkspaceView project={project} health={health} hasSelectedProvider={false} providersLoaded onConfigureProviders={vi.fn()} onProjectUpdated={vi.fn(async () => undefined)} onGoProjects={vi.fn()} />);
+    expect(screen.getByText(/Add optional AI providers/i)).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------
 describe("WorkspaceView – stalled smart detection", () => {
   beforeEach(() => {
     vi.spyOn(Date, "now").mockReturnValue(REFERENCE_NOW);
@@ -396,7 +428,7 @@ describe("WorkspaceView – publication metadata, Details rename, read-only capt
     // "Details" heading exists
     expect(screen.getByText("Details")).toBeInTheDocument();
     // Preview/review helper text
-    expect(screen.getByText(/Preview generated videos, review processing details, and choose downloads/)).toBeInTheDocument();
+    expect(screen.getByText(/Review and download finished clips here/)).toBeInTheDocument();
     // Read-only caption preset
     fireEvent.click(screen.getByRole("button", { name: /captions/i }));
     expect(screen.getByText("Read-only")).toBeInTheDocument();
@@ -449,7 +481,7 @@ describe("WorkspaceView – stable responsive media controls", () => {
     });
     fireEvent.error(video!);
     fireEvent.error(video!);
-    expect(await screen.findByRole("alert")).toHaveTextContent("could not be played in this browser");
+    expect(await screen.findByRole("alert")).toHaveTextContent("This clip could not be loaded");
     expect(screen.getByRole("button", { name: "Retry preview" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Play" })).toBeInTheDocument();
   });

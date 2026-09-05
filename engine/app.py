@@ -12,7 +12,7 @@ import uuid
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated, AsyncIterator, Literal
+from typing import Annotated, Any, AsyncIterator, Literal
 
 from fastapi import Body, FastAPI, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.exception_handlers import request_validation_exception_handler
@@ -27,7 +27,7 @@ from .jobs import JobManager, QueueFullError, SwitchFastError
 from .library import LibraryRules
 from .media import MediaError, available, probe, validate_video_upload
 from .models import (
-    Asset, AssetMove, AssetOrigin, AssetUpdate, AssetPage, CaptionCue, CaptionReviewInput, Clip, FolderCreate, FolderMove, FolderUpdate, Health, Job,
+    Asset, AssetMove, AssetOrigin, AssetUpdate, AssetPage, CaptionCue, CaptionDownload, CaptionReviewInput, Clip, FolderCreate, FolderMove, FolderUpdate, Health, Job,
     LibraryFolder, MatchExplanation, ContentFormat, ProcessingMode, ProfileInput, Project, ProjectFolderUpdate,
     OpenRouterModel, ProviderProfile, ScriptJobInput, SelectionInput, ShortsJobInput, TopicBeat, TopicVideoInput, TopicVideoPlan, now_iso,
 )
@@ -103,11 +103,63 @@ def _download_url(relative: str) -> str:
     return f"/api/v1/files/{relative}?expires={expires}&signature={signature}"
 
 
+def _clip_media(job_id: str, clip: Clip) -> tuple[str, str] | None:
+    """Signed media URLs for a finished clip.
+
+    Prefer the published Library copy: it is content-addressed and immutable,
+    so it survives retention pruning the job's working directory, which would
+    otherwise turn every finished clip into a dead link. The token is built
+    from ids already on the clip, so listing jobs costs no extra database reads
+    and no per-clip filesystem stats (bind-mount stats dominate on macOS).
+    """
+    asset_id, blob_id = clip.library_asset_id, clip.blob_id
+    if asset_id and not blob_id:
+        asset = db.get_asset(asset_id)
+        blob_id = asset.blob_id if asset else None
+    if asset_id and blob_id:
+        expires, signature = signer.sign(f"library-asset:{asset_id}:{blob_id}")
+        url = f"/api/v1/library/assets/{asset_id}/preview?expires={expires}&signature={signature}"
+        return url, url
+    # No published Library copy (an unusual, repairable state): fall back to the
+    # job output, but only advertise it if the file is really there. This branch
+    # is rare, so its filesystem check does not affect normal listings.
+    if clip.output_name:
+        try:
+            output = confined(settings.data_path, "jobs", job_id, "clips", clip.output_name)
+        except ValueError:
+            return None
+        if output.is_file():
+            download = _download_url(f"jobs/{job_id}/clips/{clip.output_name}")
+            return download, f"{download}&inline=1"
+    return None
+
+
 # DO-NOT-CHANGE: hides unpublished clips (rendering state), clears download_url for
 # incomplete clips, only signs URLs for complete clip outputs
-def public_job(job: Job) -> Job:
+def public_job(job: Job, *, include_caption_downloads: bool = True) -> Job:
+    """Public view of a job.
+
+    `include_caption_downloads` is disabled for the job *list*: reading each
+    job's private payload opens its own database connection, which dominated
+    the cost of listing a long history. Single-job responses keep the sidecars.
+    """
     result = job.model_copy(deep=True)
-    caption_artifacts = db.get_job_private(job.id).get("caption_artifacts", {})
+    artifacts_state: list[dict[str, Any]] = []
+    clip_dir_state: list[bool] = []
+
+    def caption_artifacts() -> dict[str, Any]:
+        """Loaded at most once per job, and only when a sidecar could apply."""
+        if not artifacts_state:
+            private = db.get_job_private(job.id).get("caption_artifacts", {})
+            artifacts_state.append(private if isinstance(private, dict) else {})
+        return artifacts_state[0]
+
+    def clip_dir_exists() -> bool:
+        """Checked at most once per job."""
+        if not clip_dir_state:
+            clip_dir_state.append((settings.data_path / "jobs" / job.id / "clips").is_dir())
+        return clip_dir_state[0]
+
     result.queue_position = manager.queue_position(job.id) if job.state == "queued" else None
     result.cancellation_available = job.state in {"queued", "active", "paused", "recovered"}
     if result.queue_position:
@@ -118,10 +170,17 @@ def public_job(job: Job) -> Job:
             clip.selected = False
             clip.error = "Publication repair required before this output is ready"
         if clip.state == "complete" and clip.output_name:
-            clip.download_url = _download_url(f"jobs/{job.id}/clips/{clip.output_name}")
-            clip.preview_url = f"{clip.download_url}&inline=1"
-            sidecars = []
-            manifest = caption_artifacts.get(clip.id) if isinstance(caption_artifacts, dict) else None
+            media = _clip_media(job.id, clip)
+            if media is None:
+                # Nothing serveable: advertise no links rather than a dead one.
+                clip.download_url = clip.preview_url = None
+                clip.caption_downloads = []
+                continue
+            clip.download_url, clip.preview_url = media
+            sidecars: list[CaptionDownload] = []
+            # Caption sidecars live beside the job output, so they disappear when
+            # retention prunes the job directory even though the clip plays on.
+            manifest = caption_artifacts().get(clip.id) if include_caption_downloads and clip_dir_exists() else None
             if isinstance(manifest, dict) and manifest.get("output_name") == clip.output_name:
                 for extension in manifest.get("formats", []):
                     if extension not in {"ass", "srt", "vtt"}:
@@ -129,7 +188,7 @@ def public_job(job: Job) -> Job:
                     filename = Path(clip.output_name).with_suffix(f".{extension}").name
                     relative = f"jobs/{job.id}/clips/{filename}"
                     expires, signature = signer.sign(relative)
-                    sidecars.append({"format": extension, "filename": filename, "url": f"/api/v1/jobs/{job.id}/clips/{clip.id}/captions/{extension}?expires={expires}&signature={signature}"})
+                    sidecars.append(CaptionDownload(format=extension, filename=filename, url=f"/api/v1/jobs/{job.id}/clips/{clip.id}/captions/{extension}?expires={expires}&signature={signature}"))
             clip.caption_downloads = sidecars
     return result
 
@@ -499,7 +558,7 @@ async def repair_job_publication(job_id: str) -> Job:
 
 @app.get("/api/v1/jobs", response_model=list[Job])
 async def list_jobs() -> list[Job]:
-    return [public_job(job) for job in db.list_jobs()]
+    return [public_job(job, include_caption_downloads=False) for job in db.list_jobs()]
 
 
 @app.get("/api/v1/jobs/{job_id}", response_model=Job)
@@ -745,10 +804,14 @@ def _csv(value: str) -> list[str]:
 
 # DO-NOT-CHANGE: signs preview URL with token library-asset:{id}:{blob_id};
 # preview_asset verifies token + confined path
-def _public_asset(asset: Asset) -> Asset:
+def _asset_preview_url(asset: Asset) -> str:
     token = f"library-asset:{asset.id}:{asset.blob_id}"
     expires, signature = signer.sign(token)
-    return asset.model_copy(update={"preview_url": f"/api/v1/library/assets/{asset.id}/preview?expires={expires}&signature={signature}"})
+    return f"/api/v1/library/assets/{asset.id}/preview?expires={expires}&signature={signature}"
+
+
+def _public_asset(asset: Asset) -> Asset:
+    return asset.model_copy(update={"preview_url": _asset_preview_url(asset)})
 
 
 @app.get("/api/v1/library/folders", response_model=list[LibraryFolder])

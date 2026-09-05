@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, createClipJob, createFolder, getHealth, readableError, rerenderCaptions, saveCaptionCues } from "./api";
+import { ApiError, HEALTH_TIMEOUT_MS, TimeoutError, createClipJob, createFolder, getHealth, readableError, rerenderCaptions, saveCaptionCues, readableDetail } from "./api";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -17,6 +17,31 @@ describe("engine API boundary", () => {
 
   it("turns bounded API details into readable errors", () => {
     expect(readableError(new ApiError("Queue full", 429))).toBe("Queue full");
+  });
+
+  // A wedged engine used to leave the health promise pending forever, which
+  // left the shell on "Connecting to the local engine…" with no way out.
+  it("aborts a health read that never answers and reports it as a timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      let aborted = false;
+      vi.stubGlobal("fetch", vi.fn((_url: string, init?: RequestInit) => new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => { aborted = true; reject(new DOMException("Aborted", "AbortError")); });
+      })));
+      let settled = false;
+      const pending = getHealth().then(() => "resolved" as unknown, (cause: unknown) => cause).finally(() => { settled = true; });
+
+      await vi.advanceTimersByTimeAsync(HEALTH_TIMEOUT_MS - 500);
+      expect(settled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(600);
+      const cause = await pending;
+      expect(aborted).toBe(true);
+      expect(cause).toBeInstanceOf(TimeoutError);
+      expect(readableError(cause)).toMatch(/did not respond within 8s/i);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("sends processing_mode with the clip job form", async () => {
@@ -65,5 +90,41 @@ describe("engine API boundary", () => {
     vi.stubGlobal("fetch", fetchMock);
     expect((await createFolder({ name: "Acme" })).name).toBe("Acme");
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/library/folders", expect.objectContaining({ method: "POST" }));
+  });
+});
+
+describe("readableDetail", () => {
+  it("passes a plain string detail through", () => {
+    expect(readableDetail("Minimum duration must be shorter than maximum duration", "fallback"))
+      .toBe("Minimum duration must be shorter than maximum duration");
+  });
+
+  it("flattens FastAPI validation arrays into a customer-readable sentence", () => {
+    const detail = [
+      { type: "greater_than_equal", loc: ["body", "min_duration"], msg: "Input should be greater than or equal to 8", input: "0" },
+    ];
+    expect(readableDetail(detail, "fallback")).toBe("Minimum seconds: Input should be greater than or equal to 8");
+  });
+
+  it("joins multiple field problems and drops duplicates", () => {
+    const detail = [
+      { loc: ["body", "count"], msg: "Input should be less than or equal to 30" },
+      { loc: ["body", "count"], msg: "Input should be less than or equal to 30" },
+      { loc: ["body", "max_duration"], msg: "Input should be a valid number" },
+    ];
+    expect(readableDetail(detail, "fallback"))
+      .toBe("Clips requested: Input should be less than or equal to 30. Maximum seconds: Input should be a valid number");
+  });
+
+  it("never renders an object as [object Object]", () => {
+    const message = readableDetail([{ loc: ["body", "unknown_field"], msg: "bad" }], "fallback");
+    expect(message).not.toContain("[object Object]");
+    expect(message).toBe("bad");
+  });
+
+  it("falls back when the detail carries nothing usable", () => {
+    expect(readableDetail(undefined, "Request failed (500)")).toBe("Request failed (500)");
+    expect(readableDetail([], "Request failed (500)")).toBe("Request failed (500)");
+    expect(readableDetail([{}], "Request failed (500)")).toBe("Request failed (500)");
   });
 });
