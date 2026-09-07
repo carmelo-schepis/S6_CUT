@@ -2,7 +2,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from engine.media import _ass_style_metrics, _wrap_caption_words, caption_words_for_clip, write_ass
+from engine.media import (
+    SUBTITLE_EMOJI_INSTRUCTIONS,
+    _ass_style_metrics,
+    _caption_words_with_emojis,
+    _has_emoji,
+    _is_emoji,
+    _subtitle_preset,
+    _wrap_caption_words,
+    caption_words_for_clip,
+    write_ass,
+)
 
 
 def _word(text: str, start: float = 0.0, end: float = 1.0) -> dict[str, object]:
@@ -150,6 +160,46 @@ def test_style_presets_change_caption_treatment(tmp_path: Path) -> None:
         outputs[style] = path.read_text(encoding="utf-8")
     assert len({text.split("Style: Caption,")[1].split("\n", 1)[0] for text in outputs.values()}) == 4
     assert all("\\c&H" in text for text in outputs.values())
+
+
+def test_funny_uses_meme_preset_and_other_modes_do_not() -> None:
+    funny = _subtitle_preset("funny")
+    assert funny["fontname"] == "Arial Black"
+    assert funny["font"] > _subtitle_preset("serious")["font"]
+    assert funny["primary"] == "&H00FFFFFF&"
+    assert funny["outline_color"] == "&H00000000&"
+    assert funny["bold"] == -1
+    assert all(_subtitle_preset(style) != funny for style in ("serious", "educational", "hype"))
+
+
+def test_unknown_or_missing_style_falls_back_to_educational() -> None:
+    assert _subtitle_preset("unknown") == _subtitle_preset("educational")
+    assert _subtitle_preset("") == _subtitle_preset("educational")
+
+
+def test_emoji_instructions_are_restrained_and_unicode_safe() -> None:
+    assert "sparingly" in SUBTITLE_EMOJI_INSTRUCTIONS
+    assert "at most one emoji per cue" in SUBTITLE_EMOJI_INSTRUCTIONS
+    words = _words("Wow!", "this", "amazing", "idea", "is", "a", "win", "but", "the", "lesson", "stays", "clear")
+    original = [dict(word) for word in words]
+    enriched = _caption_words_with_emojis(words, "funny")
+    emoji_texts = [str(word["text"]) for word in enriched if _has_emoji(str(word["text"]))]
+    emoji_values = [text.rsplit(" ", 1)[-1] for text in emoji_texts]
+    assert 0 < len(emoji_texts) <= 2
+    assert len(emoji_values) == len(set(emoji_values))
+    assert all(sum(_is_emoji(character) for character in text) <= 1 for text in emoji_texts)
+    assert all("\ufffd" not in text for text in emoji_texts)
+    assert [(word["start"], word["end"]) for word in enriched] == [(word["start"], word["end"]) for word in original]
+    assert words == original
+
+
+def test_existing_emoji_is_preserved_without_duplication(tmp_path: Path) -> None:
+    words = [_word("Great", 0, 1), _word("😂", 1, 2), _word("win", 2, 3)]
+    path = tmp_path / "emoji.ass"
+    write_ass(path, words, offset=0, duration=3, visuals=[], width=1080, height=1920, style="funny")
+    text = path.read_text(encoding="utf-8")
+    assert "Great" in text and "😂" in text and "win" in text
+    assert "😂 😂" not in text
 
 
 def test_sixteen_by_nine_uses_landscape_playres_and_scaled_margins(tmp_path: Path) -> None:

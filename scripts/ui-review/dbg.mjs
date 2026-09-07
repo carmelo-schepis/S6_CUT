@@ -1,0 +1,14 @@
+import { chromium } from "@playwright/test";
+const b = await chromium.launch();
+const ctx = await b.newContext({ viewport: { width: 1440, height: 900 } });
+const page = await ctx.newPage();
+page.on("console", (m) => console.log("CONSOLE", m.type(), m.text().slice(0, 300)));
+page.on("pageerror", (e) => console.log("PAGEERROR", String(e).slice(0, 400)));
+page.on("requestfailed", (r) => console.log("REQFAIL", r.url().slice(0, 120), r.failure()?.errorText));
+page.on("response", (r) => { if (r.url().includes("/api/")) console.log("RESP", r.status(), r.url().slice(0, 110)); });
+await page.goto(process.env.S6_URL || "http://127.0.0.1:5173");
+await page.waitForTimeout(2000);
+await page.getByRole("button", { name: "Workspace", exact: true }).first().click();
+await page.waitForTimeout(4000);
+console.log("clipboard:", await page.locator(".board-header").innerText().catch(() => "n/a"));
+await b.close();

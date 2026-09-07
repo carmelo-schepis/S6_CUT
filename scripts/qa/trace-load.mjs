@@ -1,0 +1,14 @@
+import { chromium } from "@playwright/test";
+const b = await chromium.launch();
+const ctx = await b.newContext({ viewport: { width: 1440, height: 900 } });
+const page = await ctx.newPage();
+const t0 = Date.now();
+page.on("console", (m) => { if (m.type() === "error") console.log(`+${Date.now()-t0}ms CONSOLE`, m.text().slice(0,180)); });
+page.on("pageerror", (e) => console.log(`+${Date.now()-t0}ms PAGEERROR`, String(e).slice(0,300)));
+page.on("request", (r) => { if (r.url().includes("/api/")) console.log(`+${Date.now()-t0}ms  -> ${r.method()} ${r.url().split("/api/v1")[1]?.split("?")[0]}`); });
+page.on("response", (r) => { if (r.url().includes("/api/")) console.log(`+${Date.now()-t0}ms  <- ${r.status()} ${r.url().split("/api/v1")[1]?.split("?")[0]}`); });
+page.on("requestfailed", (r) => { if (r.url().includes("/api/")) console.log(`+${Date.now()-t0}ms  XX ${r.url().split("/api/v1")[1]?.split("?")[0]} ${r.failure()?.errorText}`); });
+await page.goto("http://127.0.0.1:8080", { waitUntil: "domcontentloaded" });
+await page.waitForTimeout(12000);
+console.log("skeletons:", await page.locator(".skeleton").count(), "cards:", await page.locator(".project-card").count());
+await b.close();

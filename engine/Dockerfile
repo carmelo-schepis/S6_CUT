@@ -19,6 +19,9 @@ WORKDIR /app
 COPY engine/requirements.lock /app/engine/requirements.lock
 RUN python -m pip install --upgrade pip==26.0.1 \
     && python -m pip install --requirement /app/engine/requirements.lock
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends fonts-noto-color-emoji \
+    && rm -rf /var/lib/apt/lists/*
 COPY engine /app/engine
 RUN mkdir -p /app/data && chown -R s6cut:s6cut /app
 

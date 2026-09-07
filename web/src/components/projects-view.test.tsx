@@ -140,6 +140,17 @@ describe("Projects create flow", () => {
     await waitFor(() => expect(mockCreateScriptJob).toHaveBeenCalledWith(expect.objectContaining({ name: "QA Browser Test" })));
   });
 
+  it("sends the selected editorial style through script job creation", async () => {
+    const created: Project = { ...project, id: "style-id", style: "funny" };
+    mockCreateScriptJob.mockResolvedValue({ project: created, job: { ...undefinedJob, projectId: "style-id", style: "funny" } });
+    render(<ProjectsView projects={[]} health={health} hasSelectedProvider={false} onCreated={vi.fn()} onOpen={vi.fn()} onRefresh={vi.fn(async () => undefined)} />);
+    fireEvent.click(screen.getByRole("button", { name: /Script mode/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Funny/i }));
+    fireEvent.change(screen.getByPlaceholderText(/Paste the exact script/i), { target: { value: "Wow, this amazing idea is a win!" } });
+    fireEvent.click(screen.getByRole("button", { name: /Create script video/i }));
+    await waitFor(() => expect(mockCreateScriptJob).toHaveBeenCalledWith(expect.objectContaining({ style: "funny" })));
+  });
+
   it("does not send processingMode through the script API", async () => {
     const created: Project = { ...project, id: "new-id" };
     mockCreateScriptJob.mockResolvedValue({ project: created, job: { ...undefinedJob, projectId: "new-id" } });

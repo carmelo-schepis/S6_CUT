@@ -4,6 +4,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import shutil
 import subprocess
 import selectors
@@ -620,16 +621,128 @@ _CAPTION_WRAP_FRACTION = 0.85  # keep wrapped lines within 85% of the usable wid
 _CHAR_WIDTH_FACTOR = 0.55  # average Arial glyph width at 1em
 
 # Data-driven treatments keep one renderer/timing foundation across modes.
+# ASS colours are written as &HAABBGGRR.  Each preset has a different semantic
+# treatment rather than merely a different accent colour.
 _SUBTITLE_PRESETS = {
-    "funny": {"font": 78, "outline": 6, "shadow": 3, "primary": "&H00F7F0E8&", "highlight": "&H0055B7FF&", "bold": -1, "group": 4},
-    "serious": {"font": 68, "outline": 4, "shadow": 2, "primary": "&H00F4F5F7&", "highlight": "&H00D6A56A&", "bold": 0, "group": 5},
-    "educational": {"font": 70, "outline": 5, "shadow": 2, "primary": "&H00F1F2F4&", "highlight": "&H0077D6FF&", "bold": -1, "group": 6},
-    "hype": {"font": 82, "outline": 7, "shadow": 3, "primary": "&H00FFFFFF&", "highlight": "&H0048B8FF&", "bold": -1, "group": 3},
+    # Meme-caption treatment: oversized, heavy white type with a hard black
+    # stroke and no panel so reactions and punchlines stay visually punchy.
+    "funny": {
+        "fontname": "Arial Black", "font": 86, "outline": 8, "shadow": 2,
+        "primary": "&H00FFFFFF&", "highlight": "&H0000D7FF&", "outline_color": "&H00000000&",
+        "back_color": "&H00000000&", "border_style": 1, "bold": -1, "italic": 0,
+        "spacing": 0, "group": 4, "margin_v": 220,
+    },
+    # Calm, editorial type: lighter weight, warm emphasis, and longer thought
+    # groups suit claims and serious dialogue without meme-like treatment.
+    "serious": {
+        "fontname": "DejaVu Sans", "font": 64, "outline": 3, "shadow": 1,
+        "primary": "&H00F4F5F7&", "highlight": "&H00D6A56A&", "outline_color": "&H00201810&",
+        "back_color": "&H8808080A&", "border_style": 1, "bold": 0, "italic": 0,
+        "spacing": 0, "group": 6, "margin_v": 250,
+    },
+    # A readable learning label: medium-bold sans with a restrained dark box
+    # and cool highlight to maintain contrast over both light and dark footage.
+    "educational": {
+        "fontname": "DejaVu Sans", "font": 68, "outline": 5, "shadow": 1,
+        "primary": "&H00F1F2F4&", "highlight": "&H0077D6FF&", "outline_color": "&H00101010&",
+        "back_color": "&H9908080A&", "border_style": 3, "bold": -1, "italic": 0,
+        "spacing": 0, "group": 6, "margin_v": 245,
+    },
+    # Fast, kinetic hook treatment: compact groups, italic bold type, and a
+    # blue edge/highlight distinguish it from Funny's white-on-black meme look.
+    "hype": {
+        "fontname": "DejaVu Sans", "font": 80, "outline": 5, "shadow": 3,
+        "primary": "&H00FFFFFF&", "highlight": "&H0048B8FF&", "outline_color": "&H00502010&",
+        "back_color": "&H00000000&", "border_style": 1, "bold": -1, "italic": -1,
+        "spacing": 1, "group": 3, "margin_v": 210,
+    },
+}
+
+
+# Deterministic fallback configuration used when local transcripts are rendered
+# without an AI provider. If a future AI caption provider is added, these are
+# the explicit constraints its prompt must preserve.
+SUBTITLE_EMOJI_INSTRUCTIONS = (
+    "Add emojis sparingly: only when they reinforce an emotion, reaction, punchline, "
+    "or meaningful idea; never replace important words; use at most one emoji per cue; "
+    "avoid repeated or decorative emoji strings; keep serious, educational, and neutral "
+    "dialogue restrained, while allowing funny or energetic dialogue somewhat more."
+)
+_EMOJI_LIMITS = {"funny": .20, "hype": .16, "educational": .08, "serious": .05}
+_EMOJI_RANGES = (
+    (0x1F300, 0x1FAFF), (0x2600, 0x27BF), (0x2300, 0x23FF),
+)
+_EMOJI_CANDIDATES = {
+    "funny": {
+        "reaction": ("😂", "😅", "😮", "😬"), "positive": ("😎", "😄", "😊"),
+        "negative": ("🙃", "😬", "😢"), "idea": ("😏", "😐"),
+    },
+    "hype": {
+        "reaction": ("😮", "😲", "😱"), "positive": ("😎", "😄", "😁"),
+        "negative": ("😤", "😬", "😠"), "idea": ("😏", "😐"),
+    },
+    "educational": {
+        "reaction": ("😮",), "positive": ("🙂",), "negative": ("😕",),
+        "idea": ("😐", "😌"),
+    },
+    "serious": {
+        "reaction": ("😮",), "positive": ("🙂",), "negative": ("😕",),
+        "idea": ("😐",),
+    },
+}
+_EMOJI_KEYWORDS = {
+    "reaction": {"wow", "whoa", "wait", "really", "seriously", "look", "watch"},
+    "positive": {"amazing", "incredible", "perfect", "win", "wins", "won", "love", "best", "success", "breakthrough"},
+    "negative": {"wrong", "fail", "fails", "failed", "mistake", "warning", "risk", "hate", "worst", "broken", "problem", "danger"},
+    "idea": {"idea", "secret", "key", "important", "remember", "tip", "truth", "lesson", "point", "explain"},
 }
 
 
 def _subtitle_preset(style: str) -> dict[str, Any]:
     return _SUBTITLE_PRESETS.get(style, _SUBTITLE_PRESETS["educational"])
+
+
+def _is_emoji(character: str) -> bool:
+    codepoint = ord(character)
+    return any(start <= codepoint <= end for start, end in _EMOJI_RANGES)
+
+
+def _has_emoji(text: str) -> bool:
+    return any(_is_emoji(character) for character in text)
+
+
+def _emoji_kind(text: str) -> str | None:
+    normalized = re.sub(r"[^\w']+", " ", text.casefold()).strip()
+    words = set(normalized.split())
+    for kind, keywords in _EMOJI_KEYWORDS.items():
+        if words & keywords:
+            return kind
+    if "!" in text or "?" in text:
+        return "reaction"
+    return None
+
+
+def _caption_words_with_emojis(words: list[dict[str, Any]], style: str) -> list[dict[str, Any]]:
+    """Add sparse, deterministic emoji accents without changing word timing."""
+    resolved_style = style if style in _SUBTITLE_PRESETS else "educational"
+    candidates = _EMOJI_CANDIDATES[resolved_style]
+    meaningful = any(_emoji_kind(str(word.get("text", ""))) for word in words)
+    limit = max(0, math.floor(len(words) * _EMOJI_LIMITS[resolved_style]), 1 if meaningful else 0)
+    if not limit:
+        return [dict(word) for word in words]
+    enriched: list[dict[str, Any]] = []
+    used: list[str] = []
+    for word in words:
+        item = dict(word)
+        text = str(item.get("text", ""))
+        kind = _emoji_kind(text)
+        if len(used) < limit and kind and not _has_emoji(text):
+            emoji = next((value for value in candidates[kind] if value not in used), None)
+            if emoji:
+                item["text"] = f"{text} {emoji}"
+                used.append(emoji)
+        enriched.append(item)
+    return enriched
 
 
 def _ass_style_metrics(width: int, height: int) -> dict[str, int]:
@@ -722,9 +835,10 @@ def caption_words_for_clip(words: Iterable[dict[str, Any]], start: float, end: f
 # DO-NOT-CHANGE: PlayResX/Y must match the final render canvas; captions stay
 # bottom-centre (Alignment=2) with symmetric margins; word-by-word highlight
 # uses {\\c&H0077D6FF&}; wrapping at word boundaries via _wrap_caption_words
-def _caption_cues(words: list[dict[str, Any]], offset: float, duration: float) -> list[tuple[float, float, str]]:
+def _caption_cues(words: list[dict[str, Any]], offset: float, duration: float, style: str = "educational") -> list[tuple[float, float, str]]:
     cues: list[tuple[float, float, str]] = []
-    for word in caption_words_for_clip(words, offset, offset + duration):
+    local = _caption_words_with_emojis(caption_words_for_clip(words, offset, offset + duration), style)
+    for word in local:
         text = " ".join(str(word.get("text", "")).split())
         start = max(0.0, min(duration, float(word["start"])))
         end = max(start + 0.05, min(duration, float(word["end"])))
@@ -741,8 +855,8 @@ def _srt_time(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{seconds_value:02d},{millis:03d}"
 
 
-def write_caption_sidecars(path: Path, words: list[dict[str, Any]], *, offset: float, duration: float) -> None:
-    cues = _caption_cues(words, offset, duration)
+def write_caption_sidecars(path: Path, words: list[dict[str, Any]], *, offset: float, duration: float, style: str = "educational") -> None:
+    cues = _caption_cues(words, offset, duration, style)
     srt = "\n\n".join(f"{index}\n{_srt_time(start)} --> {_srt_time(end)}\n{text}" for index, (start, end, text) in enumerate(cues, 1)) + ("\n" if cues else "")
     path.with_suffix(".srt").write_text(srt, encoding="utf-8")
     vtt = "WEBVTT\n\n" + "\n\n".join(f"{_srt_time(start).replace(',', '.')} --> {_srt_time(end).replace(',', '.')}\n{text}" for start, end, text in cues) + ("\n" if cues else "")
@@ -757,7 +871,7 @@ def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duratio
     outline = max(2, round(preset["outline"] * scale))
     shadow = max(1, round(preset["shadow"] * scale))
     margin_x = metrics["margin_x"]
-    margin_v = metrics["margin_v"]
+    margin_v = max(60, round(int(preset["margin_v"]) * scale))
     visual_scale = height / _CAPTION_REFERENCE_HEIGHT
     usable = max(1, width - 2 * margin_x)
     max_chars = max(8, int(usable * _CAPTION_WRAP_FRACTION / (_CHAR_WIDTH_FACTOR * fontsize)))
@@ -770,14 +884,14 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding
-Style: Caption,Arial,{fontsize},{preset["primary"]},{preset["highlight"]},&H00000000,&H78000000,{preset["bold"]},0,0,0,100,100,0,0,1,{outline},{shadow},2,{margin_x},{margin_x},{margin_v},1
+Style: Caption,{preset["fontname"]},{fontsize},{preset["primary"]},{preset["highlight"]},{preset["outline_color"]},{preset["back_color"]},{preset["bold"]},{preset["italic"]},0,0,100,100,{preset["spacing"]},0,{preset["border_style"]},{outline},{shadow},2,{margin_x},{margin_x},{margin_v},1
 Style: Visual,Arial,{max(28, round(56 * visual_scale))},&H008FA8DD,&H000000FF,&H00110B0C,&HCC110B0C,-1,0,0,0,100,100,1,0,3,{max(1, round(2 * visual_scale))},0,8,{margin_x},{margin_x},{max(80, round(400 * visual_scale))},1
 
 [Events]
 Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
 """
     events: list[str] = []
-    local = caption_words_for_clip(words, offset, offset + duration)
+    local = _caption_words_with_emojis(caption_words_for_clip(words, offset, offset + duration), style)
     for index, word in enumerate(local):
         group_size = int(preset["group"])
         group = _caption_group_for_index(local, index, group_size, max_chars)
@@ -824,10 +938,16 @@ def _source_layout_filter(src_width: int, src_height: int, target_width: int, ta
     target_aspect = target_width / target_height
     if abs(source_aspect / target_aspect - 1) <= 0.12:
         return f"scale={target_width}:{target_height}:force_original_aspect_ratio=increase:flags=lanczos,crop={target_width}:{target_height},setsar=1[base]"
+    # Keep the enlarged border layer visually quiet without affecting the
+    # fitted foreground branch, captions, or later overlays.  Overscaling it
+    # before the final crop keeps softened edges outside the output canvas.
+    background_width = max(target_width + 2, round(target_width * 1.04 / 2) * 2)
+    background_height = max(target_height + 2, round(target_height * 1.04 / 2) * 2)
     return (
         "split=2[foreground][background];"
-        f"[background]scale={target_width}:{target_height}:force_original_aspect_ratio=increase:flags=lanczos,"
-        f"crop={target_width}:{target_height},boxblur=luma_radius=10:luma_power=1,eq=brightness=-0.08,setsar=1[bg];"
+        f"[background]scale={background_width}:{background_height}:force_original_aspect_ratio=increase:flags=lanczos,"
+        f"crop={background_width}:{background_height},boxblur=luma_radius=6:luma_power=1,eq=brightness=-0.4,"
+        f"crop={target_width}:{target_height}:(iw-{target_width})/2:(ih-{target_height})/2,setsar=1[bg];"
         f"[foreground]scale={target_width}:{target_height}:force_original_aspect_ratio=decrease:flags=lanczos,"
         "setsar=1[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2:format=auto,setsar=1[base]"
     )
@@ -862,7 +982,7 @@ def render_clip(source: Path, output: Path, *, start: float, end: float, aspect:
     if source_meta["rotation"] % 180:
         src_width, src_height = src_height, src_width
     write_ass(ass, words, offset=start, duration=duration, visuals=visuals, width=width, height=height, style=style)
-    write_caption_sidecars(output, words, offset=start, duration=duration)
+    write_caption_sidecars(output, words, offset=start, duration=duration, style=style)
     temp = output.with_suffix(".partial.mp4")
     command = [settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{start:.3f}", "-i", str(source), "-t", f"{duration:.3f}"]
     _overlay_inputs(command, overlays)
@@ -1071,7 +1191,7 @@ def render_fast_clip(
     vf = _source_layout_filter(src_width, src_height, width, height).removesuffix("[base]")
     ass: Path | None = None
     if (subtitles_enabled or embed_subtitles) and words:
-        write_caption_sidecars(output, words, offset=0, duration=duration)
+        write_caption_sidecars(output, words, offset=0, duration=duration, style=style)
     if subtitles_enabled and words:
         ass = output.parent / f"{output.stem}.ass"
         write_ass(ass, words, offset=0, duration=duration, visuals=[], width=width, height=height, style=style)
@@ -1146,7 +1266,7 @@ def render_script(output: Path, *, duration: float, aspect: str, narration: Path
     ass = output.parent / f"{output.stem}.ass"
     width, height = dimensions(aspect)
     write_ass(ass, words, offset=0, duration=duration, visuals=visuals, width=width, height=height, style=style)
-    write_caption_sidecars(output, words, offset=0, duration=duration)
+    write_caption_sidecars(output, words, offset=0, duration=duration, style=style)
     temp = output.with_suffix(".partial.mp4")
     command = [settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", f"color=c=0x08080a:s={width}x{height}:r=30:d={duration:.3f}"]
     audio_index: int | None = None

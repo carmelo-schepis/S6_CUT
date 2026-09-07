@@ -1,0 +1,12 @@
+import { chromium } from "@playwright/test";
+const [nav, w, h, out, y] = process.argv.slice(2);
+const b = await chromium.launch();
+const ctx = await b.newContext({ viewport: { width: +w, height: +h } });
+const page = await ctx.newPage();
+await page.goto("http://127.0.0.1:5173"); await page.waitForTimeout(1800);
+await page.getByRole("button", { name: nav, exact: true }).first().click();
+await page.waitForTimeout(2500);
+await page.evaluate((yy) => window.scrollTo(0, yy), +y);
+await page.waitForTimeout(500);
+await page.screenshot({ path: `test-artifacts/ui-review/iter/${out}.png` });
+await b.close(); console.log("ok");

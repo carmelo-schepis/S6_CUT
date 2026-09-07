@@ -136,7 +136,9 @@ def test_source_layout_preserves_landscape_foreground() -> None:
     vf = _source_layout_filter(640, 360, 1080, 1920)
     assert "split=2" in vf
     assert "force_original_aspect_ratio=decrease" in vf
-    assert "boxblur" in vf
+    assert "boxblur=luma_radius=6:luma_power=1" in vf
+    assert "eq=brightness=-0.4" in vf
+    assert "crop=1080:1920:(iw-1080)/2:(ih-1920)/2" in vf
     assert "setsar=1" in vf
 
 
