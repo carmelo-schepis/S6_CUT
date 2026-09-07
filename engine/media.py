@@ -10,6 +10,7 @@ import subprocess
 import selectors
 import threading
 import time
+import unicodedata
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
@@ -419,19 +420,62 @@ def download_youtube(
     return source
 
 
-def youtube_import_title(source: Path) -> str | None:
-    """Read yt-dlp's local metadata sidecar without exposing or retaining it as media."""
+def _metadata_text(value: object, limit: int) -> str | None:
+    """Normalise extractor text before it can become a title or ASS event."""
+    if not isinstance(value, str):
+        return None
+    value = unicodedata.normalize("NFC", " ".join(value.split()))
+    bidi_controls = {"\u061c", "\u200e", "\u200f", "\u202a", "\u202b", "\u202c", "\u202d", "\u202e", "\u2066", "\u2067", "\u2068", "\u2069", "\u206a", "\u206b", "\u206c", "\u206d", "\u206e", "\u206f"}
+    value = "".join(character for character in value if ord(character) >= 32 and ord(character) != 127 and not (127 < ord(character) <= 159 or character in bidi_controls))
+    return value[:limit].rstrip() or None
+
+
+def youtube_import_metadata(source: Path, *, consume: bool = True) -> dict[str, str] | None:
+    """Read yt-dlp metadata needed for YouTube attribution.
+
+    Callers that need crash-safe persistence should parse with ``consume=False``
+    and remove the sidecar only after the durable source checkpoint commits.
+
+    The displayed channel name is preferred over uploader IDs because it is the
+    original creator-facing metadata and remains readable in a small overlay.
+    """
     info = source.with_suffix(".info.json")
     if not info.is_file():
         return None
     try:
         payload = json.loads(info.read_text(encoding="utf-8"))
-        title = str(payload.get("title") or "").strip()
-        return title[:200] or None
+        if not isinstance(payload, dict):
+            return None
+        metadata: dict[str, str] = {}
+        title = _metadata_text(payload.get("title"), 200)
+        creator = None
+        for key in ("channel", "uploader", "creator"):
+            creator = _metadata_text(payload.get(key), 120)
+            if creator:
+                break
+        if title:
+            metadata["title"] = title
+        if creator:
+            metadata["creator"] = creator
+        return metadata or None
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
         return None
     finally:
-        info.unlink(missing_ok=True)
+        if consume:
+            try:
+                info.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def youtube_import_title(source: Path) -> str | None:
+    """Read yt-dlp's local title sidecar without retaining it as media."""
+    return (youtube_import_metadata(source) or {}).get("title")
+
+
+def youtube_import_creator(source: Path) -> str | None:
+    """Read yt-dlp's local channel/uploader name without retaining it as media."""
+    return (youtube_import_metadata(source) or {}).get("creator")
 
 
 def _media_duration(path: Path, settings: Settings) -> float:
@@ -863,7 +907,31 @@ def write_caption_sidecars(path: Path, words: list[dict[str, Any]], *, offset: f
     path.with_suffix(".vtt").write_text(vtt, encoding="utf-8")
 
 
-def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duration: float, visuals: Iterable[tuple[str, float, float]], width: int, height: int, style: str = "educational") -> None:
+def _wrap_credit(value: str | None, max_chars: int) -> str:
+    """Bound a creator credit to at most two readable, natural-word lines."""
+    if not value:
+        return ""
+    words = str(value).split()
+    lines: list[str] = []
+    current = ""
+    for word in words:
+        candidate = f"{current} {word}".strip()
+        if current and len(candidate) > max_chars:
+            lines.append(current)
+            current = word
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    truncated = len(lines) > 2
+    lines = lines[:2]
+    if lines and (truncated or len(lines[-1]) > max_chars):
+        limit = max(1, max_chars - 3)
+        lines[-1] = lines[-1][:limit].rstrip() + "..."
+    return "\n".join(lines)
+
+
+def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duration: float, visuals: Iterable[tuple[str, float, float]], width: int, height: int, style: str = "educational", creator_credit: str | None = None, credit_alignment: int = 3) -> None:
     preset = _subtitle_preset(style)
     metrics = _ass_style_metrics(width, height)
     scale = height / _CAPTION_REFERENCE_HEIGHT
@@ -875,6 +943,16 @@ def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duratio
     visual_scale = height / _CAPTION_REFERENCE_HEIGHT
     usable = max(1, width - 2 * margin_x)
     max_chars = max(8, int(usable * _CAPTION_WRAP_FRACTION / (_CHAR_WIDTH_FACTOR * fontsize)))
+    credit_fontsize = max(20, round(26 * visual_scale))
+    # Keep the credit inside the same 8% mobile safe-area convention as the
+    # preview, while leaving it below the bottom-centred caption band.
+    credit_margin = max(100, round(height * .08))
+    credit_max_chars = max(12, int(usable * .92 / (_CHAR_WIDTH_FACTOR * credit_fontsize)))
+    credit_text = _wrap_credit(creator_credit, credit_max_chars) if creator_credit else ""
+    # A translucent light face with a dark stroke stays legible over changing
+    # footage without competing with the much larger caption treatment.
+    credit_alignment = 1 if credit_alignment == 1 else 3
+    credit_style = f"Style: Credit,Arial,{credit_fontsize},&H22F1F2F4,&H22F1F2F4,&H3308080A,&H6608080A,0,0,0,0,100,100,0,0,3,{max(1, round(2 * visual_scale))},{max(1, round(1 * visual_scale))},{credit_alignment},{margin_x},{margin_x},{credit_margin},1\n" if credit_text else ""
     header = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {width}
@@ -886,7 +964,7 @@ ScaledBorderAndShadow: yes
 Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding
 Style: Caption,{preset["fontname"]},{fontsize},{preset["primary"]},{preset["highlight"]},{preset["outline_color"]},{preset["back_color"]},{preset["bold"]},{preset["italic"]},0,0,100,100,{preset["spacing"]},0,{preset["border_style"]},{outline},{shadow},2,{margin_x},{margin_x},{margin_v},1
 Style: Visual,Arial,{max(28, round(56 * visual_scale))},&H008FA8DD,&H000000FF,&H00110B0C,&HCC110B0C,-1,0,0,0,100,100,1,0,3,{max(1, round(2 * visual_scale))},0,8,{margin_x},{margin_x},{max(80, round(400 * visual_scale))},1
-
+{credit_style}
 [Events]
 Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
 """
@@ -909,6 +987,11 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
         events.append(f"Dialogue: 10,{_ass_time(start)},{_ass_time(end)},Caption,,0,0,0,,{event_text}")
     for label, start, end in visuals:
         events.append(f"Dialogue: 5,{_ass_time(start)},{_ass_time(end)},Visual,,0,0,0,,{_ass_escape(label)}")
+    if credit_text:
+        # The renderer chooses the quieter lower corner when source frames are
+        # available; either side stays outside the bottom-centred caption band.
+        # The explicit wrap keeps long channel names inside the safe width.
+        events.append(f"Dialogue: 2,0,{_ass_time(duration)},Credit,,0,0,0,,{_ass_escape(credit_text)}")
     path.write_text(header + "\n".join(events) + "\n", encoding="utf-8")
 
 
@@ -953,6 +1036,70 @@ def _source_layout_filter(src_width: int, src_height: int, target_width: int, ta
     )
 
 
+def _corner_activity(frame: bytes, width: int, height: int, *, left: bool) -> float:
+    """Estimate visual busyness in a lower corner from a grayscale frame."""
+    x_start = 0 if left else round(width * 0.68)
+    x_end = round(width * 0.32) if left else width
+    y_start = round(height * 0.68)
+    values: list[int] = []
+    edge_total = 0
+    for y in range(y_start, height):
+        for x in range(x_start, x_end):
+            index = y * width + x
+            value = frame[index]
+            values.append(value)
+            if x + 1 < x_end:
+                edge_total += abs(value - frame[index + 1])
+            if y + 1 < height:
+                edge_total += abs(value - frame[index + width])
+    if not values:
+        return 0.0
+    mean = sum(values) / len(values)
+    variance = sum((value - mean) ** 2 for value in values) / len(values)
+    return edge_total / max(1, len(values) * 2 * 255) + min(1.0, math.sqrt(variance) / 64) * 0.25
+
+
+def _credit_alignment(source: Path, *, start: float, end: float, width: int, height: int, settings: Settings) -> int:
+    """Pick the quieter lower corner, falling back to the established right side.
+
+    This is deliberately a small, best-effort heuristic: it samples the final
+    crop at three points and compares lower-corner visual activity. If FFmpeg
+    cannot provide a frame, the stable right-side safe zone is retained. The
+    generated captions remain bottom-centred and therefore do not compete with
+    either corner.
+    """
+    if not source.is_file() or width <= 0 or height <= 0:
+        return 3
+    sample_width = 160
+    sample_height = max(64, round(sample_width * height / width))
+    duration = max(0.1, end - start)
+    timestamps = (start, start + duration * 0.5, max(start, end - 0.15))
+    left_scores: list[float] = []
+    right_scores: list[float] = []
+    layout = f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},scale={sample_width}:{sample_height},format=gray"
+    for timestamp in timestamps:
+        try:
+            result = subprocess.run(
+                [settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-ss", f"{max(0.0, timestamp):.3f}", "-i", str(source), "-frames:v", "1", "-vf", layout, "-f", "rawvideo", "pipe:1"],
+                capture_output=True,
+                timeout=8,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError, ValueError):
+            continue
+        expected = sample_width * sample_height
+        if result.returncode != 0 or len(result.stdout) < expected:
+            continue
+        frame = result.stdout[:expected]
+        left_scores.append(_corner_activity(frame, sample_width, sample_height, left=True))
+        right_scores.append(_corner_activity(frame, sample_width, sample_height, left=False))
+    if not left_scores or not right_scores:
+        return 3
+    left = sum(left_scores) / len(left_scores)
+    right = sum(right_scores) / len(right_scores)
+    return 1 if left + 0.05 < right else 3
+
+
 def _filters(width: int, height: int, overlays: list[tuple[Path, float, float]], asset_start_index: int, ass_name: str, source_dimensions: tuple[int, int] | None = None) -> tuple[str, str]:
     if source_dimensions:
         filters = [f"[0:v]{_source_layout_filter(*source_dimensions, width, height)}"]
@@ -972,17 +1119,22 @@ def _filters(width: int, height: int, overlays: list[tuple[Path, float, float]],
 
 # DO-NOT-CHANGE: atomic render (.partial.mp4 + os.replace) with structural output
 # validation (dimensions/audio) before the output is publishable
-def render_clip(source: Path, output: Path, *, start: float, end: float, aspect: str, words: list[dict[str, Any]], visuals: list[tuple[str, float, float]], overlays: list[tuple[Path, float, float]], settings: Settings, style: str = "educational", has_audio: bool = True, embed_subtitles: bool = False, subtitle_language: str = "und") -> None:
+def render_clip(source: Path, output: Path, *, start: float, end: float, aspect: str, words: list[dict[str, Any]], visuals: list[tuple[str, float, float]], overlays: list[tuple[Path, float, float]], settings: Settings, style: str = "educational", has_audio: bool = True, embed_subtitles: bool = False, subtitle_language: str = "und", creator_credit: str | None = None) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
-    ass = output.parent / f"{output.stem}.ass"
+    ass = output.parent / (f"{output.stem}.burn.ass" if creator_credit else f"{output.stem}.ass")
     duration = end - start
     width, height = dimensions(aspect)
     source_meta = probe(source, settings)
     src_width, src_height = source_meta["width"], source_meta["height"]
     if source_meta["rotation"] % 180:
         src_width, src_height = src_height, src_width
-    write_ass(ass, words, offset=start, duration=duration, visuals=visuals, width=width, height=height, style=style)
+    credit_alignment = _credit_alignment(source, start=start, end=end, width=width, height=height, settings=settings) if creator_credit else 3
+    write_ass(ass, words, offset=start, duration=duration, visuals=visuals, width=width, height=height, style=style, creator_credit=creator_credit, credit_alignment=credit_alignment)
     write_caption_sidecars(output, words, offset=start, duration=duration, style=style)
+    if creator_credit:
+        # The downloadable ASS is caption-only; the internal burn script must
+        # never be applied a second time to an already credited MP4.
+        write_ass(output.with_suffix(".ass"), words, offset=start, duration=duration, visuals=visuals, width=width, height=height, style=style)
     temp = output.with_suffix(".partial.mp4")
     command = [settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{start:.3f}", "-i", str(source), "-t", f"{duration:.3f}"]
     _overlay_inputs(command, overlays)
@@ -1140,6 +1292,7 @@ def render_fast_clip(
     subtitles_enabled: bool = True,
     embed_subtitles: bool = False,
     subtitle_language: str = "und",
+    creator_credit: str | None = None,
 ) -> None:
     """Render a fast clip with optional captions and no overlays or visual beats.
 
@@ -1192,9 +1345,12 @@ def render_fast_clip(
     ass: Path | None = None
     if (subtitles_enabled or embed_subtitles) and words:
         write_caption_sidecars(output, words, offset=0, duration=duration, style=style)
-    if subtitles_enabled and words:
-        ass = output.parent / f"{output.stem}.ass"
-        write_ass(ass, words, offset=0, duration=duration, visuals=[], width=width, height=height, style=style)
+    if (subtitles_enabled and words) or creator_credit:
+        ass = output.parent / (f"{output.stem}.burn.ass" if creator_credit else f"{output.stem}.ass")
+        credit_alignment = _credit_alignment(source, start=start, end=end, width=width, height=height, settings=settings) if creator_credit else 3
+        write_ass(ass, words or [], offset=0, duration=duration, visuals=[], width=width, height=height, style=style, creator_credit=creator_credit, credit_alignment=credit_alignment)
+        if creator_credit:
+            write_ass(output.with_suffix(".ass"), words or [], offset=0, duration=duration, visuals=[], width=width, height=height, style=style)
         vf = f"{vf},subtitles={ass.name}"
     command = [
         settings.ffmpeg,

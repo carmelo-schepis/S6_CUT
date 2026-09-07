@@ -7,6 +7,11 @@ services:
     image: brainicism/bgutil-ytdlp-pot-provider:1.3.2-deno
     restart: unless-stopped
     init: true
+    cpus: 0.75
+    mem_reservation: 128m
+    mem_limit: 384m
+    memswap_limit: 512m
+    pids_limit: 128
     networks:
       - private
     healthcheck:
@@ -74,12 +79,22 @@ services:
       - ALL
     user: "10001:10001"
     stop_grace_period: 30s
+    cpus: 4.0
+    mem_reservation: 1g
+    mem_limit: 3g
+    memswap_limit: 4g
+    pids_limit: 512
 
   web:
     build:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
+    cpus: 0.5
+    mem_reservation: 64m
+    mem_limit: 256m
+    memswap_limit: 384m
+    pids_limit: 128
     depends_on:
       engine:
         condition: service_healthy

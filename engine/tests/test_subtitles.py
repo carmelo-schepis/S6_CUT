@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
 
+from engine.config import Settings
 from engine.media import (
     SUBTITLE_EMOJI_INSTRUCTIONS,
     _ass_style_metrics,
     _caption_words_with_emojis,
+    _credit_alignment,
     _has_emoji,
+    _wrap_credit,
     _is_emoji,
     _subtitle_preset,
     _wrap_caption_words,
@@ -224,6 +228,68 @@ def test_word_by_word_highlighting_is_preserved(tmp_path: Path) -> None:
         highlighted = event.count(r"{\c&H0077D6FF&}")
         assert highlighted == 1, f"event {index} has {highlighted} highlighted words"
         assert (r"{\c&H0077D6FF&}" + str(words[index]["text"])) in event
+
+
+def test_youtube_creator_credit_is_full_duration_in_safe_corner(tmp_path: Path) -> None:
+    path = tmp_path / "credit.ass"
+    write_ass(path, [], offset=0, duration=12.5, visuals=[], width=1080, height=1920, creator_credit="Source: Maker {One}")
+    ass = path.read_text(encoding="utf-8")
+    credit = _parse_styles(ass)["Credit"]
+    assert credit["Alignment"] == "3"  # lower-right, outside centred captions
+    assert credit["MarginR"] == credit["MarginL"]
+    assert "Dialogue: 2,0,0:00:12.50,Credit,,0,0,0,,Source: Maker \\{One\\}" in ass
+
+
+def test_creator_credit_wraps_truncates_and_uses_subtle_contrast(tmp_path: Path) -> None:
+    wrapped = _wrap_credit("Source: " + "CreatorName " * 12, 24)
+    assert wrapped.count("\n") == 1
+    assert wrapped.splitlines()[-1].endswith("...")
+
+    path = tmp_path / "credit-style.ass"
+    write_ass(path, [], offset=0, duration=4, visuals=[], width=1080, height=1920, creator_credit="Source: Creator")
+    style = _parse_styles(path.read_text(encoding="utf-8"))["Credit"]
+    assert style["PrimaryColour"].startswith("&H22")  # modest transparency
+    assert style["BorderStyle"] == "3"  # translucent contrast panel
+    assert int(style["MarginR"]) >= 80 and int(style["MarginV"]) >= 100
+
+
+def test_credit_stays_in_safe_margins_at_supported_canvas_sizes(tmp_path: Path) -> None:
+    for width, height in ((1080, 1920), (1080, 1350), (1080, 1080), (1920, 1080)):
+        path = tmp_path / f"credit-{width}x{height}.ass"
+        write_ass(path, [], offset=0, duration=12, visuals=[], width=width, height=height, creator_credit="Source: 频道 🎬 · Maker {One} !?; punctuation")
+        styles = _parse_styles(path.read_text(encoding="utf-8"))
+        credit = styles["Credit"]
+        assert credit["Alignment"] in {"1", "3"}
+        assert int(credit["MarginL"]) >= 40 and int(credit["MarginR"]) >= 40
+        assert int(credit["MarginV"]) >= 60
+        event = next(line for line in path.read_text(encoding="utf-8").splitlines() if line.startswith("Dialogue: 2,"))
+        assert "0:00:12.00" in event
+        assert "Source: 频道" in event
+
+    plain = tmp_path / "no-credit.ass"
+    write_ass(plain, [], offset=0, duration=4, visuals=[], width=1080, height=1920)
+    assert "Style: Credit," not in plain.read_text(encoding="utf-8")
+
+
+def test_credit_alignment_chooses_the_quieter_lower_corner(monkeypatch, tmp_path: Path) -> None:
+    source = tmp_path / "fixture.mp4"
+    source.write_bytes(b"fixture")
+    settings = Settings.from_env()
+    width, height = 160, 284
+    expected = width * height
+
+    def sample(busy_left: bool) -> subprocess.CompletedProcess[bytes]:
+        frame = bytearray(expected)
+        x_start, x_end = (0, 51) if busy_left else (109, 160)
+        for y in range(round(height * 0.68), height):
+            for x in range(x_start, x_end):
+                frame[y * width + x] = 255 if (x + y) % 2 else 0
+        return subprocess.CompletedProcess([], 0, bytes(frame), b"")
+
+    monkeypatch.setattr("engine.media.subprocess.run", lambda *args, **kwargs: sample(True))
+    assert _credit_alignment(source, start=0, end=2, width=1080, height=1920, settings=settings) == 3
+    monkeypatch.setattr("engine.media.subprocess.run", lambda *args, **kwargs: sample(False))
+    assert _credit_alignment(source, start=0, end=2, width=1080, height=1920, settings=settings) == 1
 
 
 def test_visual_style_keeps_top_centre_alignment(tmp_path: Path) -> None:

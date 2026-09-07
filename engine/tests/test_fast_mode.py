@@ -153,8 +153,8 @@ def test_validated_youtube_source_and_outputs_register_once_across_recovery(monk
     source = tmp_path / "jobs" / "youtube-job" / "source" / "source-video.mp4"
     source.parent.mkdir(parents=True)
     source.write_bytes(b"youtube-video")
+    source.with_suffix(".info.json").write_text(json.dumps({"title": "Validated channel title", "channel": "Known Channel"}), encoding="utf-8")
     monkeypatch.setattr("engine.jobs.download_youtube", lambda *_: source)
-    monkeypatch.setattr("engine.jobs.youtube_import_title", lambda _: "Validated channel title")
     monkeypatch.setattr("engine.jobs.probe", _fake_probe)
     monkeypatch.setattr(media_module, "plan_fast_windows", _fake_plan)
     monkeypatch.setattr(media_module, "render_fast_clip", _fake_render)
@@ -168,6 +168,14 @@ def test_validated_youtube_source_and_outputs_register_once_across_recovery(monk
     assert len(assets) == 3
     source_asset = next(asset for asset in assets if asset.origin == "project-source")
     assert source_asset.title == "Validated channel title"
+    saved_project = test_db.get_project("youtube-project")
+    assert saved_project is not None and saved_project.source_creator == "Known Channel"
+    private = test_db.get_job_private(job.id)
+    assert private["youtube_creator"] == "Known Channel"
+    saved_job = test_db.get_job(job.id)
+    assert saved_job is not None
+    assert all(clip.creator_credit == "Source: Known Channel" for clip in saved_job.clips)
+    assert not source.with_suffix(".info.json").exists()
     test_manager._process(job.id)  # terminal recovery/polling is idempotent
     assert len(test_db.list_assets()) == 3
 

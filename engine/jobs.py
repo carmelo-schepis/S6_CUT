@@ -20,7 +20,7 @@ from .database import Database
 from .library import LibraryRules
 from .media import (
     DownloadStalled, MediaError, available, download_youtube, probe, probe_audio, render_clip, render_script,
-    sha256_file, synthesize_local, transcribe, youtube_import_title,
+    _metadata_text, sha256_file, synthesize_local, transcribe, youtube_import_metadata, youtube_import_title,
 )
 from .models import (
     Asset, Clip, ContentFormat, Job, ProcessingMode, ProcessingStep, ProvenanceRecord, ScoreBreakdown, now_iso,
@@ -118,6 +118,40 @@ def job_processing_mode(job: Job, private: dict[str, Any]) -> ProcessingMode:
 def job_content_format(job: Job, private: dict[str, Any]) -> ContentFormat:
     value = private.get("content_format") or job.content_format or "short"
     return value if value in {"short", "long"} else "short"
+
+
+def _youtube_creator_name(value: object) -> str | None:
+    return _metadata_text(value, 120)
+
+
+def youtube_creator_credit(job: Job, private: dict[str, Any]) -> str | None:
+    """Return the bounded YouTube credit used by both preview and export."""
+    if not private.get("url") or job_content_format(job, private) != "short":
+        return None
+    # A missing channel is still explicitly identified as a YouTube source;
+    # this avoids silently dropping attribution from a valid short while never
+    # presenting arbitrary malformed metadata as a creator name.
+    creator = _youtube_creator_name(private.get("youtube_creator")) or "YouTube"
+    return f"Source: {creator}"
+
+
+def _consume_youtube_sidecar(source: Path) -> None:
+    try:
+        source.with_suffix(".info.json").unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _creator_render_kwargs(render, credit: str | None) -> dict[str, str]:
+    if not credit:
+        return {}
+    try:
+        parameters = inspect.signature(render).parameters.values()
+    except (TypeError, ValueError):
+        return {}
+    if any(parameter.name == "creator_credit" or parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters):
+        return {"creator_credit": credit}
+    return {}
 
 
 def probe_source(job: Job, private: dict[str, Any], source: Path, settings: Settings):
@@ -702,8 +736,10 @@ class JobManager:
             licence="Generated from user-supplied or authorised source",
         )
         published_at = now_iso()
+        applied_credit = None if script else youtube_creator_credit(job, private)
         clip = clip.model_copy(update={
             "state": "complete", "output_name": output.name, "title": title,
+            "creator_credit": applied_credit,
             "width": width, "height": height, "folder_id": effective_folder_id,
             "published_at": published_at, "selected": True, "error": None,
         })
@@ -759,8 +795,25 @@ class JobManager:
         if private.get("source_path"):
             source = Path(private["source_path"])
             if source.is_file():
+                if private.get("url") and ("youtube_title" not in private or "youtube_creator" not in private):
+                    imported = youtube_import_metadata(source, consume=False)
+                    if imported:
+                        private["youtube_title"] = imported.get("title") or private.get("youtube_title") or "YouTube source"
+                        if imported.get("creator"):
+                            private["youtube_creator"] = imported["creator"]
+                if private.get("url"):
+                    project = self.db.get_project(job.project_id)
+                    creator = _youtube_creator_name(private.get("youtube_creator")) or (project.source_creator if project else None)
+                    if creator:
+                        private["youtube_creator"] = creator
+                    if project and project.source_creator != creator:
+                        project.source_creator = creator
+                        project.updated_at = now_iso()
+                        self.db.save_project(project)
                 self._register_source(job, private, source)
                 self.complete_step(job, "source", detail="Source received, validated, and added to library", private=private)
+                if private.get("url"):
+                    _consume_youtube_sidecar(source)
                 return source
         if private.get("url"):
             self.start_step(job, "source", detail="Preparing authorised YouTube import", label="Preparing YouTube import", progress=5, private=private)
@@ -784,12 +837,28 @@ class JobManager:
                 self._download_progress(job, private, {"phase": "failed", "message": "YouTube import failed; retry the import or check the source URL"})
                 raise
             private["source_path"] = str(source)
-            private["youtube_title"] = youtube_import_title(source) or "YouTube source"
+            imported = youtube_import_metadata(source, consume=False)
+            if imported:
+                private["youtube_title"] = imported.get("title") or "YouTube source"
+                if imported.get("creator"):
+                    private["youtube_creator"] = imported["creator"]
+            else:
+                # Keep compatibility with older/test download adapters that
+                # expose the title through the original helper only.
+                private["youtube_title"] = youtube_import_title(source) or "YouTube source"
+            if private.get("url"):
+                project = self.db.get_project(job.project_id)
+                creator = _youtube_creator_name(private.get("youtube_creator"))
+                if project and project.source_creator != creator:
+                    project.source_creator = creator
+                    project.updated_at = now_iso()
+                    self.db.save_project(project)
             self._register_source(job, private, source)
             self._download_progress(job, private, {"phase": "complete", "downloaded_bytes": source.stat().st_size, "total_bytes": source.stat().st_size, "percent": 100, "message": "Download complete"})
             self.complete_step(job, "source", detail="YouTube source imported, validated, and added to library", private=private)
             private.pop("retry_import", None)
             self._save(job, private)
+            _consume_youtube_sidecar(source)
             return source
         raise MediaError("The source file is missing from the mounted data directory")
 
@@ -834,7 +903,8 @@ class JobManager:
             render(source, output, start=clip.start, end=clip.end, aspect=private["aspect_ratio"], settings=self.settings,
                    has_audio=bool(metadata["audio"]), words=words, style=job.style,
                    subtitles_enabled=bool(private.get("burn_subtitles", job.burn_subtitles)),
-                   embed_subtitles=bool(private.get("embed_subtitles", job.embed_subtitles)))
+                   embed_subtitles=bool(private.get("embed_subtitles", job.embed_subtitles)),
+                   **_creator_render_kwargs(render, youtube_creator_credit(job, private)))
             # publish_clip_output reuses the stable asset identity in its transaction.
             job, clip, _ = self._publish_output(job, clip, output, private)
             clip.caption_cues = [CaptionCue.model_validate(cue) for cue in cues]
@@ -1069,13 +1139,21 @@ class JobManager:
             overlays = [(visual.asset_path, .65, min(3.4, clip.duration - .2))] if visual.asset_path and visual.asset_path.exists() and clip.duration > 1 else []
             visuals = [(clip.visual_label or "Key idea", .45, min(3.0, clip.duration))]
             try:
+                render_kwargs = {
+                    "start": clip.start, "end": clip.end, "aspect": private["aspect_ratio"],
+                    "words": clip_words if subtitles_enabled or bool(private.get("embed_subtitles", job.embed_subtitles)) else [],
+                    "visuals": visuals, "overlays": overlays, "settings": self.settings, "style": job.style,
+                    **({"embed_subtitles": True} if private.get("embed_subtitles", job.embed_subtitles) else {}),
+                    **_creator_render_kwargs(render_clip, youtube_creator_credit(job, private)),
+                }
                 try:
-                    render_clip(source, output, start=clip.start, end=clip.end, aspect=private["aspect_ratio"], words=clip_words if subtitles_enabled or bool(private.get("embed_subtitles", job.embed_subtitles)) else [], visuals=visuals, overlays=overlays, settings=self.settings, style=job.style, **({"embed_subtitles": True} if private.get("embed_subtitles", job.embed_subtitles) else {}))
+                    render_clip(source, output, **render_kwargs)
                 except TypeError as exc:
                     if "unexpected keyword argument 'style'" not in str(exc):
                         raise
                     # Compatibility for editor/test render adapters from older jobs.
-                    render_clip(source, output, start=clip.start, end=clip.end, aspect=private["aspect_ratio"], words=clip_words if subtitles_enabled or bool(private.get("embed_subtitles", job.embed_subtitles)) else [], visuals=visuals, overlays=overlays, settings=self.settings, **({"embed_subtitles": True} if private.get("embed_subtitles", job.embed_subtitles) else {}))
+                    render_kwargs.pop("style", None)
+                    render_clip(source, output, **render_kwargs)
                 job, clip, _ = self._publish_output(job, clip, output, private)
             except Exception as exc:
                 clip = clip.model_copy(update={"state": "failed", "error": redact(str(exc)), "selected": False})
@@ -1246,6 +1324,7 @@ class JobManager:
                     render_kwargs["embed_subtitles"] = True
                 if words:
                     render_kwargs.update({"words": words, "style": job.style, "subtitles_enabled": subtitles_enabled})
+                render_kwargs.update(_creator_render_kwargs(render, youtube_creator_credit(job, private)))
                 render(source, output, **render_kwargs)
                 job, clip, _ = self._publish_output(job, clip, output, private)
             except Exception as exc:
@@ -1507,9 +1586,13 @@ class JobManager:
         export_dir = self.settings.data_path / "exports" / job.id
         export_dir.mkdir(parents=True, exist_ok=True)
         output = export_dir / f"s6-cut-{job.project_id[:8]}.zip"
+        project = self.db.get_project(job.project_id)
+        private = self.db.get_job_private(job.id)
         manifest = {
             "schemaVersion": 1, "projectId": job.project_id, "jobId": job.id, "mode": job.mode,
-            "style": job.style, "createdAt": now_iso(), "clips": [clip.model_dump(by_alias=True, exclude={"download_url"}) for clip in chosen],
+            "style": job.style, "sourceCreator": project.source_creator if project and project.source_kind == "youtube" else None,
+            "creatorCredit": youtube_creator_credit(job, private), "createdAt": now_iso(),
+            "clips": [clip.model_dump(by_alias=True, exclude={"download_url"}) for clip in chosen],
             "warnings": job.warnings, "failedClips": [clip.id for clip in job.clips if clip.state == "failed"],
         }
         credits = [record.model_dump(by_alias=True) for clip in chosen for record in clip.provenance]

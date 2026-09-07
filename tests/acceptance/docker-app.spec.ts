@@ -182,8 +182,11 @@ test("Docker-served studio acceptance workflow", async ({ page, request }) => {
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
   await expect(page.getByText("Secrets", { exact: true })).toBeVisible();
   await expect(page.getByText(/Trusted LAN only by default/)).toBeVisible();
-  await expect(page.locator('input[type="password"]')).toHaveCount(0);
-  await page.getByRole("button", { name: /New profile/ }).click();
+  // Empty installs may open setup inline; existing installs keep the form
+  // closed until requested. Either way, secret fields remain masked.
+  if (await page.locator('input[type="password"]').count() === 0) {
+    await page.getByRole("button", { name: /New profile/ }).click();
+  }
   await expect(page.locator('input[type="password"]')).toHaveCount(2);
   await capture(page, "settings-security");
 

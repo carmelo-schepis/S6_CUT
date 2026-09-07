@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import stat
 import sys
 import textwrap
@@ -9,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from engine.config import Settings
-from engine.media import DownloadStalled, TranscriptionCancelled, YOUTUBE_EXTRACTOR_ARGS, YOUTUBE_FORMAT_SELECTOR, _parse_download_line, _run_ytdlp_download, download_youtube
+from engine.media import DownloadStalled, TranscriptionCancelled, YOUTUBE_EXTRACTOR_ARGS, YOUTUBE_FORMAT_SELECTOR, _parse_download_line, _run_ytdlp_download, download_youtube, youtube_import_metadata
 
 
 @pytest.fixture
@@ -23,6 +24,33 @@ def fake_downloader(tmp_path: Path, body: str) -> Path:
     path.write_text(script, encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
     return path
+
+
+def test_youtube_import_metadata_prefers_channel_and_consumes_sidecar(tmp_path: Path) -> None:
+    source = tmp_path / "source-video.mp4"
+    source.write_bytes(b"video")
+    info = source.with_suffix(".info.json")
+    info.write_text(json.dumps({"title": "  A\nVideo  ", "channel": " Maker {One} ", "uploader": "Fallback"}), encoding="utf-8")
+
+    assert youtube_import_metadata(source) == {"title": "A Video", "creator": "Maker {One}"}
+    assert not info.exists()
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected"),
+    [
+        ({"uploader": "Uploader 🎬"}, "Uploader 🎬"),
+        ({"creator": "Creator; {One}"}, "Creator; {One}"),
+        ({"channel": "   \u0001   "}, None),
+    ],
+)
+def test_youtube_import_metadata_creator_fallbacks_and_sanitization(tmp_path: Path, payload: dict[str, str], expected: str | None) -> None:
+    source = tmp_path / "source-video.mp4"
+    source.write_bytes(b"video")
+    source.with_suffix(".info.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    metadata = youtube_import_metadata(source)
+    assert (metadata or {}).get("creator") == expected
 
 
 def test_youtube_format_selection_prefers_separate_video_audio_with_1080p_ceiling() -> None:

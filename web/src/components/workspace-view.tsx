@@ -233,6 +233,9 @@ export function WorkspaceView({ project, health, providersLoaded = true, hasSele
   const jobLoaded = jobFetched || !project?.latestJobId;
 
   const selectedClip = useMemo(() => job?.clips.find((clip) => clip.id === selectedClipId) || null, [job, selectedClipId]);
+  // Read the publication snapshot, not merely source kind: this prevents old
+  // uncredited clips from being presented as if their bytes carried credit.
+  const creatorCredit = selectedClip?.creatorCredit || null;
   const selectedPreviewUrl = selectedClip?.previewUrl || selectedClip?.downloadUrl;
   const selectedMediaIdentity = selectedClip?.state === "complete" && selectedPreviewUrl
     ? `${selectedClip.id}:${selectedClip.blobId || selectedClip.outputName || selectedPreviewUrl.split("?")[0]}`
@@ -473,7 +476,7 @@ export function WorkspaceView({ project, health, providersLoaded = true, hasSele
       </aside>
 
       <section className="viewer-panel panel" aria-label="Output viewer">
-        <div className="viewer-toolbar"><span>Output · {project.contentFormat === "long" ? "16:9" : "9:16"}</span><div><IconButton label="Toggle safe areas" aria-pressed={safeAreasVisible} onClick={() => setSafeAreasVisible((value) => !value)}><Eye size={15} /></IconButton><IconButton label={previewMuted ? "Unmute preview" : "Mute preview"} aria-pressed={previewMuted} onClick={() => { const player = playerRef.current; if (player) player.muted = !player.muted; setPreviewMuted((value) => !value); }}><Volume2 size={15} /></IconButton></div></div>
+        <div className="viewer-toolbar"><span>Output · {project.contentFormat === "long" ? "16:9" : "9:16"}</span>{creatorCredit && <span className="viewer-credit" role="note">{creatorCredit}</span>}<div><IconButton label="Toggle safe areas" aria-pressed={safeAreasVisible} onClick={() => setSafeAreasVisible((value) => !value)}><Eye size={15} /></IconButton><IconButton label={previewMuted ? "Unmute preview" : "Mute preview"} aria-pressed={previewMuted} onClick={() => { const player = playerRef.current; if (player) player.muted = !player.muted; setPreviewMuted((value) => !value); }}><Volume2 size={15} /></IconButton></div></div>
         <div className="viewer-stage">
           <div className={`viewer-frame ${project.mode} ${project.contentFormat === "long" ? "landscape" : ""} ${safeAreasVisible ? "show-safe-areas" : ""}`}>
             {previewSource ? <><video

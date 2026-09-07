@@ -104,6 +104,8 @@ class Clip(ApiModel):
     caption_revision: int = Field(default=0, ge=0)
     output_name: str | None = None
     blob_id: str | None = None
+    # Exact attribution passed to the renderer and recorded only on publication.
+    creator_credit: str | None = Field(default=None, max_length=140)
     # DO-NOT-CHANGE: engine-set only, after the publication transaction commits —
     # the UI never displays this from optimistic state
     library_asset_id: str | None = None
@@ -225,6 +227,9 @@ class Project(ApiModel):
     state: JobState
     source_name: str
     source_kind: Literal["upload", "youtube", "script"]
+    # Extracted from the immutable YouTube import sidecar and persisted with
+    # the project so the preview remains truthful after refresh/restart.
+    source_creator: str | None = Field(default=None, max_length=120)
     requested_count: int = Field(ge=1, le=60)
     content_format: ContentFormat = "short"
     latest_job_id: str | None = None
