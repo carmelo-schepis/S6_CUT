@@ -27,7 +27,7 @@ from .models import (
 )
 from .providers import ProfileService, provider_runtime_message
 from .script import align_script_words, plan_beats
-from .security import redact, safe_filename
+from .security import confined, redact, safe_archive_title, safe_filename
 from .selection import clip_from_candidate, select_candidates
 
 logger = logging.getLogger(__name__)
@@ -1501,31 +1501,32 @@ class JobManager:
         job = self.db.get_job(job_id)
         if not job:
             raise KeyError(job_id)
-        chosen = [clip for clip in job.clips if clip.id in set(clip_ids) and clip.state == "complete" and clip.output_name]
+        selected = set(clip_ids)
+        chosen = sorted(
+            (clip for clip in job.clips if clip.id in selected and clip.state == "complete" and clip.output_name),
+            key=lambda clip: (clip.index, clip.id),
+        )
         if not chosen:
             raise ValueError("No successful selected clips are available to export")
+        project = self.db.get_project(job.project_id)
+        title = safe_archive_title(project.name if project else None)
+        export_sources: list[tuple[Any, Path]] = []
+        for clip in chosen:
+            try:
+                source = confined(self.settings.data_path, "jobs", job.id, "clips", str(clip.output_name))
+            except ValueError:
+                continue
+            temporary = source.name.startswith(".") or any(marker in source.stem.casefold() for marker in (".partial", ".uploading", ".tmp", ".temp", ".ytdl"))
+            if source.is_file() and not source.is_symlink() and source.stat().st_size > 0 and source.suffix.casefold() == ".mp4" and not temporary:
+                export_sources.append((clip, source))
+        if not export_sources:
+            raise ValueError("No completed MP4 videos are available to export")
+
         export_dir = self.settings.data_path / "exports" / job.id
         export_dir.mkdir(parents=True, exist_ok=True)
-        output = export_dir / f"s6-cut-{job.project_id[:8]}.zip"
-        manifest = {
-            "schemaVersion": 1, "projectId": job.project_id, "jobId": job.id, "mode": job.mode,
-            "style": job.style, "createdAt": now_iso(), "clips": [clip.model_dump(by_alias=True, exclude={"download_url"}) for clip in chosen],
-            "warnings": job.warnings, "failedClips": [clip.id for clip in job.clips if clip.state == "failed"],
-        }
-        credits = [record.model_dump(by_alias=True) for clip in chosen for record in clip.provenance]
+        output = export_dir / f"{title}.zip"
         with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True) as archive:
-            for number, clip in enumerate(chosen, 1):
-                source = self.settings.data_path / "jobs" / job.id / "clips" / str(clip.output_name)
-                if source.is_file():
-                    base_name = f"{number:02d}-{safe_filename(source.name, 'short.mp4')}"
-                    archive.write(source, base_name)
-                    for suffix in (".srt", ".vtt", ".ass"):
-                        sidecar = source.with_suffix(suffix)
-                        if sidecar.is_file():
-                            archive.write(sidecar, f"{base_name.removesuffix('.mp4')}{suffix}")
-            archive.writestr("manifest.json", json.dumps(manifest, indent=2, ensure_ascii=False))
-            archive.writestr("credits.json", json.dumps(credits, indent=2, ensure_ascii=False))
-            if job.warnings or manifest["failedClips"]:
-                warning_lines = job.warnings + [f"Failed clip: {item}" for item in manifest["failedClips"]]
-                archive.writestr("warnings.txt", "\n".join(warning_lines))
+            for number, (_, source) in enumerate(export_sources, 1):
+                stem = safe_filename(source.stem, "cut")
+                archive.write(source, f"{title}/{number:02d}-{stem}.mp4")
         return output

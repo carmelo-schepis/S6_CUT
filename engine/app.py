@@ -752,7 +752,8 @@ async def download_file(relative_path: str, expires: int = Query(...), signature
     media_type = "application/zip" if target.suffix == ".zip" else "video/mp4"
     if inline and media_type == "video/mp4":
         return FileResponse(target, media_type=media_type)
-    return FileResponse(target, filename=safe_filename(target.name, "s6-cut-download"), media_type=media_type)
+    download_name = target.name if media_type == "application/zip" else safe_filename(target.name, "s6-cut-download")
+    return FileResponse(target, filename=download_name, media_type=media_type)
 
 
 @app.get("/api/v1/openrouter/models", response_model=list[OpenRouterModel])

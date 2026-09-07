@@ -68,8 +68,9 @@ describe("App shell", () => {
 
     await act(async () => { pending.resolve(health); });
     await waitFor(() => expect(document.querySelector(".engine-startup")).toBeNull());
-    // …and the steady-state readings return once startup is over.
-    expect(document.querySelector(".rail-foot")).toHaveTextContent("Engine ready");
+    // …and the steady-state reading remains in the top bar while Help owns the rail footer.
+    expect(screen.getByText("Local engine", { exact: true })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open S6 Cut Help" })).toBeInTheDocument();
     expect(screen.getByText(/All local tools ready/i)).toBeInTheDocument();
   });
 
@@ -95,7 +96,7 @@ describe("App shell", () => {
 
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
     expect(mockGetHealth.mock.calls.length).toBeGreaterThanOrEqual(2);
-    expect(document.querySelector(".rail-foot")).toHaveTextContent("Engine ready");
+    expect(screen.getByText("Local engine", { exact: true })).toBeInTheDocument();
   });
 
   it("never has a second health read on the wire while the first is pending", async () => {
