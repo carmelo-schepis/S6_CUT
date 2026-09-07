@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from dataclasses import replace
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
-from engine.app import _project_name, app, db
+from engine.app import _project_name, app, db, settings, signer
 
 
 client = TestClient(app)
@@ -146,6 +149,18 @@ def test_library_dedup_and_match_explanation() -> None:
     match = client.get("/api/v1/library/match", params={"text": "The Beatles changed music"})
     assert match.status_code == 200
     assert match.json()["selected"]["title"] == "Beatles poster"
+
+
+def test_zip_download_uses_unicode_archive_filename(monkeypatch, tmp_path: Path) -> None:
+    relative = "exports/job/Café - Launch.zip"
+    target = tmp_path / relative
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"zip bytes")
+    monkeypatch.setattr("engine.app.settings", replace(settings, data_path=tmp_path))
+    expires, signature = signer.sign(relative)
+    response = client.get(f"/api/v1/files/{relative}", params={"expires": expires, "signature": signature})
+    assert response.status_code == 200
+    assert "filename*=utf-8''Caf%C3%A9%20-%20Launch.zip" in response.headers["content-disposition"]
 
 
 def test_download_traversal_and_bad_signature_fail_safely() -> None:

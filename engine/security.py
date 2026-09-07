@@ -8,6 +8,7 @@ import os
 import re
 import socket
 import time
+import unicodedata
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -15,6 +16,7 @@ from cryptography.fernet import Fernet, InvalidToken
 
 
 SAFE_FILENAME = re.compile(r"[^A-Za-z0-9._-]+")
+ARCHIVE_INVALID = re.compile(r'[<>:"/\\|?*\x00-\x1f\x7f]')
 YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "music.youtube.com"}
 
 
@@ -28,6 +30,18 @@ def safe_filename(name: str, fallback: str = "media") -> str:
     if not cleaned or cleaned.upper().split(".")[0] in {"CON", "PRN", "AUX", "NUL", "COM1", "LPT1"}:
         return fallback
     return cleaned
+
+
+def safe_archive_title(name: str | None, fallback: str = "s6-cut-videos"):
+    """Return a readable, cross-platform title safe for a ZIP name and root."""
+    normalized = unicodedata.normalize("NFKC", name or "")
+    normalized = ARCHIVE_INVALID.sub("-", normalized.replace("..", "-"))
+    normalized = re.sub(r"\s+", " ", normalized).strip(" .")[:160].strip(" .")
+    if not normalized or not any(character.isalnum() for character in normalized) or normalized.casefold() in {".", ".."}:
+        return fallback
+    if normalized.split(".", 1)[0].casefold() in {"con", "prn", "aux", "nul", "com1", "lpt1"}:
+        return fallback
+    return normalized
 
 
 # DO-NOT-CHANGE: path traversal guard — every file-serving endpoint must use this

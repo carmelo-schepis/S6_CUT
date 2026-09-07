@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import tempfile
+import zipfile
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -512,8 +513,73 @@ def test_source_publication_and_exports_preserved(monkeypatch: pytest.MonkeyPatc
     import zipfile
     with zipfile.ZipFile(output) as archive:
         names = archive.namelist()
-        assert "manifest.json" in names and "credits.json" in names
-        assert any(name.endswith(".mp4") for name in names)
+        assert names == [
+            "Publication campaign/01-01-cut.mp4",
+            "Publication campaign/02-02-cut.mp4",
+        ]
+        assert all(name.casefold().endswith(".mp4") for name in names)
+
+
+def test_bulk_export_filters_artifacts_sanitizes_unicode_title_and_orders_mp4(monkeypatch: pytest.MonkeyPatch) -> None:
+    tmp_path = _tmpdir()
+    test_db, test_manager, _, test_settings = _cluster(tmp_path)
+    job = _run_fast_job(monkeypatch, test_db, test_manager, "filtered-export-job", count=3)
+    assert job is not None
+    project = test_db.get_project(job.project_id)
+    assert project is not None
+    project.name = "  Café / Launch: Final?  "
+    test_db.save_project(project)
+    clips_dir = test_settings.data_path / "jobs" / job.id / "clips"
+    persisted_job = test_db.get_job(job.id)
+    assert persisted_job is not None
+    clips = persisted_job.clips
+    for clip, filename in zip(clips, ("same.MP4", "same.mp4", "third.mp4")):
+        source = clips_dir / str(clip.output_name)
+        source.rename(clips_dir / filename)
+        clip.output_name = filename
+    test_db.save_job(persisted_job, test_db.get_job_private(job.id))
+    (clips_dir / "same.ass").write_text("subtitle")
+    (clips_dir / "same.srt").write_text("subtitle")
+    (clips_dir / "same.vtt").write_text("subtitle")
+    (clips_dir / "metadata.json").write_text("metadata")
+    (clips_dir / ".DS_Store").write_bytes(b"mac metadata")
+    (clips_dir / "third.mp4.partial").write_bytes(b"temporary")
+    (clips_dir / "orphan.mp4").write_bytes(b"not a validated clip")
+    output = test_manager.build_export(job.id, [clip.id for clip in clips])
+    assert output.name == "Café - Launch- Final-.zip"
+    with zipfile.ZipFile(output) as archive:
+        names = archive.namelist()
+        assert names == [
+            "Café - Launch- Final-/01-same.mp4",
+            "Café - Launch- Final-/02-same.mp4",
+            "Café - Launch- Final-/03-third.mp4",
+        ]
+        assert all(name.casefold().endswith(".mp4") for name in names)
+        assert all(archive.getinfo(name).file_size > 0 for name in names)
+
+
+def test_bulk_export_rejects_missing_completed_mp4(monkeypatch: pytest.MonkeyPatch) -> None:
+    tmp_path = _tmpdir()
+    test_db, test_manager, _, test_settings = _cluster(tmp_path)
+    job = _run_fast_job(monkeypatch, test_db, test_manager, "empty-export-job", count=1)
+    assert job is not None
+    persisted_job = test_db.get_job(job.id)
+    assert persisted_job is not None
+    source = test_settings.data_path / "jobs" / job.id / "clips" / str(persisted_job.clips[0].output_name)
+    incomplete = source.with_name("unfinished.partial.mp4")
+    source.rename(incomplete)
+    persisted_job.clips[0].output_name = incomplete.name
+    test_db.save_job(persisted_job, test_db.get_job_private(job.id))
+    with pytest.raises(ValueError, match="No completed MP4"):
+        test_manager.build_export(job.id, [persisted_job.clips[0].id])
+
+
+def test_archive_title_fallback_and_traversal_are_safe() -> None:
+    from engine.security import safe_archive_title
+    assert safe_archive_title(None) == "s6-cut-videos"
+    assert safe_archive_title("../") == "s6-cut-videos"
+    assert safe_archive_title("CON") == "s6-cut-videos"
+    assert safe_archive_title("  Quarterly   review — 世界  ") == "Quarterly review — 世界"
 
 
 def test_relationship_validation_detects_orphaned_pairs(monkeypatch: pytest.MonkeyPatch) -> None:

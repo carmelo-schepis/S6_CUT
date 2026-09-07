@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { BriefcaseBusiness, Film, FolderKanban, HardDrive, Library, LoaderCircle, Scissors, Settings, SlidersHorizontal, Sparkles } from "lucide-react";
+import { CircleHelp, BriefcaseBusiness, Film, FolderKanban, HardDrive, Library, LoaderCircle, Scissors, Settings, SlidersHorizontal, Sparkles } from "lucide-react";
 import { getHealth, listJobs, listProfiles, listProjects, readableError } from "./api";
 import { JobsView } from "./components/jobs-view";
 import { LibraryView } from "./components/library-view";
@@ -9,6 +9,7 @@ import { StatusBadge } from "./components/common";
 import { WorkspaceView } from "./components/workspace-view";
 import { ShortsEditorView } from "./components/shorts-editor-view";
 import { TopicToVideoView } from "./components/topic-to-video-view";
+import { HelpDialog } from "./components/help-dialog";
 import { jobPollInterval } from "./project-status";
 import { usePoll } from "./use-poll";
 import type { Health, Job, Project, ProviderProfile } from "./types";
@@ -44,6 +45,7 @@ export function App() {
   const [profilesLoaded, setProfilesLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
 
   // `getHealth` aborts itself after HEALTH_TIMEOUT_MS, so a wedged engine
   // rejects here instead of leaving the promise pending forever — which used to
@@ -139,10 +141,9 @@ export function App() {
       {/* Startup is reported once, by the shell's engine-startup row. This foot
           is the steady-state engine reading, so it stays out of the way until
           the first health read has settled. */}
-      {healthChecked && <div className="rail-foot">
-        <span className={`engine-dot ${health?.status || "offline"}`} aria-hidden="true" />
-        <span>{health?.status === "ready" ? "Engine ready" : health?.status === "degraded" ? "Engine degraded" : "Engine offline"}</span>
-      </div>}
+      <button className="help-launcher" onClick={() => setHelpOpen(true)} aria-label="Open S6 Cut Help">
+        <CircleHelp size={18} aria-hidden="true" /><span>Help</span>
+      </button>
     </aside>
 
     <div className="app-main">
@@ -176,5 +177,6 @@ export function App() {
         {page === "settings" && <SettingsView health={health} onHealthRefresh={refresh} onProfilesChanged={setProfiles} onSkipSetup={() => setPage("projects")} />}
       </main>
     </div>
+    <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
   </div>;
 }
