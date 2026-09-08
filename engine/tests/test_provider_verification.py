@@ -161,6 +161,21 @@ def test_elevenlabs_validation_uses_non_billable_user_endpoint_and_header(tmp_pa
     assert service.secrets(profile.id)["elevenlabsKey"] == "fixture-secret"
 
 
+def test_elevenlabs_network_failure_is_not_reported_as_authentication(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    db = Database(tmp_path / "s6-cut.sqlite3")
+    service = ProfileService(db, SecretVault(tmp_path / "secrets" / "instance.key"))
+    profile = service.save(ProfileInput(name="ElevenLabs", elevenlabs_key="fixture-secret", selected=True))
+    FakeClient.get_error = httpx.ConnectError("private network detail")
+    FakeClient.requests = []
+    monkeypatch.setattr("engine.providers.httpx.AsyncClient", FakeClient)
+
+    result = run_test(service, profile.id)
+
+    assert result.elevenlabs_status == "timeout_offline"
+    assert "private network detail" not in (result.elevenlabs_message or "")
+    assert "credentials" not in (result.elevenlabs_message or "").lower()
+
+
 @pytest.mark.parametrize(
     ("status_code", "status"),
     [(401, "invalid_credentials"), (403, "insufficient_permissions"), (429, "rate_limited"), (503, "provider_service_failure")],
