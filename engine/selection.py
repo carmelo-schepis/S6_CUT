@@ -70,7 +70,7 @@ def candidate_quality(words: list[dict[str, Any]], minimum_speech_density: float
     if not words:
         return False, "No speech detected", False
     text = " ".join(str(item.get("text", "")).strip() for item in words).strip()
-    tokens = re.findall(r"[\\w'-]+", text.casefold())
+    tokens = re.findall(r"[\w'-]+", text.casefold())
     if not tokens:
         return False, "Empty transcript", False
     try:

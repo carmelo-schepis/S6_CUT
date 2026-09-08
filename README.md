@@ -200,6 +200,27 @@ npm run build
 docker compose config
 ```
 
+When host FFmpeg/FFprobe are unavailable, the reproducible provisioned check
+runs the same frontend checks and the complete engine suite inside a freshly
+built engine image, with isolated temporary data:
+
+```bash
+npm run check:supported
+```
+
+The isolated real-browser OpenRouter fallback check builds a temporary Compose
+stack, configures an in-memory provider failure seam, runs local Whisper and
+FFmpeg, and removes its test dataset afterward:
+
+```bash
+npm run test:e2e:openrouter-fallback
+```
+
+Playwright retains a trace on failure; set `S6_ACCEPTANCE_TRACE=on` when a
+successful run also needs a trace artifact. The seam requires both
+`S6_TEST_MODE=1` and the harness-provided failure name,
+is disabled by default, and is never used by normal provider requests.
+
 See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for verified behavior, limitations, and exact evidence. See [ARCHITECTURE.md](ARCHITECTURE.md) for trust boundaries and durable processing. Third-party notices and the machine-readable provenance ledger are included.
 
 ## Responsible use

@@ -27,6 +27,30 @@ FALLBACKS = {
     "media": "Personal Library, licensed/no-key source, then relevant text card",
 }
 
+_TEST_FAILURE_MESSAGES = {
+    "timeout": ("timeout_offline", "OpenRouter could not be reached"),
+    "offline": ("timeout_offline", "OpenRouter could not be reached"),
+    "401": ("invalid_credentials", "OpenRouter rejected the saved credentials"),
+    "403": ("invalid_credentials", "OpenRouter rejected the saved credentials"),
+    "408": ("timeout_offline", "OpenRouter could not be reached"),
+    "429": ("rate_limited", "OpenRouter rate limit reached. Wait and retry."),
+    "404": ("unavailable_model", "The selected OpenRouter model is unavailable. Choose another model in Settings."),
+    "422": ("unavailable_model", "The selected OpenRouter model is unavailable. Choose another model in Settings."),
+    "500": ("timeout_offline", "OpenRouter is temporarily unavailable"),
+    "502": ("timeout_offline", "OpenRouter is temporarily unavailable"),
+    "503": ("timeout_offline", "OpenRouter is temporarily unavailable"),
+    "504": ("timeout_offline", "OpenRouter is temporarily unavailable"),
+    "malformed": ("malformed_response", "OpenRouter returned a plan that could not be validated."),
+}
+
+
+def test_openrouter_failure() -> tuple[str, str] | None:
+    """Return the explicit isolated-E2E provider failure, never in production."""
+    if os.getenv("S6_TEST_MODE", "").strip() != "1":
+        return None
+    failure = os.getenv("S6_TEST_OPENROUTER_FAILURE", "").strip().casefold()
+    return _TEST_FAILURE_MESSAGES.get(failure)
+
 
 def provider_runtime_message(error: Exception, service: str) -> str:
     if isinstance(error, ProviderError):
@@ -150,6 +174,7 @@ class ProfileService:
             raise KeyError(profile_id)
         profile, _ = record
         secrets = self.secrets(profile_id)
+        test_failure = test_openrouter_failure()
         profile.openrouter_status = "not_configured"
         profile.openrouter_message = "Optional; deterministic local planning remains available"
         profile.openrouter_last_checked_at = None
@@ -157,7 +182,11 @@ class ProfileService:
         profile.elevenlabs_message = "Optional; local narration and silent rendering remain available"
         profile.elevenlabs_last_checked_at = None
         async with httpx.AsyncClient(timeout=12, follow_redirects=False) as client:
-            if key := secrets.get("openrouterKey"):
+            if test_failure and secrets.get("openrouterKey"):
+                profile.openrouter_last_checked_at = now_iso()
+                profile.openrouter_status = "connected"
+                profile.openrouter_message = "Connected; isolated provider failure test is ready"
+            if key := (None if test_failure else secrets.get("openrouterKey")):
                 profile.openrouter_last_checked_at = now_iso()
                 try:
                     response = await client.get("https://openrouter.ai/api/v1/models", headers={"Authorization": f"Bearer {key}"})
@@ -303,6 +332,9 @@ class ProfileService:
         key = secrets.get("openrouterKey")
         if not key or not profile:
             return None
+        if failure := test_openrouter_failure():
+            category, message = failure
+            raise ProviderError(category, message)
         if model_id:
             models = await self.openrouter_models()
             if not any(model.id == model_id for model in models):
@@ -327,10 +359,12 @@ class ProfileService:
                     raise ProviderError("rate_limited", "OpenRouter rate limit reached. Wait and retry.")
                 if response.status_code in {404, 422}:
                     raise ProviderError("unavailable_model", "The selected OpenRouter model is unavailable. Choose another model in Settings.")
-                if response.status_code in {408, 500, 502, 503, 504} and attempt == 0:
-                    continue
+                if response.status_code == 408 or 500 <= response.status_code <= 599:
+                    if attempt == 0:
+                        continue
+                    raise ProviderError("timeout_offline", "OpenRouter is temporarily unavailable. Try again later.")
                 if response.status_code >= 400:
-                    raise ProviderError("timeout_offline", "OpenRouter could not be reached")
+                    raise ProviderError("timeout_offline", "OpenRouter request was rejected")
                 try:
                     content = response.json()["choices"][0]["message"]["content"]
                     result = json.loads(content)

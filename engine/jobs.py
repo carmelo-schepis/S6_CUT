@@ -28,7 +28,7 @@ from .models import (
 from .providers import ProfileService, provider_runtime_message
 from .script import align_script_words, plan_beats
 from .security import confined, redact, safe_archive_title, safe_filename
-from .selection import clip_from_candidate, select_candidates
+from .selection import Candidate, clip_from_candidate, select_candidates
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +99,11 @@ def _semantic_clip_title(project_name: str, clip: Clip) -> str:
         return f"{project_name} — Cut {clip.index:02d}"[:200]
     phrase = phrase[:72].rstrip()
     return f"{project_name} — {phrase} · Cut {clip.index:02d}"[:200]
+
+
+def _openrouter_fallback_warning(error: Exception) -> str:
+    reason = " ".join(redact(provider_runtime_message(error, "OpenRouter")).split()).strip(" .")
+    return f"OpenRouter API failed: {reason}. Continuing with deterministic local planning."
 
 
 class QueueFullError(RuntimeError):
@@ -985,6 +990,16 @@ class JobManager:
 
         return report
 
+    def _local_planning_fallback(self, job: Job, private: dict[str, Any], pool: list[Candidate], error: Exception):
+        warning = _openrouter_fallback_warning(error)
+        if warning not in job.warnings:
+            job.warnings.append(warning)
+        self.fail_step(job, "openrouter", detail=warning, private=private)
+        self.start_step(job, "local_planning", detail="Using deterministic local planning fallback", label="Using local planning fallback", progress=33, private=private)
+        chosen = pool[:int(private["count"])]
+        self.complete_step(job, "local_planning", detail=f"{len(chosen)} candidates planned locally", private=private)
+        return chosen
+
     def _plan_smart_candidates(self, job: Job, private: dict[str, Any], words: list[dict[str, Any]]):
         requested = int(private["count"])
         pool = select_candidates(
@@ -999,11 +1014,11 @@ class JobManager:
             self.complete_step(job, "local_planning", detail=f"{len(chosen)} candidates planned locally", private=private)
             return chosen
         self.start_step(job, "openrouter", detail="Reviewing deterministic candidate excerpts", label="Planning clips with OpenRouter", progress=33, private=private)
+        excerpts = [
+            {"index": index, "start": candidate.start, "end": candidate.end, "text": " ".join(str(word["text"]) for word in candidate.words)[:800]}
+            for index, candidate in enumerate(pool)
+        ]
         try:
-            excerpts = [
-                {"index": index, "start": candidate.start, "end": candidate.end, "text": " ".join(str(word["text"]) for word in candidate.words)[:800]}
-                for index, candidate in enumerate(pool)
-            ]
             result = asyncio.run(self.profiles.openrouter_json(
                 [{"role": "user", "content": f"Choose up to {requested} distinct candidate indexes for {job.style} short clips. Candidates: {json.dumps(excerpts, ensure_ascii=False)}"}],
                 {
@@ -1012,23 +1027,29 @@ class JobManager:
                     "required": ["indexes"], "additionalProperties": False,
                 },
             ))
-            indexes = result.get("indexes") if isinstance(result, dict) else None
-            if not isinstance(indexes, list):
-                raise ValueError("OpenRouter returned a malformed planning response")
-            unique = list(dict.fromkeys(int(index) for index in indexes if isinstance(index, int) and 0 <= index < len(pool)))
-            if not unique:
-                raise ValueError("OpenRouter returned no usable candidate indexes")
-            chosen = [pool[index] for index in unique[:requested]]
-            self.complete_step(job, "openrouter", detail=f"AI planning completed for {len(chosen)} candidates", private=private)
-            self.skip_step(job, "local_planning", detail="OpenRouter planning succeeded", private=private)
-            return chosen
         except Exception as exc:
-            self.fail_step(job, "openrouter", detail=provider_runtime_message(exc, "OpenRouter"), private=private)
-            job.warnings.append(f"{provider_runtime_message(exc, 'OpenRouter')}; used deterministic local planning.")
-            self.start_step(job, "local_planning", detail="Using deterministic local planning fallback", label="Using local planning fallback", progress=33, private=private)
-            chosen = pool[:requested]
-            self.complete_step(job, "local_planning", detail=f"{len(chosen)} candidates planned locally", private=private)
-            return chosen
+            # Only the optional provider call is guarded here. Cancellation and
+            # process termination inherit BaseException and are never converted
+            # into a local-planning fallback.
+            return self._local_planning_fallback(job, private, pool, exc)
+        indexes = result.get("indexes") if isinstance(result, dict) else None
+        if not isinstance(indexes, list) or not indexes or len(indexes) > requested:
+            return self._local_planning_fallback(job, private, pool, ValueError("OpenRouter returned a malformed planning response"))
+        if any(type(index) is not int or not 0 <= index < len(pool) for index in indexes):
+            return self._local_planning_fallback(job, private, pool, ValueError("OpenRouter returned invalid candidate indexes"))
+        unique = list(dict.fromkeys(indexes))
+        if not unique:
+            return self._local_planning_fallback(job, private, pool, ValueError("OpenRouter returned no usable candidate indexes"))
+        selected_indexes = set(unique)
+        chosen = [pool[index] for index in unique[:requested]]
+        # The provider is an ordering enhancement, not a reason to silently
+        # reduce the requested output count when the validated local pool is
+        # large enough. Fill any omitted slots in deterministic pool order.
+        if len(chosen) < min(requested, len(pool)):
+            chosen.extend(candidate for index, candidate in enumerate(pool) if index not in selected_indexes and len(chosen) < requested)
+        self.complete_step(job, "openrouter", detail=f"AI planning completed for {len(chosen)} candidates", private=private)
+        self.skip_step(job, "local_planning", detail="OpenRouter planning succeeded", private=private)
+        return chosen
 
     def _process_clip_smart(self, job: Job, private: dict[str, Any]) -> None:
         source = self._source(job, private)

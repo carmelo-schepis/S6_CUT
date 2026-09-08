@@ -13,7 +13,9 @@
     "test": "vitest run --config web/vitest.config.ts",
     "test:engine": "node scripts/test-engine.mjs",
     "check": "npm run lint && npm run typecheck && npm test && npm run test:engine && npm run build",
+    "check:supported": "node scripts/check-supported.mjs",
     "test:acceptance": "playwright test --config playwright.config.ts",
+    "test:e2e:openrouter-fallback": "node scripts/qa/openrouter-fallback.mjs",
     "qa:help-screenshots": "node scripts/qa/generate-help-screenshots.mjs"
   },
   "dependencies": {
