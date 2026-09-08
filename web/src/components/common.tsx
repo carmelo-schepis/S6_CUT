@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState, type ButtonHTMLAttributes, type PropsWithChildren, type ReactNode } from "react";
 import { AlertTriangle, Check, LoaderCircle, WifiOff, XCircle } from "lucide-react";
 import { groupWarnings } from "../status-format";
-import type { JobState } from "../types";
+import type { ContentFormat, JobState } from "../types";
 
 export { formatBytes, formatSeconds, sentenceCase } from "../status-format";
 
@@ -64,6 +64,30 @@ export function formatAge(value: string): string {
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
   if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
   return `${Math.floor(seconds / 86400)}d ago`;
+}
+
+export const outputAspectRatios = ["9:16", "1:1", "16:9", "4:5"] as const;
+export type OutputAspectRatio = typeof outputAspectRatios[number];
+
+/**
+ * Resolve the aspect ratio shown for a rendered output. Published output
+ * metadata is preferred, then validated dimensions, with the old project
+ * content format as a safe fallback for records created before output
+ * dimensions were persisted.
+ */
+export function resolveOutputAspectRatio(aspect: string | null | undefined, width: number | null | undefined, height: number | null | undefined, fallback: ContentFormat | undefined): OutputAspectRatio {
+  const persisted = outputAspectRatios.find((candidate) => candidate === aspect?.trim());
+  if (persisted) return persisted;
+  if (width && height) {
+    const ratio = width / height;
+    const closest = outputAspectRatios.reduce((best, candidate) => {
+      const [candidateWidth, candidateHeight] = candidate.split(":").map(Number);
+      const distance = Math.abs(ratio - candidateWidth / candidateHeight);
+      return distance < best.distance ? { candidate, distance } : best;
+    }, { candidate: "9:16" as OutputAspectRatio, distance: Number.POSITIVE_INFINITY });
+    if (closest.distance / ratio <= 0.02) return closest.candidate;
+  }
+  return fallback === "long" ? "16:9" : "9:16";
 }
 
 export function formatDimensions(aspect: string | null | undefined, width: number | null | undefined, height: number | null | undefined): string {

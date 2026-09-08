@@ -448,6 +448,42 @@ describe("WorkspaceView – publication metadata, Details rename, read-only capt
   });
 });
 
+describe("WorkspaceView – output aspect ratio presentation", () => {
+  const cases = [
+    [1080, 1080, "1:1"],
+    [1920, 1080, "16:9"],
+    [1080, 1920, "9:16"],
+    [1080, 1350, "4:5"],
+  ] as const;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockListFolders.mockResolvedValue([]);
+  });
+
+  it.each(cases)("uses %s×%s consistently in the viewer and clip metadata", async (width, height, aspect) => {
+    const ratioJob: Job = {
+      ...responsiveJob,
+      clips: [{ ...responsiveJob.clips[0], width, height }],
+    };
+    mockGetJob.mockResolvedValue(ratioJob);
+    renderView({ project: { ...project, latestJobId: ratioJob.id } });
+
+    expect(await screen.findByText(`Output · ${aspect}`)).toBeInTheDocument();
+    expect(screen.getByText(new RegExp(`0:10 · ${aspect} · ${width} × ${height} px`))).toBeInTheDocument();
+    expect(screen.queryByText(`Output · ${aspect === "9:16" ? "1:1" : "9:16"}`)).not.toBeInTheDocument();
+  });
+
+  it("falls back to the job content format for a legacy clip without output metadata", async () => {
+    const legacyJob: Job = { ...responsiveJob, contentFormat: "long", clips: [{ ...responsiveJob.clips[0], width: null, height: null }] };
+    mockGetJob.mockResolvedValue(legacyJob);
+    renderView({ project: { ...project, latestJobId: legacyJob.id } });
+
+    expect(await screen.findByText("Output · 16:9")).toBeInTheDocument();
+    expect(screen.getByText(/0:10 · 16:9 · dimensions unavailable/)).toBeInTheDocument();
+  });
+});
+
 describe("WorkspaceView – stable responsive media controls", () => {
   afterEach(() => vi.useRealTimers());
 
