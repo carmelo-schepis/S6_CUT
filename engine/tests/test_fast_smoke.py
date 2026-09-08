@@ -51,7 +51,7 @@ def test_fast_pipeline_real_smoke_never_enters_smart_services(monkeypatch: pytes
 
     monkeypatch.setattr(media_module, "transcribe", forbidden)
     monkeypatch.setattr("engine.jobs.select_candidates", forbidden)
-    monkeypatch.setattr(profiles, "synthesize_elevenlabs", forbidden)
+    monkeypatch.setattr(profiles, "synthesize_openrouter", forbidden)
     monkeypatch.setattr(profiles, "openrouter_json", forbidden)
 
     project_id, job_id = str(uuid.uuid4()), str(uuid.uuid4())

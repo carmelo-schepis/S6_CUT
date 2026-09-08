@@ -110,7 +110,7 @@ export function App() {
   };
 
   const selected = projects.find((project) => project.id === selectedProjectId) || null;
-  const hasSelectedProvider = profiles.some((profile) => profile.selected && profile.openrouterConfigured && profile.openrouterStatus === "connected");
+  const hasSelectedProvider = profiles.some((profile) => profile.selected && profile.openrouterConfigured && profile.textStatus === "connected");
   const openProviders = () => setPage("settings");
 
   return <div className="app-shell">

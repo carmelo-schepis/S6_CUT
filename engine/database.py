@@ -171,6 +171,55 @@ class Database:
                 );
             """)
             db.execute("INSERT OR IGNORE INTO schema_migrations VALUES(4,?)", (stamp,))
+        if version < 5:
+            stamp = now_iso()
+            # Provider profiles used to combine text settings with a second
+            # provider's credential and voice. Rewrite only the profile JSON;
+            # jobs, projects, media, and the encryption key remain untouched.
+            for row in db.execute("SELECT id, payload FROM profiles").fetchall():
+                try:
+                    old = json.loads(row["payload"])
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    continue
+                if "textModelId" in old or "textStatus" in old:
+                    continue
+                openrouter_configured = bool(old.get("openrouterConfigured"))
+                text_status = old.get("openrouterStatus", "configured" if openrouter_configured else "not_configured")
+                if text_status == "unavailable_model_or_voice":
+                    text_status = "unavailable"
+                tts_status = "not_configured"
+                new = {
+                    "id": old.get("id", row["id"]), "name": old.get("name", "Provider profile"),
+                    "textModelId": old.get("modelId", "openai/gpt-4.1-mini"), "ttsModelId": None,
+                    "ttsVoice": None, "ttsSpeed": 1.0, "selected": bool(old.get("selected")),
+                    "persistence": old.get("persistence", "encrypted"),
+                    "openrouterConfigured": openrouter_configured,
+                    "openrouterMasked": old.get("openrouterMasked"), "textStatus": text_status,
+                    "ttsStatus": tts_status, "textMessage": old.get("openrouterMessage"),
+                    "textLastCheckedAt": old.get("openrouterLastCheckedAt"),
+                    "ttsMessage": "Select an OpenRouter speech model to enable narration.",
+                    "ttsLastCheckedAt": None,
+                    "status": "partial" if text_status == "connected" else ("configured" if openrouter_configured else "local only"),
+                    "capabilities": [item for item in old.get("capabilities", []) if "eleven" not in str(item).casefold()],
+                    "fallbacks": old.get("fallbacks", {}),
+                }
+                db.execute("UPDATE profiles SET payload=? WHERE id=?", (json.dumps(new, separators=(",", ":")), row["id"]))
+            for row in db.execute("SELECT id, payload FROM jobs").fetchall():
+                try:
+                    old_job = json.loads(row["payload"])
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    continue
+                changed = False
+                for step in old_job.get("steps", []) if isinstance(old_job, dict) else []:
+                    if isinstance(step, dict) and step.get("id") == "elevenlabs":
+                        step["id"] = "tts"
+                        step["label"] = "Generated narration"
+                        if isinstance(step.get("detail"), str):
+                            step["detail"] = "Generated narration"
+                        changed = True
+                if changed:
+                    db.execute("UPDATE jobs SET payload=? WHERE id=?", (json.dumps(old_job, separators=(",", ":")), row["id"]))
+            db.execute("INSERT OR IGNORE INTO schema_migrations VALUES(5,?)", (stamp,))
 
     @staticmethod
     def _json(model: BaseModel) -> str:
@@ -259,6 +308,11 @@ class Database:
     def delete_profile(self, profile_id: str) -> None:
         with self._connect() as db:
             db.execute("DELETE FROM profiles WHERE id=?", (profile_id,))
+
+    def replace_profile_secret(self, profile_id: str, secret_payload: bytes) -> None:
+        """Replace one profile's encrypted secret during provider migration."""
+        with self._lock, self._connect() as db:
+            db.execute("UPDATE profiles SET secret_payload=? WHERE id=?", (secret_payload, profile_id))
 
     def save_asset(self, asset: Asset) -> None:
         with self._lock, self._connect() as db:

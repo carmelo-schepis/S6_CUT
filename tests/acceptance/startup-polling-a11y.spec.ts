@@ -15,14 +15,12 @@ const HEALTH_READY = {
 };
 
 const CONNECTED_PROFILE = {
-  id: "profile-1", name: "Studio", modelId: "vendor/model", voiceId: null, selected: true,
-  persistence: "encrypted", openrouterConfigured: true, elevenlabsConfigured: false,
-  openrouterMasked: "••••1234", elevenlabsMasked: null, openrouterStatus: "connected",
-  elevenlabsStatus: "not_configured", openrouterMessage: "Connected", openrouterLastCheckedAt: null,
-  elevenlabsMessage: "Optional", elevenlabsLastCheckedAt: null, status: "connected",
-  capabilities: ["structured planning"], fallbacks: { planning: "Deterministic planner", voice: "Local espeak-ng" },
+  id: "profile-1", name: "Studio", textModelId: "vendor/model", ttsModelId: "free/speech", ttsVoice: "alloy", ttsSpeed: 1, selected: true,
+  persistence: "encrypted", openrouterConfigured: true, openrouterMasked: "••••1234", textStatus: "connected",
+  ttsStatus: "connected", textMessage: "Connected", textLastCheckedAt: null, ttsMessage: "Connected", ttsLastCheckedAt: null, status: "connected",
+  capabilities: ["OpenRouter text generation", "OpenRouter TTS"], fallbacks: { planning: "Deterministic planner", voice: "Local espeak-ng" },
 };
-const DISCONNECTED_PROFILE = { ...CONNECTED_PROFILE, openrouterConfigured: false, openrouterStatus: "not_configured", openrouterMessage: null };
+const DISCONNECTED_PROFILE = { ...CONNECTED_PROFILE, openrouterConfigured: false, textStatus: "not_configured", ttsStatus: "not_configured", textMessage: null };
 
 const asset = (id: string, title: string, mediaType = "video/mp4") => ({
   id, title, description: "", mediaType, filename: `${id}.mp4`, tags: [], brands: [], people: [],

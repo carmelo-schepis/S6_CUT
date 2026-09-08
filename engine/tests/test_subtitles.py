@@ -99,7 +99,7 @@ def test_short_subtitle_is_single_centred_line(tmp_path: Path) -> None:
 def test_long_subtitle_wraps_without_splitting_words(tmp_path: Path) -> None:
     words = _words(
         "Connect", "OpenRouter", "for", "enhanced", "planning",
-        "and", "ElevenLabs", "for", "premium", "narration",
+        "and", "OpenRouter", "for", "premium", "narration",
     )
     ass = _write(tmp_path, words)
     events = _caption_events(ass)

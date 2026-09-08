@@ -456,8 +456,10 @@ class JobManager:
     def _script_steps(self) -> list[ProcessingStep]:
         return [
             ProcessingStep(id="validate", label="Script validated"),
+            ProcessingStep(id="planning", label="Planning complete"),
+            ProcessingStep(id="script_generation", label="Script generation complete"),
             ProcessingStep(id="narration", label="Narration prepared"),
-            ProcessingStep(id="elevenlabs", label="ElevenLabs narration"),
+            ProcessingStep(id="tts", label="OpenRouter speech narration"),
             ProcessingStep(id="local_voice", label="Local narration fallback"),
             ProcessingStep(id="align", label="Words aligned"),
             ProcessingStep(id="plan", label="Visual beats planned"),
@@ -1349,21 +1351,35 @@ class JobManager:
         if len(script.strip()) < 10:
             raise MediaError("The script is too short to render")
         self.complete_step(job, "validate", detail=f"Script validated — {len(script)} characters", private=private)
+        self.skip_step(job, "planning", detail="Plan supplied by the reviewed topic workflow", private=private)
+        self.skip_step(job, "script_generation", detail="Reviewed script supplied by the user", private=private)
         if private.get("narration") != "silent":
             if private.get("narration") == "auto":
                 try:
-                    self.start_step(job, "elevenlabs", detail="Requesting ElevenLabs narration", label="Creating paragraph-safe narration", progress=15, private=private)
-                    candidate = work / "narration-elevenlabs.mp3"
-                    if self.profiles.synthesize_elevenlabs(script, candidate):
-                        narration = candidate
-                        self.complete_step(job, "elevenlabs", detail="ElevenLabs narration complete", private=private)
+                    self.start_step(job, "tts", detail="Requesting OpenRouter speech narration", label="Creating paragraph-safe narration", progress=15, private=private)
+                    candidate = work / "narration-openrouter.mp3"
+                    if candidate.is_file():
+                        try:
+                            probe_audio(candidate, self.settings)
+                            narration = candidate
+                        except MediaError:
+                            candidate.unlink(missing_ok=True)
+                    if narration is None:
+                        result = self.profiles.synthesize_openrouter(script, candidate, validate=lambda path: probe_audio(path, self.settings))
+                        if result:
+                            narration = candidate
+                            private["tts"] = {"model": result.model, "voice": result.voice, "request_id": result.request_id, "generation_id": result.generation_id, "usage": result.usage, "cost": result.cost, "reused": result.reused}
+                            detail = "Reused completed OpenRouter narration" if result.reused else "OpenRouter narration complete"
+                            self.complete_step(job, "tts", detail=detail, private=private)
+                        else:
+                            self.skip_step(job, "tts", detail="OpenRouter TTS is not configured; used local narration", private=private)
                     else:
-                        self.skip_step(job, "elevenlabs", detail="No connected provider; used local narration", private=private)
+                        self.complete_step(job, "tts", detail="Reused completed OpenRouter narration", private=private)
                 except Exception as exc:
-                    self.fail_step(job, "elevenlabs", detail=redact(str(exc)), private=private)
-                    job.warnings.append(f"{provider_runtime_message(exc, 'ElevenLabs')}; used the local voice fallback.")
+                    self.fail_step(job, "tts", detail=redact(str(exc)), private=private)
+                    job.warnings.append(f"{provider_runtime_message(exc, 'OpenRouter TTS')}; used the local voice fallback.")
             else:
-                self.skip_step(job, "elevenlabs", detail="Local narration selected", private=private)
+                self.skip_step(job, "tts", detail="Local narration selected", private=private)
             if narration is None and available(self.settings.local_tts):
                 self.start_step(job, "local_voice", detail="Synthesising local narration", label="Synthesising local narration", progress=15, private=private)
                 try:
@@ -1373,17 +1389,19 @@ class JobManager:
                     self.fail_step(job, "local_voice", detail=redact(str(exc)), private=private)
                     job.warnings.append("Local narration failed; continued with a clearly labelled silent render.")
             elif narration is not None:
-                self.skip_step(job, "local_voice", detail="ElevenLabs narration succeeded", private=private)
+                self.skip_step(job, "local_voice", detail="OpenRouter narration succeeded", private=private)
             else:
                 self.skip_step(job, "local_voice", detail="Local TTS unavailable; used silent render", private=private)
             if narration is None:
                 self.skip_step(job, "narration", detail="No narration engine available; silent render used", private=private)
-                job.warnings.append("No local or optional narration engine was available. Continued with a clearly labelled silent render.")
+                job.warnings.append("No narration engine was available. Continued with a clearly labelled silent render.")
             else:
                 self.complete_step(job, "narration", detail="Narration ready", private=private)
         else:
             self.skip_step(job, "narration", detail="Silent render selected", private=private)
-            self.skip_step(job, "elevenlabs", detail="Silent render selected", private=private)
+            self.skip_step(job, "planning", detail="Silent render selected", private=private)
+            self.skip_step(job, "script_generation", detail="Silent render selected", private=private)
+            self.skip_step(job, "tts", detail="Silent render selected", private=private)
             self.skip_step(job, "local_voice", detail="Silent render selected", private=private)
         if narration:
             duration = probe_audio(narration, self.settings)["duration"]

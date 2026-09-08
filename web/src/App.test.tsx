@@ -27,12 +27,10 @@ const health = {
 };
 
 const profile = {
-  id: "p1", name: "Studio", modelId: "openai/gpt-4o-mini", voiceId: null, selected: true,
-  persistence: "encrypted", openrouterConfigured: true, elevenlabsConfigured: false,
-  openrouterMasked: "••••1234", elevenlabsMasked: null, openrouterStatus: "connected" as const,
-  elevenlabsStatus: "not_configured" as const, openrouterMessage: "Connected",
-  openrouterLastCheckedAt: null, elevenlabsMessage: "Optional", elevenlabsLastCheckedAt: null,
-  status: "connected", capabilities: ["structured planning"], fallbacks: { planning: "Deterministic planner" },
+  id: "p1", name: "Studio", textModelId: "openai/gpt-4o-mini", ttsModelId: "free/speech", ttsVoice: "alloy", ttsSpeed: 1, selected: true,
+  persistence: "encrypted", openrouterConfigured: true, openrouterMasked: "••••1234", textStatus: "connected" as const,
+  ttsStatus: "connected" as const, textMessage: "Connected", ttsMessage: "Connected", textLastCheckedAt: null, ttsLastCheckedAt: null,
+  status: "connected", capabilities: ["OpenRouter text generation", "OpenRouter TTS"], fallbacks: { planning: "Deterministic planner" },
 };
 
 /** A promise the test settles by hand. */

@@ -20,6 +20,7 @@ from engine.library import LibraryRules
 from engine.media import MediaError
 from engine.models import Clip, Job, ProcessingStep, Project, ScoreBreakdown
 from engine.providers import ProfileService
+from engine.openrouter_tts import TTSResult
 from engine.security import SecretVault
 from engine.selection import Candidate
 
@@ -47,7 +48,7 @@ SAMPLE_WORDS = [
 
 FAST_IDS = ["source", "probe", "plan", "render", "verify", "ready"]
 SMART_IDS = ["source", "probe", "audio", "transcribe", "openrouter", "local_planning", "select", "boundaries", "render", "verify", "ready"]
-SCRIPT_IDS = ["validate", "narration", "elevenlabs", "local_voice", "align", "plan", "assets", "render", "verify", "ready"]
+SCRIPT_IDS = ["validate", "planning", "script_generation", "narration", "tts", "local_voice", "align", "plan", "assets", "render", "verify", "ready"]
 
 
 def _tmpdir() -> Path:
@@ -293,7 +294,7 @@ def test_fast_checklist_exact_and_no_irrelevant_steps(monkeypatch: pytest.Monkey
     for step in job.steps:
         assert step.status == "complete"
         assert step.completed_at is not None
-    forbidden = {"audio", "transcribe", "select", "boundaries", "elevenlabs", "local_voice", "openrouter", "llm_planning"}
+    forbidden = {"audio", "transcribe", "select", "boundaries", "tts", "local_voice", "openrouter", "llm_planning"}
     assert not (forbidden & {step.id for step in job.steps})
     render_step = next(step for step in job.steps if step.id == "render")
     assert (render_step.current_item, render_step.total_items) == (3, 3)
@@ -571,14 +572,14 @@ def _script_pipeline_fakes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("engine.jobs.render_script", _fake_render_script)
 
 
-def test_script_elevenlabs_failure_local_fallback_records_both(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_script_tts_failure_local_fallback_records_both(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
 
-    def fail_elevenlabs(self: ProfileService, text: str, output: Path) -> bool:
-        raise MediaError("elevenlabs-api-down")
+    def fail_tts(self: ProfileService, text: str, output: Path, **kwargs: Any):
+        raise MediaError("openrouter-tts-api-down")
 
-    monkeypatch.setattr(ProfileService, "synthesize_elevenlabs", fail_elevenlabs)
+    monkeypatch.setattr(ProfileService, "synthesize_openrouter", fail_tts)
     monkeypatch.setattr("engine.jobs.available", lambda *a: True)
 
     def fake_local(text: str, output: Path, settings: Settings) -> Path:
@@ -599,9 +600,9 @@ def test_script_elevenlabs_failure_local_fallback_records_both(monkeypatch: pyte
     _assert_step_invariants(job)
     steps = {step.id: step for step in job.steps}
     assert [step.id for step in job.steps] == SCRIPT_IDS
-    assert steps["elevenlabs"].status == "failed"
-    assert "elevenlabs-api-down" in steps["elevenlabs"].detail
-    assert steps["elevenlabs"].completed_at is not None
+    assert steps["tts"].status == "failed"
+    assert "openrouter-tts-api-down" in steps["tts"].detail
+    assert steps["tts"].completed_at is not None
     assert steps["local_voice"].status == "complete"
     assert steps["narration"].status == "complete"
     assert any("used the local voice fallback" in warning for warning in job.warnings)
@@ -609,16 +610,16 @@ def test_script_elevenlabs_failure_local_fallback_records_both(monkeypatch: pyte
         assert steps[step_id].status == "complete", step_id
 
 
-def test_script_elevenlabs_success_records_only_that_provider(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_script_tts_success_records_only_that_provider(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
 
-    def ok_elevenlabs(self: ProfileService, text: str, output: Path) -> bool:
+    def ok_tts(self: ProfileService, text: str, output: Path, **kwargs: Any):
         output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_bytes(b"premium-narration")
-        return True
+        output.write_bytes(b"openrouter-narration")
+        return TTSResult(model="free/speech", voice="alloy")
 
-    monkeypatch.setattr(ProfileService, "synthesize_elevenlabs", ok_elevenlabs)
+    monkeypatch.setattr(ProfileService, "synthesize_openrouter", ok_tts)
     _script_pipeline_fakes(monkeypatch)
 
     script = "The Beatles changed popular music forever."
@@ -629,10 +630,26 @@ def test_script_elevenlabs_success_records_only_that_provider(monkeypatch: pytes
     assert job is not None
     assert job.state == "complete"
     steps = {step.id: step for step in job.steps}
-    assert steps["elevenlabs"].status == "complete"
+    assert steps["tts"].status == "complete"
     assert steps["local_voice"].status == "skipped"
-    assert steps["local_voice"].detail == "ElevenLabs narration succeeded"
+    assert steps["local_voice"].detail == "OpenRouter narration succeeded"
     assert steps["narration"].status == "complete"
+
+
+def test_script_reuses_completed_openrouter_narration_without_regenerating(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    tmp_path = _tmpdir()
+    test_db, test_manager = _cluster(tmp_path)
+    _script_pipeline_fakes(monkeypatch)
+    candidate = tmp_path / "jobs" / "script-reuse" / "narration-openrouter.mp3"
+    candidate.parent.mkdir(parents=True, exist_ok=True)
+    candidate.write_bytes(b"completed-openrouter-audio")
+    def forbidden(*args: Any, **kwargs: Any):
+        raise AssertionError("completed narration must be reused")
+    monkeypatch.setattr(ProfileService, "synthesize_openrouter", forbidden)
+    _script_job(test_db, "script-reuse", "script-reuse-proj", script="The Beatles changed popular music forever.", narration="auto")
+    test_manager._process("script-reuse")
+    job = test_db.get_job("script-reuse")
+    assert job and {step.id: step for step in job.steps}["tts"].detail == "Reused completed OpenRouter narration"
 
 
 def test_script_silent_marks_narration_steps_skipped(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -651,7 +668,9 @@ def test_script_silent_marks_narration_steps_skipped(monkeypatch: pytest.MonkeyP
     steps = {step.id: step for step in job.steps}
     assert steps["narration"].status == "skipped"
     assert steps["narration"].detail == "Silent render selected"
-    assert steps["elevenlabs"].status == "skipped"
+    assert steps["planning"].status == "skipped"
+    assert steps["script_generation"].status == "skipped"
+    assert steps["tts"].status == "skipped"
     assert steps["local_voice"].status == "skipped"
     assert steps["render"].status == "complete"
     assert steps["verify"].status == "complete"

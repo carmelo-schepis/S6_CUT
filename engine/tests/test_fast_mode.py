@@ -313,12 +313,12 @@ def test_smart_available_requires_selected_connected_profile() -> None:
     # Clean slate: no selected+connected profile may leak from other tests
     for existing in db.list_profiles():
         existing.selected = False
-        existing.openrouter_status = "not_configured"
+        existing.text_status = "not_configured"
         db.save_profile(existing)
     assert app_profiles.smart_available() is False
 
     created = app_profiles.save(ProfileInput(
-        name="Unconnected", model_id="openai/test",
+        name="Unconnected", text_model_id="openai/test",
         openrouter_key="sk-or-v1-test-key", persistence="session", selected=True,
     ))
     # Saved but never connected → configured only
@@ -327,8 +327,8 @@ def test_smart_available_requires_selected_connected_profile() -> None:
     record = db.get_profile(created.id)
     assert record is not None
     profile, _ = record
-    profile.openrouter_status = "connected"
-    profile.openrouter_message = "Connected"
+    profile.text_status = "connected"
+    profile.text_message = "Connected"
     profile.status = "connected"
     db.save_profile(profile)
     assert app_profiles.smart_available() is True

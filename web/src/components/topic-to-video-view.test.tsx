@@ -13,13 +13,12 @@ vi.mock("../api", () => ({
 }));
 
 const connected: ProviderProfile = {
-  id: "profile-1", name: "Connected profile", modelId: "saved/model", selected: true,
-  persistence: "encrypted", openrouterConfigured: true, elevenlabsConfigured: false,
-  openrouterMasked: "sk-…safe", elevenlabsMasked: null, openrouterStatus: "connected",
-  elevenlabsStatus: "not_configured", openrouterMessage: null, elevenlabsMessage: null,
-  status: "connected", capabilities: ["structured planning"], fallbacks: { planning: "local" },
+  id: "profile-1", name: "Connected profile", textModelId: "saved/model", ttsModelId: "free/speech", ttsVoice: "alloy", ttsSpeed: 1, selected: true,
+  persistence: "encrypted", openrouterConfigured: true, openrouterMasked: "sk-…safe", textStatus: "connected", ttsStatus: "connected",
+  textMessage: null, ttsMessage: null, textLastCheckedAt: null, ttsLastCheckedAt: null,
+  status: "connected", capabilities: ["OpenRouter text generation", "OpenRouter TTS"], fallbacks: { planning: "local" },
 };
-const disconnected: ProviderProfile = { ...connected, id: "profile-2", selected: true, openrouterConfigured: false, openrouterStatus: "not_configured" };
+const disconnected: ProviderProfile = { ...connected, id: "profile-2", selected: true, openrouterConfigured: false, textStatus: "not_configured", ttsStatus: "not_configured" };
 const models = [
   { id: "vendor/first-arbitrary", name: "First arbitrary", contextLength: 32000 },
   { id: "vendor/second-arbitrary", name: "Second arbitrary", contextLength: null },
