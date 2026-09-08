@@ -77,7 +77,7 @@ def test_provider_tests_report_each_optional_service_independently(monkeypatch) 
         async def get(self, url: str, **_: object):
             if "openrouter" in url:
                 return Response(401, {})
-            return Response(200, {"voices": [{"voice_id": "voice-ok"}]})
+            return Response(200, {"user_id": "user-ok"})
 
         async def post(self, url: str, **_: object):
             return Response(200, {"choices": [{"message": {"content": '{"ok":true}'}}]})

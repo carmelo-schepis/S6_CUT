@@ -243,6 +243,7 @@ export type OpenRouterModel = z.infer<typeof openRouterModelSchema>;
 export const providerConnectionStatusSchema = z.enum([
   "not_configured", "configured", "connected", "invalid_credentials", "rate_limited",
   "timeout_offline", "unavailable_model_or_voice", "malformed_response",
+  "insufficient_permissions", "provider_service_failure",
 ]);
 
 export const profileSchema = z.object({

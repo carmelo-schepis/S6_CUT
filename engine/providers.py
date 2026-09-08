@@ -20,6 +20,9 @@ class ProviderError(RuntimeError):
         self.safe_message = message
 
 
+MASKED_SECRET_MARKER = "••••"
+
+
 FALLBACKS = {
     "planning": "Deterministic sentence and phrase planner",
     "captions": "Canonical timed transcript",
@@ -60,6 +63,17 @@ class ProfileService:
         except (json.JSONDecodeError, UnicodeDecodeError):
             return {}
 
+    @staticmethod
+    def _credential(value: str | None, previous: str = "") -> str:
+        """Normalize a newly entered secret without accepting a masked value."""
+        if not ProfileService._has_new_credential(value):
+            return previous
+        return value.strip()
+
+    @staticmethod
+    def _has_new_credential(value: str | None) -> bool:
+        return bool(value and value.strip() and MASKED_SECRET_MARKER not in value.strip())
+
     def secrets(self, profile_id: str) -> dict[str, str]:
         record = self.db.get_profile(profile_id)
         if not record:
@@ -93,12 +107,12 @@ class ProfileService:
         existing = self.db.get_profile(profile_id)
         previous = self.secrets(profile_id) if existing else {}
         secrets = {
-            "openrouterKey": value.openrouter_key or previous.get("openrouterKey", ""),
-            "elevenlabsKey": value.elevenlabs_key or previous.get("elevenlabsKey", ""),
+            "openrouterKey": self._credential(value.openrouter_key, previous.get("openrouterKey", "")),
+            "elevenlabsKey": self._credential(value.elevenlabs_key, previous.get("elevenlabsKey", "")),
         }
         previous_profile = existing[0] if existing else None
-        openrouter_unchanged = bool(previous_profile and not value.openrouter_key and value.model_id == previous_profile.model_id)
-        elevenlabs_unchanged = bool(previous_profile and not value.elevenlabs_key and value.voice_id == previous_profile.voice_id)
+        openrouter_unchanged = bool(previous_profile and not self._has_new_credential(value.openrouter_key) and value.model_id == previous_profile.model_id)
+        elevenlabs_unchanged = bool(previous_profile and not self._has_new_credential(value.elevenlabs_key) and value.voice_id == previous_profile.voice_id)
         profile = ProviderProfile(
             id=profile_id, name=value.name, model_id=value.model_id, voice_id=value.voice_id,
             selected=value.selected, persistence=value.persistence,
@@ -142,7 +156,19 @@ class ProfileService:
             return "rate_limited", f"{service} is rate limited; try again later"
         if status_code in {404, 422}:
             return "unavailable_model_or_voice", f"The configured {service} model or voice is unavailable"
-        return "timeout_offline", f"{service} is temporarily unavailable"
+        return "provider_service_failure", f"{service} returned a temporary service failure"
+
+    @staticmethod
+    def _elevenlabs_http_failure(status_code: int) -> tuple[str, str]:
+        if status_code == 401:
+            return "invalid_credentials", "ElevenLabs rejected the saved credentials"
+        if status_code == 403:
+            return "insufficient_permissions", "The saved ElevenLabs credential lacks permission"
+        if status_code == 429:
+            return "rate_limited", "ElevenLabs is rate limited; try again later"
+        if 500 <= status_code <= 599:
+            return "provider_service_failure", "ElevenLabs is temporarily unavailable"
+        return "provider_service_failure", "ElevenLabs returned an unexpected response"
 
     async def test(self, profile_id: str) -> ProviderProfile:
         record = self.db.get_profile(profile_id)
@@ -216,20 +242,18 @@ class ProfileService:
             if key := secrets.get("elevenlabsKey"):
                 profile.elevenlabs_last_checked_at = now_iso()
                 try:
-                    response = await client.get("https://api.elevenlabs.io/v1/voices", headers={"xi-api-key": key})
+                    # /v1/user is a non-billable account/authentication check. It
+                    # validates this exact decrypted key without requiring a voice or
+                    # initiating a generation operation.
+                    response = await client.get("https://api.elevenlabs.io/v1/user", headers={"xi-api-key": key})
                     if response.status_code >= 400:
-                        profile.elevenlabs_status, profile.elevenlabs_message = self._http_failure(response.status_code, "ElevenLabs")
+                        profile.elevenlabs_status, profile.elevenlabs_message = self._elevenlabs_http_failure(response.status_code)
+                    elif not isinstance(response.json(), dict):
+                        profile.elevenlabs_status, profile.elevenlabs_message = "malformed_response", "ElevenLabs returned an unreadable response"
                     else:
-                        payload = response.json()
-                        voices = payload.get("voices") if isinstance(payload, dict) else None
-                        if not isinstance(voices, list):
-                            profile.elevenlabs_status, profile.elevenlabs_message = "malformed_response", "ElevenLabs returned an unreadable response"
-                        elif not profile.voice_id or not any(isinstance(item, dict) and item.get("voice_id") == profile.voice_id for item in voices):
-                            profile.elevenlabs_status, profile.elevenlabs_message = "unavailable_model_or_voice", "Choose an available ElevenLabs voice ID"
-                        else:
-                            profile.elevenlabs_status, profile.elevenlabs_message = "connected", "Connected; premium narration is available"
+                        profile.elevenlabs_status, profile.elevenlabs_message = "connected", "Connected; ElevenLabs authentication succeeded"
                 except (httpx.TimeoutException, httpx.RequestError):
-                    profile.elevenlabs_status, profile.elevenlabs_message = "timeout_offline", "ElevenLabs is offline or timed out; local narration remains available"
+                    profile.elevenlabs_status, profile.elevenlabs_message = "timeout_offline", "ElevenLabs could not be reached; check network, DNS, or TLS settings"
                 except (TypeError, ValueError):
                     profile.elevenlabs_status, profile.elevenlabs_message = "malformed_response", "ElevenLabs returned an unreadable response"
         statuses = {profile.openrouter_status, profile.elevenlabs_status}

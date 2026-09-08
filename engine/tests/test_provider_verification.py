@@ -28,6 +28,7 @@ class FakeClient:
     completion_response: FakeResponse
     get_error: Exception | None = None
     completion_calls = 0
+    requests: list[tuple[str, dict[str, str]]] = []
 
     def __init__(self, **_: object):
         pass
@@ -38,9 +39,11 @@ class FakeClient:
     async def __aexit__(self, *_: object):
         return None
 
-    async def get(self, *_: object, **__: object):
+    async def get(self, url: str, **kwargs: object):
         if self.get_error:
             raise self.get_error
+        headers = kwargs.get("headers", {})
+        type(self).requests.append((url, headers if isinstance(headers, dict) else {}))
         return self.model_response
 
     async def post(self, *_: object, **__: object):
@@ -140,3 +143,52 @@ def test_later_failure_clears_previous_success(tmp_path: Path, monkeypatch: pyte
     assert rejected.openrouter_last_checked_at is not None
     assert rejected.openrouter_last_checked_at != previous_check
     assert service.smart_available() is False
+
+
+def test_elevenlabs_validation_uses_non_billable_user_endpoint_and_header(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    db = Database(tmp_path / "s6-cut.sqlite3")
+    service = ProfileService(db, SecretVault(tmp_path / "secrets" / "instance.key"))
+    profile = service.save(ProfileInput(name="ElevenLabs", elevenlabs_key="  fixture-secret  ", selected=True))
+    FakeClient.model_response = FakeResponse(200, {"user_id": "user"})
+    FakeClient.get_error = None
+    FakeClient.requests = []
+    monkeypatch.setattr("engine.providers.httpx.AsyncClient", FakeClient)
+
+    result = run_test(service, profile.id)
+
+    assert result.elevenlabs_status == "connected"
+    assert FakeClient.requests == [("https://api.elevenlabs.io/v1/user", {"xi-api-key": "fixture-secret"})]
+    assert service.secrets(profile.id)["elevenlabsKey"] == "fixture-secret"
+
+
+@pytest.mark.parametrize(
+    ("status_code", "status"),
+    [(401, "invalid_credentials"), (403, "insufficient_permissions"), (429, "rate_limited"), (503, "provider_service_failure")],
+)
+def test_elevenlabs_http_failures_are_distinguished(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status_code: int, status: str) -> None:
+    db = Database(tmp_path / "s6-cut.sqlite3")
+    service = ProfileService(db, SecretVault(tmp_path / "secrets" / "instance.key"))
+    profile = service.save(ProfileInput(name="ElevenLabs", elevenlabs_key="fixture-secret", selected=True))
+    FakeClient.model_response = FakeResponse(status_code, {"detail": "secret must not escape"})
+    FakeClient.get_error = None
+    FakeClient.requests = []
+    monkeypatch.setattr("engine.providers.httpx.AsyncClient", FakeClient)
+
+    result = run_test(service, profile.id)
+
+    assert result.elevenlabs_status == status
+    assert "secret must not escape" not in (result.elevenlabs_message or "")
+
+
+def test_editing_with_masked_or_blank_secret_retains_existing_encrypted_secret(tmp_path: Path) -> None:
+    db = Database(tmp_path / "s6-cut.sqlite3")
+    service = ProfileService(db, SecretVault(tmp_path / "secrets" / "instance.key"))
+    original = service.save(ProfileInput(name="ElevenLabs", elevenlabs_key="fixture-secret", selected=True))
+
+    unchanged = service.save(ProfileInput(name="Renamed", elevenlabs_key="", selected=True), original.id)
+    whitespace = service.save(ProfileInput(name="Whitespace", elevenlabs_key=" \n\t", selected=True), original.id)
+    masked = service.save(ProfileInput(name="Renamed again", elevenlabs_key="••••cret", selected=True), original.id)
+
+    assert unchanged.elevenlabs_configured and whitespace.elevenlabs_configured and masked.elevenlabs_configured
+    assert whitespace.elevenlabs_status == "configured"
+    assert service.secrets(original.id)["elevenlabsKey"] == "fixture-secret"

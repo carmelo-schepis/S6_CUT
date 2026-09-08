@@ -349,6 +349,7 @@ class ProfileInput(ApiModel):
 ProviderConnectionStatus = Literal[
     "not_configured", "configured", "connected", "invalid_credentials", "rate_limited",
     "timeout_offline", "unavailable_model_or_voice", "malformed_response",
+    "insufficient_permissions", "provider_service_failure",
 ]
 
 

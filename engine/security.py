@@ -156,7 +156,7 @@ class MediaSigner:
 
 def redact(value: str) -> str:
     value = re.sub(r"(?i)(authorization|api[-_ ]?key|token)\s*[:=]\s*[^\s,;]+", r"\1=[redacted]", value)
-    value = re.sub(r"sk-[A-Za-z0-9_-]{12,}", "[redacted-key]", value)
+    value = re.sub(r"sk[-_][A-Za-z0-9_-]{12,}", "[redacted-key]", value)
     return value[:1000]
 
 
