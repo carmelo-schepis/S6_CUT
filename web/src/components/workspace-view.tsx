@@ -61,6 +61,7 @@ export function WorkspaceView({ project, health, providersLoaded = true, hasSele
   // "Preparing project" — the job may already be rendering.
   const [jobFetched, setJobFetched] = useState(false);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
+  const [clipFilter, setClipFilter] = useState<"all" | "selected" | "failed">("all");
   const [sourceTab, setSourceTab] = useState<"transcript" | "media">("transcript");
   const [mediaAssets, setMediaAssets] = useState<LibraryAsset[]>([]);
   const [mediaLoading, setMediaLoading] = useState(false);
@@ -363,6 +364,9 @@ export function WorkspaceView({ project, health, providersLoaded = true, hasSele
   );
   const selectedIds = job?.clips.filter((clip) => clip.selected && clip.state === "complete").map((clip) => clip.id) || [];
   const savedCount = job?.clips.filter((clip) => clip.state === "complete" && clip.libraryAssetId).length || 0;
+  const filteredClips = (job?.clips || []).filter((clip) =>
+    clipFilter === "selected" ? clip.selected : clipFilter === "failed" ? clip.state === "failed" : true,
+  );
   const providerRelatedFailure = Boolean(job?.error && /openrouter|elevenlabs|provider|credential|api key|model|voice/i.test(job.error));
   const providerCouldHelp = providerRelatedFailure || Boolean(job?.state === "failed" && project?.mode === "script" && !hasSelectedProvider);
   const canContinueLocally = providerRelatedFailure && Boolean(project?.mode === "clip" || health?.localTts);
@@ -538,11 +542,11 @@ export function WorkspaceView({ project, health, providersLoaded = true, hasSele
     </div>
 
     <section className="board-panel panel">
-      <div className="board-header"><div><strong>{project.mode === "clip" ? "Clip board" : "Beat board"}</strong><span>{!jobLoaded ? "Loading…" : project.mode === "clip" ? `${job?.clips.length || 0} planned · ${job?.clips.filter((clip) => clip.state === "complete").length || 0} ready${savedCount ? ` · ${savedCount} saved to Library` : ""}` : `${job?.beats.length || 0} visual beats`}</span></div><div className="board-filters"><button className="active">All</button><button>Selected</button><button>Failed</button></div></div>
-      {project.mode === "clip" ? <div className="clip-board">{job?.clips.map((clip) => <article key={clip.id} className={`clip-tile ${selectedClipId === clip.id ? "active" : ""} ${clip.state}`} onClick={() => setSelectedClipId(clip.id)}>
+      <div className="board-header"><div><strong>{project.mode === "clip" ? "Clip board" : "Beat board"}</strong><span>{!jobLoaded ? "Loading…" : project.mode === "clip" ? `${job?.clips.length || 0} planned · ${job?.clips.filter((clip) => clip.state === "complete").length || 0} ready${savedCount ? ` · ${savedCount} saved to Library` : ""}` : `${job?.beats.length || 0} visual beats`}</span></div>{project.mode === "clip" && <div className="board-filters" role="group" aria-label="Filter clips">{(["all", "selected", "failed"] as const).map((filter) => <button key={filter} type="button" className={clipFilter === filter ? "active" : ""} aria-label={`${filter[0].toUpperCase()}${filter.slice(1)} clips`} aria-pressed={clipFilter === filter} onClick={() => setClipFilter(filter)}>{filter[0].toUpperCase()}{filter.slice(1)}</button>)}</div>}</div>
+      {project.mode === "clip" ? <div className="clip-board">{filteredClips.length ? filteredClips.map((clip) => <article key={clip.id} className={`clip-tile ${selectedClipId === clip.id ? "active" : ""} ${clip.state}`} onClick={() => setSelectedClipId(clip.id)}>
         <div className="clip-thumb"><span className="clip-number">{String(clip.index).padStart(2, "0")}</span>{clip.state === "complete" ? <><ClipThumb clip={clip} /><span className="score-ring">{clip.score ? Math.round(clip.score.total) : "–"}</span></> : clip.state === "failed" ? <AlertTriangle size={24} /> : <RefreshCw size={24} className="spin" />}</div>
         <div className="clip-tile-body"><strong className="clip-title" title={clip.title || `Cut ${String(clip.index).padStart(2, "0")}`}>{clip.title || `Cut ${String(clip.index).padStart(2, "0")}`}</strong><span className="clip-line" title={clip.openingLine || undefined}>{clip.openingLine || "Candidate clip"}</span><span className="clip-meta">{formatDuration(clip.duration)} · {formatDimensions(outputAspectRatio, clip.width, clip.height)} · {folderName(clip.folderId, folders, project)}</span>{clip.state === "complete" && clip.libraryAssetId && <span className="saved-badge"><Check size={11} /> Saved to Library</span>}{clip.state === "failed" ? <Button disabled={busy} onClick={(event) => { event.stopPropagation(); void retryOneClip(clip); }}><RefreshCw size={12} /> Retry clip</Button> : <div className="clip-actions"><Button className="clip-action" disabled={clip.state !== "complete"} onClick={(event) => { event.stopPropagation(); selectClipForPreview(clip); }}><Eye size={12} /> Preview</Button>{clip.state === "complete" && clip.downloadUrl && <a className="button button-secondary clip-action" href={clip.downloadUrl} download onClick={(event) => event.stopPropagation()}><Download size={12} /> Download</a>}<label onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={clip.selected} disabled={clip.state !== "complete"} onChange={() => toggleClip(clip)} /> Include in export</label></div>}</div>
-      </article>) || (jobLoaded ? <div className="board-placeholder">Candidates appear here after local transcription and selection.</div> : <><Skeleton rows={3} className="skeleton-tile" /><Skeleton rows={3} className="skeleton-tile" /><Skeleton rows={3} className="skeleton-tile" /></>)}</div>
+      </article>) : jobLoaded ? <div className="board-placeholder" role="status">{clipFilter === "all" ? "Candidates appear here after local transcription and selection." : `No ${clipFilter} clips.`}</div> : <><Skeleton rows={3} className="skeleton-tile" /><Skeleton rows={3} className="skeleton-tile" /><Skeleton rows={3} className="skeleton-tile" /></>}</div>
         : <div className="beat-board">{job?.beats.map((beat, index) => <article key={beat.id} className="beat-tile"><div className="beat-visual"><span>{String(index + 1).padStart(2, "0")}</span><Sparkles size={22} /></div><div><strong>{beat.concept}</strong><p>{beat.text}</p><span>{formatDuration(beat.start)}–{formatDuration(beat.end)} · {beat.source} · {Math.round(beat.confidence * 100)}%</span></div><StatusBadge state={beat.source === "library" ? "ready" : "fallback"} label={beat.ruleState || beat.source} /></article>)}</div>}
     </section>
 
