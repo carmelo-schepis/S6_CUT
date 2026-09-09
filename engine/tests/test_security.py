@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -20,6 +21,38 @@ def test_url_import_rejects_unsupported_protocol_and_host() -> None:
         validate_youtube_url("http://youtube.com/watch?v=one")
     with pytest.raises(ValueError, match="public HTTPS YouTube"):
         validate_youtube_url("https://127.0.0.1/video")
+
+
+def test_supplied_youtube_urls_are_canonicalized(monkeypatch) -> None:
+    monkeypatch.setattr("engine.security.socket.getaddrinfo", lambda *_args, **_kwargs: [(None, None, None, None, ("142.250.70.206", 443))])
+    fixture_path = Path(__file__).parents[2] / "tests" / "fixtures" / "youtube-live-sources.json"
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+
+    for source in fixture["sources"]:
+        assert validate_youtube_url(source["url"]) == f"https://www.youtube.com/watch?v={source['videoId']}"
+
+
+@pytest.mark.parametrize("url", [
+    "https://youtu.be/8xEuFQz4E4A?t=10",
+    "https://www.youtube.com/shorts/8xEuFQz4E4A?feature=share",
+    "https://m.youtube.com/watch?v=8xEuFQz4E4A&list=untrusted",
+])
+def test_supported_youtube_shapes_share_one_canonical_url(url, monkeypatch) -> None:
+    monkeypatch.setattr("engine.security.socket.getaddrinfo", lambda *_args, **_kwargs: [(None, None, None, None, ("142.250.70.206", 443))])
+    assert validate_youtube_url(url) == "https://www.youtube.com/watch?v=8xEuFQz4E4A"
+
+
+@pytest.mark.parametrize("url", [
+    "https://www.youtube.com/redirect?q=https://example.com/video.mp4",
+    "https://www.youtube.com/watch",
+    "https://www.youtube.com/watch?v=too-short",
+    "https://www.youtube.com/watch?v=8xEuFQz4E4A&v=KNVr5pHAygI",
+    "https://youtu.be/8xEuFQz4E4A/extra",
+])
+def test_youtube_urls_reject_redirects_and_ambiguous_video_ids(url, monkeypatch) -> None:
+    monkeypatch.setattr("engine.security.socket.getaddrinfo", lambda *_args, **_kwargs: [(None, None, None, None, ("142.250.70.206", 443))])
+    with pytest.raises(ValueError, match="YouTube video URL"):
+        validate_youtube_url(url)
 
 
 def test_local_tts_terminates_options_before_user_script(tmp_path, monkeypatch) -> None:
