@@ -138,9 +138,9 @@ export function App() {
           </button>;
         })}
       </nav>
-      {/* Startup is reported once, by the shell's engine-startup row. This foot
-          is the steady-state engine reading, so it stays out of the way until
-          the first health read has settled. */}
+      {/* Help sits at the foot of the rail, below the destinations. The engine
+          reading is not here: startup is announced once by the engine-startup
+          row, and the steady-state status lives in the topbar badge. */}
       <button className="help-launcher" onClick={() => setHelpOpen(true)} aria-label="Open S6 Cut Help">
         <CircleHelp size={18} aria-hidden="true" /><span>Help</span>
       </button>

@@ -1,10 +1,32 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
 import fs from "node:fs/promises";
 import path from "node:path";
 
 const root = process.cwd();
+const gateway = process.env.S6_ACCEPTANCE_URL || "http://localhost:8080";
 const artifacts = path.join(root, "test-artifacts");
-const projectName = "Codex Final Browser Retest 20260826T062538111Z";
+/**
+ * The project this walkthrough opens.
+ *
+ * This used to name one specific project created by a one-off manual session in
+ * August 2026. That project is long gone, so the test could never pass again on
+ * any dataset. It now takes whatever completed project the instance actually
+ * has — the walkthrough is about viewport geometry, screenshots and the export
+ * ZIP, not about one particular project — and skips cleanly when there is none
+ * to open, the same way the FFmpeg-gated tests skip when the tools are absent.
+ */
+async function findCompletedProject(request: APIRequestContext): Promise<string | null> {
+  const projectsResponse = await request.get(`${gateway}/api/v1/projects`);
+  if (!projectsResponse.ok()) return null;
+  const projects = await projectsResponse.json() as { id: string; name: string }[];
+  const jobsResponse = await request.get(`${gateway}/api/v1/jobs`);
+  if (!jobsResponse.ok()) return null;
+  const jobs = await jobsResponse.json() as { projectId: string; state: string; clips?: { state: string }[] }[];
+  const exportable = new Set(jobs
+    .filter((job) => job.state === "complete" && (job.clips ?? []).some((clip) => clip.state === "complete"))
+    .map((job) => job.projectId));
+  return projects.find((project) => exportable.has(project.id))?.name ?? null;
+}
 const viewports = [
   ["desktop", 1440, 1000],
   ["tablet", 768, 1024],
@@ -82,8 +104,10 @@ async function openProjectByName(page: Page, name: string) {
   await card.first().click();
 }
 
-test("terminal exact viewport, screenshot, and ZIP evidence", async ({ browser }) => {
+test("terminal exact viewport, screenshot, and ZIP evidence", async ({ browser, request }) => {
   await fs.mkdir(artifacts, { recursive: true });
+  const projectName = await findCompletedProject(request);
+  test.skip(!projectName, "no completed project with an exportable clip is present on this instance");
   const base = `${process.env.S6_ACCEPTANCE_URL || "http://localhost:8080"}/?terminal-responsive-retest=${new Date().toISOString()}`;
   const diagnostics = { consoleErrors: [] as string[], pageErrors: [] as string[], failedRequests: [] as string[], measurements: [] as unknown[] };
 
@@ -100,7 +124,7 @@ test("terminal exact viewport, screenshot, and ZIP evidence", async ({ browser }
     await assertFocusedControlVisible(page);
     await page.screenshot({ path: path.join(artifacts, `${name}-projects.png`), fullPage: true });
 
-    await openProjectByName(page, projectName);
+    await openProjectByName(page, projectName!);
     await page.waitForTimeout(400);
     diagnostics.measurements.push(await measure(page, "workspace", { width, height }));
     await open(page, "Shorts Editor");
@@ -127,7 +151,7 @@ test("terminal exact viewport, screenshot, and ZIP evidence", async ({ browser }
   const page = await context.newPage();
   await page.goto(base);
   await expect(page.getByRole("heading", { name: "Make the first cut" })).toBeVisible();
-  await openProjectByName(page, projectName);
+  await openProjectByName(page, projectName!);
   const downloadButton = page.getByRole("button", { name: /Download ZIP/ }).first();
   await expect(downloadButton).toBeEnabled();
   const downloadWait = page.waitForEvent("download");
