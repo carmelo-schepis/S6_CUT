@@ -102,6 +102,25 @@ class Settings:
     def prepare(self) -> None:
         for name in ("jobs", "uploads", "library", "models", "cache", "exports", "temp", "secrets"):
             (self.data_path / name).mkdir(parents=True, exist_ok=True)
+        self.prepare_model_cache()
+
+    def prepare_model_cache(self) -> None:
+        """Keep every Hugging Face cache inside the mounted data path.
+
+        The Whisper download root is already ``data/models``, but the Hub client
+        and its Xet transfer backend additionally write a chunk cache and logs
+        under ``HF_HOME``, which defaults to ``$HOME/.cache/huggingface``. A
+        deployment that runs the engine under a different UID than the image's
+        own user — a NAS matching its dataset owner, or an isolated test stack —
+        gets ``HOME=/`` and the model download dies with an opaque
+        ``Permission denied (os error 13)``. Pinning the caches to the writable
+        data path removes that dependency and keeps the downloaded model across
+        container rebuilds. Values an operator already set always win.
+        """
+        root = self.data_path / "models"
+        root.mkdir(parents=True, exist_ok=True)
+        os.environ.setdefault("HF_HOME", str(root))
+        os.environ.setdefault("HF_XET_CACHE", str(root / "xet"))
 
 
 settings = Settings.from_env()

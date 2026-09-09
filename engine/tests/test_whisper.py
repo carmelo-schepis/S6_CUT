@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -37,8 +38,24 @@ def tmp_path() -> Path:
     return Path(tempfile.mkdtemp(prefix="s6-cut-whisper-test-"))
 
 
+def _require_ffmpeg(settings: Settings) -> None:
+    """Skip a test whose fixture is built with the real FFmpeg tools.
+
+    These are the FFmpeg-gated smoke tests described in
+    DO-NOT-CHANGE/AGENTS.md section 9: on a host without ffmpeg/ffprobe they
+    must skip cleanly rather than fail with a bare FileNotFoundError. Only the
+    tests that shell out are gated; the pure-logic tests in this module keep
+    running everywhere.
+    """
+    missing = [name for name, binary in (("ffmpeg", settings.ffmpeg), ("ffprobe", settings.ffprobe))
+               if not shutil.which(binary)]
+    if missing:
+        pytest.skip(f"requires {' and '.join(missing)}")
+
+
 def _make_audio_source(settings: Settings, path: Path, *, duration: float = 2.0) -> Path:
     """Create a tiny WAV test source with a sine tone."""
+    _require_ffmpeg(settings)
     src = path / "source.wav"
     subprocess.run([
         settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
@@ -50,6 +67,7 @@ def _make_audio_source(settings: Settings, path: Path, *, duration: float = 2.0)
 
 def _make_video_with_audio(settings: Settings, path: Path, *, duration: float = 3.0) -> Path:
     """Create a tiny MP4 test source with video + audio."""
+    _require_ffmpeg(settings)
     src = path / "source.mp4"
     subprocess.run([
         settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
@@ -235,6 +253,7 @@ class TestExtractAudio16k:
 
     def test_extract_raises_on_silent_source(self, settings: Settings, tmp_path: Path) -> None:
         # Video without audio
+        _require_ffmpeg(settings)
         src = tmp_path / "silent.mp4"
         subprocess.run([
             settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
@@ -263,6 +282,7 @@ class TestMediaDuration:
 
     def test_duration_fallback_to_probe(self, settings: Settings, tmp_path: Path) -> None:
         """probe_audio fails on silent video → falls back to probe."""
+        _require_ffmpeg(settings)
         src = tmp_path / "silent.mp4"
         subprocess.run([
             settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y",

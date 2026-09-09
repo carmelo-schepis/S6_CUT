@@ -114,6 +114,22 @@ export async function fullDecode(file) {
   };
 }
 
+
+/**
+ * Accurate seek arguments.
+ *
+ * `-ss` before `-i` is fast but lands on the nearest keyframe, which on a
+ * sparse-keyframe source (AV1 especially) can be many seconds away — enough to
+ * make a contact sheet show the wrong moment. Coarse-seeking slightly early and
+ * then discarding decoded frames with a second `-ss` after `-i` keeps the speed
+ * and lands on the exact timestamp.
+ */
+function seekArgs(file, start) {
+  if (!start || start <= 0) return { pre: [], post: [] };
+  const lead = Math.min(start, 5);
+  return { pre: ["-ss", String(start - lead)], post: ["-ss", String(lead)] };
+}
+
 /** Raw grayscale planes for `count` evenly spaced frames, each `size`x`size`. */
 async function grayFrames(file, { count, size, start = 0, duration = null, crop = null }) {
   const scratch = `${dirname(file)}/.gray-${basename(file)}-${size}-${count}-${start}.raw`;
@@ -124,10 +140,10 @@ async function grayFrames(file, { count, size, start = 0, duration = null, crop 
   const filters = [];
   if (crop) filters.push(`crop=${crop}`);
   filters.push(`fps=${fps.toFixed(6)}`, `scale=${size}:${size}:flags=bilinear`, "format=gray");
-  const args = ["-v", "error", "-y"];
-  if (start > 0) args.push("-ss", String(start));
+  const seek = seekArgs(file, start);
+  const args = ["-v", "error", "-y", ...seek.pre, "-i", containerPath(file), ...seek.post];
   if (duration) args.push("-t", String(duration));
-  args.push("-i", containerPath(file), "-vf", filters.join(","), "-frames:v", String(count),
+  args.push("-vf", filters.join(","), "-frames:v", String(count),
     "-f", "rawvideo", "-pix_fmt", "gray", containerPath(scratch));
   const result = await ffmpeg(args);
   if (result.code !== 0) throw new Error(`gray frame extraction failed: ${result.stderr.slice(-400)}`);
@@ -149,10 +165,10 @@ async function rgbMeans(file, { count, start = 0, duration = null, crop = null }
   const filters = [];
   if (crop) filters.push(`crop=${crop}`);
   filters.push(`fps=${fps.toFixed(6)}`, `scale=${size}:${size}:flags=bilinear`, "format=rgb24");
-  const args = ["-v", "error", "-y"];
-  if (start > 0) args.push("-ss", String(start));
+  const seek = seekArgs(file, start);
+  const args = ["-v", "error", "-y", ...seek.pre, "-i", containerPath(file), ...seek.post];
   if (duration) args.push("-t", String(duration));
-  args.push("-i", containerPath(file), "-vf", filters.join(","), "-frames:v", String(count),
+  args.push("-vf", filters.join(","), "-frames:v", String(count),
     "-f", "rawvideo", "-pix_fmt", "rgb24", containerPath(scratch));
   const result = await ffmpeg(args);
   if (result.code !== 0) throw new Error(`rgb extraction failed: ${result.stderr.slice(-400)}`);
@@ -410,8 +426,11 @@ export async function extractFrames(file, outputDir, { fractions = [0.05, 0.25, 
   const produced = [];
   for (const fraction of fractions) {
     const timestamp = Math.max(0, Math.min(info.duration - 0.05, info.duration * fraction));
-    const target = `${outputDir}/frame-${String(Math.round(fraction * 100)).padStart(3, "0")}pct.png`;
-    const result = await ffmpeg(["-v", "error", "-y", "-ss", timestamp.toFixed(3), "-i", containerPath(file),
+    // Named by index and timestamp: two nearby fractions round to the same
+    // percent, and a percent-only name silently overwrote one of the frames.
+    const target = `${outputDir}/frame-${String(produced.length + 1).padStart(2, "0")}-t${timestamp.toFixed(2)}s.png`;
+    const seek = seekArgs(file, timestamp);
+    const result = await ffmpeg(["-v", "error", "-y", ...seek.pre, "-i", containerPath(file), ...seek.post,
       "-frames:v", "1", "-q:v", "2", containerPath(target)]);
     if (result.code !== 0) throw new Error(`frame extraction failed at ${fraction}: ${result.stderr.slice(-300)}`);
     produced.push({ fraction, timestamp, path: target });

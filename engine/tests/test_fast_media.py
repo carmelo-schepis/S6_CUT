@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 import subprocess
 from itertools import pairwise
 from pathlib import Path
@@ -30,8 +31,24 @@ def settings() -> Settings:
 # ---------------------------------------------------------------------------
 
 
+def _require_ffmpeg(settings: Settings) -> None:
+    """Skip a test whose fixture is built with the real FFmpeg tools.
+
+    These are the FFmpeg-gated smoke tests described in
+    DO-NOT-CHANGE/AGENTS.md section 9: on a host without ffmpeg/ffprobe they
+    must skip cleanly rather than fail with a bare FileNotFoundError. Only the
+    tests that shell out are gated; the pure-logic tests in this module keep
+    running everywhere.
+    """
+    missing = [name for name, binary in (("ffmpeg", settings.ffmpeg), ("ffprobe", settings.ffprobe))
+               if not shutil.which(binary)]
+    if missing:
+        pytest.skip(f"requires {' and '.join(missing)}")
+
+
 def _make_source(settings: Settings, tmp: Path, *, duration: float = 3.0, width: int = 640, height: int = 360, rate: float = 30.0, with_audio: bool = True) -> Path:
     """Create a tiny MP4 test source with the given parameters."""
+    _require_ffmpeg(settings)
     src = tmp / "source.mp4"
     cmd = [
         settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
