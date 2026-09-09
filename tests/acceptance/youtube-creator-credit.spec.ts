@@ -3,6 +3,7 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { verifyVideoOutput } from "../support/video-output";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const artifacts = path.join(root, "test-artifacts", "youtube-creator-credit");
@@ -53,6 +54,37 @@ async function json(route: Route, body: unknown) {
   await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
 }
 
+async function serveMp4(route: Route, file: string) {
+  const body = await fs.readFile(file);
+  const range = route.request().headers()["range"];
+  if (!range) {
+    await route.fulfill({ status: 200, contentType: "video/mp4", headers: { "Accept-Ranges": "bytes", "Content-Length": String(body.length) }, body });
+    return;
+  }
+  const match = /^bytes=(\d+)-(\d*)$/.exec(range);
+  if (!match) {
+    await route.fulfill({ status: 416, headers: { "Content-Range": `bytes */${body.length}` } });
+    return;
+  }
+  const start = Number(match[1]);
+  const end = Math.min(match[2] ? Number(match[2]) : body.length - 1, body.length - 1);
+  if (start >= body.length || end < start) {
+    await route.fulfill({ status: 416, headers: { "Content-Range": `bytes */${body.length}` } });
+    return;
+  }
+  const partial = body.subarray(start, end + 1);
+  await route.fulfill({
+    status: 206,
+    contentType: "video/mp4",
+    headers: {
+      "Accept-Ranges": "bytes",
+      "Content-Length": String(partial.length),
+      "Content-Range": `bytes ${start}-${end}/${body.length}`,
+    },
+    body: partial,
+  });
+}
+
 async function installFixture(page: Page, sourceKind: "youtube" | "upload") {
   const id = sourceKind === "youtube" ? "youtube-credit-project" : "upload-no-credit-project";
   const outputPath = `/api/v1/files/jobs/${id}-job/clips/01-cut.mp4`;
@@ -70,7 +102,7 @@ async function installFixture(page: Page, sourceKind: "youtube" | "upload") {
   await page.route(`**/api/v1/jobs/${id}-job`, (route) => json(route, currentJob));
   // A real MP4 is served at the preview URL. The browser therefore exercises
   // the same final-output video element used by production, not a DOM credit.
-  await page.route(`**${outputPath}`, (route) => route.fulfill({ path: sourceKind === "youtube" ? path.join(root, "tests/fixtures/youtube-credit.mp4") : path.join(root, "test-video.mp4"), contentType: "video/mp4" }));
+  await page.route(`**${outputPath}`, (route) => serveMp4(route, sourceKind === "youtube" ? path.join(root, "tests/fixtures/youtube-credit.mp4") : path.join(root, "test-video.mp4")));
   return { id, currentProject, currentJob, outputPath };
 }
 
@@ -109,7 +141,7 @@ test.describe("YouTube creator credit workflow", () => {
     });
     await page.route(`**/api/v1/jobs/${projectId}-job/events`, (route) => route.fulfill({ status: 200, contentType: "text/event-stream", body: ": keep-alive\n\n" }));
     await page.route(`**/api/v1/jobs/${projectId}-job`, (route) => json(route, createdJob));
-    await page.route(`**/api/v1/files/jobs/${projectId}-job/clips/01-cut.mp4`, (route) => route.fulfill({ path: path.join(root, "tests/fixtures/youtube-credit-known.mp4"), contentType: "video/mp4" }));
+    await page.route(`**/api/v1/files/jobs/${projectId}-job/clips/01-cut.mp4`, (route) => serveMp4(route, path.join(root, "tests/fixtures/youtube-credit-known.mp4")));
     await page.route(`**/api/v1/jobs/${projectId}-job/export`, async (route) => {
       exportBody = route.request().postData() || "";
       await json(route, { downloadUrl: "/api/v1/files/exports/youtube-credit.zip", filename: "youtube-credit.zip" });
@@ -139,9 +171,24 @@ test.describe("YouTube creator credit workflow", () => {
     const video = page.getByRole("region", { name: "Output viewer" }).locator("video");
     await expect(video).toBeVisible();
     await expect(video).toHaveAttribute("src", /01-cut\.mp4/);
-    // The label is metadata for the rendered output; the actual credit is
-    // burned into the MP4 served by this same final-output video element.
+    // The label is metadata for the rendered output; verify the bytes behind the
+    // same player are decodable, playable, seekable, and visually non-uniform.
     await expect(page.getByRole("region", { name: "Output viewer" })).toContainText("Source: Known Creator");
+    const videoEvidence = await verifyVideoOutput({
+      video,
+      artifactDirectory: artifacts,
+      artifactPrefix: "youtube-preview",
+      maximumDurationSeconds: 10,
+      expectedWidth: 1080,
+      expectedHeight: 1920,
+      // The renderer's persistent creator credit occupies this lower-left
+      // region. Sampling decoded pixels proves the dark plate and light text
+      // are in the MP4 rather than trusting matching DOM metadata alone.
+      expectedOverlayRegion: { x: 0.05, y: 0.89, width: 0.32, height: 0.07 },
+    });
+    expect(videoEvidence.playbackAdvanced).toBe(true);
+    expect(videoEvidence.frameDifferences.some((difference) => difference > 1)).toBe(true);
+    expect(videoEvidence.overlaySample).toBeDefined();
     await page.screenshot({ path: path.join(artifacts, "youtube-preview.png"), fullPage: true });
 
     const downloadPromise = page.waitForEvent("download");
