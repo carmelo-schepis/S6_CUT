@@ -163,7 +163,7 @@ export async function verifyVideoOutput(options: VerifyVideoOutputOptions): Prom
   const requestedTimestamps = [
     Math.min(0.1, metadata.duration * 0.05),
     metadata.duration / 2,
-    Math.max(0, metadata.duration - 0.1),
+    Math.max(0, metadata.duration - Math.min(0.5, metadata.duration * 0.2)),
   ];
   const labels = ["begin", "middle", "end"];
   const screenshots = labels.map((label) => path.join(artifactDirectory, `${artifactPrefix}-${label}.png`));
