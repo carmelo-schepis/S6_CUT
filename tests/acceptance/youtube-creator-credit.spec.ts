@@ -189,6 +189,16 @@ test.describe("YouTube creator credit workflow", () => {
     expect(videoEvidence.playbackAdvanced).toBe(true);
     expect(videoEvidence.frameDifferences.some((difference) => difference > 1)).toBe(true);
     expect(videoEvidence.overlaySample).toBeDefined();
+
+    await page.getByRole("button", { name: "Failed clips" }).click();
+    await expect(page.getByRole("button", { name: "Failed clips" })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("status").filter({ hasText: "No failed clips." })).toBeVisible();
+    await page.screenshot({ path: path.join(artifacts, "youtube-filter-failed.png"), fullPage: true });
+    await page.getByRole("button", { name: "Selected clips" }).click();
+    await expect(page.locator(".clip-tile")).toHaveCount(1);
+    await page.screenshot({ path: path.join(artifacts, "youtube-filter-selected.png"), fullPage: true });
+    await page.getByRole("button", { name: "All clips" }).click();
+    await expect(page.getByRole("button", { name: "All clips" })).toHaveAttribute("aria-pressed", "true");
     await page.screenshot({ path: path.join(artifacts, "youtube-preview.png"), fullPage: true });
 
     const downloadPromise = page.waitForEvent("download");
