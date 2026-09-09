@@ -7,7 +7,7 @@
  * the S6_cut engine image so the check works on hosts without a local FFmpeg.
  */
 import { spawn } from "node:child_process";
-import { readFile, mkdir } from "node:fs/promises";
+import { readFile, mkdir, rm } from "node:fs/promises";
 import { basename, dirname, relative } from "node:path";
 
 const IMAGE = process.env.S6_FORENSICS_IMAGE || "s6-cut-engine";
@@ -457,6 +457,59 @@ export async function extractFrames(file, outputDir, { fractions = [0.05, 0.25, 
  * foreground band before hashing. Captions are burned in below the band and do
  * not contaminate it.
  */
+/**
+ * Gray plane and mean RGB for ONE frame, seeked accurately to `time`.
+ *
+ * Correspondence pairs frames from two different files, so each side has to
+ * land on the timestamp actually being compared. The `fps` filter cannot do
+ * that: it emits on its own grid rather than from the seek point, which put the
+ * source samples up to ~1.9s away from the frame the report claimed they were
+ * (proved against a fixture that burns its own timecode into the picture). That
+ * is invisible on slow footage and catastrophic on fast-moving content. Sampling
+ * one frame per accurate seek is exact, and eight seeks per window is cheap.
+ *
+ * The aggregate metrics (brightness, variance, motion, caption ink) do not pair
+ * frames across files, so they keep the faster single-pass `fps` sampling.
+ */
+async function frameAt(file, time, { size, crop }) {
+  const scratch = `${dirname(file)}/.at-${basename(file)}-${size}-${time.toFixed(3)}.raw`;
+  await mkdir(dirname(scratch), { recursive: true });
+  const filters = [];
+  if (crop) filters.push(`crop=${crop}`);
+  filters.push(`scale=${size}:${size}:flags=bilinear`, "format=gray");
+  const seek = seekArgs(file, time);
+  const result = await ffmpeg(["-v", "error", "-y", ...seek.pre, "-i", containerPath(file), ...seek.post,
+    "-vf", filters.join(","), "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "gray",
+    containerPath(scratch)]);
+  if (result.code !== 0) throw new Error(`frame extraction at ${time}s failed: ${result.stderr.slice(-300)}`);
+  const buffer = await readFile(scratch);
+  await rm(scratch, { force: true });
+  return buffer.length >= size * size ? buffer.subarray(0, size * size) : null;
+}
+
+/** Mean RGB of one accurately seeked frame. */
+async function colourAt(file, time, { crop }) {
+  const size = 16;
+  const scratch = `${dirname(file)}/.rgbat-${basename(file)}-${time.toFixed(3)}.raw`;
+  await mkdir(dirname(scratch), { recursive: true });
+  const filters = [];
+  if (crop) filters.push(`crop=${crop}`);
+  filters.push(`scale=${size}:${size}:flags=bilinear`, "format=rgb24");
+  const seek = seekArgs(file, time);
+  const result = await ffmpeg(["-v", "error", "-y", ...seek.pre, "-i", containerPath(file), ...seek.post,
+    "-vf", filters.join(","), "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24",
+    containerPath(scratch)]);
+  if (result.code !== 0) throw new Error(`colour extraction at ${time}s failed: ${result.stderr.slice(-300)}`);
+  const buffer = await readFile(scratch);
+  await rm(scratch, { force: true });
+  if (buffer.length < size * size * 3) return null;
+  const totals = [0, 0, 0];
+  for (let offset = 0; offset + 3 <= size * size * 3; offset += 3) {
+    totals[0] += buffer[offset]; totals[1] += buffer[offset + 1]; totals[2] += buffer[offset + 2];
+  }
+  return totals.map((total) => total / (size * size));
+}
+
 export async function sourceCorrespondence(output, source, { sourceStart, sourceEnd, samples = 6 }) {
   const outputInfo = await probe(output);
   const sourceInfo = await probe(source);
@@ -466,12 +519,26 @@ export async function sourceCorrespondence(output, source, { sourceStart, source
   const foregroundCrop = `${outputInfo.video.width}:${bandHeight}:0:${bandTop}`;
   const span = Math.max(0.1, sourceEnd - sourceStart);
 
-  const outputFrames = await grayFrames(output, { count: samples, size: DCT_SIZE, crop: foregroundCrop });
-  const sourceFrames = await grayFrames(source, { count: samples, size: DCT_SIZE, start: sourceStart, duration: span });
-  const outputColours = await rgbMeans(output, { count: samples, crop: foregroundCrop });
-  const sourceColours = await rgbMeans(source, { count: samples, start: sourceStart, duration: span });
+  // Pair each output frame with the source frame at the matching fraction of
+  // the window, and seek both accurately so the pair really is the same moment.
+  const outputSpan = Math.max(0.1, outputInfo.duration);
+  const fractions = Array.from({ length: samples }, (_, index) => index / Math.max(1, samples - 1));
+  const times = fractions.map((fraction) => ({
+    output: Math.min(outputSpan - 0.05, outputSpan * fraction),
+    source: Math.min(sourceEnd - 0.05, sourceStart + span * fraction),
+  }));
+  const outputFrames = [];
+  const sourceFrames = [];
+  const outputColours = [];
+  const sourceColours = [];
+  for (const time of times) {
+    outputFrames.push(await frameAt(output, time.output, { size: DCT_SIZE, crop: foregroundCrop }));
+    sourceFrames.push(await frameAt(source, time.source, { size: DCT_SIZE, crop: null }));
+    outputColours.push(await colourAt(output, time.output, { crop: foregroundCrop }));
+    sourceColours.push(await colourAt(source, time.source, { crop: null }));
+  }
 
-  const pairs = Math.min(outputFrames.length, sourceFrames.length);
+  const pairs = times.filter((_, index) => outputFrames[index] && sourceFrames[index]).length;
   const comparisons = [];
   for (let index = 0; index < pairs; index += 1) {
     const outputHash = perceptualHash(outputFrames[index]);
@@ -481,7 +548,8 @@ export async function sourceCorrespondence(output, source, { sourceStart, source
       : null;
     comparisons.push({
       index,
-      sourceTime: sourceStart + (span * index) / Math.max(1, pairs - 1),
+      sourceTime: times[index].source,
+      outputTime: times[index].output,
       hammingDistance: hammingDistance(outputHash, sourceHash),
       colourDistance,
       outputColour: outputColours[index]?.map((value) => Math.round(value)),
