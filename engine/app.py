@@ -199,12 +199,17 @@ def runtime_health() -> Health:
     ffprobe = available(settings.ffprobe)
     whisper = importlib.util.find_spec("faster_whisper") is not None
     database = settings.data_path.joinpath("s6-cut.sqlite3").exists()
+    try:
+        free_bytes = shutil.disk_usage(settings.data_path).free
+    except OSError:
+        # Docker Desktop file sharing can expose a mount without statvfs support.
+        free_bytes = 0
     return Health(
         status="ready" if ffmpeg and ffprobe and whisper and database else "degraded",
         version=__version__, database=database, ffmpeg=ffmpeg, ffprobe=ffprobe, whisper=whisper,
         ytdlp=available(settings.ytdlp), local_tts=available(settings.local_tts),
         data_path="Container data directory" if str(settings.data_path).startswith("/app/") else "Local mounted data directory",
-        free_bytes=shutil.disk_usage(settings.data_path).free, configured_workers=settings.job_workers,
+        free_bytes=free_bytes, configured_workers=settings.job_workers,
         active_workers=manager.active_workers, queued_jobs=manager.queue.qsize(),
         fallbacks={
             "transcription": "Local Whisper is required for automatic clip timing",
