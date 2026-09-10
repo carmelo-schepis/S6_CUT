@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import tempfile
 import zipfile
+from datetime import datetime, timedelta, timezone
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -698,6 +699,93 @@ def test_finished_clip_media_survives_job_directory_pruning() -> None:
             assert served.content == b"rendered-output-bytes"
     finally:
         app_module.db, app_module.manager, app_module.settings = original
+
+
+def test_single_asset_deletion_removes_an_unreferenced_blob() -> None:
+    tmp_path = _tmpdir()
+    test_db, test_manager, test_rules, test_settings = _cluster(tmp_path)
+    source = tmp_path / "poster.png"
+    source.write_bytes(b"single-asset-blob")
+    asset = test_rules.register_file(
+        source, title="Disposable poster", media_type="image/png", origin="manual-import",
+        folder_id=UNSORTED_FOLDER_ID,
+    )
+    relative = test_db.blob_relative_path(asset.blob_id)
+    assert relative and (tmp_path / relative).is_file()
+
+    import engine.app as app_module
+    original = (app_module.db, app_module.manager, app_module.settings)
+    app_module.db, app_module.manager, app_module.settings = test_db, test_manager, test_settings
+    try:
+        with TestClient(app) as client:
+            response = client.delete(f"/api/v1/library/assets/{asset.id}")
+            assert response.status_code == 204, response.text
+        assert test_db.get_asset(asset.id) is None
+        assert not (tmp_path / relative).exists()
+    finally:
+        app_module.db, app_module.manager, app_module.settings = original
+
+
+def test_project_deletion_waits_for_worker_and_blocks_stale_job_upserts() -> None:
+    tmp_path = _tmpdir()
+    test_db, test_manager, _, test_settings = _cluster(tmp_path)
+    project = Project(id="deleting-project", name="Deleting", mode="clip", style="educational",
+                      state="active", source_name="source.mp4", source_kind="upload", requested_count=1)
+    job = Job(id="deleting-job", project_id=project.id, mode="clip", processing_mode="fast",
+              state="active", stage="render", stage_label="Rendering", progress=50, style="educational")
+    test_db.save_project(project)
+    test_db.save_job(job, {"aspect_ratio": "9:16"})
+    workspace = tmp_path / "jobs" / job.id
+    workspace.mkdir(parents=True)
+    (workspace / "state.json").write_text("{}")
+
+    async def delete_while_worker_holds_lock() -> None:
+        lock = test_manager.job_locks[job.id]
+        lock.acquire()
+        deletion = asyncio.create_task(test_manager.delete_project(project.id))
+        await asyncio.sleep(0)
+        assert test_db.get_project(project.id) is not None
+        lock.release()
+        await deletion
+
+    asyncio.run(delete_while_worker_holds_lock())
+    assert test_db.get_project(project.id) is None
+    assert test_db.get_job(job.id) is None
+    assert not workspace.exists()
+
+    # Simulates a worker's final in-memory checkpoint after deletion. _save must
+    # not recreate the database row via its normal upsert path.
+    test_manager._save(job, {"aspect_ratio": "9:16"})
+    assert test_db.get_job(job.id) is None
+
+
+def test_retention_prunes_only_old_terminal_workspaces() -> None:
+    tmp_path = _tmpdir()
+    test_db, test_manager, _, test_settings = _cluster(tmp_path)
+    test_manager.settings = replace(test_settings, retention_days=30, max_retained_jobs=1)
+    current = datetime.now(timezone.utc)
+    project = Project(id="retention-project", name="Retention", mode="clip", style="educational",
+                      state="complete", source_name="source.mp4", source_kind="upload", requested_count=1)
+    test_db.save_project(project)
+    recent = Job(id="recent-job", project_id=project.id, mode="clip", processing_mode="fast",
+                 state="complete", stage="complete", stage_label="Ready", progress=100, style="educational",
+                 updated_at=current.isoformat())
+    old = Job(id="old-job", project_id=project.id, mode="clip", processing_mode="fast",
+              state="complete", stage="complete", stage_label="Ready", progress=100, style="educational",
+              updated_at=(current - timedelta(days=31)).isoformat())
+    test_db.save_job(recent, {"aspect_ratio": "9:16"})
+    test_db.save_job(old, {"aspect_ratio": "9:16"})
+    for job in (recent, old):
+        directory = tmp_path / "jobs" / job.id
+        directory.mkdir(parents=True)
+        (directory / "state.json").write_text("{}")
+
+    assert test_manager.prune_retained_jobs() == 1
+    assert (tmp_path / "jobs" / recent.id).is_dir()
+    assert not (tmp_path / "jobs" / old.id).exists()
+    # Retention removes transient work, not the durable project/job history.
+    assert test_db.get_job(recent.id) is not None
+    assert test_db.get_job(old.id) is not None
 
 
 def test_clip_without_recoverable_media_reports_no_download_link() -> None:

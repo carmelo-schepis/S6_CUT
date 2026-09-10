@@ -24,7 +24,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from . import __version__
 from .config import settings
 from .database import Database, MAX_FOLDER_DEPTH, UNSORTED_FOLDER_ID
-from .jobs import JobManager, QueueFullError, SwitchFastError
+from .jobs import JobManager, ProjectDeletingError, QueueFullError, SwitchFastError
 from .library import LibraryRules
 from .media import MediaError, available, probe, validate_video_upload
 from .models import (
@@ -95,6 +95,20 @@ def resolve_processing_mode(requested: Literal["fast", "smart", "auto"], smart_a
 
 def _not_found(kind: str = "Record") -> HTTPException:
     return HTTPException(404, f"{kind} not found")
+
+
+def _delete_asset_and_cleanup(asset_id: str) -> None:
+    """Delete an asset record and its unreferenced immutable blob, if any.
+
+    Database deletion determines whether the blob has any remaining durable
+    reference. Filesystem cleanup is deliberately outside that transaction: an
+    interrupted cleanup leaves a safe orphan, never a missing shared blob.
+    """
+    _, relative, unreferenced = db.delete_asset(asset_id)
+    if not unreferenced or not relative:
+        return
+    target = confined(settings.data_path, *relative.split("/"))
+    target.unlink(missing_ok=True)
 
 
 # DO-NOT-CHANGE: signs f"jobs/{relative}" or f"exports/{relative}" — only these prefixes
@@ -239,7 +253,7 @@ async def change_project_folder(project_id: str, value: ProjectFolderUpdate) -> 
 @app.delete("/api/v1/projects/{project_id}", status_code=204)
 async def delete_project(project_id: str) -> None:
     try:
-        db.delete_project(project_id)
+        await manager.delete_project(project_id)
     except KeyError as exc:
         raise _not_found("Project") from exc
 
@@ -687,7 +701,7 @@ async def job_control(job_id: str, action: Literal["pause", "resume", "stop-keep
         raise _not_found("Job") from exc
     except QueueFullError as exc:
         raise HTTPException(429, str(exc)) from exc
-    except SwitchFastError as exc:
+    except (ProjectDeletingError, SwitchFastError) as exc:
         raise HTTPException(409, str(exc)) from exc
     except MediaError as exc:
         raise HTTPException(409, str(exc)) from exc
@@ -927,17 +941,7 @@ async def delete_library_assets(value: AssetDelete) -> AssetDeleteResult:
             failed[asset_id] = "Invalid media ID"
             continue
         try:
-            _, relative, unreferenced = db.delete_asset(asset_id)
-            if unreferenced and relative:
-                try:
-                    target = confined(settings.data_path, *relative.split("/"))
-                    target.unlink(missing_ok=True)
-                except (OSError, ValueError) as exc:
-                    # The database record is already safely removed. Keep the
-                    # orphan for a later cleanup rather than risking a shared
-                    # blob; surface the storage issue in the result.
-                    failed[asset_id] = f"Media record deleted, but file cleanup failed: {exc}"
-                    continue
+            _delete_asset_and_cleanup(asset_id)
             deleted.append(asset_id)
         except KeyError:
             failed[asset_id] = "Media item was already deleted"
@@ -1015,11 +1019,13 @@ async def preview_asset(asset_id: str, expires: int = Query(...), signature: str
 @app.delete("/api/v1/library/assets/{asset_id}", status_code=204)
 async def delete_library_asset(asset_id: str) -> None:
     try:
-        db.delete_asset(asset_id)
+        _delete_asset_and_cleanup(asset_id)
     except KeyError as exc:
         raise _not_found("Asset") from exc
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(500, "Media record was deleted, but blob cleanup failed") from exc
 
 
 @app.put("/api/v1/library/assets/{asset_id}", response_model=Asset)
@@ -1060,4 +1066,5 @@ async def cleanup_temporary_files() -> dict[str, int]:
             if path.is_file() and path.stat().st_mtime < cutoff:
                 path.unlink(missing_ok=True)
                 removed += 1
-    return {"removedTemporaryFiles": removed}
+    pruned = await asyncio.to_thread(manager.prune_retained_jobs)
+    return {"removedTemporaryFiles": removed, "prunedJobDirectories": pruned}

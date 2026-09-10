@@ -6,11 +6,13 @@ import json
 import logging
 import math
 import os
+import shutil
 import threading
 import time
 import uuid
 import zipfile
 from collections import defaultdict, deque
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -114,6 +116,10 @@ class SwitchFastError(RuntimeError):
     pass
 
 
+class ProjectDeletingError(RuntimeError):
+    pass
+
+
 def job_processing_mode(job: Job, private: dict[str, Any]) -> ProcessingMode:
     """Resolved processing mode: private snapshot first, public record next, legacy jobs default to smart."""
     value = private.get("processing_mode") or job.processing_mode or "smart"
@@ -200,6 +206,8 @@ class JobManager:
         self._queued_ids: set[str] = set()
         self._pending_order: deque[str] = deque()
         self._queue_lock = threading.Lock()
+        self._deleting_projects: set[str] = set()
+        self._deletion_lock = threading.RLock()
 
     async def start(self) -> None:
         if self.workers:
@@ -217,6 +225,7 @@ class JobManager:
         # Repair legacy/committed-but-unlinked publications once on startup.  The
         # backfill is idempotent, so repeated startups never duplicate assets.
         self.repair_publications()
+        self.prune_retained_jobs()
 
     def repair_publications(self) -> int:
         """Backfill missing automatic Library assets for completed clips.
@@ -301,10 +310,21 @@ class JobManager:
             finally:
                 self.queue.task_done()
 
+    def _project_is_deleting(self, project_id: str) -> bool:
+        with self._deletion_lock:
+            return project_id in self._deleting_projects
+
     # DO-NOT-CHANGE: always syncs linked Project.state and writes jobs/<id>/state.json
     def _save(self, job: Job, private: dict[str, Any] | None = None) -> None:
+        if self._project_is_deleting(job.project_id):
+            return
         current = self.db.get_job(job.id)
-        if current and current.state == "cancelled_kept" and job.state != "cancelled_kept" and not (private or {}).get("retry_import"):
+        # A project deletion waits on the job lock before removing records. A
+        # stale worker can still hold an in-memory Job afterwards; never let its
+        # final checkpoint recreate the deleted row through the database upsert.
+        if not current:
+            return
+        if current.state == "cancelled_kept" and job.state != "cancelled_kept" and not (private or {}).get("retry_import"):
             job.state = "cancelled_kept"
             job.stage = current.stage
             job.stage_label = current.stage_label
@@ -334,6 +354,8 @@ class JobManager:
 
     def _cooperate(self, job: Job) -> bool:
         while True:
+            if self._project_is_deleting(job.project_id):
+                return False
             current = self.db.get_job(job.id)
             if not current:
                 return False
@@ -727,6 +749,8 @@ class JobManager:
         project = self.db.get_project(job.project_id)
         project_name = project.name if project else "Project"
         title = f"{project_name} — Script video" if script else _semantic_clip_title(project_name, clip)
+        if self._project_is_deleting(job.project_id):
+            raise media_module.TranscriptionCancelled("Project was deleted before output publication")
         origin = "script-output" if script else "generated-clip"
 
         digest = sha256_file(output)
@@ -1488,10 +1512,92 @@ class JobManager:
         self._save(job, private)
         self.complete_step(job, "ready", detail="Project ready", private=private)
 
+    async def delete_project(self, project_id: str) -> None:
+        """Stop a project's workers before deleting their durable records.
+
+        The marker is visible to every cooperative checkpoint immediately. The
+        synchronous deletion then waits for each job lock, so no worker can
+        publish or upsert a job after its project has been removed.
+        """
+        with self._deletion_lock:
+            if not self.db.get_project(project_id):
+                raise KeyError(project_id)
+            self._deleting_projects.add(project_id)
+        try:
+            await asyncio.to_thread(self._delete_project_records, project_id)
+        finally:
+            with self._deletion_lock:
+                self._deleting_projects.discard(project_id)
+
+    def _delete_project_records(self, project_id: str) -> None:
+        jobs = [job for job in self.db.list_jobs() if job.project_id == project_id]
+        locks = [self.job_locks[job.id] for job in sorted(jobs, key=lambda item: item.id)]
+        for lock in locks:
+            lock.acquire()
+        try:
+            self.db.delete_project(project_id)
+        finally:
+            for lock in reversed(locks):
+                lock.release()
+        for job in jobs:
+            try:
+                directory = confined(self.settings.data_path, "jobs", job.id)
+                if directory.is_symlink():
+                    directory.unlink(missing_ok=True)
+                elif directory.exists():
+                    shutil.rmtree(directory)
+            except (OSError, ValueError) as exc:
+                logger.warning("Could not remove deleted job workspace %s: %s", job.id, redact(str(exc)))
+
+    def prune_retained_jobs(self) -> int:
+        """Prune only terminal job workspaces while retaining durable job records.
+
+        Published media remains in the content-addressed Library, allowing old
+        clips to remain playable after the transient job directory is removed.
+        """
+        terminal = {"complete", "failed", "partial", "cancelled_kept"}
+        cutoff = datetime.now(timezone.utc) - timedelta(days=self.settings.retention_days)
+        pruned = 0
+        retained = 0
+        for job in self.db.list_jobs():
+            if job.state not in terminal:
+                continue
+            try:
+                updated = datetime.fromisoformat(job.updated_at.replace("Z", "+00:00"))
+                if updated.tzinfo is None:
+                    updated = updated.replace(tzinfo=timezone.utc)
+            except ValueError:
+                updated = datetime.min.replace(tzinfo=timezone.utc)
+            retain_by_count = retained < self.settings.max_retained_jobs
+            retained += 1
+            if retain_by_count and updated >= cutoff:
+                continue
+            lock = self.job_locks[job.id]
+            if not lock.acquire(blocking=False):
+                continue
+            try:
+                current = self.db.get_job(job.id)
+                if not current or current.state not in terminal:
+                    continue
+                directory = confined(self.settings.data_path, "jobs", job.id)
+                if directory.is_symlink():
+                    directory.unlink(missing_ok=True)
+                    pruned += 1
+                elif directory.is_dir():
+                    shutil.rmtree(directory)
+                    pruned += 1
+            except (OSError, ValueError) as exc:
+                logger.warning("Could not prune job workspace %s: %s", job.id, redact(str(exc)))
+            finally:
+                lock.release()
+        return pruned
+
     async def control(self, job_id: str, action: str) -> Job:
         job = self.db.get_job(job_id)
         if not job:
             raise KeyError(job_id)
+        if self._project_is_deleting(job.project_id):
+            raise ProjectDeletingError("This project is being deleted")
         if action == "retry-import":
             private = self.db.get_job_private(job.id)
             if job.mode != "clip" or not private.get("url"):
@@ -1514,9 +1620,12 @@ class JobManager:
             await self.enqueue(job.id)
             return job
         if action == "switch-fast":
-            if self.queue.full():
-                raise QueueFullError("The local render queue is full. Wait before switching to fast cut.")
-            new_job = self._switch_to_fast(job)
+            with self._deletion_lock:
+                if job.project_id in self._deleting_projects:
+                    raise ProjectDeletingError("This project is being deleted")
+                if self.queue.full():
+                    raise QueueFullError("The local render queue is full. Wait before switching to fast cut.")
+                new_job = self._switch_to_fast(job)
             await self.enqueue(new_job.id)
             return new_job
         if action == "pause" and job.state in {"queued", "active", "recovered"}:
@@ -1561,6 +1670,9 @@ class JobManager:
 
     # DO-NOT-CHANGE: creates a NEW job reusing the same source; old job stays cancelled_kept
     def _switch_to_fast(self, job: Job) -> Job:
+        with self._deletion_lock:
+            if job.project_id in self._deleting_projects:
+                raise ProjectDeletingError("This project is being deleted")
         if job.mode != "clip":
             raise SwitchFastError("Only clip projects can switch to fast cut")
         if job.state in {"complete", "cancelled_kept"}:
@@ -1617,7 +1729,17 @@ class JobManager:
             except ValueError:
                 continue
             temporary = source.name.startswith(".") or any(marker in source.stem.casefold() for marker in (".partial", ".uploading", ".tmp", ".temp", ".ytdl"))
-            if source.is_file() and not source.is_symlink() and source.stat().st_size > 0 and source.suffix.casefold() == ".mp4" and not temporary:
+            if temporary:
+                continue
+            if not (source.is_file() and not source.is_symlink() and source.stat().st_size > 0 and source.suffix.casefold() == ".mp4"):
+                # Retention removes a job's transient workspace. Published clips
+                # remain in their immutable Library blobs and must still export.
+                relative = self.db.blob_relative_path(clip.blob_id) if clip.blob_id else None
+                try:
+                    source = confined(self.settings.data_path, *(relative or "").split("/"))
+                except ValueError:
+                    continue
+            if source.is_file() and not source.is_symlink() and source.stat().st_size > 0 and source.suffix.casefold() == ".mp4":
                 export_sources.append((clip, source))
         if not export_sources:
             raise ValueError("No completed MP4 videos are available to export")
