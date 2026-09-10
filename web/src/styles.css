@@ -679,8 +679,9 @@ main { min-width: 0; }
   padding: var(--space-2);
   display: grid;
   /* Sized for the longest step label ("Complete moments selected") at General
-     text, so steps never ellipsis away the word that identifies them. */
-  grid-template-columns: repeat(auto-fit, minmax(236px, 1fr));
+     text *plus* the progress counter a running or finished step carries
+     ("5 of 5"), so steps never ellipsis away the word that identifies them. */
+  grid-template-columns: repeat(auto-fit, minmax(256px, 1fr));
   gap: 2px var(--space-1);
 }
 .checklist-step {
