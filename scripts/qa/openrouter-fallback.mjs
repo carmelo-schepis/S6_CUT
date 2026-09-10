@@ -1,6 +1,5 @@
 import { randomBytes } from "node:crypto";
 import { access as fsAccess, chmod, cp, mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
@@ -14,7 +13,14 @@ async function directoryExists(directory) {
 const composeFile = join(root, "compose.yaml");
 const artifacts = join(root, "test-artifacts", "openrouter-fallback");
 await mkdir(artifacts, { recursive: true });
-const isolatedData = await mkdtemp(join(tmpdir(), "s6-openrouter-fallback-"));
+// The isolated dataset must be bind-mountable by the Docker daemon. The OS
+// temp directory is not: Docker Desktop only shares an explicit list of host
+// paths, and `/tmp` is not on it by default, so mounting from there fails with
+// "mounts denied" before the stack can start. The repository is already a
+// shared path — compose.yaml binds ./data — so the ignored test-artifacts
+// directory is the portable place for a throwaway dataset. `cleanup()` removes
+// it on every exit path.
+const isolatedData = await mkdtemp(join(artifacts, "..", "openrouter-fallback-data-"));
 // Compose runs the engine as uid 10001. Keep this test dataset isolated while
 // allowing that container user to create its SQLite, job, and blob directories.
 const overrideFile = join(isolatedData, "compose.override.yaml");

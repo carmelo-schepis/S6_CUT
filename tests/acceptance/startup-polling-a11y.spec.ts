@@ -30,6 +30,10 @@ const asset = (id: string, title: string, mediaType = "video/mp4") => ({
   minSpacingSeconds: 0, maxUsesPerProject: 3, licence: "User supplied", attribution: "",
   contentHash: id, folderId: "folder-1", origin: "manual-import", blobId: id, createdAt: "2026-01-01T00:00:00Z",
 });
+// The mocked profile reports OpenRouter as connected, so the AI Video screen
+// will fetch the model list. Without this the request reaches the real engine,
+// which answers 503 "OpenRouter is not configured" and logs a console error.
+const OPENROUTER_MODELS = [{ id: "vendor/model", name: "Vendor Model", contextLength: 128000 }];
 const FOLDERS = [{ id: "folder-1", name: "Unsorted", parentId: null, description: "", color: null, archived: false, system: true, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" }];
 
 const json = (route: Route, body: unknown) => route.fulfill({ contentType: "application/json", body: JSON.stringify(body) });
@@ -43,6 +47,7 @@ type EngineOptions = {
   profilesDelayMs?: number;
   profiles?: unknown[];
   assets?: unknown[];
+  models?: unknown[];
 };
 
 /** Installs a fully mocked engine so latency and payloads are under test control. */
@@ -71,6 +76,7 @@ async function mockEngine(page: Page, options: EngineOptions = {}) {
     if (options.profilesDelayMs) await wait(options.profilesDelayMs);
     await json(route, options.profiles ?? [CONNECTED_PROFILE]);
   });
+  await page.route("**/api/v1/openrouter/models**", (route) => json(route, options.models ?? OPENROUTER_MODELS));
   await page.route("**/api/v1/library/folders**", (route) => json(route, FOLDERS));
   await page.route("**/api/v1/library/assets**", (route) => json(route, options.assets ?? []));
   return { counters, state };
@@ -107,6 +113,16 @@ function trackConsole(page: Page) {
   return problems;
 }
 
+/**
+ * Wait until the shell reports a settled, ready engine.
+ *
+ * This steady-state reading used to sit in the rail foot. The Help window
+ * replaced that element with the Help launcher (see App.tsx) and moved the
+ * reading to the topbar badge, which reads "Local engine" once health is ready.
+ */
+const expectEngineReady = (page: Page) =>
+  expect(page.locator(".topbar-state")).toContainText("Local engine");
+
 test.describe("engine startup", () => {
   test("a health read that never answers becomes an error with a working Retry", async ({ page }) => {
     const problems = trackConsole(page);
@@ -135,7 +151,7 @@ test.describe("engine startup", () => {
 
     await expect(page.locator(".global-alert")).toHaveCount(0, { timeout: 25_000 });
     expect(engine.counters.health).toBeGreaterThan(before);
-    await expect(page.locator(".rail-foot")).toContainText("Engine ready");
+    await expectEngineReady(page);
     expect(problems, problems.join("\n")).toHaveLength(0);
   });
 
@@ -144,7 +160,7 @@ test.describe("engine startup", () => {
     await mockEngine(page, { healthDelayMs: 400 });
     await page.goto("/", { waitUntil: "domcontentloaded" });
 
-    await expect(page.locator(".rail-foot")).toContainText("Engine ready");
+    await expectEngineReady(page);
     await expect(page.locator(".global-alert")).toHaveCount(0);
     await expect(page.locator(".engine-startup")).toHaveCount(0);
     await expect(page.locator(".engine-summary")).toContainText(/Local engine ready/i);
@@ -270,7 +286,7 @@ test.describe("page structure", () => {
     const problems = trackConsole(page);
     await mockEngine(page, { assets: [asset("a1", "Launch teaser")] });
     await page.goto("/", { waitUntil: "domcontentloaded" });
-    await expect(page.locator(".rail-foot")).toContainText("Engine ready");
+    await expectEngineReady(page);
 
     for (const screen of screens) {
       await page.getByRole("button", { name: screen, exact: true }).click();
@@ -313,7 +329,7 @@ test.describe("page structure", () => {
   test("the skip link is the first tab stop and moves focus past the rail", async ({ page }) => {
     await mockEngine(page);
     await page.goto("/", { waitUntil: "domcontentloaded" });
-    await expect(page.locator(".rail-foot")).toContainText("Engine ready");
+    await expectEngineReady(page);
 
     await page.keyboard.press("Tab");
     const skip = page.locator(".skip-link");

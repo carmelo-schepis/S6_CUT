@@ -3,7 +3,7 @@ import { FileText, Film, FolderOpen, Plus, Search, Sparkles, Zap } from "lucide-
 import { createClipJob, createFolder, createScriptJob, listFolders, readableError } from "../api";
 import type { ContentFormat, Health, Job, LibraryFolder, ProcessingMode, Project, Style } from "../types";
 import { projectStatus } from "../project-status";
-import { Button, Field, FieldGroup, PageHeader, Progress, Skeleton, StatusBadge, formatAge, useSingleFlight } from "./common";
+import { Button, Field, FieldGroup, Progress, Skeleton, StatusBadge, StepBadge, formatAge, useSingleFlight } from "./common";
 import { VideoSourcePicker } from "./video-source-picker";
 
 const RECENT_FOLDER_KEY = "s6-cut.recent-library-folder";
@@ -142,10 +142,6 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
   const visibleProjects = query || showAllProjects ? matchingProjects : matchingProjects.slice(0, RECENT_LIMIT);
 
   return <div className="page projects-page">
-    <PageHeader eyebrow="Local-first studio" title="Make the first cut" description="Add a source, choose an editorial style, and review clips as they finish." actions={health
-      ? <StatusBadge state={health.status === "ready" ? "ready" : "fallback"} label={health.status === "ready" ? "All local tools ready" : "Some local tools unavailable"} />
-      : healthChecked ? <StatusBadge state="offline" label="Local tools unavailable" /> : undefined} />
-
     <section className="create-panel" aria-labelledby="create-title">
       <div className="create-topline">
         <div><h2 id="create-title">Create a project</h2><p>Nothing leaves this machine unless you use a URL or an enabled provider.</p></div>
@@ -159,7 +155,7 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
 
       <div className="create-grid">
         <div className="create-step source-step">
-          <div className="step-label"><span>1</span>{mode === "clip" ? "Add source" : "Add script"}</div>
+          <div className="step-label"><StepBadge step={1} /><span className="step-label-text">{mode === "clip" ? "Add source" : "Add script"}</span></div>
           {mode === "clip" ? <VideoSourcePicker mode={sourceType} onModeChange={(next) => setSourceType(next as "file" | "url")} file={file} onFile={(next, pickerError) => { setFile(next); if (pickerError) setError(pickerError); else setError(null); }} url={url} onUrl={setUrl} /> : <div className="script-input-wrap">
             <textarea value={script} onChange={(event) => setScript(event.target.value)} placeholder="Paste the exact script. S6_cut preserves this source text…" rows={8} />
             <div className="script-meta"><span>{script.length.toLocaleString()} characters</span><input ref={scriptInput} type="file" accept=".txt,.md,text/plain,text/markdown" onChange={(event) => loadScriptFile(event.target.files?.[0])} hidden /><button onClick={() => scriptInput.current?.click()}><FolderOpen size={14} /> Upload .txt or .md</button></div>
@@ -176,7 +172,7 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
         </div>
 
         <div className="create-step style-step">
-          <div className="step-label"><span>2</span>Choose the output</div>
+          <div className="step-label"><StepBadge step={2} /><span className="step-label-text">Choose the output</span></div>
           <FieldGroup title="Editorial style">
             <div className="style-grid">
               {styles.map((item) => <button key={item.id} className={style === item.id ? "style-card active" : "style-card"} onClick={() => setStyle(item.id)} aria-pressed={style === item.id}>
@@ -209,7 +205,7 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
         </div>
 
         <div className="create-step action-step">
-          <div className="step-label"><span>3</span>Name and create</div>
+          <div className="step-label"><StepBadge step={3} /><span className="step-label-text">Name and create</span></div>
           <FieldGroup title="Destination">
             <Field label="Project name" hint="Optional. Leave blank for a generated name."><input id="project-name" aria-label="Project name" value={projectName} maxLength={160} onChange={(event) => setProjectName(event.target.value)} placeholder="e.g. Launch highlights" /></Field>
             <div className="folder-picker"><Field label="Business folder"><select aria-label="Business folder" value={libraryFolderId} onChange={(event) => setLibraryFolderId(event.target.value)}>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></Field><Button variant="ghost" onClick={addFolder}><Plus size={13} /> New folder</Button></div>
@@ -225,10 +221,14 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
 
           <div className="create-actions">
             {error && <p className="form-error" role="alert">{error}</p>}
-            <Button variant="primary" className="create-button" disabled={submitting || health?.ffmpeg === false} onClick={submit}>{submitting ? "Creating…" : <><Plus size={17} /> {mode === "clip" ? `Create ${count} ${contentFormat === "long" ? "landscape clip" : "short clip"}${count === 1 ? "" : "s"}` : "Create script video"}</>}</Button>
-            <p className="rights-copy">Only process content you own or are authorised to use.</p>
+            <Button variant="primary" className="create-button" disabled={submitting || health?.ffmpeg === false} onClick={submit}>{submitting ? "Creating…" : <><Plus size={16} /> {mode === "clip" ? `Create ${count} ${contentFormat === "long" ? "landscape clip" : "short clip"}${count === 1 ? "" : "s"}` : "Create script video"}</>}</Button>
           </div>
         </div>
+
+        {/* Its own row of the panel grid, under the action column. Kept out of
+            `.create-actions` so the footnote cannot push the Create button off
+            the line it shares with the Processing mode control. */}
+        <div className="create-note-row"><p className="rights-copy">Only process content you own or are authorised to use.</p></div>
       </div>
     </section>
 

@@ -119,8 +119,9 @@ describe("Projects create flow", () => {
     expect(document.querySelector(".engine-summary")).toBeNull();
 
     rerender(<ProjectsView projects={[]} health={health} healthChecked onCreated={vi.fn()} onOpen={vi.fn()} onRefresh={vi.fn(async () => undefined)} />);
-    expect(screen.getByText(/All local tools ready/i)).toBeInTheDocument();
+    expect(screen.queryByText(/All local tools ready/i)).not.toBeInTheDocument();
     expect(document.querySelector(".engine-summary")).toHaveTextContent(/Local engine ready/i);
+    expect(screen.queryByText(/Local-first studio|Make the first cut|Add a source, choose an editorial style, and review clips as they finish\./i)).not.toBeInTheDocument();
   });
 
   it("keeps explicit Smart as a local Whisper opt-in without a provider", () => {

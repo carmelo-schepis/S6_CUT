@@ -166,3 +166,16 @@ export function useSingleFlight() {
     try { await action(); } finally { inFlight.current = false; }
   }, []);
 }
+
+/**
+ * The numbered badge used by every workflow step.
+ *
+ * One component so the geometry is defined once: a fixed 24px circle that never
+ * shrinks, stretches, clips or turns oval, whatever the heading beside it does.
+ * The badge deliberately does not inherit the heading's type — its digit is
+ * General text at weight 500 with `line-height: 1`, so a single- and a
+ * double-digit value are both optically centred.
+ */
+export function StepBadge({ step }: { step: number | string }) {
+  return <span className="step-badge">{step}</span>;
+}

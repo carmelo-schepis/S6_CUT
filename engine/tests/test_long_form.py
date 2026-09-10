@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 import subprocess
 from dataclasses import replace
 from pathlib import Path
@@ -14,6 +15,20 @@ from engine.models import Job, Project
 @pytest.fixture
 def settings() -> Settings:
     return Settings.from_env()
+
+
+def _require_ffmpeg(settings: Settings) -> None:
+    """Skip a test whose fixture is built with the real FFmpeg tools.
+
+    These are the FFmpeg-gated smoke tests described in
+    DO-NOT-CHANGE/AGENTS.md section 9: on a host without ffmpeg/ffprobe they
+    must skip cleanly rather than fail with a bare FileNotFoundError. The
+    planner tests in this module use no external tools and keep running.
+    """
+    missing = [name for name, binary in (("ffmpeg", settings.ffmpeg), ("ffprobe", settings.ffprobe))
+               if not shutil.which(binary)]
+    if missing:
+        pytest.skip(f"requires {' and '.join(missing)}")
 
 
 def test_legacy_project_and_job_default_to_short_form() -> None:
@@ -45,6 +60,7 @@ def test_long_form_planner_is_deterministic_non_overlapping_and_partial() -> Non
 
 def test_long_form_render_is_true_landscape_16_9(tmp_path: Path, settings: Settings) -> None:
     runtime = settings
+    _require_ffmpeg(runtime)
     source = tmp_path / "source.mp4"
     subprocess.run([
         runtime.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi",
@@ -61,6 +77,7 @@ def test_long_form_render_is_true_landscape_16_9(tmp_path: Path, settings: Setti
 
 def test_long_source_limit_can_exceed_short_limit(tmp_path: Path) -> None:
     runtime = Settings.from_env()
+    _require_ffmpeg(runtime)
     source = tmp_path / "source.mp4"
     subprocess.run([
         runtime.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi",

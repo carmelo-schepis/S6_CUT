@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "noEmit": true,
+    "types": [
+      "node"
+    ]
+  },
+  "include": [
+    "tests/acceptance/support/**/*.ts",
+    "tests/acceptance/content-authenticity.spec.ts",
+    "tests/acceptance/youtube-import.spec.ts",
+    "tests/acceptance/youtube-url-forms.spec.ts",
+    "tests/acceptance/youtube-openrouter-fallback.spec.ts"
+  ]
+}
