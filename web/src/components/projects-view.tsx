@@ -221,10 +221,14 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
 
           <div className="create-actions">
             {error && <p className="form-error" role="alert">{error}</p>}
-            <Button variant="primary" className="create-button" disabled={submitting || health?.ffmpeg === false} onClick={submit}>{submitting ? "Creating…" : <><Plus size={17} /> {mode === "clip" ? `Create ${count} ${contentFormat === "long" ? "landscape clip" : "short clip"}${count === 1 ? "" : "s"}` : "Create script video"}</>}</Button>
-            <p className="rights-copy">Only process content you own or are authorised to use.</p>
+            <Button variant="primary" className="create-button" disabled={submitting || health?.ffmpeg === false} onClick={submit}>{submitting ? "Creating…" : <><Plus size={16} /> {mode === "clip" ? `Create ${count} ${contentFormat === "long" ? "landscape clip" : "short clip"}${count === 1 ? "" : "s"}` : "Create script video"}</>}</Button>
           </div>
         </div>
+
+        {/* Its own row of the panel grid, under the action column. Kept out of
+            `.create-actions` so the footnote cannot push the Create button off
+            the line it shares with the Processing mode control. */}
+        <div className="create-note-row"><p className="rights-copy">Only process content you own or are authorised to use.</p></div>
       </div>
     </section>
 
