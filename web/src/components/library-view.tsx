@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState, type ChangeEvent, type KeyboardEvent, type MouseEvent } from "react";
-import { Archive, FileImage, Folder, FolderPlus, ImagePlus, Library, RefreshCw, Search, ShieldCheck, Upload } from "lucide-react";
-import { archiveFolder, createFolder, deleteAsset, getHealth, listAssets, listFolders, moveAssets, moveFolder, readableError, removeFolder, updateAsset, updateFolder, uploadAsset } from "../api";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent, type MouseEvent } from "react";
+import { Archive, FileImage, Folder, FolderPlus, ImagePlus, Library, RefreshCw, Search, ShieldCheck, Trash2, Upload } from "lucide-react";
+import { archiveFolder, createFolder, deleteAsset, deleteAssets, getHealth, listAssets, listFolders, moveAssets, moveFolder, readableError, removeFolder, updateAsset, updateFolder, uploadAsset } from "../api";
 import { bindRevalidationOnFocus, createBoundedRevalidation, onLibraryChanged } from "../library-sync";
 import type { AssetOrigin, Health, LibraryAsset, LibraryFolder } from "../types";
 import { Button, EmptyState, Field, FieldGroup, PageHeader, StatusBadge, formatAge } from "./common";
@@ -32,6 +32,9 @@ export function LibraryView() {
   const [loading, setLoading] = useState(true);
   const [previewAsset, setPreviewAsset] = useState<LibraryAsset | null>(null);
   const [previewOpener, setPreviewOpener] = useState<HTMLButtonElement | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteFeedback, setDeleteFeedback] = useState<string | null>(null);
 
   const load = useCallback(async (retry = true) => {
     setLoading(true);
@@ -131,6 +134,26 @@ export function LibraryView() {
     if (!selectedIds.length) return;
     try { await moveAssets(selectedIds, destination); setAssets((current) => current.map((asset) => selectedIds.includes(asset.id) ? { ...asset, folderId: destination } : asset)); setSelectedIds([]); } catch (cause) { setError(readableError(cause)); }
   };
+  const confirmDelete = async () => {
+    if (deleting || !selectedIds.length) return;
+    const ids = [...selectedIds];
+    setDeleting(true); setDeleteFeedback(null);
+    try {
+      const result = await deleteAssets(ids);
+      const deletedCount = result.deleted.length;
+      setAssets((current) => current.filter((asset) => !result.deleted.includes(asset.id)));
+      setSelectedIds((current) => current.filter((id) => !result.deleted.includes(id)));
+      setSelected((current) => current && result.deleted.includes(current.id) ? null : current);
+      if (result.failed && Object.keys(result.failed).length) {
+        setDeleteFeedback(`${deletedCount} item${deletedCount === 1 ? "" : "s"} deleted. ${Object.keys(result.failed).length} could not be deleted. ${Object.values(result.failed)[0]}`);
+      } else {
+        setDeleteFeedback(`${deletedCount} media item${deletedCount === 1 ? "" : "s"} deleted`);
+      }
+      setDeleteDialogOpen(false);
+    } catch (cause) {
+      setDeleteFeedback(`Could not delete the selected media. ${readableError(cause)}`);
+    } finally { setDeleting(false); }
+  };
 
   return <div className="page library-page">
     <PageHeader eyebrow="Tier 0 resolver" title="Personal Media Library" description="Organise reusable and project media in local business folders. Folders group content; they are not access boundaries." actions={<Button variant="primary" onClick={() => setShowImport(!showImport)}><ImagePlus size={15} /> Import asset</Button>} />
@@ -146,7 +169,8 @@ export function LibraryView() {
       </aside>
 
       <section className="library-centre panel"><div className="library-toolbar"><div className="search-box"><Search size={15} /><input aria-label="Search media" placeholder="Search titles, tags, people, brands…" value={query} onChange={(event) => setQuery(event.target.value)} /></div><select aria-label="Media type" value={mediaType} onChange={(event) => setMediaType(event.target.value)}><option value="all">All media</option><option value="image">Images</option><option value="video">Video</option><option value="audio">Audio</option></select><select aria-label="Asset origin" value={origin} onChange={(event) => setOrigin(event.target.value as AssetOrigin | "all")}><option value="all">All origins</option><option value="project-source">Sources</option><option value="generated-clip">Generated clips</option><option value="script-output">Script outputs</option><option value="manual-import">Manual imports</option></select></div>
-        {selectedIds.length > 0 && <div className="bulk-bar"><strong>{selectedIds.length} selected</strong><select aria-label="Move selected assets" defaultValue="" onChange={(event) => { if (event.target.value) void moveSelected(event.target.value); }}><option value="" disabled>Move to…</option>{folders.filter((folder) => !folder.archived).map((folder) => <option value={folder.id} key={folder.id}>{folder.name}</option>)}</select></div>}
+        {selectedIds.length > 0 && <div className="bulk-bar"><strong>{selectedIds.length} selected</strong><select aria-label="Move selected assets" defaultValue="" onChange={(event) => { if (event.target.value) void moveSelected(event.target.value); }}><option value="" disabled>Move to…</option>{folders.filter((folder) => !folder.archived).map((folder) => <option value={folder.id} key={folder.id}>{folder.name}</option>)}</select><Button variant="danger" data-delete-selected="true" disabled={deleting} onClick={() => setDeleteDialogOpen(true)}><Trash2 size={15} aria-hidden="true" /> Delete</Button></div>}
+        {deleteFeedback && <div className="library-feedback" role="status">{deleteFeedback}</div>}
         {visibleAssets.length ? <><div className="asset-grid">{pagedAssets.map((asset) => <LibraryAssetCard key={asset.id} asset={asset} isSelected={selectedIds.includes(asset.id)} isInspected={selected?.id === asset.id} onPreview={openPreview} onInspect={setSelected} onToggleSelected={(assetId, checked) => setSelectedIds((current) => checked ? [...current, assetId] : current.filter((id) => id !== assetId))} />)}</div>
           {remainingAssets > 0 && <button className="show-all-projects" onClick={() => setAssetLimit((value) => value + ASSET_PAGE)}>Show {Math.min(ASSET_PAGE, remainingAssets)} more of {visibleAssets.length}</button>}</>
           : loading && !assets.length ? <EmptyState icon={<Library size={30} />} title="Opening your Library">Reading local media from the engine…</EmptyState>
@@ -180,8 +204,33 @@ export function LibraryView() {
     </div>
 
     {previewAsset && <VideoPreviewDialog asset={previewAsset} opener={previewOpener} onClose={closePreview} />}
+    {deleteDialogOpen && selectedIds.length > 0 && <DeleteConfirmationDialog count={selectedIds.length} deleting={deleting} onCancel={() => { setDeleteDialogOpen(false); queueMicrotask(() => document.querySelector<HTMLButtonElement>('[data-delete-selected="true"]')?.focus()); }} onConfirm={() => void confirmDelete()} />}
 
   </div>;
+}
+
+function DeleteConfirmationDialog({ count, deleting, onCancel, onConfirm }: { count: number; deleting: boolean; onCancel: () => void; onConfirm: () => void }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    dialogRef.current?.querySelector<HTMLButtonElement>("button:not([disabled])")?.focus();
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") { event.preventDefault(); if (!deleting) onCancel(); return; }
+      if (event.key !== "Tab" || !dialogRef.current) return;
+      const focusable = [...dialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled])')];
+      if (!focusable.length) return;
+      const first = focusable[0]; const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [deleting, onCancel]);
+  const title = count === 1 ? "Delete selected media?" : `Delete ${count} media items?`;
+  const message = count === 1 ? "This will permanently delete the selected media item. This action cannot be undone." : `This will permanently delete these ${count} media items. This action cannot be undone.`;
+  return <div className="dialog-backdrop"><div ref={dialogRef} className="confirmation-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-dialog-title" aria-describedby="delete-dialog-message">
+    <h2 id="delete-dialog-title">{title}</h2><p id="delete-dialog-message">{message}</p>
+    <div className="dialog-actions"><Button disabled={deleting} onClick={onCancel}>Cancel</Button><Button variant="danger" disabled={deleting} onClick={onConfirm}><Trash2 size={15} aria-hidden="true" />{deleting ? "Deleting…" : count === 1 ? "Delete media" : `Delete ${count} items`}</Button></div>
+  </div></div>;
 }
 
 function LibraryAssetCard({ asset, isSelected, isInspected, onPreview, onInspect, onToggleSelected }: { asset: LibraryAsset; isSelected: boolean; isInspected: boolean; onPreview: (asset: LibraryAsset, opener: HTMLButtonElement) => void; onInspect: (asset: LibraryAsset) => void; onToggleSelected: (assetId: string, checked: boolean) => void }) {

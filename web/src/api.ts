@@ -4,6 +4,7 @@
 import {
   assetPageSchema,
   assetSchema,
+  assetDeleteResultSchema,
   healthSchema,
   jobSchema,
   libraryFolderSchema,
@@ -362,6 +363,14 @@ export async function uploadAsset(form: FormData): Promise<LibraryAsset> {
 
 export async function deleteAsset(id: string): Promise<void> {
   await request(`/library/assets/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export async function deleteAssets(assetIds: string[]): Promise<{ deleted: string[]; failed: Record<string, string> }> {
+  return assetDeleteResultSchema.parse(await request("/library/assets/bulk-delete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ assetIds }),
+  }));
 }
 
 export async function updateAsset(id: string, input: Record<string, unknown>): Promise<LibraryAsset> {

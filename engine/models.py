@@ -418,6 +418,15 @@ class AssetMove(ApiModel):
     folder_id: str
 
 
+class AssetDelete(ApiModel):
+    asset_ids: list[str] = Field(min_length=1, max_length=500)
+
+
+class AssetDeleteResult(ApiModel):
+    deleted: list[str] = Field(default_factory=list)
+    failed: dict[str, str] = Field(default_factory=dict)
+
+
 class Asset(ApiModel):
     id: str
     title: str = Field(min_length=1, max_length=200)

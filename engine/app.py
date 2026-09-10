@@ -28,7 +28,7 @@ from .jobs import JobManager, QueueFullError, SwitchFastError
 from .library import LibraryRules
 from .media import MediaError, available, probe, validate_video_upload
 from .models import (
-    Asset, AssetMove, AssetOrigin, AssetUpdate, AssetPage, CaptionCue, CaptionDownload, CaptionReviewInput, Clip, FolderCreate, FolderMove, FolderUpdate, Health, Job,
+    Asset, AssetDelete, AssetDeleteResult, AssetMove, AssetOrigin, AssetUpdate, AssetPage, CaptionCue, CaptionDownload, CaptionReviewInput, Clip, FolderCreate, FolderMove, FolderUpdate, Health, Job,
     LibraryFolder, MatchExplanation, ContentFormat, ProcessingMode, ProfileInput, Project, ProjectFolderUpdate,
     OpenRouterModel, ProviderProfile, ScriptJobInput, SelectionInput, ShortsJobInput, TopicBeat, TopicVideoInput, TopicVideoPlan, now_iso,
 )
@@ -909,6 +909,43 @@ async def move_library_assets(value: AssetMove) -> dict[str, int]:
         return {"moved": db.move_assets(value.asset_ids, value.folder_id)}
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
+
+
+@app.post("/api/v1/library/assets/bulk-delete", response_model=AssetDeleteResult)
+async def delete_library_assets(value: AssetDelete) -> AssetDeleteResult:
+    """Delete only explicitly selected, unprotected library records.
+
+    The database resolves each blob reference; clients never submit paths. A
+    blob is removed only after the transactional reference check says it is no
+    longer shared. Missing, protected, and invalid IDs are returned per item so
+    a mixed selection can be retried without losing failed cards.
+    """
+    deleted: list[str] = []
+    failed: dict[str, str] = {}
+    for asset_id in dict.fromkeys(value.asset_ids):
+        if not asset_id.strip():
+            failed[asset_id] = "Invalid media ID"
+            continue
+        try:
+            _, relative, unreferenced = db.delete_asset(asset_id)
+            if unreferenced and relative:
+                try:
+                    target = confined(settings.data_path, *relative.split("/"))
+                    target.unlink(missing_ok=True)
+                except (OSError, ValueError) as exc:
+                    # The database record is already safely removed. Keep the
+                    # orphan for a later cleanup rather than risking a shared
+                    # blob; surface the storage issue in the result.
+                    failed[asset_id] = f"Media record deleted, but file cleanup failed: {exc}"
+                    continue
+            deleted.append(asset_id)
+        except KeyError:
+            failed[asset_id] = "Media item was already deleted"
+        except ValueError as exc:
+            failed[asset_id] = str(exc)
+        except OSError as exc:
+            failed[asset_id] = f"Storage error: {exc}"
+    return AssetDeleteResult(deleted=deleted, failed=failed)
 
 
 @app.post("/api/v1/library/assets", response_model=Asset)

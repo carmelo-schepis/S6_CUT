@@ -324,6 +324,8 @@ export type LibraryAsset = z.infer<typeof assetSchema>;
 export const assetPageSchema = z.object({ items: assetSchema.array(), page: z.number().int().positive(), pageSize: z.number().int().positive(), hasMore: z.boolean() });
 export type AssetPage = z.infer<typeof assetPageSchema>;
 
+export const assetDeleteResultSchema = z.object({ deleted: z.array(z.string()), failed: z.record(z.string()) });
+
 export type MatchExplanation = {
   query: string;
   selected: LibraryAsset | null;
