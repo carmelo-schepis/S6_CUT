@@ -36,13 +36,41 @@ const viewports = [
 async function measure(page: Page, name: string, viewport: { width: number; height: number }) {
   const result = await page.evaluate(({ name, viewport }) => {
     const root = document.documentElement;
+    /**
+     * The nearest ancestor that scrolls horizontally on purpose.
+     *
+     * The clip board is a film strip (`overflow-x: auto`): with enough clips its
+     * later tiles sit beyond the right edge by design, and the user reaches them
+     * by scrolling the strip. Those controls are not "off screen" in the sense
+     * this check guards against — that sense is a control pushed out by page
+     * layout, which the `scrollWidth`/`bodyScrollWidth` assertions below still
+     * cover for the document itself.
+     */
+    const horizontalScroller = (element: Element): HTMLElement | null => {
+      for (let node = element.parentElement; node && node !== document.body; node = node.parentElement) {
+        const overflowX = getComputedStyle(node).overflowX;
+        if ((overflowX === "auto" || overflowX === "scroll") && node.scrollWidth > node.clientWidth + 1) return node;
+      }
+      return null;
+    };
     const offenders = [...document.querySelectorAll("button,input,select,textarea,a,[role=button],[role=dialog]")]
       .flatMap((element) => {
         const style = getComputedStyle(element);
         const rect = element.getBoundingClientRect();
         if (style.display === "none" || style.visibility === "hidden" || rect.width === 0 || rect.height === 0) return [];
         if (rect.left >= -1 && rect.right <= innerWidth + 1) return [];
+        const scroller = horizontalScroller(element);
+        if (scroller) {
+          // Reachable only if the strip itself is on screen and the control lies
+          // inside the strip's scrollable content.
+          const box = scroller.getBoundingClientRect();
+          const offsetLeft = rect.left - box.left + scroller.scrollLeft;
+          const stripOnScreen = box.left >= -1 && box.right <= innerWidth + 1;
+          const insideContent = offsetLeft >= -1 && offsetLeft + rect.width <= scroller.scrollWidth + 1;
+          if (stripOnScreen && insideContent) return [];
+        }
         return [{
+          scroller: scroller ? scroller.className : null,
           description: (element.getAttribute("aria-label") || element.textContent || element.tagName).trim().slice(0, 120),
           tag: element.tagName,
           className: element.className,
