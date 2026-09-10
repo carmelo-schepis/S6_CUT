@@ -27,16 +27,17 @@ def test_health_is_honest_and_hides_host_path() -> None:
     assert "planning" in body["fallbacks"]
 
 
-def test_health_stays_available_when_mounted_data_does_not_support_statvfs(monkeypatch) -> None:
+def test_health_aliases_stay_available_when_mounted_data_does_not_support_statvfs(monkeypatch) -> None:
     def unsupported_disk_usage(_: Path) -> object:
         raise OSError(95, "Operation not supported")
 
     monkeypatch.setattr("engine.app.shutil.disk_usage", unsupported_disk_usage)
 
-    response = TestClient(app, raise_server_exceptions=False).get("/api/v1/health")
-
-    assert response.status_code == 200
-    assert response.json()["freeBytes"] == 0
+    client_without_disk_usage = TestClient(app, raise_server_exceptions=False)
+    for path in ("/api/health", "/api/v1/health"):
+        response = client_without_disk_usage.get(path)
+        assert response.status_code == 200
+        assert response.json()["freeBytes"] == 0
 
 
 def test_script_job_preserves_exact_source_and_returns_durable_records() -> None:
