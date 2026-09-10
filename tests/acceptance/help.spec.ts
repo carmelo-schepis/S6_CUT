@@ -51,7 +51,10 @@ test.describe("S6 Cut Help", () => {
     const dialog = page.getByRole("dialog", { name: "S6 Cut Help" });
     await expect(dialog).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(await page.evaluate(() => window.innerWidth));
-    expect(await dialog.boundingBox()).toMatchObject({ width: 370 });
+    // The backdrop insets the dialog by the same guide the page uses, so the
+    // dialog's edges line up with the content behind it at every width.
+    const inset = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--page-inset")));
+    expect(await dialog.boundingBox()).toMatchObject({ width: 390 - inset * 2 });
     await page.getByRole("button", { name: "Video layouts", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Video layouts", exact: true })).toBeVisible();
     await page.waitForTimeout(800);

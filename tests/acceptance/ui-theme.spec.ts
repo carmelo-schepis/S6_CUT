@@ -12,7 +12,14 @@ import path from "node:path";
  *      a different text hue;
  *   2. every numbered workflow step badge is the same 24px circle, and its
  *      digit stays centred and unclipped whatever the heading beside it does;
- *   3. accents come only from the logo-derived palette.
+ *   3. accents come only from the approved palette;
+ *   4. no brand red is painted anywhere — the accent is white, and red survives
+ *      only as the failure signal.
+ *
+ * Rule 4 exists because rule 3 cannot see the problem it guards: that test only
+ * inspects fully opaque paint, and a brand hue lives mostly in low-alpha tints
+ * and borders. A recolour that misses one panel border or one `:has()` rule
+ * looks finished and is not.
  *
  * Text drawn inside media (video, canvas, images) and the caption preview — a
  * simulation of the subtitle FFmpeg burns into the frame, not product chrome —
@@ -28,17 +35,23 @@ const viewports = [
 
 const routes = ["Projects", "Library", "Workspace", "Shorts Editor", "AI Video", "Jobs", "Settings"] as const;
 
-/** The logo-derived palette, plus the semantic status hues that must stay distinct. */
+/**
+ * The chromatic paint this UI is allowed to show. The brand accent is white and
+ * white is near-neutral, so it never reaches this list — the accent passes by
+ * being colourless, which is the point.
+ */
 const APPROVED_ACCENTS = new Set([
-  "rgb(118, 107, 255)", // --accent-primary   (logo indigo)
-  "rgb(145, 137, 255)", // --accent-primary-hover / --focus-ring
-  "rgb(241, 77, 154)",  // --accent-magenta   (logo burgundy)
-  "rgb(255, 154, 122)", // --accent-coral     (logo peach)
-  "rgb(242, 56, 85)",   // --accent-crimson   (logo crimson) / --error
-  "rgb(111, 168, 255)", // --accent-blue      (logo slate)
-  "rgb(143, 163, 200)", // --accent-slate
+  "rgb(118, 107, 255)", // --accent-primary  (option selection, independent of brand)
+  "rgb(145, 137, 255)", // --accent-primary-hover
   "rgb(76, 183, 130)",  // --success
   "rgb(240, 168, 75)",  // --warning
+  "rgb(242, 56, 85)",   // --error / --accent-crimson
+  // Destructive-action states, stepped from --error toward the surface below.
+  // These only paint on :hover/:active/:disabled, so the scan above rarely
+  // reaches them; they are listed so the ramp is declared rather than implied.
+  "rgb(208, 48, 73)",   // --error-hover
+  "rgb(175, 41, 62)",   // --error-active
+  "rgb(109, 35, 47)",   // --error-disabled
 ]);
 
 async function openRoute(page: Page, label: string) {
@@ -95,6 +108,7 @@ test.describe("theme contract", () => {
       await openRoute(page, "Projects");
       const badges = page.locator(".step-badge");
       expect(await badges.count(), `${width}px badge count`).toBeGreaterThan(0);
+      const textSize = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--type-text-size").trim());
 
       const measured = await page.evaluate(() => [...document.querySelectorAll<HTMLElement>(".step-badge")].map((el) => {
         const rect = el.getBoundingClientRect();
@@ -133,9 +147,10 @@ test.describe("theme contract", () => {
         expect(b.padding, `${where} padding`).toBe("0px");
         expect(b.overflow, `${where} overflow`).toBe("hidden");
         expect(b.aspectRatio, `${where} aspect-ratio`).toBe("1 / 1");
-        expect(b.fontSize, `${where} font-size`).toBe("14px");
+        expect(b.fontSize, `${where} font-size`).toBe(textSize);
         expect(b.fontWeight, `${where} font-weight`).toBe("500");
-        expect(b.lineHeight, `${where} line-height`).toBe("14px");
+        // `line-height: 1`: the digit's line box is exactly its own type size.
+        expect(b.lineHeight, `${where} line-height`).toBe(textSize);
         expect(b.numeric, `${where} tabular figures`).toContain("tabular-nums");
         expect(b.whiteSpace, `${where} stays on one line`).toBe("nowrap");
         expect(b.colour, `${where} colour`).toBe("rgb(255, 255, 255)");
@@ -182,15 +197,25 @@ test.describe("theme contract", () => {
     for (const route of routes) {
       await openRoute(page, route);
       for (const colour of await page.evaluate(() => {
+        // Chromium serialises a `color-mix(in srgb, …)` result as
+        // `color(srgb 0.81 0.19 0.28)`, not as `rgb()`. Without this branch a
+        // whole ramp of painted colour is invisible to the scan.
+        const read = (value: string): { r: number; g: number; b: number; a: number } | null => {
+          const legacy = /^rgba?\((\d+), (\d+), (\d+)(?:, ([\d.]+))?/.exec(value);
+          if (legacy) return { r: +legacy[1], g: +legacy[2], b: +legacy[3], a: legacy[4] === undefined ? 1 : +legacy[4] };
+          const modern = /^color\(srgb ([\d.]+) ([\d.]+) ([\d.]+)(?:\s*\/\s*([\d.]+))?/.exec(value);
+          if (modern) return { r: Math.round(+modern[1] * 255), g: Math.round(+modern[2] * 255), b: Math.round(+modern[3] * 255), a: modern[4] === undefined ? 1 : +modern[4] };
+          return null;
+        };
         const out: string[] = [];
         for (const el of document.querySelectorAll<HTMLElement>("*")) {
           if (el.closest("svg,canvas,video,img,iframe") || el.closest(".caption-preview")) continue;
           const style = getComputedStyle(el);
           for (const value of [style.backgroundColor, style.borderTopColor, style.borderLeftColor, style.color, style.outlineColor]) {
-            const m = value.match(/^rgba?\((\d+), (\d+), (\d+)(?:, ([\d.]+))?/);
-            if (!m) continue;
-            if (m[4] !== undefined && Number(m[4]) < 0.99) continue;   // tints composite onto dark surfaces
-            const [r, g, b] = [Number(m[1]), Number(m[2]), Number(m[3])];
+            const parsed = read(value);
+            if (!parsed) continue;
+            const { r, g, b, a } = parsed;
+            if (a < 0.99) continue;                                    // tints composite onto dark surfaces
             if (Math.max(r, g, b) - Math.min(r, g, b) < 24) continue;  // neutral surfaces and white
             if (Math.max(r, g, b) < 60) continue;                      // too dark to read as an accent
             out.push(`rgb(${r}, ${g}, ${b})`);
@@ -201,6 +226,95 @@ test.describe("theme contract", () => {
     }
     const unapproved = [...seen].filter((c) => !APPROVED_ACCENTS.has(c));
     expect(unapproved, `unapproved accent colours: ${unapproved.join(", ")}`).toEqual([]);
+  });
+
+  test("no brand red is painted anywhere", async ({ page }) => {
+    test.setTimeout(300_000);
+    const offenders: unknown[] = [];
+    for (const [, width, height] of viewports) {
+      await page.setViewportSize({ width, height });
+      await page.goto("/", { waitUntil: "domcontentloaded" });
+      await expect(page.locator(".app-rail nav")).toBeVisible();
+      for (const route of routes) {
+        await openRoute(page, route);
+        const found = await page.evaluate(() => {
+          // Every colour in a value, alpha included. Alpha is deliberately NOT a
+          // reason to skip: a brand hue survives a recolour mostly as low-alpha
+          // tints and hairlines, which is exactly the hole this test closes.
+          // Both serialisations matter — Chromium writes a `color-mix(in srgb,…)`
+          // result as `color(srgb 0.81 0.19 0.28)`, never as `rgb()`.
+          const LEGACY = /rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)(?:\s*[,/]\s*([\d.]+))?\s*\)/g;
+          const MODERN = /color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)(?:\s*\/\s*([\d.]+))?\s*\)/g;
+          type Paint = { r: number; g: number; b: number; a: number; text: string };
+          const extract = (value: string): Paint[] => {
+            const out: Paint[] = [];
+            LEGACY.lastIndex = 0;
+            for (let m = LEGACY.exec(value); m; m = LEGACY.exec(value)) {
+              out.push({ r: +m[1], g: +m[2], b: +m[3], a: m[4] === undefined ? 1 : +m[4], text: m[0] });
+            }
+            MODERN.lastIndex = 0;
+            for (let m = MODERN.exec(value); m; m = MODERN.exec(value)) {
+              out.push({ r: Math.round(+m[1] * 255), g: Math.round(+m[2] * 255), b: Math.round(+m[3] * 255), a: m[4] === undefined ? 1 : +m[4], text: m[0] });
+            }
+            return out;
+          };
+          const triple = (p: Paint) => `${p.r},${p.g},${p.b}`;
+
+          // Resolve the semantic reds through a real element, so a var() chain or
+          // a color-mix() yields the used colour rather than its source text —
+          // and through the same parser, so the allow-list cannot round
+          // differently from the values it is compared against.
+          const probe = document.createElement("span");
+          probe.style.cssText = "position:absolute;visibility:hidden;pointer-events:none";
+          document.body.appendChild(probe);
+          const allowed = new Set<string>();
+          for (const token of ["--error", "--error-hover", "--error-active", "--error-disabled", "--warning"]) {
+            probe.style.color = "";
+            probe.style.color = `var(${token})`;
+            for (const paint of extract(getComputedStyle(probe).color)) allowed.add(triple(paint));
+          }
+          probe.remove();
+
+          const bad: { cls: string; tag: string; property: string; colour: string }[] = [];
+          for (const el of document.querySelectorAll<HTMLElement>("*")) {
+            // The caption preview simulates the subtitle FFmpeg burns into the
+            // frame; it keeps the render's own colours, not the product's.
+            if (el.closest("svg,canvas,video,img,iframe") || el.closest(".caption-preview")) continue;
+            const style = getComputedStyle(el);
+            const properties = {
+              backgroundColor: style.backgroundColor,
+              backgroundImage: style.backgroundImage,
+              borderTopColor: style.borderTopColor,
+              borderRightColor: style.borderRightColor,
+              borderBottomColor: style.borderBottomColor,
+              borderLeftColor: style.borderLeftColor,
+              color: style.color,
+              outlineColor: style.outlineColor,
+              boxShadow: style.boxShadow,
+            };
+            for (const [property, value] of Object.entries(properties)) {
+              if (!value || value === "none") continue;
+              for (const paint of extract(value)) {
+                if (paint.a === 0) continue;
+                // Meaningfully red, rather than neutral, white or a cool hue.
+                if (paint.r - Math.max(paint.g, paint.b) < 24) continue;
+                if (allowed.has(triple(paint))) continue;
+                bad.push({
+                  cls: String(el.className).slice(0, 48) || "(no class)",
+                  tag: el.tagName.toLowerCase(),
+                  property,
+                  colour: paint.text,
+                });
+              }
+            }
+          }
+          return bad;
+        });
+        for (const item of found) offenders.push({ route, width, ...item });
+      }
+    }
+    const summary = offenders.slice(0, 25);
+    expect(offenders, `brand red still painted (${offenders.length} occurrences): ${JSON.stringify(summary, null, 1)}`).toEqual([]);
   });
 
   test("no obsolete hard-coded accent literals remain in the stylesheet", async () => {
@@ -214,6 +328,12 @@ test.describe("theme contract", () => {
       "#8de1b4", "#ff9cad", "#f6bd71", "#ecc28b",           // previous status text
       "#71405e", "#4b5a75", "#806d3b", "#9d4a32",           // previous style swatches
       "#0a0a59", "#9d001f",                                 // pre-logo brand hexes
+      // Brand red, retired for a white accent. Red is a failure signal now, so
+      // any of these reappearing is the brand creeping back one component at a
+      // time — which is how it got everywhere the first time.
+      "#B51F3D", "#CC2949", "#971830", "#762135", "181, 31, 61",
+      "160,0,30", "197,29,58",
+      "#d92f4a", "#bd263e", "#74303d",                      // old .button-danger ramp
     ];
     const found = obsolete.filter((literal) => css.includes(literal));
     expect(found, `obsolete accent literals still present: ${found.join(", ")}`).toEqual([]);
