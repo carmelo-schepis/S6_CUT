@@ -3,7 +3,7 @@ import { FileText, Film, FolderOpen, Plus, Search, Sparkles, Zap } from "lucide-
 import { createClipJob, createFolder, createScriptJob, listFolders, readableError } from "../api";
 import type { ContentFormat, Health, Job, LibraryFolder, ProcessingMode, Project, Style } from "../types";
 import { projectStatus } from "../project-status";
-import { Button, Field, FieldGroup, PageHeader, Progress, Skeleton, StatusBadge, formatAge, useSingleFlight } from "./common";
+import { Button, Field, FieldGroup, PageHeader, Progress, Skeleton, StatusBadge, StepBadge, formatAge, useSingleFlight } from "./common";
 import { VideoSourcePicker } from "./video-source-picker";
 
 const RECENT_FOLDER_KEY = "s6-cut.recent-library-folder";
@@ -159,7 +159,7 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
 
       <div className="create-grid">
         <div className="create-step source-step">
-          <div className="step-label"><span>1</span>{mode === "clip" ? "Add source" : "Add script"}</div>
+          <div className="step-label"><StepBadge step={1} /><span className="step-label-text">{mode === "clip" ? "Add source" : "Add script"}</span></div>
           {mode === "clip" ? <VideoSourcePicker mode={sourceType} onModeChange={(next) => setSourceType(next as "file" | "url")} file={file} onFile={(next, pickerError) => { setFile(next); if (pickerError) setError(pickerError); else setError(null); }} url={url} onUrl={setUrl} /> : <div className="script-input-wrap">
             <textarea value={script} onChange={(event) => setScript(event.target.value)} placeholder="Paste the exact script. S6_cut preserves this source text…" rows={8} />
             <div className="script-meta"><span>{script.length.toLocaleString()} characters</span><input ref={scriptInput} type="file" accept=".txt,.md,text/plain,text/markdown" onChange={(event) => loadScriptFile(event.target.files?.[0])} hidden /><button onClick={() => scriptInput.current?.click()}><FolderOpen size={14} /> Upload .txt or .md</button></div>
@@ -176,7 +176,7 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
         </div>
 
         <div className="create-step style-step">
-          <div className="step-label"><span>2</span>Choose the output</div>
+          <div className="step-label"><StepBadge step={2} /><span className="step-label-text">Choose the output</span></div>
           <FieldGroup title="Editorial style">
             <div className="style-grid">
               {styles.map((item) => <button key={item.id} className={style === item.id ? "style-card active" : "style-card"} onClick={() => setStyle(item.id)} aria-pressed={style === item.id}>
@@ -209,7 +209,7 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
         </div>
 
         <div className="create-step action-step">
-          <div className="step-label"><span>3</span>Name and create</div>
+          <div className="step-label"><StepBadge step={3} /><span className="step-label-text">Name and create</span></div>
           <FieldGroup title="Destination">
             <Field label="Project name" hint="Optional. Leave blank for a generated name."><input id="project-name" aria-label="Project name" value={projectName} maxLength={160} onChange={(event) => setProjectName(event.target.value)} placeholder="e.g. Launch highlights" /></Field>
             <div className="folder-picker"><Field label="Business folder"><select aria-label="Business folder" value={libraryFolderId} onChange={(event) => setLibraryFolderId(event.target.value)}>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></Field><Button variant="ghost" onClick={addFolder}><Plus size={13} /> New folder</Button></div>
