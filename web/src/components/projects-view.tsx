@@ -3,7 +3,7 @@ import { FileText, Film, FolderOpen, Plus, Search, Sparkles, Zap } from "lucide-
 import { createClipJob, createFolder, createScriptJob, listFolders, readableError } from "../api";
 import type { ContentFormat, Health, Job, LibraryFolder, ProcessingMode, Project, Style } from "../types";
 import { projectStatus } from "../project-status";
-import { Button, Field, FieldGroup, PageHeader, Progress, Skeleton, StatusBadge, StepBadge, formatAge, useSingleFlight } from "./common";
+import { Button, Field, FieldGroup, Progress, Skeleton, StatusBadge, StepBadge, formatAge, useSingleFlight } from "./common";
 import { VideoSourcePicker } from "./video-source-picker";
 
 const RECENT_FOLDER_KEY = "s6-cut.recent-library-folder";
@@ -142,10 +142,6 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
   const visibleProjects = query || showAllProjects ? matchingProjects : matchingProjects.slice(0, RECENT_LIMIT);
 
   return <div className="page projects-page">
-    <PageHeader eyebrow="Local-first studio" title="Make the first cut" description="Add a source, choose an editorial style, and review clips as they finish." actions={health
-      ? <StatusBadge state={health.status === "ready" ? "ready" : "fallback"} label={health.status === "ready" ? "All local tools ready" : "Some local tools unavailable"} />
-      : healthChecked ? <StatusBadge state="offline" label="Local tools unavailable" /> : undefined} />
-
     <section className="create-panel" aria-labelledby="create-title">
       <div className="create-topline">
         <div><h2 id="create-title">Create a project</h2><p>Nothing leaves this machine unless you use a URL or an enabled provider.</p></div>

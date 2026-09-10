@@ -71,7 +71,7 @@ describe("App shell", () => {
     // …and the steady-state reading remains in the top bar while Help owns the rail footer.
     expect(screen.getByText("Local engine", { exact: true })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Open S6 Cut Help" })).toBeInTheDocument();
-    expect(screen.getByText(/All local tools ready/i)).toBeInTheDocument();
+    expect(screen.queryByText(/All local tools ready/i)).not.toBeInTheDocument();
   });
 
   it("turns an unanswered health read into the retryable error state, not an endless loader", async () => {
@@ -136,7 +136,7 @@ describe("App shell", () => {
   it("renders one top-level main landmark and a skip link that targets it", async () => {
     mockGetHealth.mockResolvedValue(health);
     render(<App />);
-    await screen.findByRole("heading", { level: 1, name: /Make the first cut/i });
+    await screen.findByRole("heading", { level: 2, name: "Create a project" });
 
     const mains = document.querySelectorAll("main, [role='main']");
     expect(mains).toHaveLength(1);
