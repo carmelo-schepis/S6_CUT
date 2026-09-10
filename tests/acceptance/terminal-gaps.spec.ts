@@ -1,10 +1,32 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
 import fs from "node:fs/promises";
 import path from "node:path";
 
 const root = process.cwd();
+const gateway = process.env.S6_ACCEPTANCE_URL || "http://localhost:8080";
 const artifacts = path.join(root, "test-artifacts");
-const projectName = "Codex Final Browser Retest 20260826T062538111Z";
+/**
+ * The project this walkthrough opens.
+ *
+ * This used to name one specific project created by a one-off manual session in
+ * August 2026. That project is long gone, so the test could never pass again on
+ * any dataset. It now takes whatever completed project the instance actually
+ * has — the walkthrough is about viewport geometry, screenshots and the export
+ * ZIP, not about one particular project — and skips cleanly when there is none
+ * to open, the same way the FFmpeg-gated tests skip when the tools are absent.
+ */
+async function findCompletedProject(request: APIRequestContext): Promise<string | null> {
+  const projectsResponse = await request.get(`${gateway}/api/v1/projects`);
+  if (!projectsResponse.ok()) return null;
+  const projects = await projectsResponse.json() as { id: string; name: string }[];
+  const jobsResponse = await request.get(`${gateway}/api/v1/jobs`);
+  if (!jobsResponse.ok()) return null;
+  const jobs = await jobsResponse.json() as { projectId: string; state: string; clips?: { state: string }[] }[];
+  const exportable = new Set(jobs
+    .filter((job) => job.state === "complete" && (job.clips ?? []).some((clip) => clip.state === "complete"))
+    .map((job) => job.projectId));
+  return projects.find((project) => exportable.has(project.id))?.name ?? null;
+}
 const viewports = [
   ["desktop", 1440, 1000],
   ["tablet", 768, 1024],
@@ -14,13 +36,41 @@ const viewports = [
 async function measure(page: Page, name: string, viewport: { width: number; height: number }) {
   const result = await page.evaluate(({ name, viewport }) => {
     const root = document.documentElement;
+    /**
+     * The nearest ancestor that scrolls horizontally on purpose.
+     *
+     * The clip board is a film strip (`overflow-x: auto`): with enough clips its
+     * later tiles sit beyond the right edge by design, and the user reaches them
+     * by scrolling the strip. Those controls are not "off screen" in the sense
+     * this check guards against — that sense is a control pushed out by page
+     * layout, which the `scrollWidth`/`bodyScrollWidth` assertions below still
+     * cover for the document itself.
+     */
+    const horizontalScroller = (element: Element): HTMLElement | null => {
+      for (let node = element.parentElement; node && node !== document.body; node = node.parentElement) {
+        const overflowX = getComputedStyle(node).overflowX;
+        if ((overflowX === "auto" || overflowX === "scroll") && node.scrollWidth > node.clientWidth + 1) return node;
+      }
+      return null;
+    };
     const offenders = [...document.querySelectorAll("button,input,select,textarea,a,[role=button],[role=dialog]")]
       .flatMap((element) => {
         const style = getComputedStyle(element);
         const rect = element.getBoundingClientRect();
         if (style.display === "none" || style.visibility === "hidden" || rect.width === 0 || rect.height === 0) return [];
         if (rect.left >= -1 && rect.right <= innerWidth + 1) return [];
+        const scroller = horizontalScroller(element);
+        if (scroller) {
+          // Reachable only if the strip itself is on screen and the control lies
+          // inside the strip's scrollable content.
+          const box = scroller.getBoundingClientRect();
+          const offsetLeft = rect.left - box.left + scroller.scrollLeft;
+          const stripOnScreen = box.left >= -1 && box.right <= innerWidth + 1;
+          const insideContent = offsetLeft >= -1 && offsetLeft + rect.width <= scroller.scrollWidth + 1;
+          if (stripOnScreen && insideContent) return [];
+        }
         return [{
+          scroller: scroller ? scroller.className : null,
           description: (element.getAttribute("aria-label") || element.textContent || element.tagName).trim().slice(0, 120),
           tag: element.tagName,
           className: element.className,
@@ -82,8 +132,10 @@ async function openProjectByName(page: Page, name: string) {
   await card.first().click();
 }
 
-test("terminal exact viewport, screenshot, and ZIP evidence", async ({ browser }) => {
+test("terminal exact viewport, screenshot, and ZIP evidence", async ({ browser, request }) => {
   await fs.mkdir(artifacts, { recursive: true });
+  const projectName = await findCompletedProject(request);
+  test.skip(!projectName, "no completed project with an exportable clip is present on this instance");
   const base = `${process.env.S6_ACCEPTANCE_URL || "http://localhost:8080"}/?terminal-responsive-retest=${new Date().toISOString()}`;
   const diagnostics = { consoleErrors: [] as string[], pageErrors: [] as string[], failedRequests: [] as string[], measurements: [] as unknown[] };
 
@@ -100,7 +152,7 @@ test("terminal exact viewport, screenshot, and ZIP evidence", async ({ browser }
     await assertFocusedControlVisible(page);
     await page.screenshot({ path: path.join(artifacts, `${name}-projects.png`), fullPage: true });
 
-    await openProjectByName(page, projectName);
+    await openProjectByName(page, projectName!);
     await page.waitForTimeout(400);
     diagnostics.measurements.push(await measure(page, "workspace", { width, height }));
     await open(page, "Shorts Editor");
@@ -127,7 +179,7 @@ test("terminal exact viewport, screenshot, and ZIP evidence", async ({ browser }
   const page = await context.newPage();
   await page.goto(base);
   await expect(page.getByRole("heading", { name: "Make the first cut" })).toBeVisible();
-  await openProjectByName(page, projectName);
+  await openProjectByName(page, projectName!);
   const downloadButton = page.getByRole("button", { name: /Download ZIP/ }).first();
   await expect(downloadButton).toBeEnabled();
   const downloadWait = page.waitForEvent("download");

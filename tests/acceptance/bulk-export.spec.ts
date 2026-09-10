@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { copyFileSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 test.describe.configure({ mode: "serial" });
 
@@ -19,7 +19,10 @@ test("downloads only completed MP4s in a titled Unicode ZIP", async ({ page }, t
   }
   const title = `Café / Launch: Final? Bulk ${Date.now()}`;
   const safeTitle = title.replace(/[<>:"/\\|?*]/g, "-").replace(/\s+/g, " ").trim().replace(/[ .]+$/, "");
-  const dataRoot = join(process.cwd(), "data");
+  // The engine's data mount, not necessarily the repo's ./data: an isolated
+  // stack points S6_DATA_PATH at a throwaway dataset, and the fixture has to be
+  // written where that container can actually read it.
+  const dataRoot = process.env.S6_DATA_PATH ? resolve(process.env.S6_DATA_PATH) : join(process.cwd(), "data");
   const sourcePath = join(dataRoot, "test-artifacts", "bulk-source.mp4");
   mkdirSync(join(dataRoot, "test-artifacts"), { recursive: true });
   const sourceInput = join(dataRoot, "test-artifacts", "bulk-input.mp4");

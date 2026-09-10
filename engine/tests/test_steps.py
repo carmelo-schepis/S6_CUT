@@ -874,6 +874,45 @@ def test_url_import_marks_source_step(monkeypatch: pytest.MonkeyPatch, tmp_path:
     assert test_db.get_job_private("url-1")["source_path"]
 
 
+def test_url_import_downloads_into_the_job_source_directory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The imported source lands in ``jobs/<job id>/source/``.
+
+    Operator tooling and the QA harnesses locate the imported media by this
+    layout, so the directory handed to ``download_youtube`` is a contract, not
+    an implementation detail.
+    """
+    tmp_path = _tmpdir()
+    test_db, test_manager = _cluster(tmp_path)
+    seen: dict[str, Path] = {}
+
+    def fake_download(url: str, target_dir: Path, settings: Settings) -> Path:
+        seen["target_dir"] = target_dir
+        target_dir.mkdir(parents=True, exist_ok=True)
+        source = target_dir / "source-abc123.mp4"
+        source.write_bytes(b"downloaded")
+        return source
+
+    monkeypatch.setattr("engine.jobs.download_youtube", fake_download)
+    monkeypatch.setattr("engine.jobs.probe", _fake_probe)
+    monkeypatch.setattr(media_module, "plan_fast_windows", _fake_plan)
+    monkeypatch.setattr(media_module, "render_fast_clip", _fake_render)
+
+    _project(test_db, "url-dir-proj")
+    job = Job(
+        id="url-dir-1", project_id="url-dir-proj", mode="clip", processing_mode="fast",
+        state="queued", stage="queued", stage_label="Queued", progress=0, style="educational",
+    )
+    test_db.save_job(job, {"url": "https://www.youtube.com/watch?v=abc123", "count": 1, "min_duration": 10, "max_duration": 30, "aspect_ratio": "9:16", "processing_mode": "fast"})
+
+    test_manager._process("url-dir-1")
+
+    expected = test_manager.settings.data_path / "jobs" / "url-dir-1" / "source"
+    assert seen["target_dir"] == expected
+    stored = Path(test_db.get_job_private("url-dir-1")["source_path"])
+    assert stored.parent == expected
+    assert stored.name.startswith("source-")
+
+
 # ---------------------------------------------------------------------------
 #  Invariants
 # ---------------------------------------------------------------------------

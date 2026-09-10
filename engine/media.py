@@ -582,6 +582,10 @@ def transcribe(
     fixture = os.getenv("S6_TEST_TRANSCRIPT_JSON")
     if fixture:
         return json.loads(fixture)
+    # Transcription runs in a spawned worker process, and the Hub client reads
+    # its cache locations at import time — so the data-path cache has to be
+    # pinned before Faster-Whisper is imported here, not only at engine startup.
+    settings.prepare_model_cache()
     try:
         from faster_whisper import WhisperModel  # type: ignore
     except ImportError as exc:

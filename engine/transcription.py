@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import multiprocessing as mp
 import queue
+import signal
 import time
 import uuid
 from pathlib import Path
@@ -21,6 +22,28 @@ def _child(run_id: str, path: str, settings: Settings, events: Any) -> None:
         events.put({"type": "completed", "run_id": run_id, "result": result})
     except BaseException as exc:
         events.put({"type": "failed", "run_id": run_id, "error": str(exc)[:500]})
+
+
+def worker_exit_message(exitcode: int | None) -> str:
+    """Explain a transcription worker that vanished without reporting a result.
+
+    A child killed by a signal reports a negative exit code. SIGKILL is
+    overwhelmingly the kernel out-of-memory killer reclaiming the Whisper
+    process, which otherwise surfaced as an unexplained failure the operator
+    could not act on.
+    """
+    if exitcode is not None and exitcode < 0:
+        number = -exitcode
+        if number == int(signal.SIGKILL):
+            return (
+                "Transcription stopped because the worker was killed (signal 9). "
+                "This usually means the machine ran out of memory: give the engine "
+                "container more RAM, or set a smaller S6_WHISPER_MODEL."
+            )
+        return f"Transcription stopped because the worker was killed by signal {number}"
+    if exitcode:
+        return f"Transcription worker exited with code {exitcode} without a result"
+    return "Transcription worker exited without a result"
 
 
 def supervise(path: Path, settings: Settings, *, progress: Callable[[float, str], None] | None = None, cancelled: Callable[[], bool] | None = None, heartbeat: Callable[[], None] | None = None, meaningful: Callable[[float], None] | None = None, worker: Callable[..., None] = _child) -> dict[str, Any]:
@@ -65,7 +88,8 @@ def supervise(path: Path, settings: Settings, *, progress: Callable[[float, str]
                 return event["result"]
             elif event.get("type") == "failed":
                 raise media.MediaError(str(event.get("error", "Transcription failed")))
-        raise media.MediaError("Transcription worker exited without a result")
+        process.join(2)
+        raise media.MediaError(worker_exit_message(process.exitcode))
     finally:
         if process.is_alive():
             process.terminate(); process.join(2)
