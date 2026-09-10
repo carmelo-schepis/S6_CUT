@@ -2,6 +2,11 @@ import { test, expect } from "@playwright/test";
 
 test.describe("responsive layout regressions", () => {
   test("keeps mobile navigation labels inside their cells", async ({ page }) => {
+    // The rail caption is General text (14px) at every breakpoint — there is no
+    // mobile-only type size. Seven captions cannot fit a seven-column bottom bar
+    // below ~600px, so the caption is dropped there and the item becomes the
+    // icon alone; `aria-label` still carries the accessible name.
+    const ICON_ONLY_MAX_WIDTH = 600;
     for (const width of [320, 390, 400, 420, 440, 768, 820]) {
       await page.setViewportSize({ width, height: 844 });
       await page.goto("/", { waitUntil: "domcontentloaded" });
@@ -9,16 +14,20 @@ test.describe("responsive layout regressions", () => {
       const nav = page.locator(".app-rail nav");
       const measurement = await nav.evaluate((element) => {
         const items = [...element.querySelectorAll<HTMLElement>(".nav-item")];
-        const labels = items.map((item) => item.querySelector<HTMLElement>("span")!.getBoundingClientRect());
+        const labelNodes = items.map((item) => item.querySelector<HTMLElement>("span")!);
+        const labels = labelNodes.map((label) => label.getBoundingClientRect());
         const icons = items.map((item) => item.querySelector<SVGElement>("svg")!.getBoundingClientRect());
         const itemRects = items.map((item) => item.getBoundingClientRect());
         const style = getComputedStyle(element);
         return {
           gap: style.columnGap,
           widths: itemRects.map((item) => item.width),
+          labelsRendered: labelNodes.every((label) => getComputedStyle(label).display !== "none"),
           labelsInside: labels.every((label, index) => label.left >= itemRects[index].left - 0.5 && label.right <= itemRects[index].right + 0.5),
+          labelsUntruncated: labelNodes.every((label) => label.scrollWidth <= label.clientWidth + 1),
           adjacentLabelsDoNotOverlap: labels.every((label, index) => index === 0 || label.left >= labels[index - 1].right - 0.5),
           iconsCentred: icons.every((icon, index) => Math.abs((icon.left + icon.width / 2) - (itemRects[index].left + itemRects[index].width / 2)) <= 0.5),
+          accessibleNames: items.map((item) => item.getAttribute("aria-label") || ""),
           pageOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
         };
       });
@@ -26,9 +35,17 @@ test.describe("responsive layout regressions", () => {
       expect(measurement.widths.every((itemWidth) => itemWidth >= 44), `${width}px target width`).toBe(true);
       expect(Math.max(...measurement.widths) - Math.min(...measurement.widths), `${width}px equal widths`).toBeLessThanOrEqual(1);
       expect(measurement.pageOverflow, `${width}px page overflow`).toBe(false);
-      expect(measurement.labelsInside, `${width}px label containment`).toBe(true);
-      expect(measurement.adjacentLabelsDoNotOverlap, `${width}px adjacent label overlap`).toBe(true);
       expect(measurement.iconsCentred, `${width}px icon centring`).toBe(true);
+      // Every item stays reachable by name whether or not the caption renders.
+      expect(measurement.accessibleNames.every((name) => name.length > 0), `${width}px accessible names`).toBe(true);
+      if (width <= ICON_ONLY_MAX_WIDTH) {
+        expect(measurement.labelsRendered, `${width}px icon-only navigation`).toBe(false);
+      } else {
+        expect(measurement.labelsRendered, `${width}px captioned navigation`).toBe(true);
+        expect(measurement.labelsInside, `${width}px label containment`).toBe(true);
+        expect(measurement.labelsUntruncated, `${width}px label truncation`).toBe(true);
+        expect(measurement.adjacentLabelsDoNotOverlap, `${width}px adjacent label overlap`).toBe(true);
+      }
 
       const items = nav.locator(".nav-item");
       for (const index of [0, 6]) {
@@ -56,7 +73,7 @@ test.describe("responsive layout regressions", () => {
       width: rail.getBoundingClientRect().width,
       navGap: getComputedStyle(rail.querySelector("nav")!).columnGap,
     }));
-    expect(desktop.width, "desktop rail width").toBe(88);
+    expect(desktop.width, "desktop rail width").toBe(108);
     expect(desktop.navGap, "desktop navigation gap").toBe("5px");
   });
 
