@@ -1087,6 +1087,17 @@ class JobManager:
                 raise MediaError("The transcript did not contain a valid complete moment inside the requested duration range")
             if len(candidates) < int(private["count"]):
                 job.warnings.append(f"Found {len(candidates)} valid clips instead of {private['count']}; complete boundaries were prioritised over filler.")
+            # select_candidates falls back to chunking the transcript when no
+            # sentence run fits the requested range, and that fallback cannot
+            # honour the floor. Saying so keeps a short cut from reading as if
+            # it satisfied the requested duration.
+            requested_minimum = float(private["min_duration"])
+            short = [item for item in candidates if item.end - item.start < requested_minimum - 0.05]
+            if short:
+                job.warnings.append(
+                    f"{len(short)} clip(s) are shorter than the requested {requested_minimum:g}s minimum "
+                    f"(shortest {min(item.end - item.start for item in short):.1f}s); the transcript held no longer complete moment."
+                )
             clips: list[Clip] = []
             for index, candidate in enumerate(candidates, 1):
                 clip = clip_from_candidate(candidate, index)

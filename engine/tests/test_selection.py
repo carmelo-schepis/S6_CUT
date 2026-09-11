@@ -33,3 +33,26 @@ def test_style_weights_change_auditable_ranking() -> None:
     assert educational.score.explanation.endswith("educational style weighting.")
     assert hype.score.explanation.endswith("hype style weighting.")
     assert educational.score.total != hype.score.total
+
+
+def test_short_source_fallback_returns_candidate_below_requested_minimum() -> None:
+    """A source whose entire speech track is shorter than the requested minimum
+    still yields a candidate: the no-candidate fallback chunks the transcript
+    without the duration filter. Callers must therefore warn rather than let the
+    cut read as if it satisfied the requested range (see JobManager._process)."""
+    words = [
+        {"text": "Welcome", "start": 0.0, "end": 0.4, "confidence": 0.9},
+        {"text": "back.", "start": 0.4, "end": 0.96, "confidence": 0.9},
+        {"text": "My", "start": 1.18, "end": 1.32, "confidence": 0.9},
+        {"text": "guest", "start": 1.32, "end": 1.52, "confidence": 0.9},
+        {"text": "tonight", "start": 1.52, "end": 1.9, "confidence": 0.9},
+        {"text": "is", "start": 1.9, "end": 2.1, "confidence": 0.9},
+        {"text": "the", "start": 2.1, "end": 2.3, "confidence": 0.9},
+        {"text": "spokeswoman", "start": 2.3, "end": 3.1, "confidence": 0.9},
+        {"text": "for", "start": 3.1, "end": 3.3, "confidence": 0.9},
+        {"text": "the", "start": 3.3, "end": 3.5, "confidence": 0.9},
+        {"text": "department.", "start": 3.5, "end": 5.48, "confidence": 0.9},
+    ]
+    picked = select_candidates(words, "serious", 2, 20, 60)
+    assert picked, "the fallback must still offer the only available moment"
+    assert picked[0].end - picked[0].start < 20
