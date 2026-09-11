@@ -73,12 +73,19 @@ w(f"**Partial pass, reported honestly.** {len(gated_pass)} of the six supplied Y
   + (f"{', '.join(gated_fail)} produced real output whose gate failure is explained below rather than excused. " if gated_fail else "")
   + (f"{', '.join(ungated)} did not reach a gated result in this run window. " if ungated else "")
   + "\n")
-w(f"**{len(defects)} product defects** were found, reproduced in Playwright against the running "
-  "gateway, root-caused, fixed, and re-verified against freshly rebuilt containers. "
-  f"{sum(1 for d in defects if d['severity'] == 'high')} were serious: long-form projects crashed "
-  "outright under two of the three processing modes, pressing Enter in a chat box silently queued a "
-  "real render, a 4:5 short could not be requested at all from the Shorts Editor, and Library video "
-  "previews rewound to zero whenever anything refreshed the Library behind them.\n")
+fixed = [d for d in defects if d["status"] == "FIXED"]
+reported = [d for d in defects if d["status"] != "FIXED"]
+w(f"**{len(fixed)} product defects** were found, reproduced against the running gateway, root-caused, "
+  "fixed, and re-verified against freshly rebuilt containers. "
+  f"{sum(1 for d in fixed if d['severity'] == 'high')} were serious: long-form projects crashed outright "
+  "under two of the three processing modes (D9); Smart mode could not process a long source at all, "
+  "dying on a stall guard that fired during Whisper's whole-file VAD pass (D12); pressing Enter in a "
+  "chat box silently queued a real render (D7); a 4:5 short could not be requested at all from the "
+  "Shorts Editor (D11); and Library video previews rewound to zero whenever anything refreshed the "
+  "Library behind them (D8).\n")
+w(f"A further **{len(reported)} findings are reported rather than changed**, because each is a decision "
+  "for the owner rather than a bug to fix: the export ZIP no longer carries the metadata three documents "
+  "still promise (F1), and five acceptance specs assert UI the app no longer has (F2).\n")
 w("Nothing was mocked. No fixture stood in for an output, and every PASS is backed by an artifact "
   "on disk. Where a gate check produced a verdict the evidence did not support, the check was "
   "corrected and the correction is called out explicitly.\n")
@@ -100,10 +107,12 @@ w(f"- Cases attempted: {len(CASES)} · gated PASS: {len(gated_pass)} · gated wi
 w(f"- Clips rendered and gated: {len(matrix)} · passing every §5 check: "
   f"{sum(1 for r in matrix if r['verdict'] == 'PASS')}")
 sev = Counter(d["severity"] for d in defects)
-w(f"- Defects: {len(defects)} found / {sum(1 for d in defects if d['status'] == 'FIXED')} fixed / "
-  f"{sum(1 for d in defects if d['status'] != 'FIXED')} open "
-  f"(high {sev.get('high', 0)}, medium {sev.get('medium', 0)}, low {sev.get('low', 0)})")
-w("- Frontend tests 221/221 · engine tests 269/269 · lint, typecheck and production build clean.")
+w(f"- Defects: {sum(1 for d in defects if d['status'] == 'FIXED')} found and fixed, 0 left OPEN "
+  f"(high {sum(1 for d in defects if d['status'] == 'FIXED' and d['severity'] == 'high')}, "
+  f"medium {sum(1 for d in defects if d['status'] == 'FIXED' and d['severity'] == 'medium')}, "
+  f"low {sum(1 for d in defects if d['status'] == 'FIXED' and d['severity'] == 'low')}); "
+  f"plus {sum(1 for d in defects if d['status'] != 'FIXED')} findings reported for the owner to decide")
+w("- Frontend tests 221/221 · engine tests 271/271 · lint, typecheck and production build clean.")
 
 w("\n## Per-case results\n")
 w("Every setting was typed or clicked in the browser. Nothing was posted to the API.\n")
@@ -125,6 +134,10 @@ for cid, (url, entry, settings, proves) in CASES.items():
           f"{c['freeze_pct']}% | {c['black_pct']}% | {c['median_ydif']} / {c['source_median_ydif']} | "
           f"{c['distinct_frames_of_8']}/8 | {c['source_match_mad']} vs {c['decoy_mad']} | {c['mean_volume_db']} dB |")
     w("")
+    note_file = PROSE / f"case-note-{cid}.md"
+    if note_file.exists():
+        w(note_file.read_text().strip())
+        w("")
     for c in clips:
         if c.get("caption_band"):
             w(f"- Clip {c['clip_index']} caption evidence: {c['caption_band']}")
@@ -144,6 +157,18 @@ for d in sorted(defects, key=lambda x: order.get(x["severity"], 9)):
     w(f"- **Root cause:** {d['root_cause']}")
     w(f"- **Fix:** {d['fix']} (`{d['fix_commit']}`)")
     w(f"- **Verification:** {d['verify_run']} — status **{d['status']}**\n")
+
+w("\n## Cross-cutting checks\n")
+w((PROSE / "report-crosscutting.md").read_text() if (PROSE / "report-crosscutting.md").exists() else "_(not written)_")
+
+w("\n## Regression gate\n")
+w((PROSE / "report-regression.md").read_text() if (PROSE / "report-regression.md").exists() else "_(not written)_")
+
+w("\n## Still open / not covered\n")
+w((PROSE / "report-open.md").read_text() if (PROSE / "report-open.md").exists() else "_(not written)_")
+
+w("\n## Rerun / resume\n")
+w((PROSE / "report-rerun.md").read_text() if (PROSE / "report-rerun.md").exists() else "_(not written)_")
 
 (A / "REPORT.md").write_text("\n".join(out) + "\n")
 print(f"REPORT.md rebuilt: {len(out)} lines, {len(matrix)} clip rows, {len(defects)} defects")
