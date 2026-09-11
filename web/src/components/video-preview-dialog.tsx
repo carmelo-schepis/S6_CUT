@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { LibraryAsset } from "../types";
 
 export function VideoPreviewDialog({ asset, opener, onClose }: { asset: LibraryAsset; opener: HTMLButtonElement | null; onClose: () => void }) {
@@ -8,6 +8,15 @@ export function VideoPreviewDialog({ asset, opener, onClose }: { asset: LibraryA
   const [hasPlayed, setHasPlayed] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // The teardown below pauses and rewinds the preview, so it must run only when
+  // the dialog really closes. Callers hand fresh callback identities down on
+  // every parent render, and the Library re-renders whenever it revalidates —
+  // on window focus, on a cross-tab signal, or when a background render
+  // publishes a clip — which would otherwise reset playback mid-watch.
+  const onCloseRef = useRef(onClose);
+  const openerRef = useRef(opener);
+  useEffect(() => { onCloseRef.current = onClose; openerRef.current = opener; });
+
   useLayoutEffect(() => {
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -15,7 +24,7 @@ export function VideoPreviewDialog({ asset, opener, onClose }: { asset: LibraryA
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (event.key !== "Tab") return;
@@ -43,9 +52,10 @@ export function VideoPreviewDialog({ asset, opener, onClose }: { asset: LibraryA
         try { video.currentTime = 0; } catch { /* Some media implementations reject seeking before metadata loads. */ }
       }
       document.body.style.overflow = previousOverflow;
-      if (opener?.isConnected) opener.focus();
+      const returnTo = openerRef.current;
+      if (returnTo?.isConnected) returnTo.focus();
     };
-  }, [asset.id, onClose, opener]);
+  }, [asset.id]);
 
   const play = async () => {
     const video = videoRef.current;
