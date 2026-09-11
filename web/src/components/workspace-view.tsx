@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { AlertTriangle, Captions, Check, Clock, Download, Eye, FileText, Film, Pause, Play, RefreshCw, RotateCcw, SlidersHorizontal, Sparkles, Square, Volume2, Zap } from "lucide-react";
+import { AlertTriangle, Captions, Check, Clock, Download, Eye, FileText, Film, Pause, Play, RefreshCw, RotateCcw, RotateCw, SlidersHorizontal, Sparkles, Square, Volume2, Zap } from "lucide-react";
 import { changeProjectFolder, controlJob, createZip, getJob, jobEventsUrl, listAssets, listFolders, readableError, retryClip, setClipSelection } from "../api";
 import { emitLibraryChanged } from "../library-sync";
 import { jobSchema, type Clip, type Health, type Job, type LibraryAsset, type LibraryFolder, type Project } from "../types";
@@ -7,6 +7,18 @@ import { Button, EmptyState, IconButton, Progress, Skeleton, StatusBadge, Warnin
 import { jobFacts } from "../status-format";
 import { isTerminalJob, ProcessingState } from "./processing-state";
 import { ProcessChecklist } from "./process-checklist";
+
+// J and L shuttle the preview by a readable step rather than a single frame;
+// the frame buttons cover frame-accurate movement.
+const TRANSPORT_NUDGE_SECONDS = 1;
+
+/** Moves the playhead within the clip and reports where it landed. */
+function seekBy(player: HTMLVideoElement | null, seconds: number): number | null {
+  if (!player) return null;
+  const limit = Number.isFinite(player.duration) ? player.duration : Number.MAX_SAFE_INTEGER;
+  player.currentTime = Math.min(Math.max(0, player.currentTime + seconds), limit);
+  return player.currentTime;
+}
 
 function folderName(folderId: string | null | undefined, folders: LibraryFolder[], project: Project | null): string {
   if (!folderId) {
@@ -337,6 +349,11 @@ export function WorkspaceView({ project, health, providersLoaded = true, hasSele
       setPreviewError(true);
     }
   };
+  const nudgePreview = (seconds: number) => {
+    const landed = seekBy(playerRef.current || document.querySelector<HTMLVideoElement>(".viewer-frame video"), seconds);
+    if (landed !== null) setPreviewTime(landed);
+  };
+
   const togglePreviewPlayback = async () => {
     const player = playerRef.current || document.querySelector<HTMLVideoElement>(".viewer-frame video");
     if (!player) return;
@@ -352,6 +369,26 @@ export function WorkspaceView({ project, health, providersLoaded = true, hasSele
       setPreviewPlaying(false);
     }
   };
+
+  // The transport bar advertises J K L, so the shortcuts are bound for real at
+  // document level. Typing into a field must never scrub the preview, and the
+  // modifier check keeps browser and OS shortcuts intact.
+  const transportRef = useRef({ toggle: togglePreviewPlayback, nudge: nudgePreview });
+  useEffect(() => { transportRef.current = { toggle: togglePreviewPlayback, nudge: nudgePreview }; });
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target?.tagName || "")) return;
+      const key = event.key.toLowerCase();
+      if (key !== "j" && key !== "k" && key !== "l") return;
+      event.preventDefault();
+      if (key === "k") void transportRef.current.toggle();
+      else transportRef.current.nudge(key === "l" ? TRANSPORT_NUDGE_SECONDS : -TRANSPORT_NUDGE_SECONDS);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   const relevantMediaAssets = useMemo(() => {
     const clipIds = new Set(job?.clips.map((clip) => clip.id));
@@ -524,7 +561,7 @@ export function WorkspaceView({ project, health, providersLoaded = true, hasSele
             </div>}
           </div>
         </div>
-        <div className="transport"><IconButton label="Previous frame" onClick={() => { const player = playerRef.current; if (player) player.currentTime = Math.max(0, player.currentTime - 1 / 30); }}><RotateCcw size={15} /></IconButton><button className="play-button" aria-label={previewPlaying ? "Pause" : "Play"} aria-pressed={previewPlaying} onClick={() => void togglePreviewPlayback()}>{previewPlaying ? <Pause size={17} fill="currentColor" /> : <Play size={17} fill="currentColor" />}</button><span className="transport-time">{selectedClip ? `${formatDuration(previewTime)} / ${formatDuration(selectedClip.duration)}` : "0:00 / 0:00"}</span><div className="transport-spacer" /><span>J&nbsp; K&nbsp; L</span></div>
+        <div className="transport"><IconButton label="Previous frame" onClick={() => nudgePreview(-1 / 30)}><RotateCcw size={15} /></IconButton><button className="play-button" aria-label={previewPlaying ? "Pause" : "Play"} aria-pressed={previewPlaying} onClick={() => void togglePreviewPlayback()}>{previewPlaying ? <Pause size={17} fill="currentColor" /> : <Play size={17} fill="currentColor" />}</button><IconButton label="Next frame" onClick={() => nudgePreview(1 / 30)}><RotateCw size={15} /></IconButton><span className="transport-time">{selectedClip ? `${formatDuration(previewTime)} / ${formatDuration(selectedClip.duration)}` : "0:00 / 0:00"}</span><div className="transport-spacer" /><span title={`J back ${TRANSPORT_NUDGE_SECONDS}s · K play/pause · L forward ${TRANSPORT_NUDGE_SECONDS}s`}>J&nbsp; K&nbsp; L</span></div>
       </section>
 
       <aside className="inspector-panel panel" aria-label="Clip inspector">
