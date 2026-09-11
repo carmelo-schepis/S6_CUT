@@ -1,6 +1,6 @@
 # Implementation status
 
-Updated: 2026-09-08
+Updated: 2026-09-11
 
 ## Implemented and wired to the UI
 
@@ -27,7 +27,7 @@ Updated: 2026-09-08
 - `npm run lint` - passed with zero warnings.
 - `npm run typecheck` - passed under TypeScript strict mode.
 - `npm test` - 221/221 frontend contract/component/integration tests passed.
-- `python -m pytest engine/tests -q` - 265/265 engine unit/API/security/media/checklist/migration tests passed. One Starlette environment deprecation warning is upstream and does not affect results.
+- `python -m pytest engine/tests -q` - 269/269 engine unit/API/security/media/checklist/migration tests passed (265 baseline plus four added by the 2026-09-11 verification run). One Starlette environment deprecation warning is upstream and does not affect results.
 - `npm run build` - Vite production build passed; 1,794 modules transformed.
 - `npm install` and container `npm ci` audits - zero known vulnerabilities.
 - The existing multi-stage web and engine images previously built successfully, including FFmpeg, Faster-Whisper, yt-dlp, deno, and espeak-ng. A final Docker rebuild was attempted after this migration but the host Docker daemon/storage timed out; no container result is claimed for this final revision.
@@ -44,6 +44,17 @@ Updated: 2026-09-08
 - Desktop and compact production screenshots were captured after asynchronous health/project data loaded and visually inspected for responsive layout and engine-ready state.
 - **YouTube import fix verified**: `https://www.youtube.com/watch?v=FylHa4_neOA` successfully imports in both Fast and Smart modes. yt-dlp now uses `--extractor-args youtube:player_client=android,web` with format selector `bv*+ba/b` and includes a retry with broader client set (`android,web,web_music`) plus automatic cleanup of stale `.part`/`.ytdl` files on failure. Deno runtime installed in engine container for robust JavaScript player extraction.
 
+### 2026-09-11 YouTube end-to-end verification run (`test-artifacts/QA_20260911T140416Z/`)
+
+Six supplied YouTube sources were driven through the real UI against the live Docker deployment at the nginx gateway. Five produced outputs that passed a full content gate proving real moving picture and real audio taken from the imported source: container/stream sanity, clean full decode, freeze and black detection, frame-to-frame motion compared against the matching window of the source, eight distinct sampled frames, a source-versus-output frame match scored against a decoy frame from elsewhere in the same video, volume detection, and burned-caption verification.
+
+- Fast 9:16 (3 clips), Auto long-form 16:9 (2 scenes), Fast 1:1 with subtitles off (2 clips), and a Shorts Editor 4:5 trim all passed every check. Measured output motion tracks the source window closely across all nine clips (for example 2.856 against 2.783); source-frame match scored 0.5-3.2 where the decoy scored 13-112; zero freeze and zero black in every clip but one (10.4%, within limits).
+- Burned captions were proven pixel-side: on a 1920x1080 clip the caption strip differs from the source by 3.43-3.68 during cues and 0.02-0.05 between them.
+- Signed media links expire after 900 s; an idle Workspace recovers automatically (403 followed by a re-signed 206 within 157 ms).
+- Eleven product defects were found, fixed and re-verified against rebuilt containers; see the report's defect ledger. Four were high severity: long-form jobs crashed under Auto and Smart, Enter in the Shorts Editor assistant queued a real render, the Shorts Editor could not request a 4:5 output for a YouTube source, and Library previews rewound on any background revalidation.
+- Smart mode over a source whose only speech is shorter than the requested minimum still emits that short cut; it now warns instead of reporting the duration range as satisfied.
+
+
 ## Honest limitations / next bounded milestone
 
 - Reframe is reliable centre crop with reversible source preservation; face/active-speaker trajectory analysis is not implemented yet.
@@ -54,3 +65,5 @@ Updated: 2026-09-08
 - Retention policy is reported/configured; only safe stale partial-file cleanup is automatic in this milestone. Operator-approved project/output cleanup needs a reference-aware UI.
 - The UI shows the canonical EDL structure but the central viewer uses finished media when available rather than frame-accurate draft compositing before render.
 - GPU acceleration is not required and is not configured by the default Compose file.
+- The transcription stall guard (`S6_TRANSCRIPTION_STALL_SECONDS`, default 180 s) is measured from the last decoded segment. On a 34-minute source with the engine's four cores contended it fired before the first segment landed and failed the job cleanly; long sources on a loaded host may need a higher value.
+- Long-form outputs deliberately carry no burned creator credit (`youtube_creator_credit` returns None for `content_format == "long"`, pinned by `test_credit_uses_persisted_creator_only_for_short_youtube_jobs`). Short-form outputs do carry it.
