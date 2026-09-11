@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { FileText, Film, FolderOpen, Plus, Search, Sparkles, Zap } from "lucide-react";
-import { createClipJob, createFolder, createScriptJob, listFolders, readableError } from "../api";
-import type { ContentFormat, Health, Job, LibraryFolder, ProcessingMode, Project, Style } from "../types";
+import { createClipJob, createFolder, createScriptJob, listAssets, listFolders, readableError } from "../api";
+import { bindRevalidationOnFocus, createBoundedRevalidation, onLibraryChanged } from "../library-sync";
+import type { ContentFormat, Health, Job, LibraryAsset, LibraryFolder, ProcessingMode, Project, Style } from "../types";
 import { projectStatus } from "../project-status";
 import { Button, Field, FieldGroup, Progress, Skeleton, StatusBadge, StepBadge, formatAge, useSingleFlight } from "./common";
+import { VideoPreviewDialog } from "./video-preview-dialog";
 import { VideoSourcePicker } from "./video-source-picker";
 
 const RECENT_FOLDER_KEY = "s6-cut.recent-library-folder";
@@ -57,6 +59,9 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
   const [libraryFolderId, setLibraryFolderId] = useState("");
   const [showAllProjects, setShowAllProjects] = useState(false);
   const [projectQuery, setProjectQuery] = useState("");
+  const [sourceAssets, setSourceAssets] = useState<LibraryAsset[]>([]);
+  const [previewAsset, setPreviewAsset] = useState<LibraryAsset | null>(null);
+  const [previewOpener, setPreviewOpener] = useState<HTMLButtonElement | null>(null);
   const scriptInput = useRef<HTMLInputElement>(null);
   const singleFlight = useSingleFlight();
 
@@ -68,6 +73,36 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
       setLibraryFolderId(next.some((folder) => folder.id === recent) ? recent! : fallback?.id || "");
     }).catch(() => undefined);
   }, []);
+
+  // Source assets carry short-lived, server-signed preview URLs. Keep these
+  // separate from the project list: an unavailable Library must never make the
+  // workspace's recent-project controls fail.
+  const loadSourceAssets = useCallback(async () => {
+    try { setSourceAssets(await listAssets({ origin: "project-source" })); } catch { /* Source previews are optional. */ }
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void loadSourceAssets(), 0);
+    return () => window.clearTimeout(timer);
+  }, [loadSourceAssets]);
+
+  useEffect(() => {
+    const revalidation = createBoundedRevalidation(loadSourceAssets);
+    const unsubscribeFocus = bindRevalidationOnFocus(() => revalidation.signal());
+    const unsubscribeLibrary = onLibraryChanged(() => revalidation.signal());
+    return () => { unsubscribeFocus(); unsubscribeLibrary(); revalidation.dispose(); };
+  }, [loadSourceAssets]);
+
+  const openSourcePreview = async (project: Project, opener: HTMLButtonElement) => {
+    // Fetch immediately before opening as well, so an open dialog never relies
+    // on a signed URL that may have expired while this screen remained open.
+    try {
+      const freshAssets = await listAssets({ origin: "project-source" });
+      setSourceAssets(freshAssets);
+      const asset = freshAssets.find((item) => item.sourceProjectId === project.id && item.mediaType.startsWith("video/") && item.previewUrl);
+      if (asset) { setPreviewOpener(opener); setPreviewAsset(asset); }
+    } catch { /* The normal project-open control remains available. */ }
+  };
 
   const addFolder = async () => {
     const name = window.prompt("Business folder name");
@@ -238,18 +273,25 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
         <div><h2>Recent projects</h2>{projects.length > 0 && <span className="section-count">{query ? `${matchingProjects.length} of ${projects.length}` : projects.length}</span>}</div>
         <div className="section-tools">
           {projects.length > RECENT_LIMIT && <div className="project-search"><Search size={14} aria-hidden="true" /><input type="search" aria-label="Search projects" placeholder="Search projects…" value={projectQuery} onChange={(event) => setProjectQuery(event.target.value)} /></div>}
-          <button onClick={() => onRefresh()}>Refresh</button>
+          <button onClick={() => { void onRefresh(); void loadSourceAssets(); }}>Refresh</button>
         </div>
       </div>
       {!loaded ? <div className="project-grid"><Skeleton rows={4} className="skeleton-card" /><Skeleton rows={4} className="skeleton-card" /><Skeleton rows={4} className="skeleton-card" /></div>
         : matchingProjects.length ? <>
-          <div className="project-grid">{visibleProjects.map((project) => { const status = projectStatus(project, jobs); return <button className="project-card" key={project.id} onClick={() => onOpen(project.id)}>
-            <div className={`project-thumb ${project.mode}`}><div className="frame-lines" /><span>{project.mode === "clip" ? <Film size={26} /> : <FileText size={26} />}</span>{status.progress !== undefined && <Progress value={status.progress} label={status.label || "Project progress"} />}</div>
-            <div className="project-card-body"><div className="project-card-title"><strong title={project.name}>{project.name}</strong><StatusBadge state={status.state} label={status.label || undefined} /></div><p>{project.mode === "clip" ? `${project.requestedCount} ${project.contentFormat === "long" ? "landscape clip" : "short clip"}${project.requestedCount === 1 ? "" : "s"} · ${project.contentFormat === "long" ? "16:9" : "9:16"}` : "Script video"} · {project.style}</p><span>{formatAge(project.updatedAt)} · {project.sourceKind === "youtube" ? "Authorised URL" : "Local source"}</span></div>
-          </button>; })}</div>
+          <div className="project-grid">{visibleProjects.map((project) => {
+            const status = projectStatus(project, jobs);
+            const sourceAsset = sourceAssets.find((asset) => asset.sourceProjectId === project.id && asset.mediaType.startsWith("video/") && asset.previewUrl);
+            return <article className="project-card" key={project.id}>
+              {sourceAsset ? <button className="project-source-preview" type="button" aria-label={`Preview source video for ${project.name}`} onClick={(event) => void openSourcePreview(project, event.currentTarget)}>
+                <div className="project-thumb"><video src={sourceAsset.previewUrl} muted preload="metadata" aria-hidden="true" tabIndex={-1} /><span><Film size={26} /></span>{status.progress !== undefined && <Progress value={status.progress} label={status.label || "Project progress"} />}</div>
+              </button> : <div className={`project-thumb ${project.mode}`} aria-hidden="true"><div className="frame-lines" /><span>{project.mode === "clip" ? <Film size={26} /> : <FileText size={26} />}</span>{status.progress !== undefined && <Progress value={status.progress} label={status.label || "Project progress"} />}</div>}
+              <button className="project-card-open" type="button" aria-label={`Open project ${project.name}`} onClick={() => onOpen(project.id)}><div className="project-card-body"><div className="project-card-title"><strong title={project.name}>{project.name}</strong><StatusBadge state={status.state} label={status.label || undefined} /></div><p>{project.mode === "clip" ? `${project.requestedCount} ${project.contentFormat === "long" ? "landscape clip" : "short clip"}${project.requestedCount === 1 ? "" : "s"} · ${project.contentFormat === "long" ? "16:9" : "9:16"}` : "Script video"} · {project.style}</p><span>{formatAge(project.updatedAt)} · {project.sourceKind === "youtube" ? "Authorised URL" : "Local source"}</span></div></button>
+            </article>;
+          })}</div>
           {!query && projects.length > RECENT_LIMIT && <button className="show-all-projects" onClick={() => setShowAllProjects(!showAllProjects)} aria-expanded={showAllProjects}>{showAllProjects ? `Show recent ${RECENT_LIMIT}` : `Show all ${projects.length} projects`}</button>}
         </> : query && !matchingProjects.length ? <div className="inline-empty"><Search size={20} /><span>No project matches “{projectQuery.trim()}”.</span><button className="clear-search" onClick={() => setProjectQuery("")}>Clear search</button></div>
           : <div className="inline-empty"><Film size={22} /><span>Your projects will appear here after you create the first cut.</span></div>}
     </section>
+    {previewAsset && <VideoPreviewDialog asset={previewAsset} opener={previewOpener} onClose={() => setPreviewAsset(null)} />}
   </div>;
 }

@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Health, Job, Project } from "../types";
+import type { Health, Job, LibraryAsset, Project } from "../types";
 import { ProjectsView } from "./projects-view";
 
 // ---------------------------------------------------------------
@@ -9,12 +9,13 @@ import { ProjectsView } from "./projects-view";
 vi.mock("../api", () => {
   const readableError = (e: unknown) =>
     e instanceof Error ? e.message : "Something went wrong. Try again.";
-  return { readableError, createClipJob: vi.fn(), createScriptJob: vi.fn(), listFolders: vi.fn(async () => []), createFolder: vi.fn() };
+  return { readableError, createClipJob: vi.fn(), createScriptJob: vi.fn(), listAssets: vi.fn(async () => []), listFolders: vi.fn(async () => []), createFolder: vi.fn() };
 });
 
-import { createClipJob, createScriptJob } from "../api";
+import { createClipJob, createScriptJob, listAssets } from "../api";
 const mockCreateClipJob = vi.mocked(createClipJob);
 const mockCreateScriptJob = vi.mocked(createScriptJob);
+const mockListAssets = vi.mocked(listAssets);
 
 const health: Health = {
   status: "ready", version: "test", database: true, ffmpeg: true, ffprobe: true,
@@ -29,6 +30,14 @@ const project: Project = {
   latestJobId: "job-id", createdAt: "2026-08-13T00:00:00Z", updatedAt: "2026-08-13T00:00:00Z",
 };
 
+const sourceAsset: LibraryAsset = {
+  id: "source-asset", title: "Interview source", description: "", mediaType: "video/mp4", filename: "interview.mp4",
+  tags: [], triggers: [], aliases: [], negativeTriggers: [], policy: "neutral", protected: false,
+  minSpacingSeconds: 0, maxUsesPerProject: 1, licence: "User supplied", attribution: "", contentHash: "source-hash",
+  folderId: "folder-id", origin: "project-source", blobId: "source-blob", sourceProjectId: project.id,
+  previewUrl: "/api/v1/library/assets/source-asset/preview?fresh", brands: [], people: [], createdAt: "2026-08-13T00:00:00Z",
+};
+
 const undefinedJob: Job = {
   schemaVersion: 1, id: "job-id", projectId: "project-id", mode: "script", state: "queued",
   stage: "queued", stageLabel: "Queued on this machine", progress: 0, currentItem: 0, totalItems: 0,
@@ -40,6 +49,8 @@ describe("Projects create flow", () => {
   beforeEach(() => {
     mockCreateClipJob.mockReset();
     mockCreateScriptJob.mockReset();
+    mockListAssets.mockReset();
+    mockListAssets.mockResolvedValue([]);
   });
   it("keeps the three-step path and real project card accessible", () => {
     const open = vi.fn();
@@ -51,11 +62,27 @@ describe("Projects create flow", () => {
     expect(open).toHaveBeenCalledWith("project-id");
   });
 
+  it("opens a fresh source-video preview without opening the project", async () => {
+    const open = vi.fn();
+    const freshAsset = { ...sourceAsset, previewUrl: "/api/v1/library/assets/source-asset/preview?renewed" };
+    mockListAssets.mockResolvedValueOnce([sourceAsset]).mockResolvedValueOnce([freshAsset]);
+    render(<ProjectsView projects={[project]} health={health} onCreated={vi.fn()} onOpen={open} onRefresh={vi.fn(async () => undefined)} />);
+    const preview = await screen.findByRole("button", { name: "Preview source video for Interview" });
+    fireEvent.click(preview);
+    expect(await screen.findByRole("dialog", { name: "Interview source video preview" })).toBeInTheDocument();
+    expect(open).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog").querySelector("video")?.getAttribute("src")).toContain("renewed");
+    fireEvent.click(screen.getByRole("button", { name: "Close video preview" }));
+    expect(preview).toHaveFocus();
+    fireEvent.click(screen.getByRole("button", { name: "Open project Interview" }));
+    expect(open).toHaveBeenCalledWith("project-id");
+  });
+
   it("derives card status and progress from the authoritative latest job", () => {
     const staleProject = { ...project, state: "queued" as const };
     const completeJob = { ...undefinedJob, state: "complete" as const, stage: "complete", stageLabel: "Project ready", progress: 100 };
     render(<ProjectsView projects={[staleProject]} jobs={[completeJob]} health={health} onCreated={vi.fn()} onOpen={vi.fn()} onRefresh={vi.fn(async () => undefined)} />);
-    const card = screen.getByRole("button", { name: /Interview/ });
+    const card = screen.getByRole("button", { name: /Open project Interview/ }).closest(".project-card");
     expect(card).toHaveTextContent("Project ready");
     expect(card).toHaveTextContent("100%");
     expect(card).not.toHaveTextContent("queued");
