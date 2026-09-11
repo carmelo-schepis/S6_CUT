@@ -209,6 +209,12 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
   const visibleProjects = query || showAllProjects ? matchingProjects : matchingProjects.slice(0, RECENT_LIMIT);
 
   return <div className="page projects-page">
+    {/* Every screen carries exactly one h1. The page introduction that used to
+        hold this one was removed with the Projects header, and the create panel
+        title is a section heading rather than the page's, so the page name is
+        stated for assistive technology only — no visible design changes, and
+        the heading ladder below it stays h2 -> h3 with nothing skipped. */}
+    <h1 className="sr-only">Projects</h1>
     <section className="create-panel" aria-labelledby="create-title">
       <div className="create-topline">
         <div><h2 id="create-title">Create a project</h2><p>Nothing leaves this machine unless you use a URL or an enabled provider.</p></div>
