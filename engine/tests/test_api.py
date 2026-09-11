@@ -194,3 +194,18 @@ def test_specific_job_routes_are_not_shadowed_by_control_actions(monkeypatch, tm
     assert export.status_code == 422
     paused = client.post(f"/api/v1/jobs/{job_id}/control/pause")
     assert paused.status_code == 200
+
+
+def test_long_form_always_resolves_to_the_fast_pipeline() -> None:
+    """Long form renders through the fast pipeline whatever mode was asked for,
+    so every caller that builds a checklist must agree on that. When the creation
+    route decided on processing mode alone, a long-form Auto/Smart job was given
+    the smart checklist and then died in the fast renderer on a missing 'plan'
+    step. engine/app.py builds the creation checklist from this predicate."""
+    from engine.jobs import uses_fast_pipeline
+
+    assert uses_fast_pipeline("smart", "long") is True
+    assert uses_fast_pipeline("fast", "long") is True
+    assert uses_fast_pipeline("fast", "short") is True
+    assert uses_fast_pipeline("smart", "short") is False
+    assert uses_fast_pipeline(None, None) is False

@@ -120,16 +120,20 @@ def job_content_format(job: Job, private: dict[str, Any]) -> ContentFormat:
     return value if value in {"short", "long"} else "short"
 
 
-def job_uses_fast_pipeline(job: Job, private: dict[str, Any]) -> bool:
-    """Whether this clip job renders through the fast path.
+def uses_fast_pipeline(processing_mode: str | None, content_format: str | None) -> bool:
+    """Whether a clip job renders through the fast path.
 
-    Long form always does, whatever processing mode was requested. The
-    checklist and the processor must both ask this question the same way: when
-    they disagreed, a long-form Smart job was given the smart checklist and
-    then run through the fast renderer, which asks for a 'plan' step the smart
-    checklist does not contain.
+    Long form always does, whatever processing mode was requested. Every caller
+    that builds a checklist or routes a job must ask this one question: when the
+    creation route, the checklist builder and the processor disagreed, a
+    long-form Smart job was given the smart checklist and then run through the
+    fast renderer, which asks for a 'plan' step the smart checklist lacks.
     """
-    return job_content_format(job, private) == "long" or job_processing_mode(job, private) == "fast"
+    return content_format == "long" or processing_mode == "fast"
+
+
+def job_uses_fast_pipeline(job: Job, private: dict[str, Any]) -> bool:
+    return uses_fast_pipeline(job_processing_mode(job, private), job_content_format(job, private))
 
 
 def _youtube_creator_name(value: object) -> str | None:

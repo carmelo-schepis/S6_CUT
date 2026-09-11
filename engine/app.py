@@ -25,7 +25,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from . import __version__
 from .config import settings
 from .database import Database, MAX_FOLDER_DEPTH, UNSORTED_FOLDER_ID
-from .jobs import JobManager, QueueFullError, SwitchFastError
+from .jobs import JobManager, QueueFullError, SwitchFastError, uses_fast_pipeline
 from .library import LibraryRules
 from .media import MediaError, available, probe, validate_video_upload
 from .models import (
@@ -357,7 +357,7 @@ async def create_clip_job(
             raise HTTPException(422, str(exc)) from exc
         source_name, source_kind = "YouTube import", "youtube"
     project = Project(id=project_id, name=_project_name(name, Path(source_name).stem), mode="clip", style=style, state="queued", source_name=source_name, source_kind=source_kind, requested_count=count, content_format=content_format, latest_job_id=job_id, library_folder_id=library_folder_id)
-    steps = manager._fast_steps() if mode == "fast" else manager._smart_steps(bool(private["use_openrouter"]))
+    steps = manager._fast_steps() if uses_fast_pipeline(mode, content_format) else manager._smart_steps(bool(private["use_openrouter"]))
     if source_kind == "upload":
         checkpoint_time = now_iso()
         steps[0].status, steps[0].detail = "complete", "Upload atomically stored"
