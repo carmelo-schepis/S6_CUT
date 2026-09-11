@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Health, Job, LibraryAsset, Project } from "../types";
@@ -60,6 +62,29 @@ describe("Projects create flow", () => {
     expect(screen.getByRole("button", { name: /Create 5 short clips/i })).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: /Interview/i }));
     expect(open).toHaveBeenCalledWith("project-id");
+  });
+
+  it("keeps long titles and every status badge as distinct, non-shrinking card content", () => {
+    const labels = ["1 fast cut ready", "2 fast cuts ready", "5 clips ready", "Render failed", "Rendering clips"];
+    const states: Job["state"][] = ["complete", "complete", "complete", "failed", "active"];
+    const projects = labels.map((label, index) => ({ ...project, id: `long-project-${index}`, latestJobId: `long-job-${index}`, name: `A deliberately long project title that must truncate before ${label} ${index}` }));
+    const jobs = labels.map((label, index) => ({ ...undefinedJob, id: `long-job-${index}`, projectId: `long-project-${index}`, state: states[index], stageLabel: label }));
+    const { container } = render(<ProjectsView projects={projects} jobs={jobs} health={health} onCreated={vi.fn()} onOpen={vi.fn()} onRefresh={vi.fn(async () => undefined)} />);
+
+    const titleRows = [...container.querySelectorAll<HTMLElement>(".project-card-title")];
+    expect(titleRows).toHaveLength(labels.length);
+    for (const [index, row] of titleRows.entries()) {
+      const title = row.querySelector("strong");
+      const status = row.querySelector(".project-card-status");
+      expect(title).toHaveAttribute("title", projects[index].name);
+      expect(status).toHaveTextContent(labels[index]);
+      expect(title).not.toBe(status);
+      expect(status).toHaveClass("status");
+    }
+
+    const css = readFileSync(join(process.cwd(), "web", "src", "styles.css"), "utf8");
+    expect(css).toContain(".project-card-title strong { flex: 1 1 8rem; min-width: 0;");
+    expect(css).toContain(".project-card-status { flex: 0 0 auto; max-width: 100%; white-space: nowrap; }");
   });
 
   it("opens a fresh source-video preview without opening the project", async () => {
