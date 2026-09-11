@@ -8,6 +8,7 @@ checklists, and legacy backfill repair — without touching the web surface.
 from __future__ import annotations
 
 import asyncio
+import json
 import tempfile
 import zipfile
 from datetime import datetime, timedelta, timezone
@@ -25,7 +26,7 @@ from engine.database import Database, UNSORTED_FOLDER_ID
 from engine.jobs import JobManager
 from engine.library import LibraryRules
 from engine.media import MediaError, sha256_file
-from engine.models import Clip, Job, LibraryFolder, Project, now_iso
+from engine.models import Clip, Job, LibraryFolder, Project, ProvenanceRecord, now_iso
 from engine.providers import ProfileService
 from engine.security import SecretVault
 
@@ -510,15 +511,35 @@ def test_source_publication_and_exports_preserved(monkeypatch: pytest.MonkeyPatc
     assert sources[0].source_project_id == job.project_id
     assert job.source_blob_id == sources[0].blob_id
 
+    job.clips[0].creator_credit = "Source: Example Creator"
+    job.clips[0].provenance = [ProvenanceRecord(
+        id="provenance-1", provider="personal-library", creator="Example Creator",
+        original_url="https://example.test/source", licence="CC BY 4.0",
+        attribution="Example Creator", query="launch", match_reason="Matched title",
+        content_hash="abc123",
+    )]
+    job.warnings.append("One output used a local fallback.")
+    test_db.save_job(job, test_db.get_job_private(job.id))
+
     output = test_manager.build_export(job.id, [clip.id for clip in job.clips])
-    import zipfile
     with zipfile.ZipFile(output) as archive:
         names = archive.namelist()
         assert names == [
             "Publication campaign/01-01-cut.mp4",
             "Publication campaign/02-02-cut.mp4",
+            "Publication campaign/manifest.json",
+            "Publication campaign/credits.json",
+            "Publication campaign/warning-summary.json",
         ]
-        assert all(name.casefold().endswith(".mp4") for name in names)
+        manifest = json.loads(archive.read("Publication campaign/manifest.json"))
+        credits = json.loads(archive.read("Publication campaign/credits.json"))
+        warnings = json.loads(archive.read("Publication campaign/warning-summary.json"))
+
+    assert manifest["project"]["name"] == "Publication campaign"
+    assert manifest["outputs"][0]["creator_credit"] == "Source: Example Creator"
+    assert manifest["outputs"][0]["provenance"][0]["attribution"] == "Example Creator"
+    assert credits["credits"][0]["provenance"][0]["licence"] == "CC BY 4.0"
+    assert "One output used a local fallback." in warnings["job_warnings"]
 
 
 def test_bulk_export_filters_artifacts_sanitizes_unicode_title_and_orders_mp4(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -554,9 +575,12 @@ def test_bulk_export_filters_artifacts_sanitizes_unicode_title_and_orders_mp4(mo
             "Café - Launch- Final-/01-same.mp4",
             "Café - Launch- Final-/02-same.mp4",
             "Café - Launch- Final-/03-third.mp4",
+            "Café - Launch- Final-/manifest.json",
+            "Café - Launch- Final-/credits.json",
+            "Café - Launch- Final-/warning-summary.json",
         ]
-        assert all(name.casefold().endswith(".mp4") for name in names)
-        assert all(archive.getinfo(name).file_size > 0 for name in names)
+        media = [name for name in names if name.casefold().endswith(".mp4")]
+        assert all(archive.getinfo(name).file_size > 0 for name in media)
 
 
 def test_bulk_export_rejects_missing_completed_mp4(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -697,6 +721,53 @@ def test_finished_clip_media_survives_job_directory_pruning() -> None:
             served = client.get(pruned["downloadUrl"])
             assert served.status_code == 200, served.text
             assert served.content == b"rendered-output-bytes"
+    finally:
+        app_module.db, app_module.manager, app_module.settings = original
+
+
+def test_generated_asset_deletion_keeps_completed_clip_playable_after_pruning() -> None:
+    tmp_path = _tmpdir()
+    test_db, test_manager, test_rules, test_settings = _cluster(tmp_path)
+    output = tmp_path / "jobs" / "deleted-asset-job" / "clips" / "01-cut.mp4"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(b"durable-rendered-output")
+    asset = test_rules.register_managed_video(
+        output, title="Deleted asset campaign — Cut 01", origin="generated-clip",
+        project_id="deleted-asset-project", job_id="deleted-asset-job", clip_id="deleted-asset-clip",
+        metadata={"duration": 8.0, "width": 1080, "height": 1920},
+    )
+    test_db.save_project(Project(
+        id="deleted-asset-project", name="Deleted asset campaign", mode="clip", style="educational",
+        state="complete", source_name="source.mp4", source_kind="upload", requested_count=1,
+    ))
+    clip = Clip(
+        id="deleted-asset-clip", index=1, state="complete", start=0, end=8, duration=8,
+        opening_line="Cut 01", output_name="01-cut.mp4", blob_id=asset.blob_id, library_asset_id=asset.id,
+    )
+    test_db.save_job(Job(
+        id="deleted-asset-job", project_id="deleted-asset-project", mode="clip", processing_mode="fast",
+        state="complete", stage="complete", stage_label="Ready", progress=100, style="educational", clips=[clip],
+    ), {"aspect_ratio": "9:16"})
+
+    import engine.app as app_module
+    original = (app_module.db, app_module.manager, app_module.settings)
+    app_module.db, app_module.manager, app_module.settings = test_db, test_manager, test_settings
+    try:
+        with TestClient(app) as client:
+            deleted = client.delete(f"/api/v1/library/assets/{asset.id}")
+            assert deleted.status_code == 204, deleted.text
+            assert test_db.get_asset(asset.id) is None
+
+            # The transient job output may be pruned, but its immutable blob is
+            # still referenced by the completed clip and must remain downloadable.
+            output.unlink()
+            recovered = client.get("/api/v1/jobs/deleted-asset-job")
+            assert recovered.status_code == 200, recovered.text
+            url = recovered.json()["clips"][0]["downloadUrl"]
+            assert url.startswith(f"/api/v1/library/blobs/{asset.blob_id}/preview?")
+            served = client.get(url)
+            assert served.status_code == 200, served.text
+            assert served.content == b"durable-rendered-output"
     finally:
         app_module.db, app_module.manager, app_module.settings = original
 

@@ -132,9 +132,25 @@ def _clip_media(job_id: str, clip: Clip) -> tuple[str, str] | None:
         asset = db.get_asset(asset_id)
         blob_id = asset.blob_id if asset else None
     if asset_id and blob_id:
-        expires, signature = signer.sign(f"library-asset:{asset_id}:{blob_id}")
-        url = f"/api/v1/library/assets/{asset_id}/preview?expires={expires}&signature={signature}"
-        return url, url
+        asset = db.get_asset(asset_id)
+        if asset and asset.blob_id == blob_id:
+            expires, signature = signer.sign(f"library-asset:{asset_id}:{blob_id}")
+            url = f"/api/v1/library/assets/{asset_id}/preview?expires={expires}&signature={signature}"
+            return url, url
+    # A completed clip keeps its immutable clip-output blob reference even when
+    # its Library record is removed. Serve that durable blob so deleting a
+    # Library item never turns the project's ready output into a dead link.
+    if blob_id:
+        relative = db.blob_relative_path(blob_id)
+        if relative:
+            try:
+                blob = confined(settings.data_path, *relative.split("/"))
+            except ValueError:
+                blob = None
+            if blob and blob.is_file():
+                expires, signature = signer.sign(f"library-blob:{blob_id}")
+                url = f"/api/v1/library/blobs/{blob_id}/preview?expires={expires}&signature={signature}"
+                return url, url
     # No published Library copy (an unusual, repairable state): fall back to the
     # job output, but only advertise it if the file is really there. This branch
     # is rare, so its filesystem check does not affect normal listings.
@@ -993,6 +1009,23 @@ async def create_asset(
             directory.rmdir()
         except OSError:
             pass
+
+
+@app.get("/api/v1/library/blobs/{blob_id}/preview")
+# DO-NOT-CHANGE: verifies token library-blob:{id}, serves only a durable clip-output blob
+async def preview_clip_blob(blob_id: str, expires: int = Query(...), signature: str = Query(...)) -> FileResponse:
+    if not signer.verify(f"library-blob:{blob_id}", expires, signature):
+        raise HTTPException(403, "Preview link is invalid or expired")
+    relative = db.blob_relative_path(blob_id)
+    if not relative:
+        raise _not_found("Media blob")
+    try:
+        target = confined(settings.data_path, *relative.split("/"))
+    except ValueError as exc:
+        raise HTTPException(400, "Invalid media blob") from exc
+    if not target.is_file():
+        raise _not_found("Media blob")
+    return FileResponse(target, media_type="video/mp4")
 
 
 @app.get("/api/v1/library/assets/{asset_id}/preview")

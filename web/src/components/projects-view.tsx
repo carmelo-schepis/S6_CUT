@@ -103,7 +103,7 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
     setSubmitting(true);
     try {
       const result = mode === "clip"
-        ? await createClipJob({ file: sourceType === "file" ? file || undefined : undefined, url: sourceType === "url" ? url.trim() : undefined, name: projectName.trim() || undefined, style, count, minDuration, maxDuration, aspectRatio: contentFormat === "long" ? "16:9" : aspectRatio, contentFormat, processingMode, burnSubtitles, libraryFolderId: libraryFolderId || undefined })
+        ? await createClipJob({ file: sourceType === "file" ? file || undefined : undefined, url: sourceType === "url" ? url.trim() : undefined, name: projectName.trim() || undefined, style, count, minDuration, maxDuration, aspectRatio: contentFormat === "long" ? "16:9" : aspectRatio, contentFormat, processingMode, burnSubtitles: fastMode ? false : burnSubtitles, libraryFolderId: libraryFolderId || undefined })
         : await createScriptJob({ script, name: projectName.trim() || undefined, style, aspectRatio, narration, libraryFolderId: libraryFolderId || undefined });
       if (libraryFolderId) localStorage.setItem(RECENT_FOLDER_KEY, libraryFolderId);
       onCreated(result.project);
@@ -123,8 +123,9 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
   // Until /profiles answers we do not know whether a provider is connected, and
   // must not assert that none is: that read can take several seconds, and the
   // claim was wrong for the whole of it whenever a provider was in fact set up.
+  const fastMode = processingMode === "fast" || (processingMode === "auto" && providersLoaded && !hasSelectedProvider);
   const modeNote = processingMode === "fast"
-    ? "Fast runs deterministically on this machine. No provider needed."
+    ? "Fast runs deterministically on this machine. It skips transcription and captions."
     : processingMode === "smart"
       ? !providersLoaded ? "Checking connected providers… Smart uses one when available, otherwise local Whisper and deterministic planning."
         : hasSelectedProvider ? "Smart uses the selected provider for enhanced planning."
@@ -195,7 +196,7 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
             <FieldGroup title="Processing mode" hint={modeNote}>
               <div className="segmented mode-tabs processing-mode-tabs" aria-label="Processing mode">
                 <button type="button" aria-pressed={processingMode === "auto"} className={processingMode === "auto" ? "active" : ""} onClick={() => setProcessingMode("auto")}><Sparkles size={13} /> <span>Auto</span></button>
-                <button type="button" aria-pressed={processingMode === "fast"} className={processingMode === "fast" ? "active" : ""} onClick={() => setProcessingMode("fast")}><Zap size={13} /> <span>Fast</span></button>
+                <button type="button" aria-pressed={processingMode === "fast"} className={processingMode === "fast" ? "active" : ""} onClick={() => { setProcessingMode("fast"); setBurnSubtitles(false); }}><Zap size={13} /> <span>Fast</span></button>
                 <button type="button" aria-pressed={processingMode === "smart"} className={processingMode === "smart" ? "active" : ""} onClick={() => setProcessingMode("smart")}><Sparkles size={13} /> <span>Smart</span></button>
               </div>
             </FieldGroup>
@@ -211,7 +212,7 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
             <div className="folder-picker"><Field label="Business folder"><select aria-label="Business folder" value={libraryFolderId} onChange={(event) => setLibraryFolderId(event.target.value)}>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></Field><Button variant="ghost" onClick={addFolder}><Plus size={13} /> New folder</Button></div>
           </FieldGroup>
 
-          {mode === "clip" && <label className="subtitle-toggle"><input type="checkbox" checked={burnSubtitles} onChange={(event) => setBurnSubtitles(event.target.checked)} /> <span><strong>Burn in subtitles</strong><small>Uses local word timing. Fast mode transcribes selected windows only.</small></span></label>}
+          {mode === "clip" && <label className="subtitle-toggle"><input type="checkbox" checked={fastMode ? false : burnSubtitles} disabled={fastMode} onChange={(event) => setBurnSubtitles(event.target.checked)} /> <span><strong>Burn in subtitles</strong><small>{fastMode ? "Fast mode skips transcription and captions. Choose Smart mode to enable them." : "Uses local word timing. Fast mode skips captions."}</small></span></label>}
 
           <button className="advanced-toggle" onClick={() => setAdvanced(!advanced)} aria-expanded={advanced}>Advanced controls <span aria-hidden="true">{advanced ? "−" : "+"}</span></button>
           {advanced && <div className="advanced-grid">

@@ -1348,10 +1348,19 @@ class JobManager:
             job.current_item = completed_before
             job.total_items = len(job.clips)
             output = output_dir / f"{position:02d}-cut.mp4"
-            subtitles_enabled = bool(private.get("burn_subtitles", private.get("subtitles_enabled", job.burn_subtitles)))
+            subtitles_requested = bool(private.get("burn_subtitles", private.get("subtitles_enabled", job.burn_subtitles)))
+            embed_subtitles_requested = bool(private.get("embed_subtitles", job.embed_subtitles))
+            caption_options_requested = subtitles_requested or embed_subtitles_requested or bool(private.get("caption_downloads_enabled", False)) or bool(private.get("caption_review_enabled", False))
+            captions_enabled = job_processing_mode(job, private) != "fast"
+            subtitles_enabled = subtitles_requested and captions_enabled
+            embed_subtitles = embed_subtitles_requested and captions_enabled
             words: list[dict[str, Any]] = []
             try:
-                captions_required = subtitles_enabled or bool(private.get("embed_subtitles", job.embed_subtitles)) or bool(private.get("caption_downloads_enabled", False)) or bool(private.get("caption_review_enabled", False))
+                captions_required = captions_enabled and caption_options_requested
+                if caption_options_requested and not captions_enabled and has_audio:
+                    warning = "Fast mode skips caption transcription and rendering; choose Smart mode for captions."
+                    if warning not in job.warnings:
+                        job.warnings.append(warning)
                 if captions_required and has_audio:
                     try:
                         words = self._transcribe_fast_window(job, private, source, clip, output_dir)
@@ -1365,7 +1374,7 @@ class JobManager:
                             warning = f"Clip {clip.index}: Local captioning unavailable; exported without captions. ({detail})"
                         job.warnings.append(warning)
                 render_kwargs: dict[str, Any] = {"start": clip.start, "end": clip.end, "aspect": private["aspect_ratio"], "has_audio": has_audio, "settings": self.settings}
-                if private.get("embed_subtitles", job.embed_subtitles):
+                if embed_subtitles:
                     render_kwargs["embed_subtitles"] = True
                 if words:
                     render_kwargs.update({"words": words, "style": job.style, "subtitles_enabled": subtitles_enabled})
@@ -1747,8 +1756,59 @@ class JobManager:
         export_dir = self.settings.data_path / "exports" / job.id
         export_dir.mkdir(parents=True, exist_ok=True)
         output = export_dir / f"{title}.zip"
+        manifest_outputs = []
+        credits = []
+        warning_summary = []
+        for number, (clip, source) in enumerate(export_sources, 1):
+            filename = f"{number:02d}-{safe_filename(source.stem, 'cut')}.mp4"
+            manifest_outputs.append({
+                "index": clip.index,
+                "filename": filename,
+                "title": clip.title,
+                "duration_seconds": clip.duration,
+                "dimensions": {"width": clip.width, "height": clip.height},
+                "source_range_seconds": {"start": clip.start, "end": clip.end},
+                "creator_credit": clip.creator_credit,
+                "library_asset_id": clip.library_asset_id,
+                "blob_id": clip.blob_id,
+                "provenance": [record.model_dump(mode="json") for record in clip.provenance],
+            })
+            if clip.creator_credit or clip.provenance:
+                credits.append({
+                    "clip_index": clip.index,
+                    "filename": filename,
+                    "creator_credit": clip.creator_credit,
+                    "provenance": [record.model_dump(mode="json") for record in clip.provenance],
+                })
+            if clip.caption_qa_warnings or clip.error:
+                warning_summary.append({
+                    "clip_index": clip.index,
+                    "caption_warnings": clip.caption_qa_warnings,
+                    "error": clip.error,
+                })
+        manifest = {
+            "schema_version": 1,
+            "project": {
+                "id": project.id if project else None,
+                "name": project.name if project else title,
+                "mode": project.mode if project else job.mode,
+                "source_kind": project.source_kind if project else None,
+                "source_name": project.source_name if project else None,
+                "source_creator": project.source_creator if project else None,
+            },
+            "job": {
+                "id": job.id,
+                "processing_mode": job.processing_mode,
+                "content_format": job.content_format,
+                "created_at": job.created_at,
+                "updated_at": job.updated_at,
+            },
+            "outputs": manifest_outputs,
+        }
         with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True) as archive:
-            for number, (_, source) in enumerate(export_sources, 1):
-                stem = safe_filename(source.stem, "cut")
-                archive.write(source, f"{title}/{number:02d}-{stem}.mp4")
+            for output_record, (_, source) in zip(manifest_outputs, export_sources, strict=True):
+                archive.write(source, f"{title}/{output_record['filename']}")
+            archive.writestr(f"{title}/manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+            archive.writestr(f"{title}/credits.json", json.dumps({"schema_version": 1, "credits": credits}, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+            archive.writestr(f"{title}/warning-summary.json", json.dumps({"schema_version": 1, "job_warnings": job.warnings, "clips": warning_summary}, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
         return output

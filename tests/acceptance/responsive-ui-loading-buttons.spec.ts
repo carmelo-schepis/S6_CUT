@@ -119,7 +119,7 @@ test.describe("responsive loading and creation controls", () => {
       await page.setViewportSize({ width, height });
       await page.goto("/", { waitUntil: "domcontentloaded" });
       await page.getByRole("button", { name: "Projects", exact: true }).click();
-      await expect(page.getByRole("heading", { name: "Make the first cut" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
       await assertNoOverflow(page);
       const panel = page.locator(".create-panel");
       await expect(panel).toBeVisible();

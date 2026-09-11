@@ -147,6 +147,35 @@ def test_fast_pipeline_skips_smart_components(monkeypatch: pytest.MonkeyPatch) -
     assert all(asset.blob_id for asset in assets)
 
 
+def test_fast_mode_never_transcribes_when_captions_are_requested(monkeypatch: pytest.MonkeyPatch) -> None:
+    tmp_path = _tmpdir()
+    test_db, test_manager = _cluster(tmp_path)
+    monkeypatch.setattr("engine.jobs.probe", lambda *_: {
+        "duration": 100.0, "width": 1080, "height": 1920, "video_codec": "h264",
+        "audio": True, "audio_codec": "aac",
+    })
+    monkeypatch.setattr(media_module, "plan_fast_windows", _fake_plan)
+    monkeypatch.setattr(media_module, "render_fast_clip", _fake_render)
+
+    calls: list[str] = []
+    monkeypatch.setattr(media_module, "extract_audio_16k", lambda *args, **kwargs: calls.append("extract"))
+    monkeypatch.setattr(media_module, "transcribe", lambda *args, **kwargs: calls.append("transcribe"))
+
+    source = tmp_path / "captioned-source.mp4"
+    source.write_bytes(b"fake-video")
+    _clip_job(
+        test_db, "fast-captions", "fast-captions-proj", mode="fast", source=source,
+        private_extra={"burn_subtitles": True, "embed_subtitles": True},
+    )
+
+    test_manager._process("fast-captions")
+
+    processed = test_db.get_job("fast-captions")
+    assert processed is not None and processed.state == "complete"
+    assert calls == []
+    assert "Fast mode skips caption transcription and rendering; choose Smart mode for captions." in processed.warnings
+
+
 def test_validated_youtube_source_and_outputs_register_once_across_recovery(monkeypatch: pytest.MonkeyPatch) -> None:
     tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)

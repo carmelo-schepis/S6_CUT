@@ -11,7 +11,7 @@ test("downloads only completed MP4s in a titled Unicode ZIP", async ({ page }, t
   page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
   page.on("requestfailed", (request) => failedRequests.push(`${request.method()} ${request.url()} ${request.failure()?.errorText || "failed"}`));
   await page.goto("/", { waitUntil: "networkidle" });
-  await expect(page.getByText("All local tools ready")).toBeVisible();
+  await expect(page.getByText("Local engine ready")).toBeVisible();
   const existingJobsResponse = await page.request.get("/api/v1/jobs");
   if (existingJobsResponse.ok()) {
     const existingJobs = await existingJobsResponse.json() as { id: string; state: string }[];
@@ -88,9 +88,19 @@ for output_name in sys.argv[2:]:
   expect(entries).toEqual([
     [`${safeTitle}/01-01-cut.mp4`, expect.any(Number)],
     [`${safeTitle}/02-02-cut.mp4`, expect.any(Number)],
+    [`${safeTitle}/manifest.json`, expect.any(Number)],
+    [`${safeTitle}/credits.json`, expect.any(Number)],
+    [`${safeTitle}/warning-summary.json`, expect.any(Number)],
   ]);
-  expect(entries.every(([name, size]) => name.startsWith(`${safeTitle}/`) && name.toLowerCase().endsWith(".mp4") && size > 0)).toBeTruthy();
-  expect(entries.some(([name]) => /\.(ass|srt|vtt|json|log|partial|DS_Store)$/i.test(name))).toBe(false);
+  const media = entries.filter(([name]) => name.toLowerCase().endsWith(".mp4"));
+  expect(media.every(([name, size]) => name.startsWith(`${safeTitle}/`) && size > 0)).toBeTruthy();
+  const metadata = Object.fromEntries(entries.filter(([name]) => name.toLowerCase().endsWith(".json")));
+  expect(metadata).toEqual({
+    [`${safeTitle}/manifest.json`]: expect.any(Number),
+    [`${safeTitle}/credits.json`]: expect.any(Number),
+    [`${safeTitle}/warning-summary.json`]: expect.any(Number),
+  });
+  expect(entries.some(([name]) => /\.(ass|srt|vtt|log|partial|DS_Store)$/i.test(name))).toBe(false);
   expect(consoleErrors).toEqual([]);
   const unexpectedFailures = failedRequests.filter((failure) => !failure.includes("/api/v1/library/assets/") && !failure.includes("/api/v1/files/exports/") );
   expect(unexpectedFailures).toEqual([]);
