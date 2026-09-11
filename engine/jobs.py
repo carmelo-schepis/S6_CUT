@@ -965,6 +965,7 @@ class JobManager:
                     audio, self.settings, progress=callback,
                     cancelled=lambda: not self._cooperate(job), heartbeat=heartbeat,
                     meaningful=lambda fraction: setattr(job, "transcription_processed_seconds", min(duration, duration * fraction)),
+                    source_seconds=duration,
                 )
         finally:
             job.transcription_elapsed_seconds = time.monotonic() - started
