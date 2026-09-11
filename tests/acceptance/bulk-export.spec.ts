@@ -9,7 +9,12 @@ test("downloads only completed MP4s in a titled Unicode ZIP", async ({ page }, t
   const consoleErrors: string[] = [];
   const failedRequests: string[] = [];
   page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
-  page.on("requestfailed", (request) => failedRequests.push(`${request.method()} ${request.url()} ${request.failure()?.errorText || "failed"}`));
+  page.on("requestfailed", (request) => {
+    const errorText = request.failure()?.errorText || "failed";
+    // Navigating away can abort an in-flight video preview request; it is not
+    // an application failure. Every other failed request remains actionable.
+    if (errorText !== "net::ERR_ABORTED") failedRequests.push(`${request.method()} ${request.url()} ${errorText}`);
+  });
   await page.goto("/", { waitUntil: "networkidle" });
   await expect(page.getByText("Local engine ready")).toBeVisible();
   const existingJobsResponse = await page.request.get("/api/v1/jobs");

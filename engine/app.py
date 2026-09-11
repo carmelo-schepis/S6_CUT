@@ -267,11 +267,13 @@ async def change_project_folder(project_id: str, value: ProjectFolderUpdate) -> 
 
 
 @app.delete("/api/v1/projects/{project_id}", status_code=204)
-async def delete_project(project_id: str) -> None:
+async def delete_project(project_id: str, delete_assets: bool = False) -> None:
     try:
-        await manager.delete_project(project_id)
+        await manager.delete_project(project_id, delete_assets=delete_assets)
     except KeyError as exc:
         raise _not_found("Project") from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 @app.get("/api/v1/projects/{project_id}", response_model=Project)

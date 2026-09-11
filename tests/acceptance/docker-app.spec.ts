@@ -61,8 +61,8 @@ test("Docker-served studio acceptance workflow", async ({ page, request }) => {
 
   await page.goto("/");
   await expect(page).toHaveTitle(/S6_cut/i);
-  await expect(page.getByRole("heading", { name: "Make the first cut" })).toBeVisible();
-  await expect(page.getByText("All local tools ready")).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
+  await expect(page.getByText("Local engine ready")).toBeVisible({ timeout: 60_000 });
   await capture(page, "desktop-projects");
 
   // Basic keyboard/focus and responsive evidence.

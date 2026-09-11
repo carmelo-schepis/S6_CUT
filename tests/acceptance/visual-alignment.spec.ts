@@ -51,6 +51,12 @@ async function findClippedContent(page: Page) {
     for (const element of document.querySelectorAll("body *")) {
       if (!element.getClientRects().length) continue;
       if (element.closest(".sr-only")) continue;
+      // A single-line form control is its own scroll container for its value:
+      // the asset inspector's Licence field holds 49 characters in a 246px box
+      // and reports a 36px overflow while working exactly as designed. That is
+      // the control scrolling, not an ancestor clipping first-party content,
+      // which is what this scan is for.
+      if (/^(INPUT|TEXTAREA|SELECT)$/.test(element.tagName)) continue;
       const style = getComputedStyle(element);
       const scrolls = (value: string) => value === "auto" || value === "scroll";
       if (scrolls(style.overflowX) || scrolls(style.overflowY)) continue;

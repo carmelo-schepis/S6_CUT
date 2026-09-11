@@ -39,7 +39,7 @@ test("Personal Media Library keyboard and pointer regression", async ({ browser 
 
   try {
     await page.goto("/", { waitUntil: "domcontentloaded" });
-    await expect(page.getByText("All local tools ready")).toBeVisible();
+    await expect(page.getByText("Local engine ready")).toBeVisible();
     await page.getByRole("button", { name: "Library", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Personal Media Library", exact: true })).toBeVisible();
 

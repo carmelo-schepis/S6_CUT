@@ -1521,7 +1521,7 @@ class JobManager:
         self._save(job, private)
         self.complete_step(job, "ready", detail="Project ready", private=private)
 
-    async def delete_project(self, project_id: str) -> None:
+    async def delete_project(self, project_id: str, *, delete_assets: bool = False) -> None:
         """Stop a project's workers before deleting their durable records.
 
         The marker is visible to every cooperative checkpoint immediately. The
@@ -1533,18 +1533,20 @@ class JobManager:
                 raise KeyError(project_id)
             self._deleting_projects.add(project_id)
         try:
-            await asyncio.to_thread(self._delete_project_records, project_id)
+            await asyncio.to_thread(self._delete_project_records, project_id, delete_assets)
         finally:
             with self._deletion_lock:
                 self._deleting_projects.discard(project_id)
 
-    def _delete_project_records(self, project_id: str) -> None:
+    def _delete_project_records(self, project_id: str, delete_assets: bool = False) -> None:
         jobs = [job for job in self.db.list_jobs() if job.project_id == project_id]
         locks = [self.job_locks[job.id] for job in sorted(jobs, key=lambda item: item.id)]
         for lock in locks:
             lock.acquire()
         try:
-            self.db.delete_project(project_id)
+            unreferenced_paths = self.db.delete_project_everywhere(project_id) if delete_assets else []
+            if not delete_assets:
+                self.db.delete_project(project_id)
         finally:
             for lock in reversed(locks):
                 lock.release()
@@ -1557,6 +1559,11 @@ class JobManager:
                     shutil.rmtree(directory)
             except (OSError, ValueError) as exc:
                 logger.warning("Could not remove deleted job workspace %s: %s", job.id, redact(str(exc)))
+        for relative in unreferenced_paths:
+            try:
+                confined(self.settings.data_path, *relative.split("/")).unlink(missing_ok=True)
+            except (OSError, ValueError) as exc:
+                logger.warning("Could not remove unreferenced project blob: %s", redact(str(exc)))
 
     def prune_retained_jobs(self) -> int:
         """Prune only terminal job workspaces while retaining durable job records.

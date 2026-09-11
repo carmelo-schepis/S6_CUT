@@ -781,6 +781,52 @@ class Database:
                 db.execute("DELETE FROM jobs WHERE id=?", (job.id,))
             db.execute("DELETE FROM projects WHERE id=?", (project_id,))
 
+    def delete_project_everywhere(self, project_id: str) -> list[str]:
+        """Atomically delete one project's records, assets, and durable refs.
+
+        The returned blob paths had no references after the transaction. Callers
+        may remove those files only after this method returns, so a crash can
+        leave an orphan but can never remove a blob another record still needs.
+        """
+        with self._lock, self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if not db.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone():
+                raise KeyError(project_id)
+            job_rows = db.execute("SELECT id,payload,library_folder_id FROM jobs WHERE project_id=?", (project_id,)).fetchall()
+            jobs = [Job.model_validate_json(row["payload"]).model_copy(update={"library_folder_id": row["library_folder_id"] or UNSORTED_FOLDER_ID}) for row in job_rows]
+            asset_rows = db.execute("SELECT * FROM assets WHERE source_project_id=?", (project_id,)).fetchall()
+            assets = [self._asset_from_row(row) for row in asset_rows]
+            if any(asset.protected for asset in assets):
+                raise ValueError("Unprotect associated media before deleting this project everywhere")
+
+            job_ids = [job.id for job in jobs]
+            clip_ids = [clip.id for job in jobs for clip in job.clips]
+            asset_ids = [asset.id for asset in assets]
+            ref_filters = [("project-source", project_id)]
+            ref_filters.extend(("job-source", job_id) for job_id in job_ids)
+            ref_filters.extend(("clip-output", clip_id) for clip_id in clip_ids)
+            ref_filters.extend(("asset", asset_id) for asset_id in asset_ids)
+            affected_blob_ids = {asset.blob_id for asset in assets}
+            for ref_type, ref_id in ref_filters:
+                affected_blob_ids.update(row["blob_id"] for row in db.execute("SELECT blob_id FROM media_blob_refs WHERE ref_type=? AND ref_id=?", (ref_type, ref_id)).fetchall())
+                db.execute("DELETE FROM media_blob_refs WHERE ref_type=? AND ref_id=?", (ref_type, ref_id))
+
+            if asset_ids:
+                marks = ",".join("?" for _ in asset_ids)
+                db.execute(f"DELETE FROM assets WHERE id IN ({marks})", asset_ids)
+            if job_ids:
+                marks = ",".join("?" for _ in job_ids)
+                db.execute(f"DELETE FROM jobs WHERE id IN ({marks})", job_ids)
+            db.execute("DELETE FROM projects WHERE id=?", (project_id,))
+
+            unreferenced_paths: list[str] = []
+            for blob_id in affected_blob_ids:
+                row = db.execute("SELECT relative_path FROM media_blobs WHERE id=?", (blob_id,)).fetchone()
+                count = db.execute("SELECT COUNT(*) FROM media_blob_refs WHERE blob_id=?", (blob_id,)).fetchone()[0]
+                if row and count == 0:
+                    unreferenced_paths.append(str(row["relative_path"]))
+        return unreferenced_paths
+
     def update_project_folder(self, project_id: str, folder_id: str, move_existing_assets: bool) -> Project:
         destination = self.get_folder(folder_id)
         project = self.get_project(project_id)

@@ -93,7 +93,7 @@ test.describe("S6_cut imports an authorised YouTube URL", () => {
     const startedAt = Date.now();
 
     await page.goto("/", { waitUntil: "domcontentloaded" });
-    await expect(page.getByText("All local tools ready")).toBeVisible({ timeout: 90_000 });
+    await expect(page.getByText("Local engine ready")).toBeVisible({ timeout: 90_000 });
     // The URL workflow needs the engine's yt-dlp to be reported available.
     await expect(page.locator(".engine-chips")).toBeVisible();
 
@@ -228,7 +228,7 @@ test.describe("S6_cut imports an authorised YouTube URL", () => {
     const startedAt = Date.now();
 
     await page.goto("/", { waitUntil: "domcontentloaded" });
-    await expect(page.getByText("All local tools ready")).toBeVisible({ timeout: 90_000 });
+    await expect(page.getByText("Local engine ready")).toBeVisible({ timeout: 90_000 });
 
     await createClipProject(page, {
       name: projectName, count: 2, mode: "Fast", aspect: "9:16",
@@ -291,7 +291,7 @@ test.describe("S6_cut imports an authorised YouTube URL", () => {
     const downloadSamples: Record<string, unknown>[] = [];
 
     await page.goto("/", { waitUntil: "domcontentloaded" });
-    await expect(page.getByText("All local tools ready")).toBeVisible({ timeout: 90_000 });
+    await expect(page.getByText("Local engine ready")).toBeVisible({ timeout: 90_000 });
 
     await createClipProject(page, {
       name: projectName, count: 1, mode: "Fast", aspect: "9:16",
@@ -343,7 +343,7 @@ test.describe("S6_cut imports an authorised YouTube URL", () => {
       await expect(error, `${label} is rejected`).toBeVisible({ timeout: 15_000 });
       rejected.push({ input: label, message: (await error.textContent())?.trim() || "" });
       // A rejected URL must not create a project or leave a job pending.
-      expect(await page.getByRole("heading", { name: "Make the first cut" }).count(),
+      expect(await page.getByRole("heading", { name: "Create a project" }).count(),
         `${label} did not navigate into a project`).toBe(1);
     }
     await page.screenshot({ path: path.join(outputDir, "url-validation.png"), fullPage: true });

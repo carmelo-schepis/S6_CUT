@@ -60,7 +60,7 @@ test.describe("customer controls", () => {
       await route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ detail: "QA guard probe" }) });
     });
     await page.goto("/", { waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("heading", { name: "Make the first cut" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
     await page.getByRole("tab", { name: /Local file/ }).click();
     await page.locator('input[aria-label="Choose video file"]').setInputFiles({
       name: "double-click.mp4", mimeType: "video/mp4", buffer: Buffer.from("0".repeat(4096)),
@@ -82,7 +82,7 @@ test.describe("customer controls", () => {
     const total = 40;
     await installLargeHistory(page, total);
     await page.goto("/", { waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("heading", { name: "Make the first cut" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
     await expect(page.locator(".project-card").first()).toBeVisible();
 
     // Bounded by default so a large history cannot produce an unusable page.
@@ -105,6 +105,47 @@ test.describe("customer controls", () => {
     // Show all reveals the complete history.
     await showAll.click();
     await expect(page.locator(".project-card")).toHaveCount(total);
+  });
+
+  test("recent project source previews use fresh Library URLs without replacing the open control", async ({ page }) => {
+    const [projectsResponse, jobsResponse] = await Promise.all([
+      page.request.get("/api/v1/projects"),
+      page.request.get("/api/v1/jobs"),
+    ]);
+    const projects = await projectsResponse.json() as Project[];
+    const jobs = await jobsResponse.json() as Job[];
+    const project = projects[0];
+    if (!project) { test.skip("no project is available in this environment"); return; }
+    let sourceReads = 0;
+    await page.route("**/api/v1/projects", async (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(projects) });
+    });
+    await page.route("**/api/v1/jobs", async (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(jobs) });
+    });
+    await page.route("**/api/v1/library/assets**", async (route) => {
+      sourceReads += 1;
+      const token = sourceReads > 1 ? "renewed" : "initial";
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([{
+        id: "recent-project-source", title: `${project.name} source`, description: "", mediaType: "video/mp4", filename: "source.mp4",
+        tags: [], triggers: [], aliases: [], negativeTriggers: [], policy: "neutral", protected: false,
+        minSpacingSeconds: 0, maxUsesPerProject: 1, licence: "User supplied", attribution: "", contentHash: "source-hash",
+        folderId: "00000000-0000-0000-0000-000000000001", origin: "project-source", blobId: "source-blob",
+        sourceProjectId: project.id, previewUrl: `/preview.mp4?token=${token}`, brands: [], people: [], createdAt: new Date().toISOString(),
+      }]) });
+    });
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    const preview = page.getByRole("button", { name: `Preview source video for ${project.name}` });
+    await expect(preview).toBeVisible();
+    await expect(page.getByRole("button", { name: `Open project ${project.name}` })).toBeVisible();
+    await preview.click();
+    const dialog = page.getByRole("dialog", { name: `${project.name} source video preview` });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator("video")).toHaveAttribute("src", /token=renewed/);
+    await page.getByRole("button", { name: "Close video preview" }).click();
+    await expect(preview).toBeFocused();
   });
 
   test("the jobs queue is bounded with the total kept visible", async ({ page }) => {
@@ -132,7 +173,7 @@ test.describe("customer controls", () => {
 
   test("creation validation explains the problem without exposing backend detail", async ({ page }) => {
     await page.goto("/", { waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("heading", { name: "Make the first cut" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
     const create = page.getByRole("button", { name: /Create \d+ short clip/ });
 
     await page.getByRole("tab", { name: /Local file/ }).click();

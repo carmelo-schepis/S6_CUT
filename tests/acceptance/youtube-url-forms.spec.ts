@@ -82,7 +82,7 @@ test.describe("accepted YouTube URL forms import the same video", () => {
       const startedAt = Date.now();
 
       await page.goto("/", { waitUntil: "domcontentloaded" });
-      await expect(page.getByText("All local tools ready")).toBeVisible({ timeout: 90_000 });
+      await expect(page.getByText("Local engine ready")).toBeVisible({ timeout: 90_000 });
 
       await createClipProject(page, {
         name: projectName, count: 1, mode: "Fast", aspect: "9:16",

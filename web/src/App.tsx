@@ -108,6 +108,11 @@ export function App() {
     setProjects((current) => [project, ...current.filter((item) => item.id !== project.id)]);
     openProject(project.id);
   };
+  const onDeleted = (projectId: string) => {
+    setProjects((current) => current.filter((project) => project.id !== projectId));
+    setJobs((current) => current.filter((job) => job.projectId !== projectId));
+    setSelectedProjectId((current) => current === projectId ? null : current);
+  };
 
   const selected = projects.find((project) => project.id === selectedProjectId) || null;
   const hasSelectedProvider = profiles.some((profile) => profile.selected && profile.openrouterConfigured && profile.openrouterStatus === "connected");
@@ -168,7 +173,7 @@ export function App() {
       {error && <div className="global-alert" role="alert"><strong>Engine unavailable.</strong> {error} <button onClick={() => refresh()}>Retry</button></div>}
 
       <main id="main-content" tabIndex={-1}>
-        {page === "projects" && <ProjectsView projects={projects} jobs={jobs} health={health} healthChecked={healthChecked} loaded={loaded} providersLoaded={profilesLoaded} hasSelectedProvider={hasSelectedProvider} onConfigureProviders={openProviders} onCreated={onCreated} onOpen={openProject} onRefresh={refresh} />}
+        {page === "projects" && <ProjectsView projects={projects} jobs={jobs} health={health} healthChecked={healthChecked} loaded={loaded} providersLoaded={profilesLoaded} hasSelectedProvider={hasSelectedProvider} onConfigureProviders={openProviders} onCreated={onCreated} onOpen={openProject} onDeleted={onDeleted} onRefresh={refresh} />}
         {page === "library" && <LibraryView />}
         {page === "workspace" && <WorkspaceView key={selected?.id || "none"} project={selected} health={health} providersLoaded={profilesLoaded} hasSelectedProvider={hasSelectedProvider} onConfigureProviders={openProviders} onProjectUpdated={refresh} onGoProjects={() => setPage("projects")} />}
         {page === "shorts-editor" && <ShortsEditorView onJobCreated={refresh} />}

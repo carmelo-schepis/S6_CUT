@@ -5,6 +5,7 @@ Updated: 2026-08-18
 ## Implemented and wired to the UI
 
 - Branded React/TypeScript/Vite installable PWA using the supplied logo assets and canonical black/copper design tokens.
+- Outline control layer: buttons, inputs, selects, counts and chips are a hairline plus a label at rest, with fill spent only on hover, active and pressed states, and one near-square `--radius-control` corner across the control layer. Status dots and the numbered step badges stay round; status colour stays chromatic.
 - Projects create strip for local video, constrained YouTube URL, and exact-source Script mode.
 - Funny, Serious, Educational, and Hype deterministic score weights.
 - FastAPI engine with SQLite WAL project/job/profile/Library records and an atomic per-job JSON checkpoint.

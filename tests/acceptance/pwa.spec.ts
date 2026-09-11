@@ -30,13 +30,13 @@ test("production PWA shell and navigation remain available", async ({ page, requ
   page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
   page.on("pageerror", (error) => consoleErrors.push(error.message));
   await page.goto("/direct-production-route", { waitUntil: "domcontentloaded" });
-  await expect(page.getByRole("heading", { name: "Make the first cut" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
   await expect.poll(() => page.evaluate(() => navigator.serviceWorker?.controller?.scriptURL || ""), { timeout: 15_000 }).toContain("/sw.js");
   await page.reload({ waitUntil: "domcontentloaded" });
-  await expect(page.getByRole("heading", { name: "Make the first cut" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
   await page.getByRole("button", { name: "Library" }).click();
   await expect(page.getByRole("heading", { name: "Personal Media Library" })).toBeVisible();
   await page.getByRole("button", { name: "Projects", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Make the first cut" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
   expect(consoleErrors).toEqual([]);
 });

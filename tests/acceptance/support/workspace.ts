@@ -225,7 +225,10 @@ export async function jobBoundaries(projectName: string) {
 
 export async function openProjects(page: Page) {
   await page.getByRole("button", { name: "Projects", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Make the first cut" })).toBeVisible({ timeout: 30_000 });
+  // The create panel's own heading. The page carried an introduction headed
+  // "Make the first cut" until 7542e67 removed it; this helper kept waiting for
+  // that heading, so every suite that creates a project timed out here.
+  await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible({ timeout: 30_000 });
 }
 
 /** A project source chosen through the visible source picker. */
