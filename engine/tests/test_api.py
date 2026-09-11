@@ -27,6 +27,21 @@ def test_health_is_honest_and_hides_host_path() -> None:
     assert "planning" in body["fallbacks"]
 
 
+def test_storage_diagnostics_stay_available_without_statvfs(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr("engine.app.settings", replace(settings, data_path=tmp_path))
+
+    def unsupported_disk_usage(_: Path):
+        raise OSError(95, "Operation not supported")
+
+    monkeypatch.setattr("engine.app.shutil.disk_usage", unsupported_disk_usage)
+
+    response = client.get("/api/v1/storage")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["freeBytes"] == 0
+    assert response.json()["totalBytes"] == 0
+
+
 def test_script_job_preserves_exact_source_and_returns_durable_records() -> None:
     script = "The Beatles changed popular music. This second sentence explains why."
     response = client.post("/api/v1/jobs/script", json={"script": script, "style": "educational", "aspectRatio": "9:16", "narration": "silent"})

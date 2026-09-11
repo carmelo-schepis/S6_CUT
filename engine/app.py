@@ -1085,9 +1085,15 @@ async def match_asset(text: str = Query(min_length=1, max_length=10_000)) -> Mat
 
 @app.get("/api/v1/storage")
 async def storage_diagnostics() -> dict[str, object]:
-    usage = shutil.disk_usage(settings.data_path)
+    try:
+        usage = shutil.disk_usage(settings.data_path)
+        free_bytes, total_bytes = usage.free, usage.total
+    except OSError:
+        # Some mounted Docker volumes do not implement statvfs. Keep cleanup and
+        # file diagnostics available when their capacity cannot be inspected.
+        free_bytes = total_bytes = 0
     counts = {name: sum(1 for item in (settings.data_path / name).rglob("*") if item.is_file()) for name in ("jobs", "blobs", "library", "cache", "exports")}
-    return {"freeBytes": usage.free, "totalBytes": usage.total, "files": counts, "retentionDays": settings.retention_days, "maxRetainedJobs": settings.max_retained_jobs}
+    return {"freeBytes": free_bytes, "totalBytes": total_bytes, "files": counts, "retentionDays": settings.retention_days, "maxRetainedJobs": settings.max_retained_jobs}
 
 
 @app.post("/api/v1/storage/cleanup")
