@@ -71,3 +71,36 @@ def test_long_source_limit_can_exceed_short_limit(tmp_path: Path) -> None:
     with pytest.raises(MediaError, match="limit"):
         probe(source, short)
     assert probe(source, long, max_seconds=long.max_long_source_seconds)["duration"] <= 3
+
+
+def test_long_form_smart_request_builds_the_pipeline_it_actually_runs(tmp_path: Path) -> None:
+    """Long form always renders through the fast pipeline, whatever mode was
+    requested, so its checklist must be the fast one. When the two disagreed the
+    fast renderer asked for a 'plan' step that only exists on the fast
+    checklist and the job died with a raw KeyError."""
+    from dataclasses import replace as _replace
+
+    from engine.app import settings as app_settings
+    from engine.database import Database
+    from engine.jobs import JobManager
+    from engine.library import LibraryRules
+    from engine.providers import ProfileService
+    from engine.security import SecretVault
+
+    runtime = _replace(app_settings, data_path=tmp_path)
+    database = Database(tmp_path / "s6-cut.sqlite3")
+    manager = JobManager(database, LibraryRules(database, tmp_path / "library"),
+                         ProfileService(database, SecretVault(tmp_path / "secrets" / "instance.key")), runtime)
+
+    project = Project(id="p-long", name="p-long", mode="clip", style="educational", state="queued",
+                      source_name="source.mp4", source_kind="upload", requested_count=2, content_format="long")
+    database.save_project(project)
+    job = Job(id="j-long", project_id="p-long", mode="clip", processing_mode="smart", content_format="long",
+              state="queued", stage="queued", stage_label="Queued", progress=0, style="educational")
+    private = {"source_path": str(tmp_path / "source.mp4"), "count": 2, "min_duration": 30, "max_duration": 120,
+               "aspect_ratio": "16:9", "processing_mode": "smart", "content_format": "long"}
+    database.save_job(job, private)
+
+    manager._init_steps(job, private)
+    step_ids = [step.id for step in job.steps]
+    assert "plan" in step_ids, f"long form runs the fast pipeline, which needs a 'plan' step; got {step_ids}"

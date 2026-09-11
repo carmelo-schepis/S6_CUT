@@ -120,6 +120,18 @@ def job_content_format(job: Job, private: dict[str, Any]) -> ContentFormat:
     return value if value in {"short", "long"} else "short"
 
 
+def job_uses_fast_pipeline(job: Job, private: dict[str, Any]) -> bool:
+    """Whether this clip job renders through the fast path.
+
+    Long form always does, whatever processing mode was requested. The
+    checklist and the processor must both ask this question the same way: when
+    they disagreed, a long-form Smart job was given the smart checklist and
+    then run through the fast renderer, which asks for a 'plan' step the smart
+    checklist does not contain.
+    """
+    return job_content_format(job, private) == "long" or job_processing_mode(job, private) == "fast"
+
+
 def _youtube_creator_name(value: object) -> str | None:
     return _metadata_text(value, 120)
 
@@ -529,8 +541,7 @@ class JobManager:
         if job.mode == "script":
             job.steps = self._script_steps()
         else:
-            mode = job_processing_mode(job, private)
-            job.steps = self._fast_steps() if mode == "fast" else self._smart_steps(bool(private.get("use_openrouter")))
+            job.steps = self._fast_steps() if job_uses_fast_pipeline(job, private) else self._smart_steps(bool(private.get("use_openrouter")))
         self._restore_proven_steps(job, private, as_of)
         self._save(job, private)
 
@@ -869,11 +880,7 @@ class JobManager:
         if isinstance(rerender, dict) and rerender.get("run_id"):
             self._process_caption_rerender(job, private, rerender)
             return
-        if job_content_format(job, private) == "long":
-            self._process_clip_fast(job, private)
-            return
-        mode = job_processing_mode(job, private)
-        if mode == "fast":
+        if job_uses_fast_pipeline(job, private):
             self._process_clip_fast(job, private)
         else:
             self._process_clip_smart(job, private)
