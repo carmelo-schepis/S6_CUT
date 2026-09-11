@@ -28,7 +28,10 @@ def test_health_is_honest_and_hides_host_path() -> None:
 
 
 def test_storage_diagnostics_stay_available_without_statvfs(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr("engine.app.settings", replace(settings, data_path=tmp_path))
+    (tmp_path / "jobs").mkdir()
+    (tmp_path / "jobs" / "retained.json").write_text("{}")
+    configured_settings = replace(settings, data_path=tmp_path, retention_days=17, max_retained_jobs=23)
+    monkeypatch.setattr("engine.app.settings", configured_settings)
 
     def unsupported_disk_usage(_: Path):
         raise OSError(95, "Operation not supported")
@@ -38,8 +41,12 @@ def test_storage_diagnostics_stay_available_without_statvfs(monkeypatch, tmp_pat
     response = client.get("/api/v1/storage")
 
     assert response.status_code == 200, response.text
-    assert response.json()["freeBytes"] == 0
-    assert response.json()["totalBytes"] == 0
+    body = response.json()
+    assert body["freeBytes"] == 0
+    assert body["totalBytes"] == 0
+    assert body["files"] == {"jobs": 1, "blobs": 0, "library": 0, "cache": 0, "exports": 0}
+    assert body["retentionDays"] == configured_settings.retention_days
+    assert body["maxRetainedJobs"] == configured_settings.max_retained_jobs
 
 
 def test_script_job_preserves_exact_source_and_returns_durable_records() -> None:
