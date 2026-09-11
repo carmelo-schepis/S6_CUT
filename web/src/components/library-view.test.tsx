@@ -6,7 +6,7 @@ import { LibraryView } from "./library-view";
 
 const folders: LibraryFolder[] = [{ id: "unsorted", name: "Unsorted", parentId: null, description: "", color: null, archived: false, system: true, createdAt: "2026-01-01", updatedAt: "2026-01-01" }, { id: "acme", name: "Acme", parentId: null, description: "", color: null, archived: false, system: false, createdAt: "2026-01-01", updatedAt: "2026-01-01" }];
 const assets: LibraryAsset[] = [
-  { id: "a1", title: "Acme launch", description: "", mediaType: "video/mp4", filename: "launch.mp4", previewUrl: "/api/v1/library/assets/a1/preview?expires=123&signature=signed",  tags: ["campaign"], triggers: [], aliases: [], negativeTriggers: [], policy: "neutral", protected: false, minSpacingSeconds: 0, maxUsesPerProject: 1, licence: "Owned", attribution: "", contentHash: "h1", folderId: "acme", origin: "generated-clip", blobId: "b1", brands: ["Acme"], people: [], createdAt: "2026-01-01" },
+  { id: "a1", title: "Acme launch", description: "", mediaType: "video/mp4", filename: "launch.mp4", previewUrl: "/api/v1/library/assets/a1/preview?expires=123&signature=signed",  tags: ["campaign"], triggers: [], aliases: [], negativeTriggers: [], policy: "neutral", protected: false, minSpacingSeconds: 0, maxUsesPerProject: 1, licence: "Owned", attribution: "", contentHash: "h1", folderId: "acme", origin: "generated-clip", blobId: "b1", sourceProjectId: "project-a", brands: ["Acme"], people: [], createdAt: "2026-01-01" },
   { id: "a2", title: "Other logo", description: "", mediaType: "image/png", filename: "logo.png", tags: [], triggers: [], aliases: [], negativeTriggers: [], policy: "required", protected: false, minSpacingSeconds: 0, maxUsesPerProject: 1, licence: "Owned", attribution: "", contentHash: "h2", folderId: "unsorted", origin: "manual-import", blobId: "b2", brands: [], people: [], createdAt: "2026-01-01" },
 ];
 
@@ -14,7 +14,8 @@ vi.mock("../api", () => ({
   listAssets: vi.fn(async () => assets), listFolders: vi.fn(async () => folders), getHealth: vi.fn().mockRejectedValue(new Error("offline")), updateAsset: vi.fn(), deleteAsset: vi.fn(), uploadAsset: vi.fn(), createFolder: vi.fn(), updateFolder: vi.fn(), archiveFolder: vi.fn(), removeFolder: vi.fn(), moveFolder: vi.fn(), moveAssets: vi.fn(), readableError: () => "Error",
 }));
 
-import { listAssets, listFolders } from "../api";
+import { deleteAsset, listAssets, listFolders } from "../api";
+const mockDeleteAsset = vi.mocked(deleteAsset);
 const mockListAssets = vi.mocked(listAssets);
 const mockListFolders = vi.mocked(listFolders);
 
@@ -77,6 +78,27 @@ describe("LibraryView", () => {
     expect(screen.queryByText("Why it matched")).not.toBeInTheDocument();
     expect(screen.queryByText("Test the rule engine")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Explain match" })).not.toBeInTheDocument();
+  });
+
+  it("states that deleting project-linked media removes only its Library record", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(<LibraryView />);
+    await screen.findByText("Acme launch");
+    fireEvent.click(screen.getByRole("button", { name: "Select Acme launch for Rule Inspector" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove Library record" }));
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("This removes the Library item only. Its project and job history will remain."));
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("Delete project everywhere"));
+    expect(mockDeleteAsset).not.toHaveBeenCalled();
+    confirm.mockRestore();
+  });
+
+  it("keeps bulk deletion of project-linked media explicitly Library-only", async () => {
+    render(<LibraryView />);
+    await screen.findByText("Acme launch");
+    fireEvent.click(screen.getByLabelText("Select Acme launch"));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(screen.getByRole("dialog")).toHaveTextContent("This removes the Library item only. Its project and job history will remain.");
+    expect(screen.getByRole("dialog")).toHaveTextContent("Delete project everywhere");
   });
 
   it("opens a preview without changing the existing Rule Inspector selection", async () => {

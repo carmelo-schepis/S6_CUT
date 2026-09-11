@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { FileText, Film, FolderOpen, Plus, Search, Sparkles, Zap } from "lucide-react";
-import { createClipJob, createFolder, createScriptJob, listAssets, listFolders, readableError } from "../api";
-import { bindRevalidationOnFocus, createBoundedRevalidation, onLibraryChanged } from "../library-sync";
+import { FileText, Film, FolderOpen, Plus, Search, Sparkles, Trash2, Zap } from "lucide-react";
+import { createClipJob, createFolder, createScriptJob, deleteProjectEverywhere, listAssets, listFolders, readableError } from "../api";
+import { bindRevalidationOnFocus, createBoundedRevalidation, emitLibraryChanged, onLibraryChanged } from "../library-sync";
 import type { ContentFormat, Health, Job, LibraryAsset, LibraryFolder, ProcessingMode, Project, Style } from "../types";
 import { projectStatus } from "../project-status";
 import { Button, Field, FieldGroup, Progress, Skeleton, StatusBadge, StepBadge, formatAge, useSingleFlight } from "./common";
@@ -21,7 +21,7 @@ const styles: { id: Style; label: string; note: string }[] = [
   { id: "hype", label: "Hype", note: "Hooks & high energy" },
 ];
 
-export function ProjectsView({ projects, jobs = [], health, healthChecked = true, loaded = true, providersLoaded = true, hasSelectedProvider = true, onConfigureProviders = () => undefined, onCreated, onOpen, onRefresh }: {
+export function ProjectsView({ projects, jobs = [], health, healthChecked = true, loaded = true, providersLoaded = true, hasSelectedProvider = true, onConfigureProviders = () => undefined, onCreated, onOpen, onDeleted = () => undefined, onRefresh }: {
   projects: Project[];
   jobs?: Job[];
   health: Health | null;
@@ -34,6 +34,7 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
   onConfigureProviders?: () => void;
   onCreated: (project: Project) => void;
   onOpen: (id: string) => void;
+  onDeleted?: (id: string) => void;
   onRefresh: () => Promise<void>;
 }) {
   const [mode, setMode] = useState<"clip" | "script">("clip");
@@ -62,6 +63,10 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
   const [sourceAssets, setSourceAssets] = useState<LibraryAsset[]>([]);
   const [previewAsset, setPreviewAsset] = useState<LibraryAsset | null>(null);
   const [previewOpener, setPreviewOpener] = useState<HTMLButtonElement | null>(null);
+  const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
+  const [deleteOpener, setDeleteOpener] = useState<HTMLButtonElement | null>(null);
+  const [deletingProject, setDeletingProject] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const scriptInput = useRef<HTMLInputElement>(null);
   const singleFlight = useSingleFlight();
 
@@ -102,6 +107,32 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
       const asset = freshAssets.find((item) => item.sourceProjectId === project.id && item.mediaType.startsWith("video/") && item.previewUrl);
       if (asset) { setPreviewOpener(opener); setPreviewAsset(asset); }
     } catch { /* The normal project-open control remains available. */ }
+  };
+
+  const requestProjectDeletion = (project: Project, opener: HTMLButtonElement) => {
+    setDeleteError(null);
+    setDeleteOpener(opener);
+    setProjectToDelete(project);
+  };
+  const closeProjectDeletion = () => {
+    if (deletingProject) return;
+    setProjectToDelete(null);
+    queueMicrotask(() => { if (deleteOpener?.isConnected) deleteOpener.focus(); });
+  };
+  const confirmProjectDeletion = async () => {
+    if (!projectToDelete || deletingProject) return;
+    setDeletingProject(true);
+    setDeleteError(null);
+    try {
+      await deleteProjectEverywhere(projectToDelete.id);
+      onDeleted(projectToDelete.id);
+      emitLibraryChanged();
+      setProjectToDelete(null);
+    } catch (cause) {
+      setDeleteError(readableError(cause));
+    } finally {
+      setDeletingProject(false);
+    }
   };
 
   const addFolder = async () => {
@@ -286,6 +317,7 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
                 <div className="project-thumb"><video src={sourceAsset.previewUrl} muted preload="metadata" aria-hidden="true" tabIndex={-1} /><span><Film size={26} /></span>{status.progress !== undefined && <Progress value={status.progress} label={status.label || "Project progress"} />}</div>
               </button> : <div className={`project-thumb ${project.mode}`} aria-hidden="true"><div className="frame-lines" /><span>{project.mode === "clip" ? <Film size={26} /> : <FileText size={26} />}</span>{status.progress !== undefined && <Progress value={status.progress} label={status.label || "Project progress"} />}</div>}
               <button className="project-card-open" type="button" aria-label={`Open project ${project.name}`} onClick={() => onOpen(project.id)}><div className="project-card-body"><div className="project-card-title"><strong title={project.name}>{project.name}</strong><StatusBadge className="project-card-status" state={status.state} label={status.label || undefined} /></div><p>{project.mode === "clip" ? `${project.requestedCount} ${project.contentFormat === "long" ? "landscape clip" : "short clip"}${project.requestedCount === 1 ? "" : "s"} · ${project.contentFormat === "long" ? "16:9" : "9:16"}` : "Script video"} · {project.style}</p><span>{formatAge(project.updatedAt)} · {project.sourceKind === "youtube" ? "Authorised URL" : "Local source"}</span></div></button>
+              <button className="project-card-delete" type="button" aria-label={`Delete project ${project.name} everywhere`} onClick={(event) => requestProjectDeletion(project, event.currentTarget)}><Trash2 size={14} aria-hidden="true" /> Delete everywhere</button>
             </article>;
           })}</div>
           {!query && projects.length > RECENT_LIMIT && <button className="show-all-projects" onClick={() => setShowAllProjects(!showAllProjects)} aria-expanded={showAllProjects}>{showAllProjects ? `Show recent ${RECENT_LIMIT}` : `Show all ${projects.length} projects`}</button>}
@@ -293,5 +325,24 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
           : <div className="inline-empty"><Film size={22} /><span>Your projects will appear here after you create the first cut.</span></div>}
     </section>
     {previewAsset && <VideoPreviewDialog asset={previewAsset} opener={previewOpener} onClose={() => setPreviewAsset(null)} />}
+    {projectToDelete && <ProjectDeletionDialog project={projectToDelete} deleting={deletingProject} error={deleteError} onCancel={closeProjectDeletion} onConfirm={() => void confirmProjectDeletion()} />}
   </div>;
+}
+
+function ProjectDeletionDialog({ project, deleting, error, onCancel, onConfirm }: { project: Project; deleting: boolean; error: string | null; onCancel: () => void; onConfirm: () => void }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    dialogRef.current?.querySelector<HTMLButtonElement>("button:not([disabled])")?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { event.preventDefault(); onCancel(); }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [onCancel]);
+  return <div className="dialog-backdrop"><section ref={dialogRef} className="confirmation-dialog project-deletion-dialog" role="dialog" aria-modal="true" aria-labelledby="project-deletion-title" aria-describedby="project-deletion-copy">
+    <h2 id="project-deletion-title">Delete “{project.name}” everywhere?</h2>
+    <p id="project-deletion-copy">This permanently removes the project, all associated jobs and clip history, project-source assets, and generated clips or script outputs associated with this project. Shared content-addressed blobs remain when another durable reference still uses them.</p>
+    {error && <p className="form-error" role="alert">{error}</p>}
+    <div className="dialog-actions"><Button disabled={deleting} onClick={onCancel}>Cancel</Button><Button variant="danger" disabled={deleting} onClick={onConfirm}><Trash2 size={15} aria-hidden="true" />{deleting ? "Deleting…" : "Delete project everywhere"}</Button></div>
+  </section></div>;
 }

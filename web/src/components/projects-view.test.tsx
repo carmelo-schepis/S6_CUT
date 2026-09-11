@@ -11,12 +11,13 @@ import { ProjectsView } from "./projects-view";
 vi.mock("../api", () => {
   const readableError = (e: unknown) =>
     e instanceof Error ? e.message : "Something went wrong. Try again.";
-  return { readableError, createClipJob: vi.fn(), createScriptJob: vi.fn(), listAssets: vi.fn(async () => []), listFolders: vi.fn(async () => []), createFolder: vi.fn() };
+  return { readableError, createClipJob: vi.fn(), createScriptJob: vi.fn(), deleteProjectEverywhere: vi.fn(), listAssets: vi.fn(async () => []), listFolders: vi.fn(async () => []), createFolder: vi.fn() };
 });
 
-import { createClipJob, createScriptJob, listAssets } from "../api";
+import { createClipJob, createScriptJob, deleteProjectEverywhere, listAssets } from "../api";
 const mockCreateClipJob = vi.mocked(createClipJob);
 const mockCreateScriptJob = vi.mocked(createScriptJob);
+const mockDeleteProjectEverywhere = vi.mocked(deleteProjectEverywhere);
 const mockListAssets = vi.mocked(listAssets);
 
 const health: Health = {
@@ -51,6 +52,7 @@ describe("Projects create flow", () => {
   beforeEach(() => {
     mockCreateClipJob.mockReset();
     mockCreateScriptJob.mockReset();
+    mockDeleteProjectEverywhere.mockReset();
     mockListAssets.mockReset();
     mockListAssets.mockResolvedValue([]);
   });
@@ -60,7 +62,7 @@ describe("Projects create flow", () => {
     expect(screen.getByRole("heading", { name: "Create a project" })).toBeInTheDocument();
     expect(screen.getByText("Editorial style")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Create 5 short clips/i })).toBeEnabled();
-    fireEvent.click(screen.getByRole("button", { name: /Interview/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Open project Interview" }));
     expect(open).toHaveBeenCalledWith("project-id");
   });
 
@@ -85,6 +87,40 @@ describe("Projects create flow", () => {
     const css = readFileSync(join(process.cwd(), "web", "src", "styles.css"), "utf8");
     expect(css).toContain(".project-card-title strong { flex: 1 1 8rem; min-width: 0;");
     expect(css).toContain(".project-card-status { flex: 0 0 auto; max-width: 100%; white-space: nowrap; }");
+  });
+
+  it("keeps preview, open, and delete controls distinct and confirms global deletion", async () => {
+    const open = vi.fn();
+    const deleted = vi.fn();
+    mockListAssets.mockResolvedValue([sourceAsset]);
+    mockDeleteProjectEverywhere.mockResolvedValue(undefined);
+    render(<ProjectsView projects={[project]} health={health} onCreated={vi.fn()} onOpen={open} onDeleted={deleted} onRefresh={vi.fn(async () => undefined)} />);
+    const preview = await screen.findByRole("button", { name: "Preview source video for Interview" });
+    expect(screen.getByRole("button", { name: "Open project Interview" })).toBeInTheDocument();
+    const deleteButton = screen.getByRole("button", { name: "Delete project Interview everywhere" });
+    expect(preview.closest("article")?.querySelectorAll("button")).toHaveLength(3);
+    fireEvent.click(deleteButton);
+    expect(screen.getByRole("dialog", { name: "Delete “Interview” everywhere?" })).toHaveTextContent(/all associated jobs and clip history/i);
+    expect(mockDeleteProjectEverywhere).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(mockDeleteProjectEverywhere).not.toHaveBeenCalled();
+    await waitFor(() => expect(deleteButton).toHaveFocus());
+
+    fireEvent.click(deleteButton);
+    fireEvent.click(screen.getByRole("button", { name: "Delete project everywhere" }));
+    await waitFor(() => expect(mockDeleteProjectEverywhere).toHaveBeenCalledTimes(1));
+    expect(mockDeleteProjectEverywhere).toHaveBeenCalledWith(project.id);
+    expect(deleted).toHaveBeenCalledWith(project.id);
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it("keeps a project visible and reports a failed global deletion", async () => {
+    mockDeleteProjectEverywhere.mockRejectedValue(new Error("Unprotect associated media before deleting this project everywhere"));
+    render(<ProjectsView projects={[project]} health={health} onCreated={vi.fn()} onOpen={vi.fn()} onRefresh={vi.fn(async () => undefined)} />);
+    fireEvent.click(screen.getByRole("button", { name: "Delete project Interview everywhere" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete project everywhere" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/Unprotect associated media/i);
+    expect(screen.getByRole("button", { name: "Open project Interview" })).toBeInTheDocument();
   });
 
   it("opens a fresh source-video preview without opening the project", async () => {
