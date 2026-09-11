@@ -96,7 +96,9 @@ test("Docker-served studio acceptance workflow", async ({ page, request }) => {
   await expect(page.getByRole("tabpanel", { name: "Media" })).toBeVisible();
   await capture(page, "workspace-media");
   await page.getByRole("tab", { name: "Transcript" }).click();
-  await page.getByRole("button", { name: "captions", exact: true }).click();
+  // The inspector tabs were relabelled to sentence case (987dddb); this asserts
+  // the label a reader sees, not the state key behind it.
+  await page.getByRole("button", { name: "Captions", exact: true }).click();
   await expect(page.getByText(/Caption style and timing are fixed when the job is created/)).toBeVisible();
 
   const selected = page.locator('input[type="checkbox"]:checked');

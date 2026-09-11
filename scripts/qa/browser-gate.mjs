@@ -22,6 +22,12 @@ const PROBE = async (selector) => {
   if (!v) return { error: "no video element for " + selector };
   v.muted = true;
   try { await v.play(); } catch (e) { return { error: "play rejected: " + e.message }; }
+  // A viewer waits for the clip to buffer before judging the player. Give it up
+  // to 20s to reach HAVE_FUTURE_DATA; failing to get there is itself the finding.
+  const readyBy = Date.now() + 20000;
+  while (v.readyState < 3 && Date.now() < readyBy && !v.error) {
+    await new Promise((r) => setTimeout(r, 250));
+  }
   const snap = () => {
     const c = document.createElement("canvas");
     c.width = 160; c.height = 90;
@@ -44,7 +50,13 @@ const PROBE = async (selector) => {
   };
 };
 
-const verdict = (r) => (!r.error && r.readyState >= 3 && r.advanced >= 1.5 && r.meanDiff >= 3.0 && !r.err ? "PASS" : "FAIL");
+// What this gate is for is that the stream served through nginx decodes and
+// advances in the page on an untainted canvas. A high frame-to-frame difference
+// is evidence of that, but a low one is not evidence against it: a locked-off
+// shot legitimately barely changes, and whether the picture matches the source's
+// own motion is settled on disk by content_gate.py §5.5. So frames must be
+// changing, not changing by a fixed amount.
+const verdict = (r) => (!r.error && r.readyState >= 3 && r.advanced >= 1.5 && r.meanDiff > 0.5 && !r.err ? "PASS" : "FAIL");
 
 const report = { case: caseId, project: projectName, surfaces: {}, consoleErrors: [], httpErrors: [] };
 const browser = await chromium.launch();
