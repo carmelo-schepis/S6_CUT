@@ -85,7 +85,7 @@ test.describe("Smart planning survives an OpenRouter failure on a YouTube import
     expect((await fetch(`${gateway}/api/v1/profiles/${profile.id}/test`, { method: "POST" })).ok).toBeTruthy();
 
     await page.goto("/", { waitUntil: "domcontentloaded" });
-    await expect(page.getByText("All local tools ready")).toBeVisible({ timeout: 90_000 });
+    await expect(page.getByText("Local engine ready")).toBeVisible({ timeout: 90_000 });
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
     await expect(page.getByRole("article").filter({ hasText: "E2E OpenRouter failure" }).first())

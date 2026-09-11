@@ -48,7 +48,7 @@ test.describe("OpenRouter Smart fallback", () => {
 
     await page.goto("/", { waitUntil: "domcontentloaded" });
     await expect(page).toHaveTitle(/S6_cut/i);
-    await expect(page.getByText("All local tools ready")).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByText("Local engine ready")).toBeVisible({ timeout: 60_000 });
 
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
@@ -56,7 +56,7 @@ test.describe("OpenRouter Smart fallback", () => {
     await expect(providerRow).toContainText("Connected; isolated provider failure test is ready", { timeout: 30_000 });
 
     await page.getByRole("button", { name: "Projects", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "Make the first cut" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
     await page.locator('input[aria-label="Choose video file"]').setInputFiles(fixture);
     const projectName = `OpenRouter fallback ${Date.now()}`;
     await page.getByLabel("Project name").fill(projectName);
@@ -106,7 +106,7 @@ test.describe("OpenRouter Smart fallback", () => {
     await page.screenshot({ path: path.join(artifacts, "complete-fallback.png"), fullPage: true });
 
     await page.reload({ waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("heading", { name: "Make the first cut" })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible({ timeout: 30_000 });
     const projectCard = page.locator(".project-card").filter({ hasText: projectName }).first();
     await expect(projectCard).toBeVisible({ timeout: 30_000 });
     await projectCard.click();

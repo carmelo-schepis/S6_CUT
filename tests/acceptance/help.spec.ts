@@ -7,7 +7,7 @@ test.describe("S6 Cut Help", () => {
     page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
     page.on("requestfailed", (request) => failedRequests.push(`${request.method()} ${request.url()} ${request.failure()?.errorText || "failed"}`));
     await page.goto("/", { waitUntil: "networkidle" });
-    await expect(page.getByText("All local tools ready")).toBeVisible();
+    await expect(page.getByText("Local engine ready")).toBeVisible();
     const launcher = page.getByRole("button", { name: "Open S6 Cut Help" });
     await expect(launcher).toBeVisible();
     await launcher.click();

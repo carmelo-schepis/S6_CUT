@@ -112,7 +112,11 @@ test.describe("responsive loading and creation controls", () => {
     const consoleErrors: string[] = [];
     const failedRequests: string[] = [];
     page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
-    page.on("requestfailed", (request) => failedRequests.push(`${request.method()} ${request.url()}`));
+    // Recent project cards autoplay a source preview (b64f1a0), so moving to the
+    // next viewport cancels whatever media fetch is still in flight. An aborted
+    // request is the navigation working, not the application failing — the same
+    // filter the other suites in this directory apply.
+    page.on("requestfailed", (request) => { if (request.failure()?.errorText !== "net::ERR_ABORTED") failedRequests.push(`${request.method()} ${request.url()} ${request.failure()?.errorText || ""}`); });
     test.setTimeout(180_000);
     await fs.mkdir(artifacts, { recursive: true });
     for (const [name, width, height] of viewports) {
@@ -182,13 +186,17 @@ test.describe("responsive loading and creation controls", () => {
     const consoleErrors: string[] = [];
     const failedRequests: string[] = [];
     page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
-    page.on("requestfailed", (request) => failedRequests.push(`${request.method()} ${request.url()}`));
+    page.on("requestfailed", (request) => { if (request.failure()?.errorText !== "net::ERR_ABORTED") failedRequests.push(`${request.method()} ${request.url()} ${request.failure()?.errorText || ""}`); });
     await installFixtures(page);
     for (const [name, width, height] of viewports) {
       await page.setViewportSize({ width, height });
       await page.goto("/", { waitUntil: "domcontentloaded" });
-      await expect(page.getByRole("button", { name: /deliberately long project name/i })).toBeVisible();
-      await page.getByRole("button", { name: /deliberately long project name/i }).click();
+      // A recent project card carries two buttons that name the project: the
+      // source preview added by b64f1a0 and the card itself. Name the one that
+      // opens the project rather than matching both.
+      const card = page.getByRole("button", { name: /^Open project .*deliberately long project name/i });
+      await expect(card).toBeVisible();
+      await card.click();
       await expect(page.locator(".processing-state")).toBeVisible();
       await expect(page.locator(".processing-state")).toContainText("Transcribing audio");
       await expect(page.locator(".processing-state")).toContainText("18%");

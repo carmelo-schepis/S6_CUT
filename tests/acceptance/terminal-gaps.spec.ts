@@ -147,7 +147,7 @@ test("terminal exact viewport, screenshot, and ZIP evidence", async ({ browser, 
     page.on("requestfailed", (request) => { if (request.failure()?.errorText !== "net::ERR_ABORTED") diagnostics.failedRequests.push(`${request.method()} ${request.url()} ${request.failure()?.errorText || ""}`); });
 
     await page.goto(base);
-    await expect(page.getByRole("heading", { name: "Make the first cut" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
     diagnostics.measurements.push(await measure(page, "projects", { width, height }));
     await assertFocusedControlVisible(page);
     await page.screenshot({ path: path.join(artifacts, `${name}-projects.png`), fullPage: true });
@@ -178,7 +178,7 @@ test("terminal exact viewport, screenshot, and ZIP evidence", async ({ browser, 
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, deviceScaleFactor: 1 });
   const page = await context.newPage();
   await page.goto(base);
-  await expect(page.getByRole("heading", { name: "Make the first cut" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
   await openProjectByName(page, projectName!);
   const downloadButton = page.getByRole("button", { name: /Download ZIP/ }).first();
   await expect(downloadButton).toBeEnabled();

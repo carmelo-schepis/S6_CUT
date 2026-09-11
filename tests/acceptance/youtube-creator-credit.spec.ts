@@ -76,7 +76,7 @@ async function installFixture(page: Page, sourceKind: "youtube" | "upload") {
 
 async function openWorkspace(page: Page, projectName: string) {
   await page.goto("/", { waitUntil: "domcontentloaded" });
-  await expect(page.getByRole("heading", { name: "Make the first cut" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
   await page.getByRole("button", { name: new RegExp(projectName) }).click();
   await expect(page.getByRole("heading", { name: projectName })).toBeVisible();
   await expect(page.getByRole("region", { name: "Output viewer" })).toBeVisible();
@@ -126,7 +126,7 @@ test.describe("YouTube creator credit workflow", () => {
     });
 
     await page.goto("/", { waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("heading", { name: "Make the first cut" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
     await page.getByRole("tab", { name: "YouTube" }).click();
     await page.getByLabel("YouTube URL").fill("https://www.youtube.com/watch?v=known-creator-fixture");
     await page.getByRole("button", { name: "Fast", exact: true }).click();
