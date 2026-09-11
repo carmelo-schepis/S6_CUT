@@ -48,7 +48,7 @@ page.on("response", (r) => { if (r.status() >= 400) state.http_errors.push(`${r.
 // together; capturing it avoids guessing which record the UI just made.
 page.on("response", async (r) => {
   if (r.request().method() !== "POST") return;
-  if (!/\/api\/v1\/jobs\/(clip|shorts|shorts-source)$/.test(new URL(r.url()).pathname)) return;
+  if (!/\/api\/v1\/jobs\/(clip|shorts|shorts\/source)$/.test(new URL(r.url()).pathname)) return;
   try {
     const body = await r.json();
     if (body.project?.id) state.project_id = body.project.id;
@@ -113,6 +113,8 @@ try {
     await page.getByRole("textbox", { name: /YouTube|URL/i }).first().fill(spec.url);
     await page.getByRole("spinbutton", { name: "Start seconds" }).first().fill(String(spec.settings.start));
     await page.getByRole("spinbutton", { name: "End seconds" }).first().fill(String(spec.settings.end));
+    if (spec.settings.aspect) await page.getByLabel("Aspect ratio").selectOption(spec.settings.aspect);
+    if (spec.name) await page.locator(".shorts-project-name input").fill(spec.name);
     await shot(page, "01-source");
     const subtitles = page.getByRole("checkbox").first();
     if ((await subtitles.count()) && (await subtitles.isChecked()) !== spec.settings.subtitles) await subtitles.click();

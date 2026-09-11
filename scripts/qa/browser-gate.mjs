@@ -102,6 +102,15 @@ try {
 
   // --- Shorts Editor clip browser ------------------------------------------
   await rail("Shorts Editor");
+  // The clip browser pages at 30 rows, so a recent project can sit past the
+  // first page; expand until the wanted row is mounted.
+  for (let i = 0; i < 6; i += 1) {
+    if (await page.locator(".clip-browser-item").filter({ hasText: projectName }).count()) break;
+    const more = page.getByRole("button", { name: /Show \d+ more of \d+/ });
+    if (!(await more.count())) break;
+    await more.click();
+    await page.waitForTimeout(600);
+  }
   const row = page.locator(".clip-browser-item").filter({ hasText: projectName }).first();
   if (await row.count()) {
     await row.locator(".clip-select-button").click();

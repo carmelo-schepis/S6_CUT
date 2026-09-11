@@ -87,7 +87,7 @@ try {
   report.verdict = "ERROR";
   report.error = String(error);
 } finally {
-  await fs.writeFile(path.join(artifactDir, "logs", "url-expiry-gate.json"), JSON.stringify(report, null, 2));
+  await fs.writeFile(path.join(artifactDir, "logs", `url-expiry-gate-${Date.now()}.json`), JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report, null, 2));
   await browser.close();
 }

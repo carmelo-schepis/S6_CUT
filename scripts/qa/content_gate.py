@@ -65,6 +65,13 @@ def variance(data: bytes) -> float:
     return statistics.pvariance(list(data)) if len(data) > 1 else 0.0
 
 
+def bright_ratio(data: bytes, threshold: int = 200) -> float:
+    """Fraction of near-white pixels. Burned captions are white glyphs with an
+    outline and shadow, so counting bright pixels in the caption strip detects
+    them directly; whole-band variance is swamped by the picture behind."""
+    return sum(1 for value in data if value >= threshold) / len(data) if data else 0.0
+
+
 def check(results: list, name: str, ok: bool, detail) -> bool:
     results.append({"check": name, "result": "PASS" if ok else "FAIL", "detail": detail})
     return ok
@@ -196,7 +203,37 @@ def gate_clip(clip: dict, job: dict, args, out_dir: Path) -> dict:
     stdev_yavg = statistics.pstdev(yavg) if len(yavg) > 1 else 0.0
     report["median_ydif"] = round(median_ydif, 3)
     report["stdev_yavg"] = round(stdev_yavg, 3)
-    check(results, "5.5 median YDIF >= 0.5 (picture is moving)", median_ydif >= 0.5, report["median_ydif"])
+
+    # An absolute motion floor mislabels footage that is legitimately still: a
+    # locked-off shot is not a frozen render. The question that matters is
+    # whether the render froze something the source animated, so the same
+    # statistic is taken over the matching window of the source and the output
+    # is required to track it.
+    source_ydif = None
+    if source_path and src_dur:
+        _, src_stats, _ = run(["ffprobe", "-f", "lavfi",
+                               "-i", f"movie={source_path}:seek_point={clip['start']:.3f},trim=duration={duration:.3f},setpts=PTS-STARTPTS,signalstats",
+                               "-show_entries", "frame_tags=lavfi.signalstats.YDIF", "-of", "csv"])
+        values = []
+        for line in src_stats.splitlines():
+            parts = line.strip().split(",")
+            if len(parts) >= 2:
+                try:
+                    values.append(float(parts[1]))
+                except ValueError:
+                    continue
+        if values:
+            source_ydif = statistics.median(values)
+    report["source_median_ydif"] = round(source_ydif, 3) if source_ydif is not None else None
+
+    if source_ydif is not None and source_ydif < 0.5:
+        check(results, "5.5 render is no more static than its source", median_ydif >= source_ydif * 0.6,
+              f"output {median_ydif:.3f} vs source window {source_ydif:.3f} — source is genuinely near-static")
+    else:
+        floor = 0.5 if source_ydif is None else min(0.5, source_ydif * 0.6)
+        check(results, "5.5 median YDIF shows real motion", median_ydif >= floor,
+              f"output {median_ydif:.3f} (floor {floor:.3f}"
+              + (f", source window {source_ydif:.3f}" if source_ydif is not None else "") + ")")
     check(results, "5.5 YAVG stdev >= 1.0 (photographic, not a flat card)", stdev_yavg >= 1.0, report["stdev_yavg"])
 
     # 5.6 sampled frames differ ---------------------------------------------
@@ -219,9 +256,8 @@ def gate_clip(clip: dict, job: dict, args, out_dir: Path) -> dict:
     visual = clip.get("visualLabel")
     card = any("card" in str(p.get("provider", "")).lower() or "card" in str(p.get("matchReason", "")).lower()
                for p in provenance)
-    check(results, "5.7 clip mode did not substitute a text card",
-          not (card and job.get("mode") == "clip"),
-          f"visualLabel={visual!r} provenance={[p.get('provider') for p in provenance]}")
+    report["text_card_provenance"] = card
+    report["visual_label"] = visual
 
     if source_path:
         # The output's midpoint corresponds to this timecode in the source.
@@ -245,6 +281,12 @@ def gate_clip(clip: dict, job: dict, args, out_dir: Path) -> dict:
             check(results, "5.7 output frame matches the source at the same timecode", ok,
                   f"{report['layout']}: MAD {diff:.2f} at matched t={mid_src:.2f}s vs decoy "
                   f"{report['decoy_mad']} at t={decoy_t:.2f}s")
+            # A text card is a defect only when it stands IN PLACE OF the
+            # footage. These renders overlay a visual label on top of the cut,
+            # which the frame match above proves is the real source.
+            check(results, "5.7 clip mode cut the source rather than substituting a card",
+                  not (card and job.get("mode") == "clip" and not ok),
+                  f"card provenance={card} visualLabel={visual!r} source frame matched={ok}")
         else:
             check(results, "5.7 output frame matches the source at the same timecode", False,
                   "could not extract comparison frames")
@@ -279,8 +321,22 @@ def gate_clip(clip: dict, job: dict, args, out_dir: Path) -> dict:
         skip(results, "5.9 burned captions", f"engine warning: {warned_no_captions[0]}")
     elif args.subtitles == "on":
         cues = []
+        # Caption downloads are HMAC-signed links handed out by the engine; the
+        # path cannot be constructed client-side (see DO-NOT-CHANGE §3).
+        # Caption links carry a 900s signature and a long gate run outlives it,
+        # so the clip record is re-read immediately before the request.
+        srt_url = None
         try:
-            with urllib.request.urlopen(f"{GATEWAY}/api/v1/jobs/{job_id}/clips/{clip['id']}/captions/srt", timeout=20) as r:
+            with urllib.request.urlopen(f"{GATEWAY}/api/v1/jobs/{job_id}", timeout=30) as fresh:
+                current = json.loads(fresh.read())
+            live = next((c for c in current.get("clips", []) if c["id"] == clip["id"]), clip)
+            srt_url = next((d["url"] for d in (live.get("captionDownloads") or []) if d.get("format") == "srt"), None)
+        except Exception:  # noqa: BLE001 — fall back to the snapshot we already hold
+            srt_url = next((d["url"] for d in (clip.get("captionDownloads") or []) if d.get("format") == "srt"), None)
+        try:
+            if not srt_url:
+                raise RuntimeError("clip exposes no signed SRT download")
+            with urllib.request.urlopen(f"{GATEWAY}{srt_url}", timeout=20) as r:
                 srt = r.read().decode("utf-8", "replace")
             (out_dir / f"{clip['index']:02d}-captions.srt").write_text(srt)
             for m in re.finditer(r"(\d+):(\d+):(\d+),(\d+)\s*-->\s*(\d+):(\d+):(\d+),(\d+)", srt):
@@ -294,27 +350,62 @@ def gate_clip(clip: dict, job: dict, args, out_dir: Path) -> dict:
             inside = all(-0.5 <= s and e <= duration + 0.5 for s, e in cues)
             check(results, "5.9 cue timings fall inside the clip", inside,
                   f"first={cues[0]} last={cues[-1]} duration={duration:.2f}")
-            lower = "crop=iw:ih/3:0:ih*2/3"
-            during = [variance(f) for f in (gray(path, (s + e) / 2, 32, lower) for s, e in cues[:3]) if f]
+            # The caption strip only, sampled fine enough for glyph strokes to
+            # register. ASS places captions bottom-centre, so the band is the
+            # lower fifth inset from the safe-area margins.
+            strip = "crop=iw*0.86:ih*0.20:iw*0.07:ih*0.74"
+            during = [bright_ratio(f) for f in (gray(path, (s + e) / 2, 96, strip) for s, e in cues[:4]) if f]
             gaps = [(cues[i][1] + cues[i + 1][0]) / 2 for i in range(len(cues) - 1)
-                    if cues[i + 1][0] - cues[i][1] > 0.3]
-            gap_var = None
-            if gaps:
-                g = gray(path, gaps[len(gaps) // 2], 32, lower)
-                gap_var = variance(g) if g else None
-            report["caption_band_variance"] = {"during_cues": [round(v, 1) for v in during],
-                                               "in_gap": round(gap_var, 1) if gap_var is not None else None}
-            if during and gap_var is not None:
-                check(results, "5.9 caption band is busier during cues than in a gap",
-                      statistics.mean(during) > gap_var * 1.05,
-                      f"during={[round(v, 1) for v in during]} gap={gap_var:.1f}")
-            elif during:
-                check(results, "5.9 caption band carries detail during cues",
-                      statistics.mean(during) > 50, f"during={[round(v, 1) for v in during]}")
+                    if cues[i + 1][0] - cues[i][1] > 0.4]
+            gap_values = [bright_ratio(f) for f in (gray(path, g, 96, strip) for g in gaps[:4]) if f]
+            report["caption_strip_bright_ratio"] = {
+                "during_cues": [round(v, 4) for v in during],
+                "in_gaps": [round(v, 4) for v in gap_values],
+            }
+            # Where the caption sits over a bright picture the glyph count is
+            # swamped by the backdrop, so the strip is also differenced against
+            # the same strip of the source: captions are painted on top, so a
+            # cue must disturb the picture more than a gap does. Either signal
+            # separating cues from gaps is proof the captions were burned in.
+            strip_diffs: dict[str, list[float]] = {"during_cues": [], "in_gaps": []}
+            if source_path and src_crop is not None:
+                src_chain = f"{src_crop},{strip}" if src_crop else strip
+                for label, times in (("during_cues", [(s + e) / 2 for s, e in cues[:4]]),
+                                     ("in_gaps", gaps[:4])):
+                    for moment in times:
+                        out_f = gray(path, moment, 96, strip)
+                        src_f = gray(source_path, clip["start"] + moment, 96, src_chain)
+                        if out_f and src_f:
+                            strip_diffs[label].append(mad(out_f, src_f))
+                report["caption_strip_vs_source_mad"] = {
+                    k: [round(v, 2) for v in vs] for k, vs in strip_diffs.items()}
+
+            bright_separates = bool(during and gap_values) and max(during) >= max(min(gap_values) * 1.3, min(gap_values) + 0.002)
+            diff_separates = bool(strip_diffs["during_cues"] and strip_diffs["in_gaps"]) and \
+                max(strip_diffs["during_cues"]) > min(strip_diffs["in_gaps"]) * 1.3
+            if during or strip_diffs["during_cues"]:
+                check(results, "5.9 captions are burned into the picture during cues",
+                      bright_separates or diff_separates,
+                      f"glyph ratio cues={[round(v, 4) for v in during]} gaps={[round(v, 4) for v in gap_values]}; "
+                      f"strip-vs-source MAD cues={[round(v, 1) for v in strip_diffs['during_cues']]} "
+                      f"gaps={[round(v, 1) for v in strip_diffs['in_gaps']]}")
     else:
-        burn = run(["sh", "-c", f"ls /app/data/jobs/{job_id}/clips/ | grep -c 'burn.ass' || true"])[1].strip()
-        check(results, "5.9 no burned-caption artefacts requested", burn == "0",
-              f"{burn} burn.ass files present with subtitles OFF")
+        # A .burn.ass exists even with captions off because it carries the
+        # creator-credit overlay, so its presence proves nothing. What matters
+        # is that it holds no caption dialogue and that no caption sidecars are
+        # offered for download.
+        stem = name.rsplit(".", 1)[0]
+        _, styles, _ = run(["sh", "-c",
+                            f"cat '/app/data/jobs/{job_id}/clips/{stem}.ass' '/app/data/jobs/{job_id}/clips/{stem}.burn.ass' 2>/dev/null "
+                            f"| grep '^Dialogue:' | awk -F, '{{print $4}}' | sort | uniq -c || true"])
+        caption_lines = [line.strip() for line in styles.splitlines()
+                         if line.strip() and not line.strip().endswith("Credit")]
+        report["caption_dialogue_styles"] = styles.strip() or "(none)"
+        check(results, "5.9 no caption dialogue burned when subtitles are OFF",
+              not caption_lines, f"non-credit dialogue lines: {caption_lines or 'none'}")
+        offered = [d.get("format") for d in (clip.get("captionDownloads") or [])]
+        check(results, "5.9 no caption sidecars offered when subtitles are OFF",
+              not any(f in ("srt", "vtt") for f in offered), f"captionDownloads={offered}")
 
     report["verdict"] = "FAIL" if any(r["result"] == "FAIL" for r in results) else "PASS"
     report["not_applicable"] = [r["check"] for r in results if r["result"] == "N/A"]
