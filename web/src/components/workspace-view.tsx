@@ -12,6 +12,8 @@ import { ProcessChecklist } from "./process-checklist";
 // the frame buttons cover frame-accurate movement.
 const TRANSPORT_NUDGE_SECONDS = 1;
 
+const detailsTabLabels = { score: "Score", captions: "Captions", asset: "Asset", info: "Info" } as const;
+
 /** Moves the playhead within the clip and reports where it landed. */
 function seekBy(player: HTMLVideoElement | null, seconds: number): number | null {
   if (!player) return null;
@@ -567,7 +569,7 @@ export function WorkspaceView({ project, health, providersLoaded = true, hasSele
       <aside className="inspector-panel panel" aria-label="Clip inspector">
         <div className="panel-title"><strong>Details</strong>{selectedClip && <span>Clip {selectedClip.index}</span>}</div>
         <div className="inspector-tabs">
-          {(["score", "captions", "asset", "info"] as const).map((tab) => <button key={tab} className={detailsTab === tab ? "active" : ""} onClick={() => setDetailsTab(tab)}>{tab}</button>)}
+          {(["score", "captions", "asset", "info"] as const).map((tab) => <button key={tab} type="button" aria-pressed={detailsTab === tab} className={detailsTab === tab ? "active" : ""} onClick={() => setDetailsTab(tab)}>{detailsTabLabels[tab]}</button>)}
         </div>
         <div className="inspector-content">
           <p className="review-hint" role="note">Review and download finished clips here. To change a cut, adjust the project settings and generate a new version.</p>
