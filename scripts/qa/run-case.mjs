@@ -138,7 +138,8 @@ try {
       return r.json();
     }, state.job_id);
     if (job.error) { await page.waitForTimeout(5_000); continue; }
-    const line = `${job.state} | ${job.stage} | ${job.stageLabel} | ${Math.round((job.progress || 0) * 100)}% | clips=${(job.clips || []).length}` +
+    // Job.progress is already a 0-100 percentage (engine/models.py: ge=0, le=100).
+    const line = `${job.state} | ${job.stage} | ${job.stageLabel} | ${Math.round(job.progress || 0)}% | clips=${(job.clips || []).length}` +
       (job.downloadProgress ? ` | dl=${job.downloadProgress.phase} ${job.downloadProgress.downloadedBytes || 0}/${job.downloadProgress.totalBytes || "?"} ${job.downloadProgress.percent ?? ""}%` : "");
     if (line !== last) {
       last = line;
