@@ -111,6 +111,14 @@ describe("TopicToVideoView OpenRouter model picker", () => {
     expect(screen.queryByRole("option", { name: /First arbitrary/ })).not.toBeInTheDocument();
   });
 
+  it("shows a visible validation message for an empty topic", async () => {
+    renderView();
+    const select = await screen.findByLabelText("OpenRouter model");
+    fireEvent.change(select, { target: { value: "vendor/first-arbitrary" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create / refresh plan" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Topic or keyword is required.");
+  });
+
   it("sends the exact selected model and makes a changed model plan stale", async () => {
     renderView();
     const select = await screen.findByLabelText("OpenRouter model");

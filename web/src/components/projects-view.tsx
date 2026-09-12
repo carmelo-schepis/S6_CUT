@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { FileText, Film, FolderOpen, Plus, Search, Sparkles, Zap } from "lucide-react";
 import { createClipJob, createFolder, createScriptJob, listFolders, readableError } from "../api";
 import type { ContentFormat, Health, Job, LibraryFolder, ProcessingMode, Project, Style } from "../types";
-import { projectStatus } from "../project-status";
-import { Button, Field, FieldGroup, PageHeader, Progress, Skeleton, StatusBadge, formatAge, useSingleFlight } from "./common";
+import { authoritativeJob, projectStatus } from "../project-status";
+import { Button, Field, FieldGroup, PageHeader, Progress, Skeleton, StatusBadge, formatAge, resolveOutputAspectRatio, useSingleFlight } from "./common";
 import { VideoSourcePicker } from "./video-source-picker";
 
 const RECENT_FOLDER_KEY = "s6-cut.recent-library-folder";
@@ -118,6 +118,7 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
     if (!selected) return;
     if (!/\.(txt|md)$/i.test(selected.name)) return setError("Script uploads must be .txt or .md files.");
     setScript(await selected.text());
+    setError(null);
   };
 
   // Until /profiles answers we do not know whether a provider is connected, and
@@ -150,8 +151,8 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
       <div className="create-topline">
         <div><h2 id="create-title">Create a project</h2><p>Nothing leaves this machine unless you use a URL or an enabled provider.</p></div>
         <div className="segmented" aria-label="Creation mode">
-          <button type="button" aria-pressed={mode === "clip"} className={mode === "clip" ? "active" : ""} onClick={() => setMode("clip")}><Film size={15} /> Clip mode</button>
-          <button type="button" aria-pressed={mode === "script"} className={mode === "script" ? "active" : ""} onClick={() => setMode("script")}><FileText size={15} /> Script mode</button>
+          <button type="button" aria-pressed={mode === "clip"} className={mode === "clip" ? "active" : ""} onClick={() => { setError(null); setMode("clip"); }}><Film size={15} /> Clip mode</button>
+          <button type="button" aria-pressed={mode === "script"} className={mode === "script" ? "active" : ""} onClick={() => { setError(null); setMode("script"); }}><FileText size={15} /> Script mode</button>
         </div>
       </div>
 
@@ -160,8 +161,8 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
       <div className="create-grid">
         <div className="create-step source-step">
           <div className="step-label"><span>1</span>{mode === "clip" ? "Add source" : "Add script"}</div>
-          {mode === "clip" ? <VideoSourcePicker mode={sourceType} onModeChange={(next) => setSourceType(next as "file" | "url")} file={file} onFile={(next, pickerError) => { setFile(next); if (pickerError) setError(pickerError); else setError(null); }} url={url} onUrl={setUrl} /> : <div className="script-input-wrap">
-            <textarea value={script} onChange={(event) => setScript(event.target.value)} placeholder="Paste the exact script. S6_cut preserves this source text…" rows={8} />
+          {mode === "clip" ? <VideoSourcePicker mode={sourceType} onModeChange={(next) => { setError(null); setSourceType(next as "file" | "url"); }} file={file} onFile={(next, pickerError) => { setFile(next); if (pickerError) setError(pickerError); else setError(null); }} url={url} onUrl={setUrl} /> : <div className="script-input-wrap">
+            <textarea value={script} onChange={(event) => { setScript(event.target.value); setError(null); }} placeholder="Paste the exact script. S6_cut preserves this source text…" rows={8} />
             <div className="script-meta"><span>{script.length.toLocaleString()} characters</span><input ref={scriptInput} type="file" accept=".txt,.md,text/plain,text/markdown" onChange={(event) => loadScriptFile(event.target.files?.[0])} hidden /><button onClick={() => scriptInput.current?.click()}><FolderOpen size={14} /> Upload .txt or .md</button></div>
           </div>}
           {mode === "clip" && healthChecked && <div className="engine-summary">
@@ -242,10 +243,15 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
       </div>
       {!loaded ? <div className="project-grid"><Skeleton rows={4} className="skeleton-card" /><Skeleton rows={4} className="skeleton-card" /><Skeleton rows={4} className="skeleton-card" /></div>
         : matchingProjects.length ? <>
-          <div className="project-grid">{visibleProjects.map((project) => { const status = projectStatus(project, jobs); return <button className="project-card" key={project.id} onClick={() => onOpen(project.id)}>
-            <div className={`project-thumb ${project.mode}`}><div className="frame-lines" /><span>{project.mode === "clip" ? <Film size={26} /> : <FileText size={26} />}</span>{status.progress !== undefined && <Progress value={status.progress} label={status.label || "Project progress"} />}</div>
-            <div className="project-card-body"><div className="project-card-title"><strong title={project.name}>{project.name}</strong><StatusBadge state={status.state} label={status.label || undefined} /></div><p>{project.mode === "clip" ? `${project.requestedCount} ${project.contentFormat === "long" ? "landscape clip" : "short clip"}${project.requestedCount === 1 ? "" : "s"} · ${project.contentFormat === "long" ? "16:9" : "9:16"}` : "Script video"} · {project.style}</p><span>{formatAge(project.updatedAt)} · {project.sourceKind === "youtube" ? "Authorised URL" : "Local source"}</span></div>
-          </button>; })}</div>
+          <div className="project-grid">{visibleProjects.map((project) => {
+            const status = projectStatus(project, jobs);
+            const outputClip = authoritativeJob(project, jobs)?.clips.find((clip) => clip.width && clip.height);
+            const outputAspect = resolveOutputAspectRatio(undefined, outputClip?.width, outputClip?.height, project.contentFormat);
+            return <button className="project-card" key={project.id} onClick={() => onOpen(project.id)}>
+              <div className={`project-thumb ${project.mode}`}><div className="frame-lines" /><span>{project.mode === "clip" ? <Film size={26} /> : <FileText size={26} />}</span>{status.progress !== undefined && <Progress value={status.progress} label={status.label || "Project progress"} />}</div>
+              <div className="project-card-body"><div className="project-card-title"><strong title={project.name}>{project.name}</strong><StatusBadge state={status.state} label={status.label || undefined} /></div><p>{project.mode === "clip" ? `${project.requestedCount} ${project.contentFormat === "long" ? "landscape clip" : "short clip"}${project.requestedCount === 1 ? "" : "s"} · ${outputAspect}` : "Script video"} · {project.style}</p><span>{formatAge(project.updatedAt)} · {project.sourceKind === "youtube" ? "Authorised URL" : "Local source"}</span></div>
+            </button>;
+          })}</div>
           {!query && projects.length > RECENT_LIMIT && <button className="show-all-projects" onClick={() => setShowAllProjects(!showAllProjects)} aria-expanded={showAllProjects}>{showAllProjects ? `Show recent ${RECENT_LIMIT}` : `Show all ${projects.length} projects`}</button>}
         </> : query && !matchingProjects.length ? <div className="inline-empty"><Search size={20} /><span>No project matches “{projectQuery.trim()}”.</span><button className="clear-search" onClick={() => setProjectQuery("")}>Clear search</button></div>
           : <div className="inline-empty"><Film size={22} /><span>Your projects will appear here after you create the first cut.</span></div>}

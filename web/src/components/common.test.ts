@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { resolveOutputAspectRatio } from "./common";
+import { formatDuration, resolveOutputAspectRatio } from "./common";
+
+describe("formatDuration", () => {
+  it("carries rounded seconds into the next minute", () => {
+    expect(formatDuration(59.6)).toBe("1:00");
+    expect(formatDuration(119.6)).toBe("2:00");
+  });
+});
 
 describe("resolveOutputAspectRatio", () => {
   it.each([

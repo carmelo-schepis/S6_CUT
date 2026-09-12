@@ -4,6 +4,7 @@ import { controlJob, createShortsJob, createShortsSourceJob, listAssets, listJob
 import type { Clip, Job, LibraryAsset } from "../types";
 import { Button, StatusBadge, formatDimensions, formatDuration, resolveOutputAspectRatio, useSingleFlight } from "./common";
 import { VideoSourcePicker, type VideoSourceMode } from "./video-source-picker";
+import { usePoll } from "../use-poll";
 
 const aspects = ["9:16", "16:9", "1:1", "4:5"] as const;
 type AspectRatio = typeof aspects[number];
@@ -94,6 +95,17 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
     } catch (cause) { setError(readableError(cause)); }
   }, []);
   useEffect(() => { queueMicrotask(() => void refresh()); return () => { if (objectUrl.current) URL.revokeObjectURL(objectUrl.current); }; }, [refresh]);
+  // A queued render is durable but it must not look permanently queued in this
+  // screen. Poll only job state (not the larger asset catalogue), and pull the
+  // cadence in while a render is unsettled so completed previews appear here.
+  const refreshJobs = useCallback(async () => {
+    try {
+      setJobs((await listJobs()).filter((job) => job.mode === "clip"));
+      setError(null);
+    } catch (cause) { setError(readableError(cause)); }
+  }, []);
+  const hasUnsettledJobs = jobs.some((job) => ["queued", "active", "paused", "stalled", "recovered"].includes(job.state));
+  usePoll(refreshJobs, hasUnsettledJobs ? 2_000 : 15_000);
 
   const rows = useMemo<ClipRow[]>(() => jobs.flatMap((job) => job.clips.map((clip) => ({ job, clip }))).filter(({ clip, job }) => filter === "all" || clipStatus(clip, job) === filter), [filter, jobs]);
   const selectedRow = rows.find(({ clip }) => clip.id === selectedClipId) || jobs.flatMap((job) => job.clips.map((clip) => ({ job, clip }))).find(({ clip }) => clip.id === selectedClipId);

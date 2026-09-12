@@ -133,7 +133,7 @@ test.describe("engine startup", () => {
 
     await expect(page.locator(".global-alert")).toHaveCount(0, { timeout: 25_000 });
     expect(engine.counters.health).toBeGreaterThan(before);
-    await expect(page.locator(".rail-foot")).toContainText("Engine ready");
+    await expect(page.locator(".topbar-state")).toContainText("Local engine");
     expect(problems, problems.join("\n")).toHaveLength(0);
   });
 
@@ -142,7 +142,7 @@ test.describe("engine startup", () => {
     await mockEngine(page, { healthDelayMs: 400 });
     await page.goto("/", { waitUntil: "domcontentloaded" });
 
-    await expect(page.locator(".rail-foot")).toContainText("Engine ready");
+    await expect(page.locator(".topbar-state")).toContainText("Local engine");
     await expect(page.locator(".global-alert")).toHaveCount(0);
     await expect(page.locator(".engine-startup")).toHaveCount(0);
     await expect(page.locator(".engine-summary")).toContainText(/Local engine ready/i);
@@ -268,7 +268,7 @@ test.describe("page structure", () => {
     const problems = trackConsole(page);
     await mockEngine(page, { assets: [asset("a1", "Launch teaser")] });
     await page.goto("/", { waitUntil: "domcontentloaded" });
-    await expect(page.locator(".rail-foot")).toContainText("Engine ready");
+    await expect(page.locator(".topbar-state")).toContainText("Local engine");
 
     for (const screen of screens) {
       await page.getByRole("button", { name: screen, exact: true }).click();
@@ -311,7 +311,7 @@ test.describe("page structure", () => {
   test("the skip link is the first tab stop and moves focus past the rail", async ({ page }) => {
     await mockEngine(page);
     await page.goto("/", { waitUntil: "domcontentloaded" });
-    await expect(page.locator(".rail-foot")).toContainText("Engine ready");
+    await expect(page.locator(".topbar-state")).toContainText("Local engine");
 
     await page.keyboard.press("Tab");
     const skip = page.locator(".skip-link");

@@ -61,6 +61,15 @@ describe("Projects create flow", () => {
     expect(card).not.toHaveTextContent("queued");
   });
 
+  it("shows a completed clip's measured output aspect rather than assuming 9:16", () => {
+    const squareJob: Job = {
+      ...undefinedJob, mode: "clip", state: "complete", stage: "complete", stageLabel: "Project ready", progress: 100,
+      clips: [{ id: "clip-id", index: 1, state: "complete", start: 0, end: 10, duration: 10, openingLine: "", score: null, selected: true, fallbackUsed: false, provenance: [], width: 1080, height: 1080 }],
+    };
+    render(<ProjectsView projects={[project]} jobs={[squareJob]} health={health} onCreated={vi.fn()} onOpen={vi.fn()} onRefresh={vi.fn(async () => undefined)} />);
+    expect(screen.getByRole("button", { name: /Interview/ })).toHaveTextContent("3 short clips · 1:1");
+  });
+
   it("selects Long form by keyboard-friendly control and sends landscape format", async () => {
     mockCreateClipJob.mockResolvedValue({ project: { ...project, contentFormat: "long" }, job: undefinedJob });
     render(<ProjectsView projects={[]} health={health} onCreated={vi.fn()} onOpen={vi.fn()} onRefresh={vi.fn(async () => undefined)} />);
@@ -79,6 +88,25 @@ describe("Projects create flow", () => {
     expect(screen.getByText(/Upload .txt or .md/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Create script video/i })).toBeEnabled();
     expect(screen.queryByRole("button", { name: "Auto" })).not.toBeInTheDocument();
+  });
+
+  it("clears a clip validation error when switching to Script mode", () => {
+    render(<ProjectsView projects={[]} health={health} onCreated={vi.fn()} onOpen={vi.fn()} onRefresh={vi.fn(async () => undefined)} />);
+    fireEvent.click(screen.getByRole("tab", { name: "YouTube" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "YouTube URL" }), { target: { value: "https://example.com/not-youtube" } });
+    fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Only public HTTPS YouTube URLs are supported.");
+    fireEvent.click(screen.getByRole("button", { name: /Script mode/i }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("clears a script validation error when the script is edited", () => {
+    render(<ProjectsView projects={[]} health={health} onCreated={vi.fn()} onOpen={vi.fn()} onRefresh={vi.fn(async () => undefined)} />);
+    fireEvent.click(screen.getByRole("button", { name: /Script mode/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Create script video/i }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Add at least 10 characters of script.");
+    fireEvent.change(screen.getByPlaceholderText(/Paste the exact script/i), { target: { value: "A valid disposable script." } });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("defaults to Auto mode and resolves no-provider auto to a Fast local cut note", () => {
