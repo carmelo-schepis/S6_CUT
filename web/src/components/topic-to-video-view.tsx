@@ -26,7 +26,7 @@ export function TopicToVideoView({ profiles, profilesLoaded = true, onConfigureP
   const [modelsError, setModelsError] = useState<string | null>(null);
   const [modelsRefresh, setModelsRefresh] = useState(0);
   const selected = profiles.find((profile) => profile.selected);
-  const connected = selected?.openrouterStatus === "connected" && selected.openrouterConfigured;
+  const connected = selected?.textStatus === "connected" && selected.openrouterConfigured;
   const profileKey = connected ? selected?.id || null : null;
   const loadingModels = Boolean(connected && (modelsLoading || modelsLoadedProfile !== profileKey));
   const refreshModels = () => { setModelsLoading(true); setModelsError(null); setModelsRefresh((value) => value + 1); };
@@ -35,14 +35,14 @@ export function TopicToVideoView({ profiles, profilesLoaded = true, onConfigureP
   useEffect(() => {
     let active = true;
     if (!connected) return () => { active = false; };
-    void listOpenRouterModels().then((next) => {
+    void listOpenRouterModels("text").then((next) => {
       if (!active) return;
       setModelsError(null);
       setModelsLoadedProfile(profileKey);
       setModels(next);
       setSelectedModelId((current) => {
         if (current) return next.some((model) => model.id === current) ? current : "";
-        return next.some((model) => model.id === selected?.modelId) ? selected?.modelId || "" : "";
+        return next.some((model) => model.id === selected?.textModelId) ? selected?.textModelId || "" : "";
       });
     }).catch((cause) => {
       if (!active) return;
@@ -54,7 +54,7 @@ export function TopicToVideoView({ profiles, profilesLoaded = true, onConfigureP
       if (active) setModelsLoading(false);
     });
     return () => { active = false; };
-  }, [connected, selected?.id, selected?.modelId, modelsRefresh, profileKey]);
+  }, [connected, selected?.id, selected?.textModelId, modelsRefresh, profileKey]);
 
   const singleFlight = useSingleFlight();
 
@@ -104,7 +104,7 @@ export function TopicToVideoView({ profiles, profilesLoaded = true, onConfigureP
     <form className="panel topic-video-form" onSubmit={makePlan}>
       {/* Until /profiles answers, provider availability is unknown — saying it
           is not configured would be a claim we cannot yet support. */}
-      <div className={`provider-status ${!profilesLoaded ? "checking" : connected ? "connected" : "unavailable"}`} role="status"><div><strong>{!profilesLoaded ? "Checking connected providers…" : connected ? `OpenRouter connected — ${selected.name} · ${selected.modelId}` : "OpenRouter is not configured."}</strong><span>{!profilesLoaded ? "Reading saved provider profiles from the local engine." : connected ? "The selected Settings profile will be used for this request." : "Add and test a provider in Settings, or enter a custom script."}</span></div>{profilesLoaded && !connected && <Button type="button" onClick={onConfigureProviders}>Configure OpenRouter</Button>}</div>
+      <div className={`provider-status ${!profilesLoaded ? "checking" : connected ? "connected" : "unavailable"}`} role="status"><div><strong>{!profilesLoaded ? "Checking connected providers…" : connected ? `OpenRouter connected — ${selected.name} · ${selected.textModelId}` : "OpenRouter is not configured."}</strong><span>{!profilesLoaded ? "Reading saved provider profiles from the local engine." : connected ? "The selected Settings profile will be used for this request." : "Add and test a provider in Settings, or enter a custom script."}</span></div>{profilesLoaded && !connected && <Button type="button" onClick={onConfigureProviders}>Configure OpenRouter</Button>}</div>
       {connected && <div className="model-picker-row"><div className="field"><label className="field-label" htmlFor="openrouter-model">OpenRouter model</label><select id="openrouter-model" aria-label="OpenRouter model" value={selectedModelId} disabled={loadingModels || !!modelsError || !models.length} onChange={(event) => setSelectedModelId(event.target.value)}><option value="">Choose a model</option>{models.map((model) => <option key={model.id} value={model.id}>{model.name} — {model.id}</option>)}</select></div><Button type="button" onClick={refreshModels} disabled={loadingModels}>Refresh models</Button></div>}
       {connected && loadingModels && <p className="mode-note" role="status">Loading available OpenRouter models…</p>}
       {connected && modelsError && <div className="form-error" role="alert">Unable to load OpenRouter models: {modelsError} <Button type="button" onClick={refreshModels}>Retry</Button></div>}
@@ -112,7 +112,7 @@ export function TopicToVideoView({ profiles, profilesLoaded = true, onConfigureP
       {connected && !script.trim() && selectedModelId && <p className="provider-charge-note">This request will use OpenRouter model <strong>{selectedModelId}</strong> and may incur provider charges.</p>}
       <div className="topic-video-grid">
         <FieldGroup title="Brief" headingLevel={2}>
-          <div className="field"><label className="field-label" htmlFor="topic">Topic or keyword</label><input id="topic" required value={topic} onChange={(event) => setTopic(event.target.value)} placeholder="e.g. How solar panels work" /></div>
+          <div className="field"><label className="field-label" htmlFor="topic">Topic or keyword</label><input id="topic" value={topic} onChange={(event) => setTopic(event.target.value)} placeholder="e.g. How solar panels work" /></div>
           <div className="topic-three-grid"><div className="field"><label className="field-label" htmlFor="audience">Audience</label><input id="audience" value={audience} onChange={(event) => setAudience(event.target.value)} /></div><div className="field"><label className="field-label" htmlFor="tone">Tone</label><input id="tone" value={tone} onChange={(event) => setTone(event.target.value)} /></div><div className="field"><label className="field-label" htmlFor="language">Language</label><input id="language" value={language} onChange={(event) => setLanguage(event.target.value)} /></div></div>
           <div className="field"><label className="field-label" htmlFor="cta">Call to action</label><input id="cta" value={cta} onChange={(event) => setCta(event.target.value)} /></div>
           <div className="field"><label className="field-label" htmlFor="instructions">Additional instructions</label><textarea id="instructions" rows={3} value={instructions} onChange={(event) => setInstructions(event.target.value)} /></div>

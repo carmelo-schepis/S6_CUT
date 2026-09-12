@@ -96,8 +96,9 @@ export function formatDimensions(aspect: string | null | undefined, width: numbe
 }
 
 export function formatDuration(seconds: number): string {
-  const minutes = Math.floor(seconds / 60);
-  const remainder = Math.round(seconds % 60).toString().padStart(2, "0");
+  const roundedSeconds = Math.max(0, Math.round(seconds));
+  const minutes = Math.floor(roundedSeconds / 60);
+  const remainder = (roundedSeconds % 60).toString().padStart(2, "0");
   return `${minutes}:${remainder}`;
 }
 

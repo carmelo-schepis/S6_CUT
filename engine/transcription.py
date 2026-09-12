@@ -25,13 +25,7 @@ def _child(run_id: str, path: str, settings: Settings, events: Any) -> None:
 
 
 def worker_exit_message(exitcode: int | None) -> str:
-    """Explain a transcription worker that vanished without reporting a result.
-
-    A child killed by a signal reports a negative exit code. SIGKILL is
-    overwhelmingly the kernel out-of-memory killer reclaiming the Whisper
-    process, which otherwise surfaced as an unexplained failure the operator
-    could not act on.
-    """
+    """Explain a transcription worker that vanished without reporting a result."""
     if exitcode is not None and exitcode < 0:
         number = -exitcode
         if number == int(signal.SIGKILL):
@@ -46,7 +40,14 @@ def worker_exit_message(exitcode: int | None) -> str:
     return "Transcription worker exited without a result"
 
 
-def supervise(path: Path, settings: Settings, *, progress: Callable[[float, str], None] | None = None, cancelled: Callable[[], bool] | None = None, heartbeat: Callable[[], None] | None = None, meaningful: Callable[[float], None] | None = None, worker: Callable[..., None] = _child) -> dict[str, Any]:
+def startup_budget_seconds(settings: Settings, source_seconds: float | None) -> float:
+    """Return the longer startup budget needed for long-source VAD."""
+    if not source_seconds or source_seconds <= 0:
+        return float(settings.transcription_stall_seconds)
+    return max(float(settings.transcription_stall_seconds), source_seconds * 0.25 + 60.0)
+
+
+def supervise(path: Path, settings: Settings, *, progress: Callable[[float, str], None] | None = None, cancelled: Callable[[], bool] | None = None, heartbeat: Callable[[], None] | None = None, meaningful: Callable[[float], None] | None = None, worker: Callable[..., None] = _child, source_seconds: float | None = None) -> dict[str, Any]:
     run_id = uuid.uuid4().hex
     # Jobs run on background threads. Forking the multithreaded Uvicorn process
     # can inherit a locked OpenMP/BLAS runtime and leave Faster-Whisper consuming
@@ -59,6 +60,8 @@ def supervise(path: Path, settings: Settings, *, progress: Callable[[float, str]
     process.start()
     started = time.monotonic()
     last_progress = started
+    startup_limit = startup_budget_seconds(settings, source_seconds)
+    saw_progress = False
     try:
         while process.is_alive() or not events.empty():
             if heartbeat:
@@ -71,7 +74,8 @@ def supervise(path: Path, settings: Settings, *, progress: Callable[[float, str]
             try:
                 event = events.get(timeout=.1)
             except queue.Empty:
-                if time.monotonic() - last_progress > settings.transcription_stall_seconds:
+                limit = settings.transcription_stall_seconds if saw_progress else startup_limit
+                if time.monotonic() - last_progress > limit:
                     process.terminate(); process.join(2)
                     if process.is_alive(): process.kill(); process.join(2)
                     raise media.MediaError("Transcription stalled and was safely terminated")
@@ -81,6 +85,7 @@ def supervise(path: Path, settings: Settings, *, progress: Callable[[float, str]
             if event.get("type") == "progress":
                 fraction = max(0.0, min(1.0, float(event.get("fraction", 0))))
                 last_progress = time.monotonic()
+                saw_progress = True
                 if meaningful: meaningful(fraction)
                 if progress: progress(fraction, str(event.get("detail", "")))
             elif event.get("type") == "completed":

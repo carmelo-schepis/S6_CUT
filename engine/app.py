@@ -8,6 +8,7 @@ import json
 import math
 import os
 import shutil
+import sqlite3
 import time
 import uuid
 from collections import defaultdict, deque
@@ -24,7 +25,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from . import __version__
 from .config import settings
 from .database import Database, MAX_FOLDER_DEPTH, UNSORTED_FOLDER_ID
-from .jobs import JobManager, ProjectDeletingError, QueueFullError, SwitchFastError
+from .jobs import JobManager, ProjectDeletingError, QueueFullError, SwitchFastError, uses_fast_pipeline
 from .library import LibraryRules
 from .media import MediaError, available, probe, validate_video_upload
 from .models import (
@@ -388,7 +389,7 @@ async def create_clip_job(
             raise HTTPException(422, str(exc)) from exc
         source_name, source_kind = "YouTube import", "youtube"
     project = Project(id=project_id, name=_project_name(name, Path(source_name).stem), mode="clip", style=style, state="queued", source_name=source_name, source_kind=source_kind, requested_count=count, content_format=content_format, latest_job_id=job_id, library_folder_id=library_folder_id)
-    steps = manager._fast_steps() if mode == "fast" else manager._smart_steps(bool(private["use_openrouter"]))
+    steps = manager._fast_steps() if uses_fast_pipeline(mode, content_format) else manager._smart_steps(bool(private["use_openrouter"]))
     if source_kind == "upload":
         checkpoint_time = now_iso()
         steps[0].status, steps[0].detail = "complete", "Upload atomically stored"
@@ -541,12 +542,15 @@ async def topic_plan(value: TopicVideoInput) -> TopicVideoPlan:
         beats = [TopicBeat(narration=" ".join(words[index:index + chunk]), seconds=max(1, value.duration_seconds / max(1, (len(words) + chunk - 1) // chunk)), keywords=[value.topic]) for index in range(0, len(words), chunk)][:30]
         return TopicVideoPlan(title=value.topic[:200], hook=words[0][:500], narration=narration, beats=beats, estimated_duration=value.duration_seconds)
     schema = {"type": "object", "additionalProperties": False, "properties": {"title": {"type": "string"}, "hook": {"type": "string"}, "narration": {"type": "string"}, "beats": {"type": "array", "items": {"type": "object", "additionalProperties": False, "properties": {"narration": {"type": "string"}, "seconds": {"type": "number"}, "keywords": {"type": "array", "items": {"type": "string"}}}, "required": ["narration", "seconds", "keywords"]}}, "estimated_duration": {"type": "number"}, "description": {"type": "string"}, "hashtags": {"type": "array", "items": {"type": "string"}}}, "required": ["title", "hook", "narration", "beats", "estimated_duration", "description", "hashtags"]}
-    prompt = f"Create a concise video plan in {value.language} about {value.topic!r}. Audience: {value.audience}. Tone: {value.tone}. Target seconds: {value.duration_seconds}. CTA: {value.call_to_action}. Extra instructions: {value.instructions}. Return only JSON matching the schema; use local-library visual keywords and never claim licensing."
+    target_words = round(value.duration_seconds * 2.5)
+    prompt = f"Create a concise video plan in {value.language} about {value.topic!r}. Audience: {value.audience}. Tone: {value.tone}. Target seconds: {value.duration_seconds}; write approximately {target_words} spoken words so narration duration matches the target at a natural pace. CTA: {value.call_to_action}. Extra instructions: {value.instructions}. Return only JSON matching the schema; use local-library visual keywords and never claim licensing."
     try:
         result = await profiles.openrouter_json([{"role": "user", "content": prompt}], schema, require_saved_profile=True, model_id=value.model_id)
     except ProviderError as exc:
-        status_code = {"not_configured": 503, "invalid_credentials": 502, "rate_limited": 429, "timeout_offline": 503, "unavailable_model": 422, "malformed_response": 502}.get(exc.category, 502)
+        status_code = {"not_configured": 503, "invalid_credentials": 502, "rate_limited": 429, "timeout_offline": 503, "unavailable_model": 422, "unsupported_model_or_voice": 422, "malformed_response": 502}.get(exc.category, 502)
         raise HTTPException(status_code, exc.safe_message) from exc
+    except sqlite3.Error as exc:
+        raise HTTPException(503, "Local project storage is temporarily unavailable. Free disk space and try again.") from exc
     if not result:
         raise HTTPException(503, "OpenRouter is not configured. Add and test a provider in Settings, or enter a custom script.")
     try:
@@ -561,19 +565,22 @@ async def create_script_job(request: Request, value: ScriptJobInput) -> dict[str
     if manager.queue.full():
         raise HTTPException(429, "The local processing queue is full. Try again after an active job completes.")
     folder_id = value.library_folder_id or UNSORTED_FOLDER_ID
-    selected_folder = db.get_folder(folder_id)
-    if not selected_folder:
-        raise _not_found("Library folder")
-    if selected_folder.archived:
-        raise HTTPException(409, "Archived folders cannot receive new projects")
-    project_id, job_id = str(uuid.uuid4()), str(uuid.uuid4())
-    first_line = next((line.strip() for line in value.script.splitlines() if line.strip()), "Script project")
-    name = _project_name(value.name, first_line[:70])
-    project = Project(id=project_id, name=name, mode="script", style=value.style, state="queued", source_name=f"{len(value.script)} character script", source_kind="script", requested_count=1, latest_job_id=job_id, library_folder_id=folder_id)
-    job = Job(id=job_id, project_id=project_id, library_folder_id=folder_id, mode="script", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style=value.style, steps=manager._script_steps())
-    private = {"script": value.script, "aspect_ratio": value.aspect_ratio, "narration": value.narration, "library_folder_id": folder_id}
-    db.save_project(project)
-    db.save_job(job, private)
+    try:
+        selected_folder = db.get_folder(folder_id)
+        if not selected_folder:
+            raise _not_found("Library folder")
+        if selected_folder.archived:
+            raise HTTPException(409, "Archived folders cannot receive new projects")
+        project_id, job_id = str(uuid.uuid4()), str(uuid.uuid4())
+        first_line = next((line.strip() for line in value.script.splitlines() if line.strip()), "Script project")
+        name = _project_name(value.name, first_line[:70])
+        project = Project(id=project_id, name=name, mode="script", style=value.style, state="queued", source_name=f"{len(value.script)} character script", source_kind="script", requested_count=1, latest_job_id=job_id, library_folder_id=folder_id)
+        job = Job(id=job_id, project_id=project_id, library_folder_id=folder_id, mode="script", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style=value.style, steps=manager._script_steps())
+        private = {"script": value.script, "aspect_ratio": value.aspect_ratio, "narration": value.narration, "library_folder_id": folder_id}
+        db.save_project(project)
+        db.save_job(job, private)
+    except sqlite3.Error as exc:
+        raise HTTPException(503, "Local project storage is temporarily unavailable. Free disk space and try again.") from exc
     await manager.enqueue(job_id)
     return {"project": project, "job": public_job(job)}
 
@@ -789,11 +796,13 @@ async def download_file(relative_path: str, expires: int = Query(...), signature
 
 
 @app.get("/api/v1/openrouter/models", response_model=list[OpenRouterModel])
-async def list_openrouter_models() -> list[OpenRouterModel]:
+async def list_openrouter_models(output_modalities: Annotated[str | None, Query(alias="outputModalities")] = None) -> list[OpenRouterModel]:
+    if output_modalities not in {None, "text", "speech"}:
+        raise HTTPException(422, "Unsupported OpenRouter output modality")
     try:
-        return await profiles.openrouter_models()
+        return await profiles.openrouter_models(output_modalities)
     except ProviderError as exc:
-        status_code = {"not_configured": 503, "invalid_credentials": 502, "rate_limited": 429, "timeout_offline": 503, "malformed_response": 502}.get(exc.category, 502)
+        status_code = {"not_configured": 503, "invalid_credentials": 502, "insufficient_balance": 402, "rate_limited": 429, "timeout_offline": 503, "malformed_response": 502, "unsupported_model_or_voice": 422}.get(exc.category, 502)
         raise HTTPException(status_code, exc.safe_message) from exc
 
 

@@ -3,8 +3,8 @@ import { FileText, Film, FolderOpen, Plus, Search, Sparkles, Trash2, Zap } from 
 import { createClipJob, createFolder, createScriptJob, deleteProjectEverywhere, listAssets, listFolders, readableError } from "../api";
 import { bindRevalidationOnFocus, createBoundedRevalidation, emitLibraryChanged, onLibraryChanged } from "../library-sync";
 import type { ContentFormat, Health, Job, LibraryAsset, LibraryFolder, ProcessingMode, Project, Style } from "../types";
-import { projectStatus } from "../project-status";
-import { Button, Field, FieldGroup, Progress, Skeleton, StatusBadge, StepBadge, formatAge, useSingleFlight } from "./common";
+import { authoritativeJob, projectStatus } from "../project-status";
+import { Button, Field, FieldGroup, Progress, Skeleton, StatusBadge, StepBadge, formatAge, resolveOutputAspectRatio, useSingleFlight } from "./common";
 import { LazyVideoThumbnail } from "./lazy-video-thumbnail";
 import { VideoPreviewDialog } from "./video-preview-dialog";
 import { VideoSourcePicker } from "./video-source-picker";
@@ -194,6 +194,7 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
     if (!selected) return;
     if (!/\.(txt|md)$/i.test(selected.name)) return setError("Script uploads must be .txt or .md files.");
     setScript(await selected.text());
+    setError(null);
   };
 
   // Until /profiles answers we do not know whether a provider is connected, and
@@ -229,18 +230,18 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
       <div className="create-topline">
         <div><h2 id="create-title">Create a project</h2><p>Nothing leaves this machine unless you use a URL or an enabled provider.</p></div>
         <div className="segmented" aria-label="Creation mode">
-          <button type="button" aria-pressed={mode === "clip"} className={mode === "clip" ? "active" : ""} onClick={() => setMode("clip")}><Film size={15} /> Clip mode</button>
-          <button type="button" aria-pressed={mode === "script"} className={mode === "script" ? "active" : ""} onClick={() => setMode("script")}><FileText size={15} /> Script mode</button>
+          <button type="button" aria-pressed={mode === "clip"} className={mode === "clip" ? "active" : ""} onClick={() => { setError(null); setMode("clip"); }}><Film size={15} /> Clip mode</button>
+          <button type="button" aria-pressed={mode === "script"} className={mode === "script" ? "active" : ""} onClick={() => { setError(null); setMode("script"); }}><FileText size={15} /> Script mode</button>
         </div>
       </div>
 
-      {providersLoaded && !hasSelectedProvider && !providerCalloutDismissed && <div className="provider-callout"><Sparkles size={17} /><div><strong>Add optional AI providers</strong><span>OpenRouter improves planning; ElevenLabs adds premium narration. Local fallbacks stay available.</span></div><div className="provider-callout-actions"><Button onClick={onConfigureProviders}>Configure providers</Button><Button variant="ghost" onClick={() => setProviderCalloutDismissed(true)}>Continue locally</Button></div></div>}
+      {providersLoaded && !hasSelectedProvider && !providerCalloutDismissed && <div className="provider-callout"><Sparkles size={17} /><div><strong>Add optional AI providers</strong><span>OpenRouter improves planning and provides optional speech narration. Local modes stay available.</span></div><div className="provider-callout-actions"><Button onClick={onConfigureProviders}>Configure providers</Button><Button variant="ghost" onClick={() => setProviderCalloutDismissed(true)}>Continue locally</Button></div></div>}
 
       <div className="create-grid">
         <div className="create-step source-step">
           <div className="step-label"><StepBadge step={1} /><span className="step-label-text">{mode === "clip" ? "Add source" : "Add script"}</span></div>
-          {mode === "clip" ? <VideoSourcePicker mode={sourceType} onModeChange={(next) => setSourceType(next as "file" | "url")} file={file} onFile={(next, pickerError) => { setFile(next); if (pickerError) setError(pickerError); else setError(null); }} url={url} onUrl={setUrl} /> : <div className="script-input-wrap">
-            <textarea value={script} onChange={(event) => setScript(event.target.value)} placeholder="Paste the exact script. S6_cut preserves this source text…" rows={8} />
+          {mode === "clip" ? <VideoSourcePicker mode={sourceType} onModeChange={(next) => { setError(null); setSourceType(next as "file" | "url"); }} file={file} onFile={(next, pickerError) => { setFile(next); if (pickerError) setError(pickerError); else setError(null); }} url={url} onUrl={setUrl} /> : <div className="script-input-wrap">
+            <textarea value={script} onChange={(event) => { setScript(event.target.value); setError(null); }} placeholder="Paste the exact script. S6_cut preserves this source text…" rows={8} />
             <div className="script-meta"><span>{script.length.toLocaleString()} characters</span><input ref={scriptInput} type="file" accept=".txt,.md,text/plain,text/markdown" onChange={(event) => loadScriptFile(event.target.files?.[0])} hidden /><button onClick={() => scriptInput.current?.click()}><FolderOpen size={14} /> Upload .txt or .md</button></div>
           </div>}
           {mode === "clip" && healthChecked && <div className="engine-summary">
@@ -327,12 +328,14 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
         : matchingProjects.length ? <>
           <div className="project-grid">{visibleProjects.map((project) => {
             const status = projectStatus(project, jobs);
+            const outputClip = authoritativeJob(project, jobs)?.clips.find((clip) => clip.width && clip.height);
+            const outputAspect = resolveOutputAspectRatio(undefined, outputClip?.width, outputClip?.height, project.contentFormat);
             const sourceAsset = sourceAssets.find((asset) => asset.sourceProjectId === project.id && asset.mediaType.startsWith("video/") && asset.previewUrl);
             return <article className="project-card" key={project.id}>
               {sourceAsset ? <button className="project-source-preview" type="button" aria-label={`Preview source video for ${project.name}`} onClick={(event) => void openSourcePreview(project, event.currentTarget)}>
                 <LazyVideoThumbnail key={sourceAsset.blobId} className="project-thumb" src={sourceAsset.previewUrl}><span><Film size={26} /></span>{status.progress !== undefined && <Progress value={status.progress} label={status.label || "Project progress"} />}</LazyVideoThumbnail>
               </button> : <div className={`project-thumb ${project.mode}`} aria-hidden="true"><div className="frame-lines" /><span>{project.mode === "clip" ? <Film size={26} /> : <FileText size={26} />}</span>{status.progress !== undefined && <Progress value={status.progress} label={status.label || "Project progress"} />}</div>}
-              <button className="project-card-open" type="button" aria-label={`Open project ${project.name}`} onClick={() => onOpen(project.id)}><div className="project-card-body"><div className="project-card-title"><strong title={project.name}>{project.name}</strong><StatusBadge className="project-card-status" state={status.state} label={status.label || undefined} /></div><p>{project.mode === "clip" ? `${project.requestedCount} ${project.contentFormat === "long" ? "landscape clip" : "short clip"}${project.requestedCount === 1 ? "" : "s"} · ${project.contentFormat === "long" ? "16:9" : "9:16"}` : "Script video"} · {project.style}</p><span>{formatAge(project.updatedAt)} · {project.sourceKind === "youtube" ? "Authorised URL" : "Local source"}</span></div></button>
+              <button className="project-card-open" type="button" aria-label={`Open project ${project.name}`} onClick={() => onOpen(project.id)}><div className="project-card-body"><div className="project-card-title"><strong title={project.name}>{project.name}</strong><StatusBadge className="project-card-status" state={status.state} label={status.label || undefined} /></div><p>{project.mode === "clip" ? `${project.requestedCount} ${project.contentFormat === "long" ? "landscape clip" : "short clip"}${project.requestedCount === 1 ? "" : "s"} · ${outputAspect}` : "Script video"} · {project.style}</p><span>{formatAge(project.updatedAt)} · {project.sourceKind === "youtube" ? "Authorised URL" : "Local source"}</span></div></button>
               <button className="project-card-delete" type="button" aria-label={`Delete project ${project.name} everywhere`} onClick={(event) => requestProjectDeletion(project, event.currentTarget)}><Trash2 size={14} aria-hidden="true" /> Delete everywhere</button>
             </article>;
           })}</div>

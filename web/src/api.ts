@@ -232,8 +232,9 @@ export async function createShortsSourceJob(input: { file?: File; url?: string; 
   return { project: projectSchema.parse(value.project), job: jobSchema.parse(value.job) };
 }
 
-export async function listOpenRouterModels(): Promise<OpenRouterModel[]> {
-  return openRouterModelSchema.array().parse(await request("/openrouter/models"));
+export async function listOpenRouterModels(outputModalities?: "text" | "speech"): Promise<OpenRouterModel[]> {
+  const query = outputModalities ? `?outputModalities=${encodeURIComponent(outputModalities)}` : "";
+  return openRouterModelSchema.array().parse(await request(`/openrouter/models${query}`));
 }
 
 export async function createTopicPlan(input: { topic: string; audience: string; tone: string; language: string; callToAction: string; instructions: string; durationSeconds: number; aspectRatio: string; variants: number; customScript: string; modelId?: string }): Promise<TopicVideoPlan> {

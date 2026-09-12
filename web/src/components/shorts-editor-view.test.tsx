@@ -1,7 +1,7 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createShortsJob, createShortsSourceJob, listAssets } from "../api";
-import type { LibraryAsset } from "../types";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createShortsJob, createShortsSourceJob, listAssets, listJobs } from "../api";
+import type { Job, LibraryAsset } from "../types";
 import { ShortsEditorView, parseAssistantRequest } from "./shorts-editor-view";
 
 vi.mock("../api", () => ({
@@ -11,7 +11,8 @@ vi.mock("../api", () => ({
 const asset: LibraryAsset = { id: "asset-1", title: "Library clip", description: "", mediaType: "video/mp4", filename: "clip.mp4", tags: [], triggers: [], aliases: [], negativeTriggers: [], policy: "neutral", protected: false, minSpacingSeconds: 0, maxUsesPerProject: 0, licence: "User", attribution: "", contentHash: "hash", brands: [], people: [], folderId: "folder", origin: "manual-import", blobId: "blob", createdAt: "2026-01-01T00:00:00Z" };
 
 describe("ShortsEditorView", () => {
-  beforeEach(() => { vi.mocked(listAssets).mockImplementation(async () => [asset]); vi.mocked(createShortsJob).mockResolvedValue({ project: {} as never, job: {} as never }); vi.mocked(createShortsSourceJob).mockResolvedValue({ project: {} as never, job: {} as never }); });
+  beforeEach(() => { vi.mocked(listAssets).mockImplementation(async () => [asset]); vi.mocked(listJobs).mockResolvedValue([]); vi.mocked(createShortsJob).mockResolvedValue({ project: {} as never, job: {} as never }); vi.mocked(createShortsSourceJob).mockResolvedValue({ project: {} as never, job: {} as never }); });
+  afterEach(() => vi.useRealTimers());
   it("explains the accepted source, editing controls, and queued output", async () => {
     render(<ShortsEditorView onJobCreated={vi.fn()} />);
     expect(screen.getByText("Trim an authorised video into a social-ready clip. Choose the section, output shape, and subtitles, then queue the render.")).toBeInTheDocument();
@@ -40,6 +41,24 @@ describe("ShortsEditorView", () => {
     fireEvent.click(screen.getByRole("tab", { name: /Library/ }));
     expect(await screen.findByText("No Library videos available")).toBeInTheDocument();
   });
+  it("refreshes a queued render into its completed preview state", async () => {
+    vi.useFakeTimers();
+    const queued: Job = {
+      schemaVersion: 1, id: "job-1", projectId: "project-1", mode: "clip", state: "queued", stage: "queued", stageLabel: "Queued", progress: 0,
+      currentItem: 0, totalItems: 1, style: "educational", processingMode: "fast", warnings: [], error: null, beats: [], steps: [],
+      clips: [{ id: "clip-1", index: 1, state: "queued", start: 0, end: 4, duration: 4, openingLine: "", score: null, selected: true, fallbackUsed: false, provenance: [] }],
+      createdAt: "2026-09-12T00:00:00Z", updatedAt: "2026-09-12T00:00:00Z",
+    };
+    vi.mocked(listJobs).mockResolvedValue([queued]);
+    const view = render(<ShortsEditorView onJobCreated={vi.fn()} />);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(screen.getByText("queued")).toBeInTheDocument();
+    vi.mocked(listJobs).mockResolvedValue([{ ...queued, state: "complete", stage: "complete", stageLabel: "1 fast cut ready", progress: 100, clips: [{ ...queued.clips[0], state: "complete", width: 1080, height: 1350, previewUrl: "/preview.mp4" }] }]);
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
+    expect(screen.getByText("complete")).toBeInTheDocument();
+    view.unmount();
+  });
+
   it("keeps proposal-only assistant requests uncommitted until Apply", async () => {
     const current = { start: 0, end: 4, aspect: "9:16" as const, subtitles: true };
     const parsed = parseAssistantRequest("Propose changing the aspect ratio to 1:1 without applying it.", current);

@@ -338,17 +338,19 @@ class ProjectFolderUpdate(ApiModel):
 
 class ProfileInput(ApiModel):
     name: str = Field(min_length=1, max_length=100)
-    model_id: str = Field(default="openai/gpt-4.1-mini", max_length=200)
-    voice_id: str | None = Field(default=None, max_length=200)
+    text_model_id: str = Field(default="openai/gpt-4.1-mini", max_length=200)
+    tts_model_id: str | None = Field(default=None, max_length=200)
+    tts_voice: str | None = Field(default=None, max_length=200)
+    tts_speed: float = Field(default=1.0, gt=0.25, le=4.0)
     openrouter_key: str | None = Field(default=None, max_length=500)
-    elevenlabs_key: str | None = Field(default=None, max_length=500)
     persistence: Literal["session", "encrypted"] = "encrypted"
     selected: bool = False
 
 
 ProviderConnectionStatus = Literal[
-    "not_configured", "configured", "connected", "invalid_credentials", "rate_limited",
-    "timeout_offline", "unavailable_model_or_voice", "malformed_response",
+    "not_configured", "configured", "connected", "invalid_credentials", "insufficient_balance",
+    "unsupported_model_or_voice", "rate_limited", "timeout_offline", "unavailable",
+    "malformed_response", "provider_service_failure",
 ]
 
 
@@ -356,25 +358,28 @@ class OpenRouterModel(ApiModel):
     id: str = Field(min_length=1, max_length=200)
     name: str = Field(min_length=1, max_length=300)
     context_length: int | None = Field(default=None, ge=1)
+    output_modalities: list[str] = Field(default_factory=list, max_length=10)
+    free: bool = False
+    voices: list[str] = Field(default_factory=list, max_length=100)
 
 
 class ProviderProfile(ApiModel):
     id: str
     name: str
-    model_id: str
-    voice_id: str | None = None
+    text_model_id: str
+    tts_model_id: str | None = None
+    tts_voice: str | None = None
+    tts_speed: float = Field(default=1.0, gt=0.25, le=4.0)
     selected: bool
     persistence: Literal["session", "encrypted"]
     openrouter_configured: bool
-    elevenlabs_configured: bool
     openrouter_masked: str | None = None
-    elevenlabs_masked: str | None = None
-    openrouter_status: ProviderConnectionStatus = "not_configured"
-    elevenlabs_status: ProviderConnectionStatus = "not_configured"
-    openrouter_message: str | None = None
-    openrouter_last_checked_at: str | None = None
-    elevenlabs_message: str | None = None
-    elevenlabs_last_checked_at: str | None = None
+    text_status: ProviderConnectionStatus = "not_configured"
+    tts_status: ProviderConnectionStatus = "not_configured"
+    text_message: str | None = None
+    text_last_checked_at: str | None = None
+    tts_message: str | None = None
+    tts_last_checked_at: str | None = None
     status: str
     capabilities: list[str]
     fallbacks: dict[str, str]
