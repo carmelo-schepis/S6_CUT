@@ -883,3 +883,51 @@ def test_clip_without_recoverable_media_reports_no_download_link() -> None:
             assert payload["previewUrl"] is None
     finally:
         app_module.db, app_module.manager, app_module.settings = original
+
+
+def test_stop_keep_during_render_survives_the_publication_checkpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stop & keep must survive publication of the clip that was already in flight.
+
+    Publication commits the job checkpoint inside its own transaction, so it
+    never passes through ``_save()``'s cancellation precedence. A stop-keep that
+    landed while a clip was rendering was therefore overwritten by the worker's
+    in-memory ``active`` state the moment that clip published: the job resumed,
+    rendered every remaining clip, and held the only configured worker for the
+    rest of the job while everything queued behind it starved.
+
+    The clip already in flight still publishes — keeping finished outputs is
+    what stop-keep promises — but the job must stay stopped.
+    """
+    tmp_path = _tmpdir()
+    test_db, test_manager, _, _ = _cluster(tmp_path)
+    rendered: list[Path] = []
+
+    def render_then_stop(source: Path, output: Path, **kwargs: Any) -> None:
+        _fake_render(source, output, **kwargs)
+        rendered.append(output)
+        if len(rendered) != 1:
+            return
+        # Exactly what POST /jobs/{id}/control/stop-keep writes while a worker
+        # is mid-render: the database row is the only record of the stop.
+        stopping = test_db.get_job("stop-keep-job")
+        assert stopping is not None
+        stopping.state, stopping.stage_label = "cancelled_kept", "Stopped; completed outputs kept"
+        for step in stopping.steps:
+            if step.status == "active":
+                step.status, step.completed_at, step.detail = "skipped", now_iso(), "Stopped by user"
+        test_db.save_job(stopping)
+
+    job = _run_fast_job(monkeypatch, test_db, test_manager, "stop-keep-job", count=5, render_hook=render_then_stop)
+
+    assert job is not None
+    assert job.state == "cancelled_kept", f"publication resurrected the stopped job as {job.state!r}"
+    assert len(rendered) == 1, f"rendering continued past the stop: {len(rendered)} of 5 clips rendered"
+    # The worker is released rather than held for the remaining four clips.
+    assert test_manager.active_workers == 0
+
+    complete = [clip for clip in job.clips if clip.state == "complete"]
+    assert len(complete) == 1, "the clip already in flight is kept"
+    assert complete[0].library_asset_id is not None, "a kept clip still carries its Library asset"
+    asset = test_db.get_asset(complete[0].library_asset_id)
+    assert asset is not None and asset.source_clip_id == complete[0].id
+    assert not [step for step in job.steps if step.status == "active"], "a stopped job leaves no active step"

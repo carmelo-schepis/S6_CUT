@@ -6,6 +6,9 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const fixture = path.join(root, "tests/fixtures/openrouter-fallback.mp4");
 const artifacts = path.join(root, "test-artifacts/openrouter-fallback");
+const profileKey = process.env.S6_E2E_PROFILE_KEY;
+
+test.skip(!profileKey, "requires S6_E2E_PROFILE_KEY for the isolated real-provider fallback test");
 
 async function checklistStatuses(page: import("@playwright/test").Page) {
   return page.locator(".process-checklist li").evaluateAll((rows) => rows.map((row) => ({
@@ -36,8 +39,6 @@ test.describe("OpenRouter Smart fallback", () => {
     // trace never records a password-field value. The browser still verifies
     // the connected profile in Settings before creating the job.
     const gateway = process.env.S6_ACCEPTANCE_URL || "http://127.0.0.1:8080";
-    const profileKey = process.env.S6_E2E_PROFILE_KEY;
-    if (!profileKey) throw new Error("The isolated acceptance harness did not provide a profile key");
     const profileResponse = await fetch(`${gateway}/api/v1/profiles`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({
       name: "E2E OpenRouter failure", modelId: "openai/gpt-4.1-mini", openrouterKey: profileKey, persistence: "encrypted", selected: true,
     }) });

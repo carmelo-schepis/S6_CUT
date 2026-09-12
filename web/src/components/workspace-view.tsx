@@ -6,6 +6,7 @@ import { jobSchema, type Clip, type Health, type Job, type LibraryAsset, type Li
 import { Button, EmptyState, IconButton, Progress, Skeleton, StatusBadge, WarningList, formatBytes, formatDimensions, formatDuration, resolveOutputAspectRatio, useSingleFlight } from "./common";
 import { jobFacts } from "../status-format";
 import { isTerminalJob, ProcessingState } from "./processing-state";
+import { LazyVideoThumbnail } from "./lazy-video-thumbnail";
 import { ProcessChecklist } from "./process-checklist";
 
 function folderName(folderId: string | null | undefined, folders: LibraryFolder[], project: Project | null): string {
@@ -27,17 +28,7 @@ function ClipThumb({ clip }: { clip: Clip }) {
   // Try previewUrl first, then downloadUrl as fallback
   const src = clip.previewUrl || clip.downloadUrl;
   if (src && !failed) {
-    return (
-      <video
-        src={src}
-        muted
-        playsInline
-        preload="metadata"
-        className="clip-thumbnail"
-        aria-hidden="true"
-        onError={() => setFailed(true)}
-      />
-    );
+    return <LazyVideoThumbnail key={clip.id} src={src} videoClassName="clip-thumbnail" onError={() => setFailed(true)} />;
   }
   return (
     <>
@@ -558,7 +549,7 @@ const mediaOriginLabels: Record<LibraryAsset["origin"], string> = {
 
 function WorkspaceMediaAsset({ asset, clip }: { asset: LibraryAsset; clip?: Clip }) {
   const mediaType = asset.mediaType.toLowerCase();
-  const preview = mediaType.startsWith("video/") && asset.previewUrl ? <video src={asset.previewUrl} controls muted preload="metadata" aria-label={`${asset.title} preview`} />
+  const preview = mediaType.startsWith("video/") && asset.previewUrl ? <LazyVideoThumbnail key={asset.blobId} src={asset.previewUrl} label={`${asset.title} preview`} />
     : mediaType.startsWith("image/") && asset.previewUrl ? <img src={asset.previewUrl} alt={`${asset.title} preview`} />
       : mediaType.startsWith("audio/") && asset.previewUrl ? <audio src={asset.previewUrl} controls aria-label={`${asset.title} preview`} />
         : <FileText size={24} aria-hidden="true" />;

@@ -791,6 +791,25 @@ class JobManager:
             "embedded": bool(private.get("embed_subtitles", job.embed_subtitles)),
             "updated_at": now_iso(),
         }
+        # A stop-keep that lands while this clip was rendering exists only in the
+        # database row: the in-memory job still says "active", and publication
+        # commits the job checkpoint directly (database.py step 6), so it never
+        # passes through _save()'s cancellation precedence and silently
+        # resurrects the job. The render loop's next _cooperate() then reads
+        # "active" and keeps going, so Stop & keep rendered every remaining clip
+        # and held the only worker for the whole job.
+        #
+        # The output still publishes — keeping finished outputs is exactly what
+        # stop-keep promises, and the clip/asset transaction is untouched — but
+        # the checkpoint defers to the cancellation exactly as _save() does, so
+        # the next cooperation point stops the job and frees the worker.
+        current = self.db.get_job(job.id)
+        if current and current.state == "cancelled_kept" and job.state != "cancelled_kept" and not private.get("retry_import"):
+            job.state = current.state
+            job.stage = current.stage
+            job.stage_label = current.stage_label
+            job.error = current.error
+            job.steps = current.steps
         return self.db.publish_clip_output(job, clip, asset, relative, output.stat().st_size, private=private)
 
     def _download_progress(self, job: Job, private: dict[str, Any], update: dict[str, Any]) -> None:

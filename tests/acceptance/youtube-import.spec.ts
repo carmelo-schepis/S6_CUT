@@ -23,7 +23,7 @@ const artifacts = path.join(root, "test-artifacts/youtube-import");
 const writeManifest = (name: string, payload: unknown) => writeManifestTo(artifacts, name, payload);
 
 const url = process.env.S6_YOUTUBE_URL;
-if (!url) throw new Error("S6_YOUTUBE_URL must supply the authorised public YouTube URL under test");
+test.skip(!url, "requires S6_YOUTUBE_URL with an authorised public YouTube URL");
 const videoId = /[?&]v=([\w-]{11})|youtu\.be\/([\w-]{11})/.exec(url);
 const expectedId = videoId?.[1] || videoId?.[2] || "";
 

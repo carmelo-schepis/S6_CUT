@@ -411,8 +411,8 @@ describe("WorkspaceView – publication metadata, Details rename, read-only capt
   it("shows a retryable preview placeholder when the video thumbnail fails to load", async () => {
     renderView();
     expect(await screen.findByText("Test — Cut 01")).toBeInTheDocument();
+    await waitFor(() => expect(document.querySelector<HTMLVideoElement>(".clip-thumbnail")).toBeTruthy());
     const video = document.querySelector<HTMLVideoElement>(".clip-thumbnail");
-    expect(video).toBeTruthy();
     expect(video?.src).toContain("/api/v1/media/dl/one.mp4");
     fireEvent.error(video!);
     expect(screen.getByRole("button", { name: "Retry preview" })).toBeInTheDocument();

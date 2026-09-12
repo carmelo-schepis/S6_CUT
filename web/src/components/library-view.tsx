@@ -4,6 +4,7 @@ import { archiveFolder, createFolder, deleteAsset, deleteAssets, getHealth, list
 import { bindRevalidationOnFocus, createBoundedRevalidation, onLibraryChanged } from "../library-sync";
 import type { AssetOrigin, Health, LibraryAsset, LibraryFolder } from "../types";
 import { Button, EmptyState, Field, FieldGroup, PageHeader, StatusBadge, formatAge } from "./common";
+import { LazyVideoThumbnail } from "./lazy-video-thumbnail";
 import { VideoPreviewDialog } from "./video-preview-dialog";
 
 const originLabels = { "manual-import": "Manual", "project-source": "Source", "generated-clip": "Generated clip", "script-output": "Script output" } as const;
@@ -35,22 +36,39 @@ export function LibraryView() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteFeedback, setDeleteFeedback] = useState<string | null>(null);
+  const loadFlight = useRef<Promise<void> | null>(null);
+  const initialLoadComplete = useRef(false);
 
-  const load = useCallback(async (retry = true) => {
-    setLoading(true);
-    for (let attempt = 0; attempt < (retry ? 3 : 1); attempt += 1) {
-      try {
-        const [nextAssets, nextFolders] = await Promise.all([listAssets({ includeArchived: showArchived }), listFolders({ includeArchived: showArchived })]);
-        setAssets(nextAssets); setFolders(nextFolders); setError(null);
-        setSelected((current) => nextAssets.find((asset) => asset.id === current?.id) || nextAssets[0] || null);
-        setLoading(false); return;
-      } catch {
-        if (attempt < 2 && retry) await sleep(300 * 2 ** attempt);
+  const load = useCallback((retry = true) => {
+    if (loadFlight.current) return loadFlight.current;
+    const request = async () => {
+      setLoading(true);
+      for (let attempt = 0; attempt < (retry ? 3 : 1); attempt += 1) {
+        try {
+          const [nextAssets, nextFolders] = await Promise.all([listAssets({ includeArchived: showArchived }), listFolders({ includeArchived: showArchived })]);
+          // A refresh re-signs URLs. Retain an already working URL for the same
+          // immutable blob so a harmless revalidation cannot restart media.
+          setAssets((current) => {
+            const previous = new Map(current.map((asset) => [asset.id, asset]));
+            return nextAssets.map((asset) => {
+              const existing = previous.get(asset.id);
+              return existing?.blobId === asset.blobId ? { ...asset, previewUrl: existing.previewUrl || asset.previewUrl } : asset;
+            });
+          });
+          setFolders(nextFolders); setError(null);
+          setSelected((current) => nextAssets.find((asset) => asset.id === current?.id) || nextAssets[0] || null);
+          return;
+        } catch {
+          if (attempt < 2 && retry) await sleep(300 * 2 ** attempt);
+        }
       }
-    }
-    setError("Could not reach the local S6 Cut media library.");
-    void getHealth().then(setHealth).catch(() => setHealth(null));
-    setLoading(false);
+      // Keep the last successful cards on screen while a transient request fails.
+      setError("Could not reach the local S6 Cut media library.");
+      void getHealth().then(setHealth).catch(() => setHealth(null));
+    };
+    const flight = request().finally(() => { setLoading(false); initialLoadComplete.current = true; loadFlight.current = null; });
+    loadFlight.current = flight;
+    return flight;
   }, [showArchived]);
 
   // Initial load on mount
@@ -62,8 +80,13 @@ export function LibraryView() {
   // Set up bounded revalidation and cross-view event subscription
   useEffect(() => {
     const reval = createBoundedRevalidation(() => load(false));
-    const unsubFocus = bindRevalidationOnFocus(() => reval.signal());
-    const unsubEvent = onLibraryChanged(() => reval.signal());
+    // A focus event commonly accompanies the first paint. Ignore it until the
+    // initial read has settled instead of scheduling a second full read.
+    const signalRevalidation = () => {
+      if (initialLoadComplete.current) reval.signal();
+    };
+    const unsubFocus = bindRevalidationOnFocus(signalRevalidation);
+    const unsubEvent = onLibraryChanged(signalRevalidation);
     return () => {
       unsubFocus();
       unsubEvent();
@@ -268,7 +291,7 @@ function LibraryAssetCard({ asset, isSelected, isInspected, onPreview, onInspect
 function AssetPreview({ asset }: { asset: LibraryAsset }) {
   const [unavailable, setUnavailable] = useState(false);
   if (asset.mediaType.startsWith("video/") && asset.previewUrl && !unavailable) {
-    return <div className="asset-preview"><video src={asset.previewUrl} muted preload="metadata" aria-hidden="true" tabIndex={-1} onError={() => setUnavailable(true)} /></div>;
+    return <LazyVideoThumbnail key={asset.blobId} className="asset-preview" src={asset.previewUrl} onError={() => setUnavailable(true)} />;
   }
   return <div className="asset-preview"><FileImage size={29} /><span>{unavailable ? "UNAVAILABLE" : asset.mediaType.split("/")[1]?.toUpperCase() || "MEDIA"}</span>{asset.protected && <ShieldCheck size={14} />}</div>;
 }

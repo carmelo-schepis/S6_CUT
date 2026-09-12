@@ -5,6 +5,7 @@ import { bindRevalidationOnFocus, createBoundedRevalidation, emitLibraryChanged,
 import type { ContentFormat, Health, Job, LibraryAsset, LibraryFolder, ProcessingMode, Project, Style } from "../types";
 import { projectStatus } from "../project-status";
 import { Button, Field, FieldGroup, Progress, Skeleton, StatusBadge, StepBadge, formatAge, useSingleFlight } from "./common";
+import { LazyVideoThumbnail } from "./lazy-video-thumbnail";
 import { VideoPreviewDialog } from "./video-preview-dialog";
 import { VideoSourcePicker } from "./video-source-picker";
 
@@ -83,7 +84,16 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
   // separate from the project list: an unavailable Library must never make the
   // workspace's recent-project controls fail.
   const loadSourceAssets = useCallback(async () => {
-    try { setSourceAssets(await listAssets({ origin: "project-source" })); } catch { /* Source previews are optional. */ }
+    try {
+      const next = await listAssets({ origin: "project-source" });
+      setSourceAssets((current) => {
+        const previous = new Map(current.map((asset) => [asset.id, asset]));
+        return next.map((asset) => {
+          const existing = previous.get(asset.id);
+          return existing?.blobId === asset.blobId ? { ...asset, previewUrl: existing.previewUrl || asset.previewUrl } : asset;
+        });
+      });
+    } catch { /* Source previews are optional. */ }
   }, []);
 
   useEffect(() => {
@@ -320,7 +330,7 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
             const sourceAsset = sourceAssets.find((asset) => asset.sourceProjectId === project.id && asset.mediaType.startsWith("video/") && asset.previewUrl);
             return <article className="project-card" key={project.id}>
               {sourceAsset ? <button className="project-source-preview" type="button" aria-label={`Preview source video for ${project.name}`} onClick={(event) => void openSourcePreview(project, event.currentTarget)}>
-                <div className="project-thumb"><video src={sourceAsset.previewUrl} muted preload="metadata" aria-hidden="true" tabIndex={-1} /><span><Film size={26} /></span>{status.progress !== undefined && <Progress value={status.progress} label={status.label || "Project progress"} />}</div>
+                <LazyVideoThumbnail key={sourceAsset.blobId} className="project-thumb" src={sourceAsset.previewUrl}><span><Film size={26} /></span>{status.progress !== undefined && <Progress value={status.progress} label={status.label || "Project progress"} />}</LazyVideoThumbnail>
               </button> : <div className={`project-thumb ${project.mode}`} aria-hidden="true"><div className="frame-lines" /><span>{project.mode === "clip" ? <Film size={26} /> : <FileText size={26} />}</span>{status.progress !== undefined && <Progress value={status.progress} label={status.label || "Project progress"} />}</div>}
               <button className="project-card-open" type="button" aria-label={`Open project ${project.name}`} onClick={() => onOpen(project.id)}><div className="project-card-body"><div className="project-card-title"><strong title={project.name}>{project.name}</strong><StatusBadge className="project-card-status" state={status.state} label={status.label || undefined} /></div><p>{project.mode === "clip" ? `${project.requestedCount} ${project.contentFormat === "long" ? "landscape clip" : "short clip"}${project.requestedCount === 1 ? "" : "s"} · ${project.contentFormat === "long" ? "16:9" : "9:16"}` : "Script video"} · {project.style}</p><span>{formatAge(project.updatedAt)} · {project.sourceKind === "youtube" ? "Authorised URL" : "Local source"}</span></div></button>
               <button className="project-card-delete" type="button" aria-label={`Delete project ${project.name} everywhere`} onClick={(event) => requestProjectDeletion(project, event.currentTarget)}><Trash2 size={14} aria-hidden="true" /> Delete everywhere</button>
