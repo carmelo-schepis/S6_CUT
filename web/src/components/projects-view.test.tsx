@@ -20,6 +20,19 @@ const mockCreateScriptJob = vi.mocked(createScriptJob);
 const mockDeleteProjectEverywhere = vi.mocked(deleteProjectEverywhere);
 const mockListAssets = vi.mocked(listAssets);
 
+const storedValues = new Map<string, string>();
+Object.defineProperty(globalThis, "localStorage", {
+  configurable: true,
+  value: {
+    clear: () => storedValues.clear(),
+    getItem: (key: string) => storedValues.get(key) ?? null,
+    key: (index: number) => [...storedValues.keys()][index] ?? null,
+    get length() { return storedValues.size; },
+    removeItem: (key: string) => storedValues.delete(key),
+    setItem: (key: string, value: string) => storedValues.set(key, value),
+  } satisfies Storage,
+});
+
 const health: Health = {
   status: "ready", version: "test", database: true, ffmpeg: true, ffprobe: true,
   whisper: true, ytdlp: true, localTts: true, dataPath: "Local mounted data directory",
@@ -50,6 +63,7 @@ const undefinedJob: Job = {
 
 describe("Projects create flow", () => {
   beforeEach(() => {
+    storedValues.clear();
     mockCreateClipJob.mockReset();
     mockCreateScriptJob.mockReset();
     mockDeleteProjectEverywhere.mockReset();
@@ -220,6 +234,17 @@ describe("Projects create flow", () => {
     render(<ProjectsView projects={[]} health={health} providersLoaded hasSelectedProvider={false} onCreated={vi.fn()} onOpen={vi.fn()} onRefresh={vi.fn(async () => undefined)} />);
     expect(screen.getByText(/No provider is connected, so Auto runs as a fast local cut\./i)).toBeInTheDocument();
     expect(screen.getByText(/Add optional AI providers/i)).toBeInTheDocument();
+  });
+
+  it("remembers when the optional provider callout is dismissed", () => {
+    const props = { projects: [], health, providersLoaded: true, hasSelectedProvider: false, onCreated: vi.fn(), onOpen: vi.fn(), onRefresh: vi.fn(async () => undefined) };
+    const first = render(<ProjectsView {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "Continue locally" }));
+    expect(screen.queryByText(/Add optional AI providers/i)).not.toBeInTheDocument();
+    first.unmount();
+
+    render(<ProjectsView {...props} />);
+    expect(screen.queryByText(/Add optional AI providers/i)).not.toBeInTheDocument();
   });
 
   it("reports a connected provider once /profiles confirms it", () => {

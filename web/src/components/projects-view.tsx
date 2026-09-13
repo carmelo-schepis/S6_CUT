@@ -10,6 +10,7 @@ import { VideoPreviewDialog } from "./video-preview-dialog";
 import { VideoSourcePicker } from "./video-source-picker";
 
 const RECENT_FOLDER_KEY = "s6-cut.recent-library-folder";
+const PROVIDER_CALLOUT_DISMISSED_KEY = "s6-cut.provider-callout-dismissed";
 
 // Recent projects is a shortlist, not the whole archive: rendering every
 // project produced a 30,000px-tall page once the library passed a hundred.
@@ -56,7 +57,13 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
   const [burnSubtitles, setBurnSubtitles] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [providerCalloutDismissed, setProviderCalloutDismissed] = useState(false);
+  const [providerCalloutDismissed, setProviderCalloutDismissed] = useState(() => {
+    try {
+      return localStorage.getItem(PROVIDER_CALLOUT_DISMISSED_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
   const [folders, setFolders] = useState<LibraryFolder[]>([]);
   const [libraryFolderId, setLibraryFolderId] = useState("");
   const [showAllProjects, setShowAllProjects] = useState(false);
@@ -235,7 +242,10 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
         </div>
       </div>
 
-      {providersLoaded && !hasSelectedProvider && !providerCalloutDismissed && <div className="provider-callout"><Sparkles size={17} /><div><strong>Add optional AI providers</strong><span>OpenRouter improves planning and provides optional speech narration. Local modes stay available.</span></div><div className="provider-callout-actions"><Button onClick={onConfigureProviders}>Configure providers</Button><Button variant="ghost" onClick={() => setProviderCalloutDismissed(true)}>Continue locally</Button></div></div>}
+      {providersLoaded && !hasSelectedProvider && !providerCalloutDismissed && <div className="provider-callout"><Sparkles size={17} /><div><strong>Add optional AI providers</strong><span>OpenRouter improves planning and provides optional speech narration. Local modes stay available.</span></div><div className="provider-callout-actions"><Button onClick={onConfigureProviders}>Configure providers</Button><Button variant="ghost" onClick={() => {
+        setProviderCalloutDismissed(true);
+        try { localStorage.setItem(PROVIDER_CALLOUT_DISMISSED_KEY, "true"); } catch { /* Storage can be unavailable in hardened browsers. */ }
+      }}>Continue locally</Button></div></div>}
 
       <div className="create-grid">
         <div className="create-step source-step">
