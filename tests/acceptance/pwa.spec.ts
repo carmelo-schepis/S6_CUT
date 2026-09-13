@@ -25,6 +25,9 @@ test("production PWA shell and navigation remain available", async ({ page, requ
   const serviceWorkerResponse = await request.get("/sw.js");
   expect(serviceWorkerResponse.ok()).toBeTruthy();
   expect(serviceWorkerResponse.headers()["content-type"]).toContain("javascript");
+  const serviceWorkerSource = await serviceWorkerResponse.text();
+  expect(serviceWorkerSource).toContain('const CACHE = "s6-cut-shell-v3"');
+  expect(serviceWorkerSource).toContain('fetch(request, { cache: "no-store" })');
 
   const consoleErrors: string[] = [];
   page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
