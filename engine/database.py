@@ -83,6 +83,7 @@ class Database:
     def _migrate(self, db: sqlite3.Connection) -> None:
         """Apply additive migrations transactionally; safe to repeat after interruption."""
         version = db.execute("SELECT COALESCE(MAX(version), 0) FROM schema_migrations").fetchone()[0]
+        applied_versions = {row[0] for row in db.execute("SELECT version FROM schema_migrations")}
         if version < 1:
             db.execute("INSERT OR IGNORE INTO schema_migrations VALUES(1,?)", (now_iso(),))
         if version < 2:
@@ -171,7 +172,10 @@ class Database:
                 );
             """)
             db.execute("INSERT OR IGNORE INTO schema_migrations VALUES(4,?)", (stamp,))
-        if version < 5:
+        # Check membership as well as the maximum: an interrupted/recovered
+        # database can contain a newer migration while an earlier one is
+        # missing, and profile payloads still need that earlier rewrite.
+        if version < 5 or 5 not in applied_versions:
             stamp = now_iso()
             # Provider profiles used to combine text settings with a second
             # provider's credential and voice. Rewrite only the profile JSON;
@@ -220,6 +224,12 @@ class Database:
                 if changed:
                     db.execute("UPDATE jobs SET payload=? WHERE id=?", (json.dumps(old_job, separators=(",", ":")), row["id"]))
             db.execute("INSERT OR IGNORE INTO schema_migrations VALUES(5,?)", (stamp,))
+        if version < 6 or 6 not in applied_versions:
+            stamp = now_iso()
+            columns = {row[1] for row in db.execute("PRAGMA table_info(projects)")}
+            if "library_deleted" not in columns:
+                db.execute("ALTER TABLE projects ADD COLUMN library_deleted INTEGER NOT NULL DEFAULT 0")
+            db.execute("INSERT OR IGNORE INTO schema_migrations VALUES(6,?)", (stamp,))
 
     @staticmethod
     def _json(model: BaseModel) -> str:
@@ -249,7 +259,7 @@ class Database:
 
     def list_projects(self) -> list[Project]:
         with self._connect() as db:
-            rows = db.execute("SELECT payload,library_folder_id FROM projects ORDER BY updated_at DESC").fetchall()
+            rows = db.execute("SELECT payload,library_folder_id FROM projects WHERE library_deleted=0 ORDER BY updated_at DESC").fetchall()
         return [Project.model_validate_json(row["payload"]).model_copy(update={"library_folder_id": self.resolve_folder_id(row["library_folder_id"])}) for row in rows]
 
     def save_job(self, job: Job, private: dict[str, Any] | None = None) -> None:
@@ -387,6 +397,8 @@ class Database:
                 "ON CONFLICT(id) DO UPDATE SET relative_path=excluded.relative_path,byte_size=excluded.byte_size",
                 (asset.blob_id, asset.content_hash, relative_path, byte_size, stamp),
             )
+            if asset.source_project_id:
+                db.execute("UPDATE projects SET library_deleted=0 WHERE id=?", (asset.source_project_id,))
             if asset.origin == "project-source":
                 row = db.execute("SELECT * FROM assets WHERE origin=? AND source_project_id=?", (asset.origin, asset.source_project_id)).fetchone()
             elif asset.origin in {"generated-clip", "script-output"}:
@@ -512,6 +524,8 @@ class Database:
                 "ON CONFLICT(id) DO UPDATE SET content_hash=excluded.content_hash,updated_at=excluded.updated_at,payload=excluded.payload,folder_id=excluded.folder_id,origin=excluded.origin,blob_id=excluded.blob_id,source_project_id=excluded.source_project_id,source_job_id=excluded.source_job_id,source_clip_id=excluded.source_clip_id",
                 (asset.id, asset.content_hash, stamp, self._json(asset), asset.folder_id, asset.origin, asset.blob_id, asset.source_project_id, asset.source_job_id, asset.source_clip_id),
             )
+            if asset.source_project_id:
+                db.execute("UPDATE projects SET library_deleted=0 WHERE id=?", (asset.source_project_id,))
 
             # 3. Durable references
             db.execute("DELETE FROM media_blob_refs WHERE ref_type='clip-output' AND ref_id=?", (clip.id,))
@@ -661,6 +675,8 @@ class Database:
                 raise ValueError("Protected assets cannot be removed")
             db.execute("DELETE FROM media_blob_refs WHERE ref_type='asset' AND ref_id=?", (asset_id,))
             db.execute("DELETE FROM assets WHERE id=?", (asset_id,))
+            if asset.source_project_id and not db.execute("SELECT 1 FROM assets WHERE source_project_id=? LIMIT 1", (asset.source_project_id,)).fetchone():
+                db.execute("UPDATE projects SET library_deleted=1 WHERE id=?", (asset.source_project_id,))
             blob = db.execute("SELECT relative_path FROM media_blobs WHERE id=?", (asset.blob_id,)).fetchone()
             count = db.execute("SELECT COUNT(*) FROM media_blob_refs WHERE blob_id=?", (asset.blob_id,)).fetchone()[0]
         return asset, str(blob["relative_path"]) if blob else None, bool(blob and count == 0)

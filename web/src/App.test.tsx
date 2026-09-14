@@ -19,6 +19,7 @@ vi.mock("./api", async (importOriginal) => {
 
 import { App } from "./App";
 import { TimeoutError } from "./api";
+import { emitLibraryChanged } from "./library-sync";
 
 const health = {
   status: "ready" as const, version: "0.1.0", database: true, ffmpeg: true, ffprobe: true,
@@ -49,6 +50,22 @@ describe("App shell", () => {
     mockListProfiles.mockReset().mockResolvedValue([profile]);
   });
   afterEach(() => vi.useRealTimers());
+
+  it("refreshes Recent projects when a Library deletion changes persisted records", async () => {
+    const recentProject = {
+      schemaVersion: 1 as const, id: "deleted-project", name: "Deleted library project", mode: "clip" as const,
+      style: "educational" as const, state: "complete" as const, sourceName: "source.mp4", sourceKind: "upload" as const,
+      requestedCount: 1, createdAt: "2026-01-01", updatedAt: "2026-01-01",
+    };
+    mockListProjects.mockResolvedValueOnce([recentProject]).mockResolvedValue([]);
+    mockGetHealth.mockResolvedValue(health);
+    render(<App />);
+
+    expect(await screen.findByRole("button", { name: "Open project Deleted library project" })).toBeInTheDocument();
+    emitLibraryChanged();
+    await waitFor(() => expect(mockListProjects).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Open project Deleted library project" })).not.toBeInTheDocument());
+  });
 
   it("shows exactly one engine startup message while the first health read is outstanding", async () => {
     const pending = deferred<typeof health>();

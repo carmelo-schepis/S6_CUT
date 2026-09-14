@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { CircleHelp, BriefcaseBusiness, Film, FolderKanban, HardDrive, Library, LoaderCircle, Scissors, Settings, SlidersHorizontal, Sparkles } from "lucide-react";
 import { getHealth, listJobs, listProfiles, listProjects, readableError } from "./api";
 import { JobsView } from "./components/jobs-view";
@@ -11,6 +11,7 @@ import { ShortsEditorView } from "./components/shorts-editor-view";
 import { TopicToVideoView } from "./components/topic-to-video-view";
 import { HelpDialog } from "./components/help-dialog";
 import { jobPollInterval } from "./project-status";
+import { onLibraryChanged } from "./library-sync";
 import { usePoll } from "./use-poll";
 import type { Health, Job, Project, ProviderProfile } from "./types";
 
@@ -46,6 +47,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const refreshRevision = useRef(0);
 
   // `getHealth` aborts itself after HEALTH_TIMEOUT_MS, so a wedged engine
   // rejects here instead of leaving the promise pending forever — which used to
@@ -74,10 +76,15 @@ export function App() {
   // the heavy project and job reads returned — so a healthy engine still looked
   // unreachable for as long as the slowest list took.
   const refresh = useCallback(async () => {
+    const revision = ++refreshRevision.current;
     const projectsDone = listProjects().then(
-      (value) => { setProjects(value); setSelectedProjectId((current) => current && value.some((project) => project.id === current) ? current : value[0]?.id || null); },
+      (value) => {
+        if (revision !== refreshRevision.current) return;
+        setProjects(value);
+        setSelectedProjectId((current) => current && value.some((project) => project.id === current) ? current : value[0]?.id || null);
+      },
       () => undefined,
-    ).finally(() => setLoaded(true));
+    ).finally(() => { if (revision === refreshRevision.current) setLoaded(true); });
 
     // Health and jobs go through their polls so a manual Retry can never start
     // a second read alongside the one already in flight.
@@ -94,6 +101,11 @@ export function App() {
   useEffect(() => {
     void Promise.resolve().then(refresh).catch((cause) => setError(readableError(cause)));
   }, [refresh]);
+
+  useEffect(() => onLibraryChanged(() => {
+    setLoaded(false);
+    void refresh();
+  }), [refresh]);
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "auto" });

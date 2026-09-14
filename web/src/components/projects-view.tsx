@@ -75,6 +75,7 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
   const [deleteOpener, setDeleteOpener] = useState<HTMLButtonElement | null>(null);
   const [deletingProject, setDeletingProject] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const sourceAssetsRevision = useRef(0);
   const scriptInput = useRef<HTMLInputElement>(null);
   const singleFlight = useSingleFlight();
 
@@ -91,8 +92,10 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
   // separate from the project list: an unavailable Library must never make the
   // workspace's recent-project controls fail.
   const loadSourceAssets = useCallback(async () => {
+    const revision = ++sourceAssetsRevision.current;
     try {
       const next = await listAssets({ origin: "project-source" });
+      if (revision !== sourceAssetsRevision.current) return;
       setSourceAssets((current) => {
         const previous = new Map(current.map((asset) => [asset.id, asset]));
         return next.map((asset) => {
@@ -118,8 +121,10 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
   const openSourcePreview = async (project: Project, opener: HTMLButtonElement) => {
     // Fetch immediately before opening as well, so an open dialog never relies
     // on a signed URL that may have expired while this screen remained open.
+    const revision = ++sourceAssetsRevision.current;
     try {
       const freshAssets = await listAssets({ origin: "project-source" });
+      if (revision !== sourceAssetsRevision.current) return;
       setSourceAssets(freshAssets);
       const asset = freshAssets.find((item) => item.sourceProjectId === project.id && item.mediaType.startsWith("video/") && item.previewUrl);
       if (asset) { setPreviewOpener(opener); setPreviewAsset(asset); }
@@ -328,7 +333,7 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
 
     <section className="recent-section">
       <div className="section-heading">
-        <div><h2>Recent projects</h2>{projects.length > 0 && <span className="section-count">{query ? `${matchingProjects.length} of ${projects.length}` : projects.length}</span>}</div>
+        <div><h2>Recent projects</h2>{projects.length > 0 && <span className="section-count" data-testid="recent-project-count">{query ? `${visibleProjects.length} of ${projects.length}` : visibleProjects.length}</span>}</div>
         <div className="section-tools">
           {projects.length > RECENT_LIMIT && <div className="project-search"><Search size={14} aria-hidden="true" /><input type="search" aria-label="Search projects" placeholder="Search projects…" value={projectQuery} onChange={(event) => setProjectQuery(event.target.value)} /></div>}
           <button onClick={() => { void onRefresh(); void loadSourceAssets(); }}>Refresh</button>

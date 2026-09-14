@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent, type MouseEvent } from "react";
 import { Archive, FileImage, Folder, FolderPlus, ImagePlus, Library, RefreshCw, Search, ShieldCheck, Trash2, Upload } from "lucide-react";
 import { archiveFolder, createFolder, deleteAsset, deleteAssets, getHealth, listAssets, listFolders, moveAssets, moveFolder, readableError, removeFolder, updateAsset, updateFolder, uploadAsset } from "../api";
-import { bindRevalidationOnFocus, createBoundedRevalidation, onLibraryChanged } from "../library-sync";
+import { bindRevalidationOnFocus, createBoundedRevalidation, emitLibraryChanged, onLibraryChanged } from "../library-sync";
 import type { AssetOrigin, Health, LibraryAsset, LibraryFolder } from "../types";
 import { Button, EmptyState, Field, FieldGroup, PageHeader, StatusBadge, formatAge } from "./common";
 import { LazyVideoThumbnail } from "./lazy-video-thumbnail";
@@ -121,6 +121,7 @@ export function LibraryView() {
     try {
       await deleteAsset(selected.id);
       setAssets((current) => current.filter((asset) => asset.id !== selected.id));
+      emitLibraryChanged();
       setSelected(null);
       setSelectedIds((current) => current.filter((id) => id !== selected.id));
     } catch (cause) { setError(readableError(cause)); }
@@ -169,6 +170,7 @@ export function LibraryView() {
       const result = await deleteAssets(ids);
       const deletedCount = result.deleted.length;
       setAssets((current) => current.filter((asset) => !result.deleted.includes(asset.id)));
+      if (deletedCount) emitLibraryChanged();
       setSelectedIds((current) => current.filter((id) => !result.deleted.includes(id)));
       setSelected((current) => current && result.deleted.includes(current.id) ? null : current);
       if (result.failed && Object.keys(result.failed).length) {
