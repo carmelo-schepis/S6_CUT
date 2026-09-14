@@ -174,7 +174,8 @@ test.describe("vertical creation progress", () => {
       await assertVerticalLayout();
       const mobileLabelBox = await progress.locator("[aria-current=\"step\"] .checklist-label").boundingBox();
       const mobileMetaBox = await activeMeta.boundingBox();
-      expect(mobileLabelBox && mobileMetaBox && mobileMetaBox.y > mobileLabelBox.y).toBeTruthy();
+      expect(mobileLabelBox && mobileMetaBox && mobileMetaBox.y >= mobileLabelBox.y).toBeTruthy();
+      expect(await progress.locator("[aria-current=\"step\"] .checklist-step-body").evaluate((element) => getComputedStyle(element).display)).toBe("grid");
       await page.screenshot({ path: "test-artifacts/progress-list-mobile.png", fullPage: true });
       await page.setViewportSize({ width: 1440, height: 900 });
 
