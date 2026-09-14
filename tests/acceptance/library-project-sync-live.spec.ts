@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import fs from "node:fs/promises";
 import path from "node:path";
 import { createClipProject, jobBoundaries, openProjects, root, waitForProjectReady } from "./support/workspace";
 
@@ -39,7 +40,7 @@ test("repaired installation has no orphaned Library projects", async ({ page }) 
   expect(failedRequests, failedRequests.join("\n")).toEqual([]);
 });
 
-test("deleting project source videos removes their projects and generated media", async ({ page }) => {
+test("deleting project source videos removes their projects and generated media", async ({ page, testInfo }) => {
   const consoleErrors: string[] = [];
   const failedRequests: string[] = [];
   page.on("console", (message) => { if (message.type() === "error" && !isExpectedBrowserWarning(message.text())) consoleErrors.push(message.text()); });
@@ -50,11 +51,13 @@ test("deleting project source videos removes their projects and generated media"
   await page.goto("/", { waitUntil: "networkidle" });
   const fixture = path.join(root, "test-video.mp4");
   const projectNames = [`Library deletion live A ${Date.now()}`, `Library deletion live B ${Date.now() + 1}`];
+  const fixturePaths = projectNames.map((_, index) => testInfo.outputPath(`library-delete-source-${index + 1}.mp4`));
   const projectIds: string[] = [];
   try {
-    for (const name of projectNames) {
+    await Promise.all(fixturePaths.map((target) => fs.copyFile(fixture, target)));
+    for (const [index, name] of projectNames.entries()) {
       const observed = new Set<string>();
-      await createClipProject(page, { name, count: 1, mode: "Fast", aspect: "9:16", min: 8, max: 10, captions: false, source: { kind: "file", path: fixture } });
+      await createClipProject(page, { name, count: 1, mode: "Fast", aspect: "9:16", min: 8, max: 10, captions: false, source: { kind: "file", path: fixturePaths[index] } });
       await waitForProjectReady(page, observed);
       projectIds.push((await jobBoundaries(name)).project.id);
     }
