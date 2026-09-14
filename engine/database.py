@@ -911,6 +911,7 @@ class Database:
                 count = db.execute("SELECT COUNT(*) FROM media_blob_refs WHERE blob_id=?", (blob_id,)).fetchone()[0]
                 if row and count == 0:
                     unreferenced_paths.append(str(row["relative_path"]))
+                    db.execute("DELETE FROM media_blobs WHERE id=?", (blob_id,))
         return unreferenced_paths
 
     def update_project_folder(self, project_id: str, folder_id: str, move_existing_assets: bool) -> Project:

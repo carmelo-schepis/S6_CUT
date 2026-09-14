@@ -150,6 +150,8 @@ def test_deleting_a_project_source_cascades_project_outputs_and_job_workspace(tm
     assert database.get_asset(output.id) is None
     assert not source_path.exists()
     assert not output_path.exists()
+    assert database.blob_relative_path(source.blob_id) is None
+    assert database.blob_relative_path(output.blob_id) is None
 
 
 def test_bulk_delete_reports_partial_failure_without_hiding_project(tmp_path: Path) -> None:
