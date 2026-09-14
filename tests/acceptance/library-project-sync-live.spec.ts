@@ -40,7 +40,7 @@ test("repaired installation has no orphaned Library projects", async ({ page }) 
   expect(failedRequests, failedRequests.join("\n")).toEqual([]);
 });
 
-test("deleting project source videos removes their projects and generated media", async ({ page, testInfo }) => {
+test("deleting project source videos removes their projects and generated media", async ({ page }, testInfo) => {
   const consoleErrors: string[] = [];
   const failedRequests: string[] = [];
   page.on("console", (message) => { if (message.type() === "error" && !isExpectedBrowserWarning(message.text())) consoleErrors.push(message.text()); });
