@@ -219,7 +219,7 @@ describe("WorkspaceView – timeline removal", () => {
 });
 
 describe("WorkspaceView – processing checklist placement", () => {
-  it("renders the checklist above the board from API-provided steps", async () => {
+  it("renders the vertical checklist at the bottom of the workspace from API-provided steps", async () => {
     const withSteps: Job = {
       ...freshSmartJob,
       steps: [
@@ -230,10 +230,13 @@ describe("WorkspaceView – processing checklist placement", () => {
     mockGetJob.mockResolvedValue(withSteps);
     renderView();
     expect(await screen.findByRole("list", { name: "Short creation progress" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Short creation progress" })).toBeInTheDocument();
     expect(screen.getByText("Source received")).toBeInTheDocument();
     const checklist = document.querySelector(".checklist-panel")!;
     const board = document.querySelector(".board-panel")!;
-    expect(checklist.compareDocumentPosition(board) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(checklist.compareDocumentPosition(board) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+    expect(checklist.querySelector(".process-checklist")).toBeInTheDocument();
+    expect(checklist.querySelector("[aria-current=\"step\"]")).toHaveTextContent("In progress");
   });
 
   it("renders no checklist when the job has no steps", async () => {

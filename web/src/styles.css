@@ -400,9 +400,13 @@ select { line-height: var(--type-text-line); }
 .help-launcher svg { color: var(--copper-light); }
 .help-backdrop { position: fixed; z-index: 1000; inset: 0; display: grid; place-items: center; padding: var(--page-inset); background: rgba(0,0,0,.72); }
 .help-dialog { width: min(1080px, 100%); height: min(820px, 92vh); display: grid; grid-template-rows: auto minmax(0,1fr); overflow: hidden; border: 1px solid var(--border-strong); border-radius: var(--radius-xl); background: var(--surface-1); box-shadow: 0 24px 90px rgba(0,0,0,.65); }
-.help-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: var(--space-6) var(--space-8) var(--space-5); border-bottom: 1px solid var(--border); background: var(--surface-1); }
-.help-header h1 { margin: 0 0 var(--space-1); font-size: var(--type-heading-size); font-weight: var(--type-heading-weight); line-height: var(--type-heading-line); letter-spacing: var(--type-heading-tracking); }
-.help-header p { max-width: 620px; margin: 0; color: var(--text-primary); }
+.help-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: var(--space-8) var(--space-8) var(--space-6); border-bottom: 1px solid var(--border); background: var(--surface-1); }
+.help-header-main { display: flex; align-items: flex-start; gap: var(--space-3); min-width: 0; }
+.help-header-mark { flex: 0 0 36px; width: 36px; height: 36px; display: grid; place-items: center; margin-top: 2px; border: 1px solid var(--brand-border-soft); border-radius: var(--radius-md); background: var(--brand-faint); color: var(--selector-highlight-hover); }
+.help-header-copy { min-width: 0; max-width: 760px; }
+.help-header-eyebrow { display: block; margin-bottom: var(--space-2); color: var(--selector-highlight-hover); font-weight: var(--type-heading-weight); letter-spacing: var(--type-heading-tracking); text-transform: uppercase; }
+.help-header h1 { margin: 0 0 var(--space-2); font-size: calc(var(--type-heading-size) + var(--space-3)); font-weight: var(--type-heading-weight); line-height: calc(var(--type-heading-line) + var(--space-3)); letter-spacing: var(--type-heading-tracking); }
+.help-header p { max-width: 620px; margin: 0; color: var(--text-primary); line-height: var(--type-text-line); opacity: .72; }
 .help-close { flex: 0 0 auto; }
 .help-body { min-width: 0; min-height: 0; display: grid; grid-template-columns: 190px minmax(0,1fr); }
 .help-nav { min-width: 0; display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-6) var(--space-3); overflow-y: auto; border-right: 1px solid var(--border); background: var(--canvas); }
@@ -965,23 +969,24 @@ main { min-width: 0; }
 .download-message { display: block; margin: 0; min-width: 0; color: var(--text-primary); overflow-wrap: anywhere; }
 .processing-help { margin: 0; max-width: 100%; color: var(--text-primary); }
 
-/* Processing checklist (engine-reported steps, rendered near the stage progress area) */
+/* Processing checklist (engine-reported steps, rendered after the workspace) */
 .checklist-panel {
-  margin: 0 0 7px;
+  margin: var(--space-8) 0 0;
   border: 1px solid var(--border-soft);
   border-left: 2px solid var(--theme-primary);
   background: var(--surface-1);
 }
 .checklist-heading {
-  min-height: var(--control-height);
+  min-height: var(--control-height-large);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding: 0 11px;
+  gap: var(--space-3);
+  padding: 0 var(--space-4);
   border-bottom: 1px solid var(--border-soft);
 }
-.checklist-heading strong {
+.checklist-heading h2 {
+  margin: 0;
   color: var(--text-primary);
   font-size: var(--type-heading-size);
   font-weight: var(--type-heading-weight);
@@ -989,73 +994,70 @@ main { min-width: 0; }
   letter-spacing: var(--type-heading-tracking);
   text-transform: none;
 }
-.checklist-count {
-  color: var(--text-primary);
-}
+.checklist-count { color: var(--text-primary); }
 .checklist-live { white-space: pre-wrap; }
 .process-checklist {
+  position: relative;
   list-style: none;
   margin: 0;
-  padding: var(--space-2);
+  padding: var(--space-4);
   display: grid;
-  /* Sized for the longest step label ("Complete moments selected") at General
-     text *plus* the progress counter a running or finished step carries
-     ("5 of 5"), so steps never ellipsis away the word that identifies them. */
-  grid-template-columns: repeat(auto-fit, minmax(256px, 1fr));
-  gap: 2px var(--space-1);
+  gap: var(--space-2);
+}
+.process-checklist::before {
+  position: absolute;
+  top: calc(var(--space-4) + 16px);
+  bottom: calc(var(--space-4) + 16px);
+  left: calc(var(--space-4) + 12px);
+  width: 1px;
+  background: var(--border);
+  content: "";
 }
 .checklist-step {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  position: relative;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--space-3);
   min-width: 0;
-  padding: 4px 6px;
+  padding: var(--space-2) var(--space-3);
   border: 1px solid transparent;
-  border-radius: 5px;
+  border-radius: var(--radius-md);
 }
 .checklist-icon {
-  flex: 0 0 auto;
-  width: 16px;
-  height: 16px;
+  position: relative;
+  z-index: 1;
+  width: 24px;
+  height: 24px;
   display: grid;
   place-items: center;
   border: 1px solid var(--border-strong);
   border-radius: 50%;
   color: var(--text-primary);
-  background: var(--surface-2);
+  background: var(--surface-1);
 }
-.checklist-icon svg { width: 11px; height: 11px; }
-.checklist-label {
-  /* The step name keeps its own content width and only shrinks when the row
-     genuinely cannot hold it. */
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text-primary);
-}
+.checklist-icon svg { width: 13px; height: 13px; }
+.checklist-step-body { min-width: 0; display: grid; gap: var(--space-1); }
+.checklist-step-line { min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2) var(--space-3); }
+.checklist-label { min-width: 0; color: var(--text-primary); overflow-wrap: anywhere; }
+.checklist-status-text { flex: 0 0 auto; color: var(--text-primary); font-weight: var(--type-emphasis-weight); }
 .checklist-progress {
-  flex: 0 0 auto;
+  align-self: start;
   color: var(--text-primary);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .checklist-detail {
-  /* Supporting context: it takes whatever the label leaves and ellipsises.
-     A failure message is far longer than any row, so it must never be the
-     thing that squeezes out the step's name. */
-  flex: 1 1 0;
-  gap: var(--space-2);
   min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
   color: var(--text-primary);
+  overflow-wrap: anywhere;
 }
-.checklist-step.status-pending .checklist-label { color: var(--text-primary); }
+.checklist-step.status-pending .checklist-label,
+.checklist-step.status-pending .checklist-status-text { color: var(--text-primary); }
 .checklist-step.status-active {
   border-color: var(--brand-border);
   background: var(--surface-2);
@@ -1066,38 +1068,40 @@ main { min-width: 0; }
   background: var(--theme-primary-soft);
 }
 .checklist-step.status-active .checklist-icon svg { animation: checklist-spin .9s linear infinite; }
-.checklist-step.status-active .checklist-label { color: var(--text); }
+.checklist-step.status-active .checklist-label,
+.checklist-step.status-active .checklist-status-text { color: var(--text); }
 .checklist-step.status-complete .checklist-icon {
   color: var(--success);
   border-color: rgba(76,183,130,.4);
   background: rgba(76,183,130,.14);
 }
 .checklist-step.status-complete.checkmark-new .checklist-icon svg { animation: checklist-pop .3s ease-out; }
-.checklist-step.status-complete .checklist-label { color: var(--text-primary); }
+.checklist-step.status-complete .checklist-label,
+.checklist-step.status-complete .checklist-status-text { color: var(--text-primary); }
 .checklist-step.status-skipped .checklist-icon {
   color: var(--text-primary);
   border-color: var(--border-strong);
   background: var(--surface-3);
 }
-.checklist-step.status-skipped .checklist-label { color: var(--text-primary); }
+.checklist-step.status-skipped .checklist-label,
+.checklist-step.status-skipped .checklist-status-text { color: var(--text-primary); }
 .checklist-step.status-failed .checklist-icon {
   color: var(--error);
   border-color: rgba(242,56,85,.45);
   background: rgba(242,56,85,.16);
 }
-.checklist-step.status-failed .checklist-label { color: var(--text-primary); }
+.checklist-step.status-failed .checklist-label,
+.checklist-step.status-failed .checklist-status-text { color: var(--text-primary); }
 .checklist-panel.is-paused .checklist-step.status-active .checklist-icon svg { animation: none; }
 @keyframes checklist-spin { to { transform: rotate(360deg); } }
 @keyframes checklist-pop {
   from { transform: scale(.5); opacity: .4; }
   to { transform: scale(1); opacity: 1; }
 }
-.checklist-panel.compact .process-checklist { padding: var(--space-1) var(--space-2); gap: 1px var(--space-1); }
-.checklist-panel.compact .checklist-step { padding: 2px 5px; }
-.checklist-panel.compact .checklist-icon { width: 14px; height: 14px; }
-.checklist-panel.compact .checklist-detail { max-width: 220px; }
+.checklist-panel.compact .process-checklist { padding: var(--space-3) var(--space-4); gap: var(--space-1); }
+.checklist-panel.compact .checklist-step { padding: var(--space-1) var(--space-2); }
 .checklist-elapsed { flex: 0 0 auto; font-variant-numeric: tabular-nums; }
-.checklist-detail-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.checklist-detail-text { min-width: 0; overflow-wrap: anywhere; }
 
 .transport { display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-3); border-top: 1px solid var(--border-soft); color: var(--text-primary); }/* A 100%-white disc on --canvas was the highest-contrast object on the page and
    the only filled circle in the product — a sticker rather than a control. It is

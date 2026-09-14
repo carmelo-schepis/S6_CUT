@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, Check, Circle, LoaderCircle, Minus, Pause } from "lucide-react";
+import { AlertTriangle, Check, Circle, LoaderCircle, Minus } from "lucide-react";
 import { formatSeconds } from "../status-format";
 import type { JobState, ProcessingStep } from "../types";
 
@@ -26,6 +26,17 @@ function itemProgress(step: ProcessingStep) {
   return ["active", "complete"].includes(step.status) && step.totalItems != null && step.totalItems > 0 && step.currentItem != null
     ? `${step.currentItem} of ${step.totalItems}`
     : null;
+}
+
+function statusLabel(status: ProcessingStep["status"], paused: boolean) {
+  if (status === "active" && paused) return "Paused";
+  switch (status) {
+    case "active": return "In progress";
+    case "complete": return "Complete";
+    case "skipped": return "Skipped";
+    case "failed": return "Failed";
+    default: return "Pending";
+  }
 }
 
 /**
@@ -107,10 +118,12 @@ export function ProcessChecklist({ steps, jobState, compact = false, label = "Sh
 
   if (steps.length === 0) return null;
 
+  const headingId = `${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-heading`;
+
   return (
-    <div className={`checklist-panel${compact ? " compact" : ""}${paused ? " is-paused" : ""}`}>
+    <section className={`checklist-panel${compact ? " compact" : ""}${paused ? " is-paused" : ""}`} aria-labelledby={headingId}>
       <div className="checklist-heading">
-        <strong>{label}</strong>
+        <h2 id={headingId}>{label}</h2>
         <span className="checklist-count">{steps.length} step{steps.length === 1 ? "" : "s"}</span>
       </div>
       <div className="checklist-live sr-only" role="status" aria-live="polite">{announcement}</div>
@@ -119,27 +132,28 @@ export function ProcessChecklist({ steps, jobState, compact = false, label = "Sh
           const active = step.status === "active";
           const progress = itemProgress(step);
           return (
-            <li key={step.id} className={`checklist-step status-${step.status}${active ? " active-row" : ""}${step.status === "complete" && freshlyCompleted.has(step.id) ? " checkmark-new" : ""}`}>
+            <li key={step.id} className={`checklist-step status-${step.status}${active ? " active-row" : ""}${step.status === "complete" && freshlyCompleted.has(step.id) ? " checkmark-new" : ""}`} aria-current={active ? "step" : undefined}>
               <span className="checklist-icon" aria-hidden="true">{stepIcon(step.status)}</span>
-              <span className="checklist-label" title={step.label}>{step.label}</span>
+              <div className="checklist-step-body">
+                <div className="checklist-step-line">
+                  <span className="checklist-label" title={step.label}>{step.label}</span>
+                  <span className="checklist-status-text">{statusLabel(step.status, paused)}</span>
+                </div>
+                {active && !paused && (step.detail || step.startedAt) && (
+                  <span className="checklist-detail">
+                    {step.startedAt && <time className="checklist-elapsed">Elapsed {formatElapsed(step.startedAt, now)}</time>}
+                    {step.detail && <span className="checklist-detail-text">{step.detail}</span>}
+                  </span>
+                )}
+                {(step.status === "skipped" || step.status === "failed") && step.detail && (
+                  <span className="checklist-detail">{step.detail}</span>
+                )}
+              </div>
               {progress && <span className="checklist-progress">{progress}</span>}
-              {active && (step.detail || step.startedAt || paused) && (
-                <span className="checklist-detail">
-                  {paused
-                    ? <><Pause size={10} /> Paused</>
-                    : <>
-                      {step.startedAt && <time className="checklist-elapsed">Elapsed {formatElapsed(step.startedAt, now)}</time>}
-                      {step.detail && <span className="checklist-detail-text">{step.detail}</span>}
-                    </>}
-                </span>
-              )}
-              {(step.status === "skipped" || step.status === "failed") && step.detail && (
-                <span className="checklist-detail">{step.detail}</span>
-              )}
             </li>
           );
         })}
       </ol>
-    </div>
+    </section>
   );
 }

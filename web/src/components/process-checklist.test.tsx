@@ -39,9 +39,19 @@ describe("ProcessChecklist – structure & semantics", () => {
     expect(items[2]).toHaveTextContent("Clips rendered");
   });
 
-  it("includes a step count in the heading", () => {
+  it("includes a step count and semantic heading in the panel", () => {
     render(<ProcessChecklist steps={[pending, active, complete]} />);
+    expect(screen.getByRole("heading", { name: "Short creation progress" })).toBeInTheDocument();
     expect(screen.getByText("3 steps")).toBeInTheDocument();
+  });
+
+  it("keeps the current step identifiable without changing API order", () => {
+    render(<ProcessChecklist steps={[complete, active, pending]} />);
+    const items = screen.getAllByRole("listitem");
+    expect(items[0]).not.toHaveAttribute("aria-current");
+    expect(items[1]).toHaveAttribute("aria-current", "step");
+    expect(items[1]).toHaveTextContent("In progress");
+    expect(items[2]).toHaveTextContent("Pending");
   });
 });
 
@@ -134,8 +144,10 @@ describe("ProcessChecklist – paused state", () => {
 
 // ---------------------------------------------------------------
 describe("ProcessChecklist – skipped & failed detail", () => {
-  it("shows explanation detail for skipped and failed steps", () => {
+  it("shows visible status labels and explanation detail for skipped and failed steps", () => {
     render(<ProcessChecklist steps={[skipped, failed]} />);
+    expect(screen.getByText("Skipped")).toBeInTheDocument();
+    expect(screen.getByText("Failed")).toBeInTheDocument();
     expect(screen.getByText("No connected provider; used local planning")).toBeInTheDocument();
     expect(screen.getByText("Provider request failed [redacted]")).toBeInTheDocument();
   });

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowRight, CheckCircle2, CircleHelp, FileVideo, FastForward, Layout, X, Zap } from "lucide-react";
+import { ArrowRight, BookOpen, CheckCircle2, CircleHelp, FileVideo, FastForward, Layout, X, Zap } from "lucide-react";
 import { StepBadge } from "./common";
 import { HelpVideoPreview } from "./help-video-preview";
 
@@ -79,7 +79,7 @@ export function HelpDialog({ open, onClose }: { open: boolean; onClose: () => vo
 
   return <div className="help-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
     <div className="help-dialog" ref={dialog} role="dialog" aria-modal="true" aria-labelledby="help-dialog-title">
-      <header className="help-header"><div><span className="eyebrow">S6 Cut guide</span><h1 id="help-dialog-title">S6 Cut Help</h1><p>Make local, reviewable cuts without losing track of what the engine is doing.</p></div><button ref={closeButton} className="icon-button help-close" onClick={onClose} aria-label="Close S6 Cut Help"><X size={18} /></button></header>
+      <header className="help-header"><div className="help-header-main"><div className="help-header-mark" aria-hidden="true"><BookOpen size={18} /></div><div className="help-header-copy"><span className="help-header-eyebrow">S6 Cut guide</span><h1 id="help-dialog-title">S6 Cut Help</h1><p>Make local, reviewable cuts without losing track of what the engine is doing.</p></div></div><button ref={closeButton} className="icon-button help-close" onClick={onClose} aria-label="Close S6 Cut Help"><X size={18} /></button></header>
       <div className="help-body">
         <nav className="help-nav" aria-label="Help sections"><strong>On this page</strong>{sections.map((section) => <button key={section.id} className={activeSection === section.id ? "active" : ""} onClick={() => goTo(section.id)}>{section.label}<ArrowRight size={13} /></button>)}</nav>
         <div className="help-content" ref={content}>

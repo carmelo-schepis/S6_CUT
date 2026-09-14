@@ -10,6 +10,10 @@ describe("HelpDialog", () => {
   it("documents the workflow, processing modes, editorial styles, subtitles, layouts, and recovery", () => {
     render(<><button aria-label="Open S6 Cut Help">Help</button><HelpDialog open onClose={close} /></>);
     expect(screen.getByRole("dialog", { name: "S6 Cut Help" })).toBeInTheDocument();
+    expect(screen.getByText("S6 Cut guide")).toBeVisible();
+    expect(screen.getByRole("heading", { level: 1, name: "S6 Cut Help" })).toBeVisible();
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    expect(screen.getByText("Make local, reviewable cuts without losing track of what the engine is doing.")).toBeVisible();
     for (const heading of ["Getting started", "Fast, Auto & Smart", "Editorial modes", "Subtitle styles", "Video layouts", "Troubleshooting"]) {
       expect(screen.getByRole("heading", { name: heading })).toBeInTheDocument();
     }
