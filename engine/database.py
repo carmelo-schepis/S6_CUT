@@ -230,6 +230,14 @@ class Database:
             if "library_deleted" not in columns:
                 db.execute("ALTER TABLE projects ADD COLUMN library_deleted INTEGER NOT NULL DEFAULT 0")
             db.execute("INSERT OR IGNORE INTO schema_migrations VALUES(6,?)", (stamp,))
+        if version < 7 or 7 not in applied_versions:
+            # Legacy installations could lose Library asset rows while leaving
+            # their project/job history behind. Those projects are proven
+            # orphaned when no asset still points at their project id. Keep the
+            # history for explicit cleanup/recovery, but exclude it everywhere
+            # the recent-project list is read.
+            db.execute("UPDATE projects SET library_deleted=1 WHERE NOT EXISTS (SELECT 1 FROM assets WHERE assets.source_project_id=projects.id)")
+            db.execute("INSERT OR IGNORE INTO schema_migrations VALUES(7,?)", (now_iso(),))
 
     @staticmethod
     def _json(model: BaseModel) -> str:
@@ -259,7 +267,15 @@ class Database:
 
     def list_projects(self) -> list[Project]:
         with self._connect() as db:
-            rows = db.execute("SELECT payload,library_folder_id FROM projects WHERE library_deleted=0 ORDER BY updated_at DESC").fetchall()
+            rows = db.execute("""
+                SELECT payload,library_folder_id FROM projects
+                WHERE library_deleted=0
+                  AND (
+                    json_extract(payload, '$.state') IN ('queued','active','paused','recovered','stalled')
+                    OR EXISTS (SELECT 1 FROM assets WHERE assets.source_project_id=projects.id)
+                  )
+                ORDER BY updated_at DESC
+            """).fetchall()
         return [Project.model_validate_json(row["payload"]).model_copy(update={"library_folder_id": self.resolve_folder_id(row["library_folder_id"])}) for row in rows]
 
     def save_job(self, job: Job, private: dict[str, Any] | None = None) -> None:

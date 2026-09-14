@@ -98,18 +98,26 @@ def _not_found(kind: str = "Record") -> HTTPException:
     return HTTPException(404, f"{kind} not found")
 
 
-def _delete_asset_and_cleanup(asset_id: str) -> None:
-    """Delete an asset record and its unreferenced immutable blob, if any.
+async def _delete_asset_and_cleanup(asset_id: str) -> str | None:
+    """Delete an asset and clean its durable project relationship, if any.
 
-    Database deletion determines whether the blob has any remaining durable
-    reference. Filesystem cleanup is deliberately outside that transaction: an
-    interrupted cleanup leaves a safe orphan, never a missing shared blob.
+    A project-source asset is the required input for its project. Removing it
+    therefore uses the existing coordinated project deletion path, which
+    removes the project, jobs, generated assets, durable references, job
+    workspaces, and unreferenced immutable blobs in the same workflow. Ordinary
+    Library assets retain their existing reference-counted deletion semantics.
+    Returns the deleted source project id when the request cascaded a project.
     """
-    _, relative, unreferenced = db.delete_asset(asset_id)
-    if not unreferenced or not relative:
-        return
-    target = confined(settings.data_path, *relative.split("/"))
-    target.unlink(missing_ok=True)
+    asset = db.get_asset(asset_id)
+    if asset and asset.origin == "project-source" and asset.source_project_id and db.get_project(asset.source_project_id):
+        await manager.delete_project(asset.source_project_id, delete_assets=True)
+        return asset.source_project_id
+
+    _, relative, unreferenced = await asyncio.to_thread(db.delete_asset, asset_id)
+    if unreferenced and relative:
+        target = confined(settings.data_path, *relative.split("/"))
+        target.unlink(missing_ok=True)
+    return None
 
 
 # DO-NOT-CHANGE: signs f"jobs/{relative}" or f"exports/{relative}" — only these prefixes
@@ -963,12 +971,24 @@ async def delete_library_assets(value: AssetDelete) -> AssetDeleteResult:
     """
     deleted: list[str] = []
     failed: dict[str, str] = {}
-    for asset_id in dict.fromkeys(value.asset_ids):
+    requested_ids = list(dict.fromkeys(value.asset_ids))
+    source_projects = {
+        asset_id: asset.source_project_id
+        for asset_id in requested_ids
+        if (asset := db.get_asset(asset_id)) and asset.origin == "project-source" and asset.source_project_id
+    }
+    cascaded_projects: set[str] = set()
+    for asset_id in requested_ids:
+        if source_projects.get(asset_id) in cascaded_projects:
+            deleted.append(asset_id)
+            continue
         if not asset_id.strip():
             failed[asset_id] = "Invalid media ID"
             continue
         try:
-            _delete_asset_and_cleanup(asset_id)
+            project_id = await _delete_asset_and_cleanup(asset_id)
+            if project_id:
+                cascaded_projects.add(project_id)
             deleted.append(asset_id)
         except KeyError:
             failed[asset_id] = "Media item was already deleted"
@@ -1063,7 +1083,7 @@ async def preview_asset(asset_id: str, expires: int = Query(...), signature: str
 @app.delete("/api/v1/library/assets/{asset_id}", status_code=204)
 async def delete_library_asset(asset_id: str) -> None:
     try:
-        _delete_asset_and_cleanup(asset_id)
+        await _delete_asset_and_cleanup(asset_id)
     except KeyError as exc:
         raise _not_found("Asset") from exc
     except ValueError as exc:

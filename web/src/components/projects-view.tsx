@@ -333,9 +333,9 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
 
     <section className="recent-section">
       <div className="section-heading">
-        <div><h2>Recent projects</h2>{projects.length > 0 && <span className="section-count" data-testid="recent-project-count">{query ? `${visibleProjects.length} of ${projects.length}` : visibleProjects.length}</span>}</div>
+        <div><h2>Recent projects</h2><span className="section-count" data-testid="recent-project-count">{query ? `${visibleProjects.length} of ${projects.length}` : visibleProjects.length}</span></div>
         <div className="section-tools">
-          {projects.length > RECENT_LIMIT && <div className="project-search"><Search size={14} aria-hidden="true" /><input type="search" aria-label="Search projects" placeholder="Search projects…" value={projectQuery} onChange={(event) => setProjectQuery(event.target.value)} /></div>}
+          <div className="project-search"><Search size={14} aria-hidden="true" /><input type="search" aria-label="Search projects" placeholder="Search projects…" value={projectQuery} onChange={(event) => setProjectQuery(event.target.value)} /></div>
           <button onClick={() => { void onRefresh(); void loadSourceAssets(); }}>Refresh</button>
         </div>
       </div>
