@@ -358,8 +358,9 @@ input[type="checkbox"]:checked::before {
 }
 input[type="checkbox"]:disabled { cursor: default; opacity: .5; }
 input[type="checkbox"]:focus-visible { outline: 2px solid var(--selector-highlight-hover); outline-offset: 1px; }
-/* Placeholders are input text, not disabled text, so they are white too. */
+/* Keep entered input text high-contrast while examples remain visually secondary. */
 input::placeholder, textarea::placeholder { color: var(--text-primary); opacity: 1; }
+.video-source-picker input::placeholder { color: var(--text-disabled); opacity: 1; }
 textarea { resize: vertical; line-height: var(--space-4); }
 h1, h2, h3, h4, h5, h6, p { margin-top: 0; }
 /* Every heading level is the one Heading role — an h3 is not smaller type,

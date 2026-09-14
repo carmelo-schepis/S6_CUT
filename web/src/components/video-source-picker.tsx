@@ -45,7 +45,7 @@ export function VideoSourcePicker({ mode, onModeChange, file, onFile, url, onUrl
       <input ref={input} type="file" accept={VIDEO_ACCEPT} aria-label="Choose video file" hidden onChange={(event) => { select(event.target.files?.[0]); event.currentTarget.value = ""; }} />
       {file ? <><Film size={25} /><strong title={file.name}>{file.name}</strong><span>{humanFileSize(file.size)} · ready to validate</span><div className="source-actions"><button type="button" onClick={() => input.current?.click()}>Choose another</button><button type="button" onClick={() => onFile(null)}>Remove</button></div></> : <><UploadCloud size={26} /><strong>Drop a video here</strong><span>MP4, MOV, WebM, MKV, M4V or AVI</span><Button type="button" onClick={() => input.current?.click()}>Browse files</Button></>}
     </div>}
-    {mode === "url" && <div className="field"><label className="field-label" htmlFor="source-youtube-url">YouTube URL</label><input id="source-youtube-url" type="url" value={url} onChange={(event) => onUrl(event.target.value)} placeholder="https://www.youtube.com/watch?v=…" /><small>Public YouTube links only. DRM and access controls are never bypassed.</small></div>}
+    {mode === "url" && <div className="field"><label className="field-label" htmlFor="source-youtube-url">YouTube URL</label><input id="source-youtube-url" type="url" value={url} onChange={(event) => onUrl(event.target.value)} placeholder="https://www.youtube.com/watch?v=..." /><small>Public YouTube links only. DRM and access controls are never bypassed.</small></div>}
     {mode === "library" && children}
   </div>;
 }
