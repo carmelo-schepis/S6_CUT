@@ -2,9 +2,14 @@ import { expect, test } from "@playwright/test";
 import type { Job, ProcessingStep, Project } from "../../web/src/types";
 
 const isExpectedBrowserWarning = (text: string) => /Cross-Origin-Opener-Policy header has been ignored.*untrustworthy/i.test(text);
+const workflowLabels = [
+  "Source received", "Video validated", "Audio prepared", "Speech transcribed",
+  "OpenRouter planning", "Local planning fallback", "Complete moments selected",
+  "Clip boundaries verified", "Clips rendered and saved", "Outputs verified", "Project ready",
+];
 
 test.describe("vertical creation progress", () => {
-  test("keeps authoritative steps vertical, ordered, bottom-aligned, and retryable", async ({ page }) => {
+  test("keeps authoritative steps vertical, ordered, full-width, and retryable", async ({ page }) => {
     const consoleErrors: string[] = [];
     const pageErrors: string[] = [];
     const failedRequests: string[] = [];
@@ -103,14 +108,15 @@ test.describe("vertical creation progress", () => {
       const createResponse = await createResponsePromise;
       const created = await createResponse.json() as { project: Project; job: Job };
       projectId = created.project.id;
-      sourceJob = created.job;
+      sourceJob = {
+        ...created.job,
+        steps: workflowLabels.map((label, index) => ({ id: `workflow-${index}`, label, status: "pending" as const })),
+      };
       jobId = created.job.id;
 
       const progress = page.getByRole("region", { name: "Short creation progress" });
       await expect(progress).toBeVisible({ timeout: 120_000 });
-      const expectedLabels = sourceJob?.steps.length
-        ? sourceJob.steps.map((step) => step.label)
-        : ["Source received", "Video validated", "Clips rendered and saved", "Project ready"];
+      const expectedLabels = sourceJob?.steps.map((step) => step.label) || workflowLabels;
       const items = progress.getByRole("listitem");
       await expect(items).toHaveCount(expectedLabels.length);
       expect(await items.allTextContents()).toEqual(expectedLabels.map((label) => expect.stringContaining(label)));
@@ -118,24 +124,58 @@ test.describe("vertical creation progress", () => {
       await expect(progress.locator("[aria-current=\"step\"]")).toContainText("In progress");
       await expect(progress.locator(".checklist-step.status-pending").first()).toContainText("Pending");
       await expect(progress.locator(".checklist-step.status-complete").first()).toContainText("Complete");
-      const firstBox = await items.nth(0).boundingBox();
-      const secondBox = await items.nth(1).boundingBox();
-      expect(firstBox && secondBox && firstBox.x === secondBox.x && secondBox.y > firstBox.y).toBeTruthy();
-      const boardBox = await page.locator(".board-panel").boundingBox();
-      const checklistBox = await page.locator(".checklist-panel").boundingBox();
-      expect(boardBox && checklistBox && checklistBox.y > boardBox.y).toBeTruthy();
-      const trackCount = await progress.locator(".process-checklist").evaluate((element) => getComputedStyle(element).gridTemplateColumns.trim().split(/\\s+/).length);
-      expect(trackCount).toBe(1);
-      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-      await page.screenshot({ path: "test-artifacts/vertical-progress-active.png", fullPage: true });
+
+      const assertVerticalLayout = async () => {
+        const list = progress.getByRole("list");
+        const listBox = await list.boundingBox();
+        const listContentWidth = await list.evaluate((element) => {
+          const style = getComputedStyle(element);
+          return element.getBoundingClientRect().width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+        });
+        const boxes = await Promise.all((await items.all()).map((item) => item.boundingBox()));
+        expect(listBox).not.toBeNull();
+        expect(boxes.every((box) => box !== null)).toBe(true);
+        for (let index = 1; index < boxes.length; index += 1) {
+          expect(boxes[index]!.y).toBeGreaterThan(boxes[index - 1]!.y);
+          expect(boxes[index]!.x).toBe(boxes[index - 1]!.x);
+        }
+        expect(boxes.every((box) => box!.width >= listContentWidth - 2)).toBe(true);
+        expect(await list.evaluate((element) => {
+          const style = getComputedStyle(element);
+          return { display: style.display, flexDirection: style.flexDirection, gridColumns: style.gridTemplateColumns };
+        })).toEqual({ display: "flex", flexDirection: "column", gridColumns: "none" });
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+        const checklistBox = await progress.boundingBox();
+        const lowerWorkspaceBox = await page.locator("[data-testid=\"lower-workspace\"]").boundingBox();
+        expect(checklistBox && lowerWorkspaceBox && lowerWorkspaceBox.y >= checklistBox.y + checklistBox.height).toBe(true);
+        const banners = page.locator(".workspace-offline, .workspace-alert, .failure-strip, .warning-strip, .job-strip");
+        const progressTop = checklistBox?.y || 0;
+        for (const banner of await banners.all()) {
+          const bannerBox = await banner.boundingBox();
+          if (bannerBox) expect(bannerBox.y + bannerBox.height).toBeLessThanOrEqual(progressTop + 1);
+        }
+      };
+
+      await page.setViewportSize({ width: 1920, height: 1080 });
+      await assertVerticalLayout();
+      const activeMeta = progress.locator("[aria-current=\"step\"] .checklist-step-meta");
+      const activeLabelBox = await progress.locator("[aria-current=\"step\"] .checklist-label").boundingBox();
+      const activeMetaBox = await activeMeta.boundingBox();
+      expect(activeLabelBox && activeMetaBox && activeMetaBox.x > activeLabelBox.x).toBeTruthy();
+      await page.screenshot({ path: "test-artifacts/progress-list-desktop.png", fullPage: true });
+      await page.screenshot({ path: "test-artifacts/progress-list-active.png", fullPage: true });
+
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await assertVerticalLayout();
 
       await page.setViewportSize({ width: 768, height: 1024 });
-      const tabletItems = progress.getByRole("listitem");
-      const tabletFirst = await tabletItems.nth(0).boundingBox();
-      const tabletSecond = await tabletItems.nth(1).boundingBox();
-      expect(tabletFirst && tabletSecond && tabletFirst.x === tabletSecond.x && tabletSecond.y > tabletFirst.y).toBeTruthy();
-      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-      await page.screenshot({ path: "test-artifacts/vertical-progress-tablet.png", fullPage: true });
+      await assertVerticalLayout();
+      await page.setViewportSize({ width: 390, height: 844 });
+      await assertVerticalLayout();
+      const mobileLabelBox = await progress.locator("[aria-current=\"step\"] .checklist-label").boundingBox();
+      const mobileMetaBox = await activeMeta.boundingBox();
+      expect(mobileLabelBox && mobileMetaBox && mobileMetaBox.y > mobileLabelBox.y).toBeTruthy();
+      await page.screenshot({ path: "test-artifacts/progress-list-mobile.png", fullPage: true });
       await page.setViewportSize({ width: 1440, height: 900 });
 
       phase = "next";
@@ -153,7 +193,7 @@ test.describe("vertical creation progress", () => {
       phase = "complete";
       await expect.poll(() => restoredProgress.locator(".checklist-step.status-complete").count(), { timeout: 15_000 }).toBe(expectedLabels.length);
       await expect(restoredProgress.getByText("Project ready", { exact: true })).toBeVisible();
-      await page.screenshot({ path: "test-artifacts/vertical-progress-complete.png", fullPage: true });
+      await page.screenshot({ path: "test-artifacts/progress-list-complete.png", fullPage: true });
 
       phase = "failed";
       await page.reload({ waitUntil: "domcontentloaded" });
@@ -165,7 +205,7 @@ test.describe("vertical creation progress", () => {
       await expect(failedProgress.getByText("Failed", { exact: true })).toBeVisible();
       await expect(failedProgress.getByText("Deterministic test failure: provider unavailable.", { exact: true })).toBeVisible();
       await expect(page.getByRole("button", { name: "Retry failed work" })).toBeVisible();
-      await page.screenshot({ path: "test-artifacts/vertical-progress-failed.png", fullPage: true });
+      await page.screenshot({ path: "test-artifacts/progress-list-failed.png", fullPage: true });
 
       await page.getByRole("button", { name: "Retry failed work" }).click();
       await expect.poll(() => failedProgress.locator("[aria-current=\"step\"]").count(), { timeout: 15_000 }).toBe(1);
@@ -175,7 +215,7 @@ test.describe("vertical creation progress", () => {
       await expect(failedProgress).toBeVisible();
       await expect(failedProgress.locator(".process-checklist")).toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-      await page.screenshot({ path: "test-artifacts/vertical-progress-mobile.png", fullPage: true });
+      await page.screenshot({ path: "test-artifacts/progress-list-mobile-failed.png", fullPage: true });
       for (const item of await failedProgress.getByRole("listitem").all()) {
         const box = await item.boundingBox();
         expect(box?.width).toBeLessThanOrEqual(390);

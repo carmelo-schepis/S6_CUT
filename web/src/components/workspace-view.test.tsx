@@ -219,7 +219,7 @@ describe("WorkspaceView – timeline removal", () => {
 });
 
 describe("WorkspaceView – processing checklist placement", () => {
-  it("renders the vertical checklist at the bottom of the workspace from API-provided steps", async () => {
+  it("renders the vertical checklist before the lower workspace from API-provided steps", async () => {
     const withSteps: Job = {
       ...freshSmartJob,
       steps: [
@@ -233,8 +233,8 @@ describe("WorkspaceView – processing checklist placement", () => {
     expect(screen.getByRole("heading", { name: "Short creation progress" })).toBeInTheDocument();
     expect(screen.getByText("Source received")).toBeInTheDocument();
     const checklist = document.querySelector(".checklist-panel")!;
-    const board = document.querySelector(".board-panel")!;
-    expect(checklist.compareDocumentPosition(board) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+    const lowerWorkspace = document.querySelector("[data-testid=\"lower-workspace\"]")!;
+    expect(checklist.compareDocumentPosition(lowerWorkspace) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(checklist.querySelector(".process-checklist")).toBeInTheDocument();
     expect(checklist.querySelector("[aria-current=\"step\"]")).toHaveTextContent("In progress");
   });

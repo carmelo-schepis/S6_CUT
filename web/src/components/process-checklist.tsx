@@ -121,35 +121,35 @@ export function ProcessChecklist({ steps, jobState, compact = false, label = "Sh
   const headingId = `${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-heading`;
 
   return (
-    <section className={`checklist-panel${compact ? " compact" : ""}${paused ? " is-paused" : ""}`} aria-labelledby={headingId}>
+    <section className={`checklist-panel${compact ? " compact" : ""}${paused ? " is-paused" : ""}`} aria-labelledby={headingId} data-testid="short-creation-progress">
       <div className="checklist-heading">
         <h2 id={headingId}>{label}</h2>
         <span className="checklist-count">{steps.length} step{steps.length === 1 ? "" : "s"}</span>
       </div>
       <div className="checklist-live sr-only" role="status" aria-live="polite">{announcement}</div>
-      <ol className="process-checklist" aria-label={label}>
+      <ol className="process-checklist" aria-label={label} data-testid="progress-step-list">
         {steps.map((step) => {
           const active = step.status === "active";
           const progress = itemProgress(step);
           return (
-            <li key={step.id} className={`checklist-step status-${step.status}${active ? " active-row" : ""}${step.status === "complete" && freshlyCompleted.has(step.id) ? " checkmark-new" : ""}`} aria-current={active ? "step" : undefined}>
+            <li key={step.id} className={`checklist-step status-${step.status}${active ? " active-row" : ""}${step.status === "complete" && freshlyCompleted.has(step.id) ? " checkmark-new" : ""}`} aria-current={active ? "step" : undefined} data-testid={`progress-step-${step.id}`}>
               <span className="checklist-icon" aria-hidden="true">{stepIcon(step.status)}</span>
               <div className="checklist-step-body">
-                <div className="checklist-step-line">
-                  <span className="checklist-label" title={step.label}>{step.label}</span>
+                <span className="checklist-label" title={step.label}>{step.label}</span>
+                <span className="checklist-step-meta">
                   <span className="checklist-status-text">{statusLabel(step.status, paused)}</span>
-                </div>
-                {active && !paused && (step.detail || step.startedAt) && (
-                  <span className="checklist-detail">
-                    {step.startedAt && <time className="checklist-elapsed">Elapsed {formatElapsed(step.startedAt, now)}</time>}
-                    {step.detail && <span className="checklist-detail-text">{step.detail}</span>}
-                  </span>
-                )}
-                {(step.status === "skipped" || step.status === "failed") && step.detail && (
-                  <span className="checklist-detail">{step.detail}</span>
-                )}
+                  {active && !paused && (step.detail || step.startedAt) && (
+                    <span className="checklist-detail">
+                      {step.startedAt && <time className="checklist-elapsed">Elapsed {formatElapsed(step.startedAt, now)}</time>}
+                      {step.detail && <span className="checklist-detail-text">{step.detail}</span>}
+                    </span>
+                  )}
+                  {(step.status === "skipped" || step.status === "failed") && step.detail && (
+                    <span className="checklist-detail">{step.detail}</span>
+                  )}
+                  {progress && <span className="checklist-progress">{progress}</span>}
+                </span>
               </div>
-              {progress && <span className="checklist-progress">{progress}</span>}
             </li>
           );
         })}

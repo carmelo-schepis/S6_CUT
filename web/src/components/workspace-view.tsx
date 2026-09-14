@@ -499,7 +499,9 @@ export function WorkspaceView({ project, health, providersLoaded = true, hasSele
     {job && !["complete", "failed", "cancelled_kept"].includes(job.state) && (() => { const facts = jobFacts(job); return <div className="job-strip"><div className="job-strip-text"><strong>{facts.stage}</strong>{facts.detail && <span>{facts.detail}</span>}</div><Progress value={facts.percent} indeterminate={facts.indeterminate} label={facts.stage} /></div>; })()}
     {job && job.warnings.length > 0 && <WarningList warnings={job.warnings} />}
 
-    <div className="workspace-grid">
+    {job && job.steps.length > 0 && <ProcessChecklist steps={job.steps} jobState={job.state} />}
+
+    <div className="workspace-grid" data-testid="lower-workspace">
       <aside className="source-panel panel" aria-label="Source material">
         <div className="panel-tabs" role="tablist" aria-label="Source material">
           <button type="button" role="tab" id="workspace-transcript-tab" aria-controls="workspace-transcript-panel" aria-selected={sourceTab === "transcript"} tabIndex={sourceTab === "transcript" ? 0 : -1} className={sourceTab === "transcript" ? "active" : ""} onClick={() => moveSourceTab("transcript")} onKeyDown={handleSourceTabKeyDown}>{project.mode === "clip" ? "Transcript" : "Script"}</button>
@@ -581,7 +583,6 @@ export function WorkspaceView({ project, health, providersLoaded = true, hasSele
         : <div className="beat-board">{job?.beats.map((beat, index) => <article key={beat.id} className="beat-tile"><div className="beat-visual"><span>{String(index + 1).padStart(2, "0")}</span><Sparkles size={22} /></div><div><strong>{beat.concept}</strong><p>{beat.text}</p><span>{formatDuration(beat.start)}–{formatDuration(beat.end)} · {beat.source} · {Math.round(beat.confidence * 100)}%</span></div><StatusBadge state={beat.source === "library" ? "ready" : "fallback"} label={beat.ruleState || beat.source} /></article>)}</div>}
     </section>
 
-    {job && job.steps.length > 0 && <ProcessChecklist steps={job.steps} jobState={job.state} compact={isTerminalJob(job)} />}
   </div>;
 }
 
