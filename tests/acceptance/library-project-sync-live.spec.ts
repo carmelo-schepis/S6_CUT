@@ -2,12 +2,14 @@ import { expect, test } from "@playwright/test";
 import path from "node:path";
 import { createClipProject, jobBoundaries, openProjects, root, waitForProjectReady } from "./support/workspace";
 
+const isExpectedBrowserWarning = (text: string) => /Cross-Origin-Opener-Policy header has been ignored.*untrustworthy/i.test(text);
+
 test.use({ storageState: { cookies: [], origins: [] } });
 
 test("repaired installation has no orphaned Library projects", async ({ page }) => {
   const consoleErrors: string[] = [];
   const failedRequests: string[] = [];
-  page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
+  page.on("console", (message) => { if (message.type() === "error" && !isExpectedBrowserWarning(message.text())) consoleErrors.push(message.text()); });
   page.on("requestfailed", (request) => {
     if (request.failure()?.errorText !== "net::ERR_ABORTED") failedRequests.push(`${request.method()} ${request.url()}`);
   });
@@ -40,7 +42,7 @@ test("repaired installation has no orphaned Library projects", async ({ page }) 
 test("deleting project source videos removes their projects and generated media", async ({ page }) => {
   const consoleErrors: string[] = [];
   const failedRequests: string[] = [];
-  page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
+  page.on("console", (message) => { if (message.type() === "error" && !isExpectedBrowserWarning(message.text())) consoleErrors.push(message.text()); });
   page.on("requestfailed", (request) => {
     if (request.failure()?.errorText !== "net::ERR_ABORTED") failedRequests.push(`${request.method()} ${request.url()}`);
   });
@@ -57,6 +59,7 @@ test("deleting project source videos removes their projects and generated media"
       projectIds.push((await jobBoundaries(name)).project.id);
     }
 
+    await openProjects(page);
     await expect(page.getByRole("button", { name: `Open project ${projectNames[0]}` })).toBeVisible();
     await expect(page.getByRole("button", { name: `Open project ${projectNames[1]}` })).toBeVisible();
     await expect(page.getByTestId("recent-project-count")).toHaveText("2");
@@ -86,6 +89,7 @@ test("deleting project source videos removes their projects and generated media"
     await page.getByRole("button", { name: "Library", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Build your private resolver" })).toBeVisible();
     await page.reload({ waitUntil: "networkidle" });
+    await page.getByRole("button", { name: "Library", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Build your private resolver" })).toBeVisible();
     await page.getByRole("button", { name: "Projects", exact: true }).click();
     await expect(page.getByTestId("recent-project-count")).toHaveText("0");
