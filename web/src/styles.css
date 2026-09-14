@@ -438,7 +438,15 @@ select { line-height: var(--type-text-line); }
    own `object-fit` crop. Stretching it to the frame makes `height: 100%`
    resolve and keeps the crop to one pass. */
 .help-reference-frame { display: block; height: 190px; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--canvas); }
-.help-reference-frame img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.help-reference-frame img, .help-reference-frame video { display: block; width: 100%; height: 100%; object-fit: cover; }
+.help-video-preview { position: relative; width: 100%; height: 100%; background: var(--canvas); }
+.help-video-preview video { opacity: 1; }
+.help-video-preview[data-preview-state="loading"] video { opacity: .45; }
+.help-video-status, .help-video-error { position: absolute; inset: 0; display: grid; place-items: center; align-content: center; gap: 8px; padding: 12px; text-align: center; background: color-mix(in srgb, var(--canvas) 82%, transparent); color: var(--text-primary); }
+.help-video-status::before { width: 18px; height: 18px; border: 2px solid var(--border); border-top-color: var(--copper-light); border-radius: 50%; animation: help-preview-spin .8s linear infinite; content: ""; }
+.help-video-error { color: var(--error); }
+.help-video-error button { min-height: var(--control-height); padding: 4px 12px; border: 1px solid currentColor; border-radius: var(--radius-sm); background: transparent; color: inherit; cursor: pointer; }
+@keyframes help-preview-spin { to { transform: rotate(360deg); } }
 .help-reference-grid figcaption { display: grid; gap: 4px; padding-top: 9px; }
 .help-reference-grid figcaption strong { color: var(--text); font-size: var(--type-heading-size); font-weight: var(--type-heading-weight); line-height: var(--type-heading-line); letter-spacing: var(--type-heading-tracking); }
 .help-reference-grid figcaption span { color: var(--text-primary); }
