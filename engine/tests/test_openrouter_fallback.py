@@ -87,8 +87,9 @@ def test_provider_failures_complete_through_local_smart_fallback(
     assert all((database_path / "jobs" / job_id / "clips" / clip.output_name).is_file() for clip in job.clips if clip.output_name)
     warning = "OpenRouter API failed: "
     assert sum(item.startswith(warning) for item in job.warnings) == 1
-    assert expected in next(item for item in job.warnings if item.startswith(warning))
-    assert "Continuing with deterministic local planning." in job.warnings[-1]
+    provider_warning = next(item for item in job.warnings if item.startswith(warning))
+    assert expected in provider_warning
+    assert "Continuing with deterministic local planning." in provider_warning
     steps = {step.id: step for step in job.steps}
     assert steps["openrouter"].status == "failed"
     assert steps["local_planning"].status == "complete"
@@ -287,8 +288,8 @@ class _ProviderClient:
     [
         (401, "rejected the saved credentials"),
         (403, "rejected the saved credentials"),
-        (404, "selected OpenRouter model is unavailable"),
-        (422, "selected OpenRouter model is unavailable"),
+        (404, "selected OpenRouter text model is unavailable"),
+        (422, "selected OpenRouter text model is unavailable"),
         (408, "temporarily unavailable"),
         (429, "rate limit reached"),
         (500, "temporarily unavailable"),
@@ -303,7 +304,7 @@ def test_openrouter_http_failures_are_mapped_without_response_body_leaks(
     database = Database(tmp_path / "s6-cut.sqlite3")
     service = ProfileService(database, SecretVault(tmp_path / "secrets" / "instance.key"))
     profile = service.save(ProfileInput(name="HTTP failure", openrouter_key="test-key", selected=True))
-    profile.openrouter_status = "connected"
+    profile.text_status = "connected"
     database.save_profile(profile)
     _ProviderClient.response = _ProviderResponse(status_code, {"error": "private response body must not escape"})
     _ProviderClient.post_error = None
@@ -331,7 +332,7 @@ def test_malformed_provider_responses_are_rejected_without_body_leaks(
     database = Database(tmp_path / "s6-cut.sqlite3")
     service = ProfileService(database, SecretVault(tmp_path / "secrets" / "instance.key"))
     profile = service.save(ProfileInput(name="Malformed response", openrouter_key="test-key", selected=True))
-    profile.openrouter_status = "connected"
+    profile.text_status = "connected"
     database.save_profile(profile)
     _ProviderClient.response = _ProviderResponse(200, payload)
     _ProviderClient.post_error = None
@@ -348,7 +349,7 @@ def test_provider_connection_failures_are_retried_and_mapped_safely(
     database = Database(tmp_path / "s6-cut.sqlite3")
     service = ProfileService(database, SecretVault(tmp_path / "secrets" / "instance.key"))
     profile = service.save(ProfileInput(name="Connection failure", openrouter_key="test-key", selected=True))
-    profile.openrouter_status = "connected"
+    profile.text_status = "connected"
     database.save_profile(profile)
     _ProviderClient.post_error = error
     monkeypatch.setattr("engine.providers.httpx.AsyncClient", _ProviderClient)
@@ -402,7 +403,7 @@ def test_provider_call_is_unchanged_without_explicit_allowlisted_failure(
     database = Database(tmp_path / "s6-cut.sqlite3")
     service = ProfileService(database, SecretVault(tmp_path / "secrets" / "instance.key"))
     profile = service.save(ProfileInput(name="Normal provider", openrouter_key="test-key", selected=True))
-    profile.openrouter_status = "connected"
+    profile.text_status = "connected"
     database.save_profile(profile)
     _ProviderClient.response = _ProviderResponse(200, {"choices": [{"message": {"content": '{"ok": true}'}}]})
     _ProviderClient.post_error = None
