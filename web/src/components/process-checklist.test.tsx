@@ -149,7 +149,7 @@ describe("ProcessChecklist – skipped & failed detail", () => {
     expect(screen.getByText("Skipped")).toBeInTheDocument();
     expect(screen.getByText("Failed")).toBeInTheDocument();
     expect(screen.getByText("No connected provider; used local planning")).toBeInTheDocument();
-    expect(screen.getByText("Provider request failed [redacted]")).toBeInTheDocument();
+    expect(screen.getByText("Provider request failed [redacted]")).toHaveAttribute("title", "Provider request failed [redacted]");
   });
 
   it("shows active detail alongside elapsed", () => {
