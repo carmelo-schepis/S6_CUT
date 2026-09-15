@@ -19,7 +19,7 @@ from typing import Any
 from . import media as media_module
 from .config import Settings
 from .database import Database
-from .library import LibraryRules
+from .library import LibraryRules, ResolvedVisual
 from .media import (
     DownloadStalled, MediaError, available, download_youtube, probe, probe_audio, render_clip, render_script,
     _metadata_text, sha256_file, synthesize_local, transcribe, youtube_import_metadata, youtube_import_title,
@@ -167,6 +167,24 @@ def _consume_youtube_sidecar(source: Path) -> None:
         source.with_suffix(".info.json").unlink(missing_ok=True)
     except OSError:
         pass
+
+
+def _source_clip_visual_metadata(visual: ResolvedVisual, duration: float) -> tuple[list[tuple[Path, float, float]], list[ProvenanceRecord]]:
+    """Return only source-clip overlays and provenance that will be rendered.
+
+    Source clips no longer use generated text cards. A personal-library asset is
+    recorded only when its resolved file exists and the render window is long
+    enough for the same overlay branch to composite it.
+    """
+    if not visual.asset or not visual.asset_path or not visual.asset_path.exists() or duration <= 1:
+        return [], []
+    overlay = (visual.asset_path, .65, min(3.4, duration - .2))
+    provenance = ProvenanceRecord(
+        id=str(uuid.uuid4()), provider="personal-library", licence=visual.asset.licence,
+        attribution=visual.asset.attribution or visual.asset.title, query=visual.label,
+        match_reason=visual.match_reason, content_hash=visual.asset.content_hash,
+    )
+    return [overlay], [provenance]
 
 
 def _creator_render_kwargs(render, credit: str | None) -> dict[str, str]:
@@ -1181,11 +1199,9 @@ class JobManager:
                 excerpt = " ".join(str(word["text"]) for word in candidate.words)
                 visual = self.rules.resolve(excerpt)
                 clip.visual_label = visual.label
-                clip.fallback_used = visual.source != "library"
-                if visual.asset:
-                    clip.provenance.append(ProvenanceRecord(id=str(uuid.uuid4()), provider="personal-library", licence=visual.asset.licence, attribution=visual.asset.attribution or visual.asset.title, query=visual.label, match_reason=visual.match_reason, content_hash=visual.asset.content_hash))
-                else:
-                    clip.provenance.append(ProvenanceRecord(id=str(uuid.uuid4()), provider="local-text-card", licence="Generated locally by S6_cut", attribution="No attribution required", query=visual.label, match_reason=visual.match_reason))
+                # The source renderer uses source footage plus real library
+                # media only; it never burns the planner's text-card fallback.
+                clip.fallback_used = False
                 clips.append(clip)
             job.clips = clips
             job.total_items = len(clips)
@@ -1225,13 +1241,18 @@ class JobManager:
                 for word in clip_words
             ]
             visual = self.rules.resolve(" ".join(str(word["text"]) for word in clip_words))
-            overlays = [(visual.asset_path, .65, min(3.4, clip.duration - .2))] if visual.asset_path and visual.asset_path.exists() and clip.duration > 1 else []
-            visuals = [(clip.visual_label or "Key idea", .45, min(3.0, clip.duration))]
+            overlays, provenance = _source_clip_visual_metadata(visual, clip.duration)
+            # Provenance describes media actually composited into this source
+            # clip. Remove legacy/generated-card records and replace any prior
+            # library match when a retry resolves the clip again.
+            clip.provenance = [record for record in clip.provenance if record.provider not in {"local-text-card", "personal-library"}]
+            clip.provenance.extend(provenance)
+            clip.fallback_used = False
             try:
                 render_kwargs = {
                     "start": clip.start, "end": clip.end, "aspect": private["aspect_ratio"],
                     "words": clip_words if subtitles_enabled or bool(private.get("embed_subtitles", job.embed_subtitles)) else [],
-                    "visuals": visuals, "overlays": overlays, "settings": self.settings, "style": job.style,
+                    "visuals": [], "overlays": overlays, "settings": self.settings, "style": job.style,
                     **({"embed_subtitles": True} if private.get("embed_subtitles", job.embed_subtitles) else {}),
                     **_creator_render_kwargs(render_clip, youtube_creator_credit(job, private)),
                 }

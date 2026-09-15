@@ -10,7 +10,7 @@ import { WorkspaceView } from "./components/workspace-view";
 import { ShortsEditorView } from "./components/shorts-editor-view";
 import { TopicToVideoView } from "./components/topic-to-video-view";
 import { HelpDialog } from "./components/help-dialog";
-import { jobPollInterval } from "./project-status";
+import { hasLiveWork, jobPollInterval, workspaceActivity } from "./project-status";
 import { onLibraryChanged } from "./library-sync";
 import { usePoll } from "./use-poll";
 import type { Health, Job, Project, ProviderProfile } from "./types";
@@ -62,14 +62,16 @@ export function App() {
   const runHealth = usePoll(pollHealth, HEALTH_POLL_MS, true, true);
 
   const jobsPollMs = jobPollInterval(jobs);
+  const latestJobsSnapshot = useRef<Job[]>([]);
 
   // Runs immediately on entering Projects: waiting a full interval let a
   // finished project keep showing its creation-time badge while its progress
   // bar already read 100%.
   const pollJobs = useCallback(() => listJobs()
-    .then(setJobs)
+    .then((value) => { latestJobsSnapshot.current = value; setJobs(value); })
     .catch((cause) => setError(readableError(cause))), []);
-  const runJobs = usePoll(pollJobs, jobsPollMs, page === "projects");
+  const jobsPollingEnabled = page === "projects" || hasLiveWork(jobs);
+  const runJobs = usePoll(pollJobs, jobsPollMs, jobsPollingEnabled);
 
   // Each read applies its own slice the moment it settles. Gating all four on a
   // single `allSettled` meant the engine badge kept saying "Connecting…" until
@@ -118,6 +120,14 @@ export function App() {
 
   const onCreated = (project: Project) => {
     setProjects((current) => [project, ...current.filter((item) => item.id !== project.id)]);
+    // The guarded poll picks up the job immediately without racing the shell's
+    // existing /jobs request. If that request began before creation and returns
+    // an older snapshot, one guarded follow-up closes the gap without ever
+    // putting two /jobs requests on the wire together.
+    void runJobs().then(() => {
+      const createdJobIsLive = project.mode === "clip" && latestJobsSnapshot.current.some((job) => job.projectId === project.id && job.mode === "clip" && hasLiveWork([job]));
+      if (!createdJobIsLive) void runJobs();
+    });
     openProject(project.id);
   };
   const onDeleted = (projectId: string) => {
@@ -127,6 +137,10 @@ export function App() {
   };
 
   const selected = projects.find((project) => project.id === selectedProjectId) || null;
+  const activity = workspaceActivity(projects, jobs);
+  const activityDescription = activity
+    ? `${activity.remainingClips} clip${activity.remainingClips === 1 ? "" : "s"} remaining across ${activity.liveJobCount} active job${activity.liveJobCount === 1 ? "" : "s"}`
+    : "";
   const hasSelectedProvider = profiles.some((profile) => profile.selected && profile.openrouterConfigured && profile.textStatus === "connected");
   const openProviders = () => setPage("settings");
 
@@ -150,11 +164,18 @@ export function App() {
       <nav>
         {nav.map((item) => {
           const Icon = item.icon;
-          return <button key={item.id} className={page === item.id ? "nav-item active" : "nav-item"} onClick={() => setPage(item.id)} aria-label={item.name} title={item.name} aria-current={page === item.id ? "page" : undefined}>
-            <Icon size={19} /><span>{item.label}</span>
+          const workspace = item.id === "workspace";
+          return <button key={item.id} className={page === item.id ? "nav-item active" : "nav-item"} onClick={() => setPage(item.id)} aria-label={item.name} title={item.name} aria-current={page === item.id ? "page" : undefined} aria-describedby={workspace && activity ? "workspace-work-description" : undefined}>
+            <span className="nav-icon-wrap" aria-hidden="true">
+              <Icon className={workspace ? "nav-main-icon" : undefined} data-testid={workspace ? "workspace-nav-icon" : undefined} size={19} />
+              {workspace && activity?.isProcessing ? <LoaderCircle className="nav-work-spinner" data-testid="workspace-work-spinner" /> : null}
+            </span>
+            <span className="nav-label">{item.label}</span>
+            {workspace && activity && <span className="nav-work-count" data-testid="workspace-work-count" aria-hidden="true">{activity.remainingClips}</span>}
           </button>;
         })}
       </nav>
+      {activity && <span id="workspace-work-description" className="sr-only">{activityDescription}</span>}
       {/* Help sits at the foot of the rail, below the destinations. The engine
           reading is not here: startup is announced once by the engine-startup
           row, and the steady-state status lives in the topbar badge. */}
@@ -190,7 +211,7 @@ export function App() {
         {page === "workspace" && <WorkspaceView key={selected?.id || "none"} project={selected} health={health} providersLoaded={profilesLoaded} hasSelectedProvider={hasSelectedProvider} onConfigureProviders={openProviders} onProjectUpdated={refresh} onGoProjects={() => setPage("projects")} />}
         {page === "shorts-editor" && <ShortsEditorView onJobCreated={refresh} />}
         {page === "ai-video" && <TopicToVideoView profiles={profiles} profilesLoaded={profilesLoaded} onConfigureProviders={openProviders} onJobCreated={refresh} />}
-        {page === "jobs" && <JobsView onOpenProject={openProject} />}
+        {page === "jobs" && <JobsView jobs={jobs} onRefresh={runJobs} onOpenProject={openProject} />}
         {page === "settings" && <SettingsView health={health} onHealthRefresh={refresh} onProfilesChanged={setProfiles} onSkipSetup={() => setPage("projects")} />}
       </main>
     </div>

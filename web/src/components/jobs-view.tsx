@@ -1,8 +1,6 @@
-import { useCallback, useState } from "react";
+import { useState } from "react";
 import { BriefcaseBusiness, ExternalLink, Pause, Play, RefreshCw } from "lucide-react";
-import { controlJob, listJobs, readableError } from "../api";
-import { jobPollInterval } from "../project-status";
-import { usePoll } from "../use-poll";
+import { controlJob, readableError } from "../api";
 import type { Job } from "../types";
 import { Button, EmptyState, PageHeader, Progress, StatusBadge, formatAge } from "./common";
 import { downloadFacts, groupWarnings, jobFacts } from "../status-format";
@@ -11,17 +9,12 @@ import { downloadFacts, groupWarnings, jobFacts } from "../status-format";
 // ~15,000px page that took seconds to settle. Show the recent window by default.
 const JOB_LIMIT = 20;
 
-export function JobsView({ onOpenProject }: { onOpenProject: (id: string) => void }) {
-  const [jobs, setJobs] = useState<Job[]>([]);
+export function JobsView({ onOpenProject, jobs, onRefresh }: { onOpenProject: (id: string) => void; jobs: Job[]; onRefresh: () => Promise<void> }) {
   const [error, setError] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
-  // Match the Projects cadence: fast while work is running, relaxed when idle.
-  // usePoll schedules the next read only after this one settles, so a slow
-  // single-worker engine never receives a queue of overlapping /jobs calls.
-  const pollMs = jobPollInterval(jobs);
-  const poll = useCallback(() => listJobs().then((next) => { setJobs(next); setError(null); }).catch((cause) => { setError(readableError(cause)); }), []);
-  const runPoll = usePoll(poll, pollMs);
-  const load = () => { void runPoll(); };
+  // Jobs are shell state. Keeping the refresh here would create a second
+  // independent /jobs poll and could race the activity indicator's source.
+  const load = () => { void onRefresh().then(() => setError(null)); };
   const action = async (job: Job, next: "pause" | "resume" | "retry-failed" | "retry-import") => { try { await controlJob(job.id, next); load(); } catch (cause) { setError(readableError(cause)); } };
   const running = jobs.some((job) => ["queued", "active", "paused", "stalled", "recovered"].includes(job.state));
   const description = jobs.length === 0 ? "No job history yet. Create a Clip or Script project to start a durable local render." : running ? "Live stages and partial results stay available here while completed history remains below." : "No jobs are currently running. Completed history and recovery controls remain available here.";
