@@ -7,9 +7,10 @@ from pathlib import Path
 import pytest
 
 from engine.config import Settings
-from engine.jobs import youtube_creator_credit
+from engine.jobs import _source_clip_visual_metadata, youtube_creator_credit
+from engine.library import ResolvedVisual
 from engine.media import dimensions, probe, render_fast_clip
-from engine.models import Job
+from engine.models import Asset, Job
 
 
 def _job(content_format: str = "short"):
@@ -30,6 +31,24 @@ def test_credit_uses_persisted_creator_only_for_short_youtube_jobs():
 def test_credit_accepts_unicode_and_punctuation_for_renderer_sanitization():
     creator = "频道 🎬 · Maker {One}"
     assert youtube_creator_credit(_job(), {"url": "https://youtu.be/fixture", "youtube_creator": creator}) == f"Source: {creator}"
+
+
+def test_source_clip_visual_metadata_only_keeps_real_composited_library_assets(tmp_path: Path):
+    asset_path = tmp_path / "matched.png"
+    asset_path.write_bytes(b"asset")
+    asset = Asset(
+        id="asset-1", title="Matched media", media_type="image", filename=asset_path.name,
+        content_hash="hash-1", licence="User supplied", attribution="Artist",
+    )
+    matched = ResolvedVisual("Matched media", "library", 1.0, "matched", asset, asset_path)
+    overlays, provenance = _source_clip_visual_metadata(matched, 4)
+    assert overlays == [(asset_path, .65, 3.4)]
+    assert [item.provider for item in provenance] == ["personal-library"]
+    assert provenance[0].content_hash == "hash-1"
+
+    fallback = ResolvedVisual("GPT", "text-card", .55, "no match")
+    assert _source_clip_visual_metadata(fallback, 4) == ([], [])
+    assert _source_clip_visual_metadata(matched, 1) == ([], [])
 
 
 def _frame(path: Path, timestamp: float, settings: Settings) -> bytes:

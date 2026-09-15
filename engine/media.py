@@ -52,6 +52,8 @@ BACKGROUND_BLUR_SIGMA = 30
 BACKGROUND_BLUR_STEPS = 2
 BACKGROUND_BLUR_FILTER = f"gblur=sigma={BACKGROUND_BLUR_SIGMA}:steps={BACKGROUND_BLUR_STEPS}"
 BACKGROUND_OVERSCAN_FACTOR = 1.12
+CREDIT_BOTTOM_INSET_RATIO = 0.0125
+CREDIT_MIN_MARGIN = 12
 
 
 class MediaError(RuntimeError):
@@ -945,6 +947,10 @@ def _wrap_credit(value: str | None, max_chars: int) -> str:
     return "\n".join(lines)
 
 
+def _credit_margin(height: int) -> int:
+    return max(CREDIT_MIN_MARGIN, round(height * CREDIT_BOTTOM_INSET_RATIO))
+
+
 def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duration: float, visuals: Iterable[tuple[str, float, float]], width: int, height: int, style: str = "educational", creator_credit: str | None = None, credit_alignment: int = 3) -> None:
     preset = _subtitle_preset(style)
     metrics = _ass_style_metrics(width, height)
@@ -958,9 +964,9 @@ def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duratio
     usable = max(1, width - 2 * margin_x)
     max_chars = max(8, int(usable * _CAPTION_WRAP_FRACTION / (_CHAR_WIDTH_FACTOR * fontsize)))
     credit_fontsize = max(20, round(26 * visual_scale))
-    # Keep the credit inside the same 8% mobile safe-area convention as the
-    # preview, while leaving it below the bottom-centred caption band.
-    credit_margin = max(100, round(height * .08))
+    # Keep the credit anchored to the bottom edge with only a small inset for
+    # glyphs, outlines, and the translucent panel.
+    credit_margin = _credit_margin(height)
     credit_max_chars = max(12, int(usable * .92 / (_CHAR_WIDTH_FACTOR * credit_fontsize)))
     credit_text = _wrap_credit(creator_credit, credit_max_chars) if creator_credit else ""
     # A translucent light face with a dark stroke stays legible over changing
