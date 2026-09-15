@@ -166,7 +166,11 @@ export function App() {
           const Icon = item.icon;
           const workspace = item.id === "workspace";
           return <button key={item.id} className={page === item.id ? "nav-item active" : "nav-item"} onClick={() => setPage(item.id)} aria-label={item.name} title={item.name} aria-current={page === item.id ? "page" : undefined} aria-describedby={workspace && activity ? "workspace-work-description" : undefined}>
-            <Icon size={19} /><span>{item.label}</span>
+            <span className="nav-icon-wrap" aria-hidden="true">
+              <Icon className={workspace ? "nav-main-icon" : undefined} data-testid={workspace ? "workspace-nav-icon" : undefined} size={19} />
+              {workspace && activity?.isProcessing ? <LoaderCircle className="nav-work-spinner" data-testid="workspace-work-spinner" /> : null}
+            </span>
+            <span className="nav-label">{item.label}</span>
             {workspace && activity && <span className="nav-work-count" data-testid="workspace-work-count" aria-hidden="true">{activity.remainingClips}</span>}
           </button>;
         })}

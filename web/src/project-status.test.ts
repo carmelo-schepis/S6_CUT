@@ -85,43 +85,64 @@ describe("workspace activity derivation", () => {
     expect(workspaceActivity([project], [job({ state })])).toBeNull();
   });
 
+  it.each(["queued", "active", "recovered"] as const)("marks %s clip work as processing", (state) => {
+    expect(workspaceActivity([project], [job({ state })])).toMatchObject({ activeJobCount: 1, isProcessing: true });
+  });
+
+  it.each(["paused", "stalled"] as const)("keeps %s work counted without processing animation", (state) => {
+    expect(workspaceActivity([{ ...project, requestedCount: 3 }], [job({ state })]))
+      .toMatchObject({ liveJobCount: 1, remainingClips: 3, activeJobCount: 0, isProcessing: false });
+  });
+
+  it("reports processing when at least one of multiple live jobs is active", () => {
+    const secondProject = { ...project, id: "project-2", requestedCount: 2 };
+    expect(workspaceActivity([project, secondProject], [
+      job({ id: "paused", state: "paused", projectId: project.id }),
+      job({ id: "recovered", state: "recovered", projectId: secondProject.id }),
+    ])).toMatchObject({ liveJobCount: 2, activeJobCount: 1, isProcessing: true });
+  });
+
+  it("returns no processing activity for terminal-only jobs", () => {
+    expect(workspaceActivity([project], [job({ state: "complete" }), job({ id: "failed", state: "failed" })])).toBeNull();
+  });
+
   it("does not produce activity for script-mode jobs", () => {
     expect(workspaceActivity([project], [job({ mode: "script" })])).toBeNull();
   });
 
   it("falls back to the requested count for a queued job with no clips", () => {
     expect(workspaceActivity([{ ...project, requestedCount: 5 }], [job({ stage: "queued", clips: [] })]))
-      .toEqual({ liveJobCount: 1, remainingClips: 5 });
+      .toEqual({ liveJobCount: 1, remainingClips: 5, activeJobCount: 1, isProcessing: true });
   });
 
   it("uses render-step item progress", () => {
     expect(workspaceActivity([project], [job({ steps: [{ id: "render", label: "Render", status: "active", currentItem: 1, totalItems: 5 }] })]))
-      .toEqual({ liveJobCount: 1, remainingClips: 4 });
+      .toEqual({ liveJobCount: 1, remainingClips: 4, activeJobCount: 1, isProcessing: true });
   });
 
   it("prefers render-step progress over the clip array", () => {
     expect(workspaceActivity([project], [job({
       steps: [{ id: "render", label: "Render", status: "active", currentItem: 1, totalItems: 5 }],
       clips: [clip("queued"), clip("complete", 2)],
-    })])).toEqual({ liveJobCount: 1, remainingClips: 4 });
+    })])).toEqual({ liveJobCount: 1, remainingClips: 4, activeJobCount: 1, isProcessing: true });
   });
 
   it("counts every incomplete clip in the clip-array fallback", () => {
     expect(workspaceActivity([project], [job({
       stage: "verify",
       clips: [clip("queued"), clip("rendering", 2), clip("failed", 3), clip("complete", 4)],
-    })])).toEqual({ liveJobCount: 1, remainingClips: 3 });
+    })])).toEqual({ liveJobCount: 1, remainingClips: 3, activeJobCount: 1, isProcessing: true });
   });
 
   it("keeps a live verification job visible with zero remaining clips", () => {
     expect(workspaceActivity([project], [job({ stage: "verify", clips: [clip("complete")] })]))
-      .toEqual({ liveJobCount: 1, remainingClips: 0 });
+      .toEqual({ liveJobCount: 1, remainingClips: 0, activeJobCount: 1, isProcessing: true });
   });
 
   it("clamps negative derived values to zero", () => {
     expect(workspaceActivity([project], [job({
       steps: [{ id: "render", label: "Render", status: "active", currentItem: 5, totalItems: 2 }],
-    })])).toEqual({ liveJobCount: 1, remainingClips: 0 });
+    })])).toEqual({ liveJobCount: 1, remainingClips: 0, activeJobCount: 1, isProcessing: true });
   });
 
   it("aggregates multiple live clip jobs and ignores historical jobs", () => {
@@ -130,13 +151,13 @@ describe("workspace activity derivation", () => {
       job({ id: "live-1", projectId: project.id, steps: [{ id: "render", label: "Render", status: "active", currentItem: 2, totalItems: 5 }] }),
       job({ id: "live-2", projectId: secondProject.id, state: "paused", stage: "queued", clips: [] }),
       job({ id: "old", state: "complete", clips: [clip("queued")] }),
-    ])).toEqual({ liveJobCount: 2, remainingClips: 6 });
+    ])).toEqual({ liveJobCount: 2, remainingClips: 6, activeJobCount: 1, isProcessing: true });
   });
 
   it("does not include terminal historical jobs in the count", () => {
     expect(workspaceActivity([project], [
       job({ id: "live", state: "active", steps: [{ id: "render", label: "Render", status: "active", currentItem: 3, totalItems: 5 }] }),
       job({ id: "history", state: "complete", clips: [clip("queued"), clip("queued", 2)] }),
-    ])).toEqual({ liveJobCount: 1, remainingClips: 2 });
+    ])).toEqual({ liveJobCount: 1, remainingClips: 2, activeJobCount: 1, isProcessing: true });
   });
 });

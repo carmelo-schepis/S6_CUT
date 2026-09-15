@@ -1,7 +1,6 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { createClipProject, gateway, root } from "./support/workspace";
 
 const approvedUrl = "https://www.youtube.com/watch?v=KNVr5pHAygI";
@@ -12,6 +11,7 @@ test("keeps the Workspace activity indicator live for a real YouTube import", as
   test.setTimeout(deadlineMs + 30_000);
   await fs.mkdir(screenshots, { recursive: true });
   await page.setViewportSize({ width: 1440, height: 900 });
+  await page.emulateMedia({ reducedMotion: "no-preference" });
 
   const projectName = `Workspace indicator ${Date.now()}`;
   let projectId: string | undefined;
@@ -22,7 +22,7 @@ test("keeps the Workspace activity indicator live for a real YouTube import", as
   page.on("pageerror", (error) => pageErrors.push(error.message));
   page.on("requestfailed", (request) => {
     // Workspace event streams are deliberately aborted when navigating away.
-    if (!/\/api\/v1\/jobs\/[^/]+\/events(?:\?|$)/.test(request.url())) {
+    if (!/\/api\/v1\/jobs\/[^/]+\/events(?:\?|$)/.test(request.url()) && !/\/api\/v1\/library\/assets\/[^/]+\/preview(?:\?|$)/.test(request.url())) {
       failedRequests.push(`${request.method()} ${request.url()} — ${request.failure()?.errorText || "failed"}`);
     }
   });
@@ -30,13 +30,38 @@ test("keeps the Workspace activity indicator live for a real YouTube import", as
   const workspaceGeometry = async () => {
     const button = page.getByRole("button", { name: "Workspace", exact: true });
     const badge = page.getByTestId("workspace-work-count");
-    const icon = button.locator("svg").first();
+    const icon = page.getByTestId("workspace-nav-icon");
+    const spinner = page.getByTestId("workspace-work-spinner");
     const buttonBox = await button.boundingBox();
     const badgeBox = await badge.boundingBox();
     const iconBox = await icon.boundingBox();
+    const spinnerBox = await spinner.boundingBox();
     expect(buttonBox).toBeTruthy();
     expect(badgeBox).toBeTruthy();
     expect(iconBox).toBeTruthy();
+    expect(spinnerBox).toBeTruthy();
+    const spinnerStyle = await spinner.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { width: Number.parseFloat(style.width), height: Number.parseFloat(style.height) };
+    });
+    expect(spinnerStyle.width).toBeGreaterThanOrEqual(10);
+    expect(spinnerStyle.width).toBeLessThanOrEqual(12);
+    expect(spinnerStyle.height).toBeGreaterThanOrEqual(10);
+    expect(spinnerStyle.height).toBeLessThanOrEqual(12);
+    // A rotated square's visual bounding box grows to ~15.5px at 45°;
+    // computed CSS dimensions above are the actual indicator size.
+    expect(spinnerBox!.width).toBeLessThanOrEqual(17);
+    expect(spinnerBox!.height).toBeLessThanOrEqual(17);
+    expect(spinnerBox!.x).toBeGreaterThan(iconBox!.x + iconBox!.width);
+    expect(spinnerBox!.x - (iconBox!.x + iconBox!.width)).toBeLessThanOrEqual(6);
+    expect(Math.abs((spinnerBox!.y + spinnerBox!.height / 2) - (iconBox!.y + iconBox!.height / 2))).toBeLessThanOrEqual(3);
+    expect(spinnerBox!.x).toBeGreaterThanOrEqual(buttonBox!.x);
+    expect(spinnerBox!.y).toBeGreaterThanOrEqual(buttonBox!.y);
+    expect(spinnerBox!.x + spinnerBox!.width).toBeLessThanOrEqual(buttonBox!.x + buttonBox!.width);
+    expect(spinnerBox!.y + spinnerBox!.height).toBeLessThanOrEqual(buttonBox!.y + buttonBox!.height);
+    const spinnerBadgeOverlap = spinnerBox!.x < badgeBox!.x + badgeBox!.width && spinnerBox!.x + spinnerBox!.width > badgeBox!.x
+      && spinnerBox!.y < badgeBox!.y + badgeBox!.height && spinnerBox!.y + spinnerBox!.height > badgeBox!.y;
+    expect(spinnerBadgeOverlap, "the spinner must not cover the count badge").toBeFalsy();
     expect(badgeBox!.x).toBeGreaterThanOrEqual(buttonBox!.x);
     expect(badgeBox!.y).toBeGreaterThanOrEqual(buttonBox!.y);
     expect(badgeBox!.x + badgeBox!.width).toBeLessThanOrEqual(buttonBox!.x + buttonBox!.width);
@@ -56,6 +81,31 @@ test("keeps the Workspace activity indicator live for a real YouTube import", as
     return buttonBox;
   };
 
+  const assertAnimatedSpinner = async () => {
+    const spinner = page.getByTestId("workspace-work-spinner");
+    await expect(spinner).toBeVisible();
+    const initial = await spinner.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { name: style.animationName, duration: style.animationDuration, transform: style.transform };
+    });
+    expect(initial.name).not.toBe("none");
+    expect(initial.duration).not.toBe("0s");
+    await page.waitForTimeout(200);
+    const laterTransform = await spinner.evaluate((element) => getComputedStyle(element).transform);
+    expect(laterTransform).not.toBe(initial.transform);
+  };
+
+  const assertStaticReducedMotionSpinner = async () => {
+    const spinner = page.getByTestId("workspace-work-spinner");
+    await expect(spinner).toBeVisible();
+    const style = await spinner.evaluate((element) => {
+      const computed = getComputedStyle(element);
+      return { name: computed.animationName, duration: computed.animationDuration };
+    });
+    expect(style.name).toBe("none");
+    expect(Number.parseFloat(style.duration)).toBeLessThan(0.001);
+  };
+
   const fetchProjectJob = async () => {
     const projects = await (await fetch(`${gateway}/api/v1/projects`)).json() as { id: string; name: string }[];
     const project = projects.find((item) => item.name === projectName);
@@ -71,6 +121,7 @@ test("keeps the Workspace activity indicator live for a real YouTube import", as
     await page.goto("/", { waitUntil: "domcontentloaded" });
     await expect(page.getByText("Local engine ready")).toBeVisible({ timeout: 90_000 });
     const beforeCreate = await page.getByRole("button", { name: "Workspace", exact: true }).boundingBox();
+    await expect(page.getByTestId("workspace-nav-icon")).toBeVisible();
 
     const creationPost = page.waitForResponse((response) => response.request().method() === "POST" && response.url().endsWith("/api/v1/jobs/clip"));
     await createClipProject(page, {
@@ -102,11 +153,13 @@ test("keeps the Workspace activity indicator live for a real YouTube import", as
     expect(initialCount).toBeGreaterThanOrEqual(0);
     expect(initialCount).toBeLessThanOrEqual(5);
     await workspaceGeometry();
+    await assertAnimatedSpinner();
     expect(await page.getByRole("button", { name: "Workspace", exact: true }).boundingBox()).toEqual(beforeCreate);
     await page.screenshot({ path: path.join(screenshots, "workspace-indicator-desktop.png"), fullPage: true });
 
     await page.getByRole("button", { name: "Library", exact: true }).click();
     await expect(badge).toBeVisible();
+    await assertAnimatedSpinner();
     await page.screenshot({ path: path.join(screenshots, "workspace-indicator-library.png"), fullPage: true });
     const describedBy = await page.getByRole("button", { name: "Workspace", exact: true }).getAttribute("aria-describedby");
     expect(describedBy).toBeTruthy();
@@ -116,15 +169,23 @@ test("keeps the Workspace activity indicator live for a real YouTube import", as
     // attached to Workspace while the workspace view is unmounted.
     await page.getByRole("button", { name: "Jobs", exact: true }).click();
     await expect(page.getByTestId("workspace-work-count")).toBeVisible();
+    await assertAnimatedSpinner();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await expect(page.getByTestId("workspace-work-count")).toBeVisible();
+    await assertAnimatedSpinner();
 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.getByRole("button", { name: "Workspace", exact: true }).click();
     await expect(page.getByTestId("workspace-work-count")).toBeVisible();
     await workspaceGeometry();
+    await assertAnimatedSpinner();
     await page.screenshot({ path: path.join(screenshots, "workspace-indicator-mobile.png"), fullPage: true });
     await page.setViewportSize({ width: 1440, height: 900 });
+
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await assertStaticReducedMotionSpinner();
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    await assertAnimatedSpinner();
 
     const observedCounts: number[] = [initialCount];
     let sawDecrease = false;
@@ -137,6 +198,7 @@ test("keeps the Workspace activity indicator live for a real YouTube import", as
         if (!job || job.mode !== "clip" || !["queued", "active", "paused", "recovered", "stalled"].includes(job.state)) {
           completed = true;
           await expect(page.getByTestId("workspace-work-count")).toHaveCount(0, { timeout: 30_000 });
+          await expect(page.getByTestId("workspace-work-spinner")).toHaveCount(0, { timeout: 30_000 });
           return;
         }
         const current = Number(await page.getByTestId("workspace-work-count").textContent());
@@ -145,6 +207,8 @@ test("keeps the Workspace activity indicator live for a real YouTube import", as
         expect(current).toBeLessThanOrEqual(5);
         if (current < observedCounts.at(-1)!) sawDecrease = true;
         expect(current, "count must not increase during one job").toBeLessThanOrEqual(observedCounts.at(-1)!);
+        const processing = ["queued", "active", "recovered"].includes(job.state);
+        await expect(page.getByTestId("workspace-work-spinner")).toHaveCount(processing ? 1 : 0);
         observedCounts.push(current);
         await page.waitForTimeout(1_000);
       }
@@ -166,6 +230,7 @@ test("keeps the Workspace activity indicator live for a real YouTube import", as
       expect(Number(await page.getByTestId("workspace-work-count").textContent())).toBe(expected);
     } else {
       await expect(page.getByTestId("workspace-work-count")).toHaveCount(0);
+      await expect(page.getByTestId("workspace-work-spinner")).toHaveCount(0);
     }
 
     await page.screenshot({ path: path.join(screenshots, "workspace-indicator-complete.png"), fullPage: true });

@@ -216,6 +216,8 @@ describe("App shell", () => {
     expect(workspace).toHaveAttribute("aria-describedby", "workspace-work-description");
     expect(badge).toHaveTextContent("4");
     expect(badge).toHaveAttribute("aria-hidden", "true");
+    expect(screen.getByTestId("workspace-nav-icon")).toBeInTheDocument();
+    expect(screen.getByTestId("workspace-work-spinner")).toBeInTheDocument();
     expect(workspace).toHaveAccessibleDescription("4 clips remaining across 1 active job");
   });
 
@@ -230,8 +232,10 @@ describe("App shell", () => {
     await act(async () => undefined);
 
     expect(screen.getByTestId("workspace-work-count")).toHaveTextContent("4");
+    expect(screen.getByTestId("workspace-work-spinner")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /^Library$/ }));
     expect(screen.getByTestId("workspace-work-count")).toHaveTextContent("4");
+    expect(screen.getByTestId("workspace-work-spinner")).toBeInTheDocument();
 
     await act(async () => { await vi.advanceTimersByTimeAsync(4_000); });
     expect(mockListJobs).toHaveBeenCalledTimes(2);
@@ -241,12 +245,45 @@ describe("App shell", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(4_000); });
     expect(mockListJobs).toHaveBeenCalledTimes(3);
     expect(screen.queryByTestId("workspace-work-count")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("workspace-work-spinner")).not.toBeInTheDocument();
+  });
+
+  it.each(["queued", "active", "recovered"] as const)("shows the processing spinner for %s work", async (state) => {
+    mockGetHealth.mockResolvedValue(health);
+    mockListProjects.mockResolvedValue([activityProject]);
+    mockListJobs.mockResolvedValue([{ ...activityJob, state }]);
+    render(<App />);
+    expect(await screen.findByTestId("workspace-work-spinner")).toBeInTheDocument();
+    expect(screen.getByTestId("workspace-work-count")).toBeInTheDocument();
+  });
+
+  it.each(["complete", "failed", "cancelled_kept", "paused", "stalled"] as const)("does not show the spinner for %s work", async (state) => {
+    mockGetHealth.mockResolvedValue(health);
+    mockListProjects.mockResolvedValue([activityProject]);
+    mockListJobs.mockResolvedValue([{ ...activityJob, state }]);
+    render(<App />);
+    await screen.findByRole("button", { name: /^Workspace$/ });
+    expect(screen.getByTestId("workspace-nav-icon")).toBeInTheDocument();
+    expect(screen.queryByTestId("workspace-work-spinner")).not.toBeInTheDocument();
+    if (state === "paused" || state === "stalled") expect(screen.getByTestId("workspace-work-count")).toBeInTheDocument();
+    else expect(screen.queryByTestId("workspace-work-count")).not.toBeInTheDocument();
+  });
+
+  it("keeps the decorative spinner out of the Workspace accessible name", async () => {
+    mockGetHealth.mockResolvedValue(health);
+    mockListProjects.mockResolvedValue([activityProject]);
+    mockListJobs.mockResolvedValue([activityJob]);
+    render(<App />);
+    const workspace = await screen.findByRole("button", { name: /^Workspace$/ });
+    expect(workspace).toHaveAttribute("aria-label", "Workspace");
+    expect(screen.getByTestId("workspace-work-spinner").closest("span")).toHaveAttribute("aria-hidden", "true");
   });
 
   it("does not render an activity badge when no work is live", async () => {
     mockGetHealth.mockResolvedValue(health);
     render(<App />);
     await screen.findByRole("button", { name: /^Workspace$/ });
+    expect(screen.getByTestId("workspace-nav-icon")).toBeInTheDocument();
     expect(screen.queryByTestId("workspace-work-count")).not.toBeInTheDocument();
   });
 });

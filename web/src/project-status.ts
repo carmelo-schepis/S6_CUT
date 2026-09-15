@@ -20,10 +20,13 @@ export function projectStatus(project: Project, jobs: Job[]) {
 
 /** Job states that mean work is still in flight. */
 const liveJobStates = new Set(["queued", "active", "paused", "recovered", "stalled"]);
+const processingJobStates = new Set(["queued", "active", "recovered"]);
 
 export type WorkspaceActivity = {
   liveJobCount: number;
   remainingClips: number;
+  activeJobCount: number;
+  isProcessing: boolean;
 } | null;
 
 const preClipStages = new Set([
@@ -59,9 +62,12 @@ export function workspaceActivity(projects: Project[], jobs: Job[]): WorkspaceAc
   const projectById = new Map(projects.map((project) => [project.id, project]));
   const liveClipJobs = jobs.filter((job) => job.mode === "clip" && liveJobStates.has(job.state));
   if (liveClipJobs.length === 0) return null;
+  const activeJobCount = liveClipJobs.filter((job) => processingJobStates.has(job.state)).length;
   return {
     liveJobCount: liveClipJobs.length,
     remainingClips: liveClipJobs.reduce((total, job) => total + remainingForJob(job, projectById.get(job.projectId)), 0),
+    activeJobCount,
+    isProcessing: activeJobCount > 0,
   };
 }
 
