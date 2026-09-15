@@ -37,7 +37,7 @@ The browser owns interaction state. The engine is authoritative for projects, jo
 4. Before announcing each stage/result, save the SQLite job and atomically replace `jobs/<uuid>/state.json`.
 5. Smart mode transcribes with visible Whisper model stages; fast mode skips transcription, providers, selection, Library resolution, and captions entirely — it probes, plans neutral windows with `plan_fast_windows`, and renders each cut independently with `render_fast_clip` (silent sources allowed).
 6. Generate sentence-aware, duration-bounded, deterministic candidates and score components.
-7. Resolve a personal Library asset first; otherwise use an explicit relevant text card.
+7. For Clip mode, resolve an eligible personal Library asset only as an optional overlay; the imported source remains the video. Script-mode visual beats may use an explicit relevant text card when no eligible asset matches.
 8. Render each clip independently to a partial filename, probe its structure, then atomically publish.
 9. Hash each validated source/output into `blobs/sha256`, using a same-filesystem hard link when possible and an atomic copy fallback otherwise. In one SQLite transaction, bind the blob, project/job/clip reference, idempotent Library asset, typed origin, and immutable business-folder snapshot. Temporary or failed files never cross this boundary.
 10. Keep successful clips if another render fails; failed clips remain scoped and retryable. Recovery repeats publication safely using stable source/clip identities.
@@ -53,7 +53,7 @@ The canonical job/clip/beat records are the first versioned EDL. FFmpeg consumes
 
 1. centre/subject-safe source crop;
 2. Library visual overlay where a valid matched file exists;
-3. relevant text-card visual intention;
+3. for Script mode only, a relevant text-card visual beat when no eligible asset matches;
 4. word-by-word ASS captions with current-word highlight;
 5. source speech or generated narration.
 

@@ -140,7 +140,7 @@ Whisper job stages report real, incrementally observed progress: each fraction i
 | Smart clip selection | Optional OpenRouter ordering over validated local candidates | Deterministic local candidate planning |
 | Script planning | Optional OpenRouter structured planning boundary | Deterministic exact-span phrase planner |
 | Narration | Selected OpenRouter speech model and voice | Local espeak-ng; then explicitly silent render |
-| Visuals | Required/preferred personal Library | Relevant local text card; wrong media is not substituted |
+| Visuals | Clip mode cuts the imported source; a valid personal Library asset may be composited as an overlay | Script mode uses a relevant local text card when no eligible visual asset matches; Clip mode never substitutes a text card for source footage |
 | YouTube | Constrained local yt-dlp | Local upload remains available and the URL failure is scoped |
 
 The application remains operational when OpenRouter is the only configured API. Clip mode also works with no API key. Optional provider failure becomes a visible warning and local fallback, not a corrupt project.
