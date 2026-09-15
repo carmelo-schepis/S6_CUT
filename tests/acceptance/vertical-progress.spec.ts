@@ -101,7 +101,7 @@ test.describe("vertical creation progress", () => {
       const projectName = `Vertical progress ${Date.now()}`;
       await page.locator('input[type="file"]').setInputFiles("test-video.mp4");
       await page.getByRole("textbox", { name: "Project name" }).fill(projectName);
-      await page.getByRole("button", { name: "Fast" }).click();
+      await page.getByRole("button", { name: "Fast", exact: true }).click();
       for (let index = 0; index < 4; index += 1) await page.getByRole("button", { name: "Fewer clips" }).click();
       const createResponsePromise = page.waitForResponse((response) => response.url().endsWith("/api/v1/jobs/clip") && response.request().method() === "POST");
       await page.getByRole("button", { name: "Create 1 short clip" }).click();
