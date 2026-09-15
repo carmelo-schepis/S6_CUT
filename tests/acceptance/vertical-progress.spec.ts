@@ -156,8 +156,37 @@ test.describe("vertical creation progress", () => {
         }
       };
 
+      const assertDenseLayout = async () => {
+        const list = progress.getByRole("list");
+        const boxes = await Promise.all((await items.all()).map((item) => item.boundingBox()));
+        const checklistBox = await progress.boundingBox();
+        const lowerWorkspaceBox = await page.locator("[data-testid=\"lower-workspace\"]").boundingBox();
+        const listContentWidth = await list.evaluate((element) => {
+          const style = getComputedStyle(element);
+          return element.getBoundingClientRect().width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+        });
+        expect(checklistBox).not.toBeNull();
+        expect(checklistBox!.height).toBeLessThanOrEqual(380);
+        expect(checklistBox!.height).toBeGreaterThanOrEqual(280);
+        expect(checklistBox!.height).toBeLessThanOrEqual(340);
+        if (await page.evaluate(() => window.innerWidth) === 1440) console.log(`Dense checklist at 1440x900: ${checklistBox!.height}px`);
+        expect(boxes.every((box) => box !== null && box.height <= 28)).toBe(true);
+        for (let index = 0; index < boxes.length; index += 1) {
+          expect(Math.abs(boxes[index]!.x - boxes[0]!.x)).toBeLessThanOrEqual(1);
+          expect(Math.abs(boxes[index]!.width - listContentWidth)).toBeLessThanOrEqual(2);
+          if (index > 0) {
+            expect(boxes[index]!.y).toBeGreaterThan(boxes[index - 1]!.y);
+            expect(boxes[index]!.y - (boxes[index - 1]!.y + boxes[index - 1]!.height)).toBeLessThanOrEqual(4);
+          }
+        }
+        expect(lowerWorkspaceBox && checklistBox!.y + checklistBox!.height <= lowerWorkspaceBox.y).toBe(true);
+        expect(lowerWorkspaceBox!.y).toBeLessThan(900);
+      };
+
       await page.setViewportSize({ width: 1920, height: 1080 });
       await assertVerticalLayout();
+      await assertDenseLayout();
+      await page.screenshot({ path: "test-artifacts/progress-dense-desktop.png", fullPage: true });
       const activeMeta = progress.locator("[aria-current=\"step\"] .checklist-step-meta");
       const activeLabelBox = await progress.locator("[aria-current=\"step\"] .checklist-label").boundingBox();
       const activeMetaBox = await activeMeta.boundingBox();
@@ -167,6 +196,7 @@ test.describe("vertical creation progress", () => {
 
       await page.setViewportSize({ width: 1440, height: 900 });
       await assertVerticalLayout();
+      await assertDenseLayout();
 
       await page.setViewportSize({ width: 768, height: 1024 });
       await assertVerticalLayout();
@@ -176,6 +206,7 @@ test.describe("vertical creation progress", () => {
       const mobileMetaBox = await activeMeta.boundingBox();
       expect(mobileLabelBox && mobileMetaBox && mobileMetaBox.y >= mobileLabelBox.y).toBeTruthy();
       expect(await progress.locator("[aria-current=\"step\"] .checklist-step-body").evaluate((element) => getComputedStyle(element).display)).toBe("grid");
+      await page.screenshot({ path: "test-artifacts/progress-dense-mobile.png", fullPage: true });
       await page.screenshot({ path: "test-artifacts/progress-list-mobile.png", fullPage: true });
       await page.setViewportSize({ width: 1440, height: 900 });
 
@@ -206,7 +237,22 @@ test.describe("vertical creation progress", () => {
       await expect(failedProgress.getByText("Failed", { exact: true })).toBeVisible();
       await expect(failedProgress.getByText("Deterministic test failure: provider unavailable.", { exact: true })).toBeVisible();
       await expect(page.getByRole("button", { name: "Retry failed work" })).toBeVisible();
+      await page.screenshot({ path: "test-artifacts/progress-dense-failed.png", fullPage: true });
       await page.screenshot({ path: "test-artifacts/progress-list-failed.png", fullPage: true });
+
+      await page.setViewportSize({ width: 390, height: 844 });
+      const failedItems = failedProgress.getByRole("listitem");
+      await expect(failedItems).toHaveCount(expectedLabels.length);
+      await expect(failedProgress.getByText("Deterministic test failure: provider unavailable.", { exact: true })).toBeVisible();
+      for (const item of await failedItems.all()) {
+        const box = await item.boundingBox();
+        const labelBox = await item.locator(".checklist-label").boundingBox();
+        const metaBox = await item.locator(".checklist-step-meta").boundingBox();
+        expect(box && box.width <= 390).toBe(true);
+        expect(labelBox && metaBox && metaBox.y >= labelBox.y).toBe(true);
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      await page.setViewportSize({ width: 1440, height: 900 });
 
       await page.getByRole("button", { name: "Retry failed work" }).click();
       await expect.poll(() => failedProgress.locator("[aria-current=\"step\"]").count(), { timeout: 15_000 }).toBe(1);

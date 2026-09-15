@@ -978,12 +978,12 @@ main { min-width: 0; }
   background: var(--surface-1);
 }
 .checklist-heading {
-  min-height: var(--control-height-large);
+  min-height: 32px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-3);
-  padding: 0 var(--space-4);
+  gap: var(--space-2);
+  padding: 0 10px;
   border-bottom: 1px solid var(--border-soft);
 }
 .checklist-heading h2 {
@@ -1002,15 +1002,15 @@ main { min-width: 0; }
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: 2px;
   margin: 0;
-  padding: var(--space-4);
+  padding: 8px;
 }
 .process-checklist::before {
   position: absolute;
-  top: calc(var(--space-4) + 16px);
-  bottom: calc(var(--space-4) + 16px);
-  left: calc(var(--space-4) + 12px);
+  top: calc(8px + 9px);
+  bottom: calc(8px + 9px);
+  left: calc(8px + 9px);
   width: 1px;
   background: var(--border);
   content: "";
@@ -1018,37 +1018,39 @@ main { min-width: 0; }
 .checklist-step {
   position: relative;
   display: flex;
-  align-items: flex-start;
-  gap: var(--space-3);
+  align-items: center;
+  gap: 8px;
   align-self: stretch;
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
-  padding: var(--space-3);
+  padding: 2px 8px;
   border: 1px solid transparent;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-control);
+  line-height: 16px;
 }
 .checklist-icon {
   position: relative;
   z-index: 1;
-  flex: 0 0 24px;
-  width: 24px;
-  height: 24px;
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
   display: grid;
   place-items: center;
+  box-sizing: border-box;
   border: 1px solid var(--border-strong);
   border-radius: 50%;
   color: var(--text-primary);
   background: var(--surface-1);
 }
-.checklist-icon svg { width: 13px; height: 13px; }
+.checklist-icon svg { width: 11px; height: 11px; }
 .checklist-step-body {
   min-width: 0;
   flex: 1 1 auto;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
-  gap: var(--space-4);
+  gap: 8px;
 }
 .checklist-label {
   min-width: 0;
@@ -1060,11 +1062,12 @@ main { min-width: 0; }
   min-width: 0;
   flex: 0 1 62%;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: flex-end;
   flex-wrap: wrap;
-  gap: var(--space-1) var(--space-3);
+  gap: 2px 8px;
   color: var(--text-primary);
+  line-height: 16px;
   text-align: right;
   overflow-wrap: anywhere;
 }
@@ -1077,11 +1080,13 @@ main { min-width: 0; }
 }
 .checklist-detail {
   min-width: 0;
+  max-width: 100%;
   display: inline-flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: var(--space-1) var(--space-2);
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 2px 8px;
   color: var(--text-primary);
+  overflow: hidden;
   overflow-wrap: anywhere;
 }
 .checklist-step.status-pending .checklist-label,
@@ -1139,10 +1144,10 @@ main { min-width: 0; }
   from { transform: scale(.5); opacity: .4; }
   to { transform: scale(1); opacity: 1; }
 }
-.checklist-panel.compact .process-checklist { padding: var(--space-4); gap: var(--space-2); }
-.checklist-panel.compact .checklist-step { padding: var(--space-3); }
-.checklist-elapsed { flex: 0 0 auto; font-variant-numeric: tabular-nums; }
-.checklist-detail-text { min-width: 0; overflow-wrap: anywhere; }
+.checklist-panel.compact .process-checklist { padding: 8px; gap: 2px; }
+.checklist-panel.compact .checklist-step { padding: 2px 8px; }
+.checklist-elapsed { flex: 0 0 auto; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.checklist-detail-text { min-width: 0; overflow: hidden; overflow-wrap: anywhere; text-overflow: ellipsis; white-space: nowrap; }
 
 .transport { display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-3); border-top: 1px solid var(--border-soft); color: var(--text-primary); }/* A 100%-white disc on --canvas was the highest-contrast object on the page and
    the only filled circle in the product — a sticker rather than a control. It is
@@ -1381,8 +1386,11 @@ main { min-width: 0; }
 }
 
 @media (max-width: 540px) {
+  .checklist-step { gap: 6px; padding: 4px 6px; }
   .checklist-step-body { display: grid; gap: var(--space-1); }
   .checklist-step-meta { width: 100%; flex-basis: auto; justify-content: flex-start; text-align: left; }
+  .checklist-detail { flex-wrap: wrap; overflow: visible; }
+  .checklist-detail-text { overflow: visible; text-overflow: clip; white-space: normal; }
   .section-tools { flex-wrap: wrap; justify-content: flex-end; }.project-search input { width: 150px; }
   .topbar-state .status { display: none; }.page-header h1 { font-size: var(--type-heading-size); font-weight: var(--type-heading-weight); line-height: var(--type-heading-line); letter-spacing: var(--type-heading-tracking); }.segmented button { padding: 7px; }.segmented button svg { display: none; }.create-topline { flex-direction: column; align-items: stretch; padding: 14px; }.create-topline > .segmented { width: 100%; }.create-topline p { display: none; }.style-grid { grid-template-columns: 1fr 1fr; }.project-grid { grid-template-columns: 1fr; }
   .workspace-page { padding: 0 var(--page-inset) var(--space-6); }.workspace-commandbar { display: grid; align-items: stretch; gap: 10px; }.workspace-controls { justify-content: flex-start; }.workspace-commandbar .status { display: none; }.job-strip { display: block; }.job-strip .progress-wrap { width: 100%; margin-top: 6px; }.viewer-frame { height: min(400px, 115vw); }.viewer-stage { min-height: 400px; padding: var(--space-2); }.clip-board { padding: var(--space-2); }.inspector-tabs { overflow-x: auto; }

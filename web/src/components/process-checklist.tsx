@@ -139,13 +139,13 @@ export function ProcessChecklist({ steps, jobState, compact = false, label = "Sh
                 <span className="checklist-step-meta">
                   <span className="checklist-status-text">{statusLabel(step.status, paused)}</span>
                   {active && !paused && (step.detail || step.startedAt) && (
-                    <span className="checklist-detail">
+                    <span className="checklist-detail" title={step.detail || undefined}>
                       {step.startedAt && <time className="checklist-elapsed">Elapsed {formatElapsed(step.startedAt, now)}</time>}
-                      {step.detail && <span className="checklist-detail-text">{step.detail}</span>}
+                      {step.detail && <span className="checklist-detail-text" title={step.detail}>{step.detail}</span>}
                     </span>
                   )}
                   {(step.status === "skipped" || step.status === "failed") && step.detail && (
-                    <span className="checklist-detail">{step.detail}</span>
+                    <span className="checklist-detail" title={step.detail}><span className="checklist-detail-text" title={step.detail}>{step.detail}</span></span>
                   )}
                   {progress && <span className="checklist-progress">{progress}</span>}
                 </span>
