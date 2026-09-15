@@ -1498,3 +1498,393 @@ main { min-width: 0; }
     background: var(--theme-primary-soft);
   }
 }
+
+/* ===========================================================================
+   WORKSPACE — measured-canvas pass
+   ---------------------------------------------------------------------------
+   Additive layer. Nothing above is deleted or rewritten; every rule here
+   resolves through the existing token surface (--space-*, --surface-*,
+   --border*, --selector-highlight) exactly as DO-NOT-CHANGE/AGENTS.md requires.
+
+   What this pass fixes, in the order a reader notices it:
+
+     1. The page had no measure. Content stretched to 1900px, so a checklist row
+        put its label at x=150 and its status at x=1250 with 1100px of nothing
+        between them. Hierarchy cannot survive that much unstructured width.
+     2. Nothing landed on the 4px grid. The three panels measured
+        310.612 / 751.487 / 350.7px because the columns were fractional `fr`
+        units; every hairline inside them then fell on a different subpixel.
+        The columns are whole pixels here and the panels are one framed slab.
+     3. The progress list read as twelve floating tinted pills — a full-width
+        green wash that outweighed the video it was describing. Status now
+        travels in the icon and one aligned status column; the rows are a
+        ledger separated by hairlines, and only the in-flight row lifts.
+     4. The output — the thing the whole page exists to show — rendered 228px
+        wide inside a 751px panel. It scales with the viewport now.
+
+   Three contracts constrain everything below, and each is enforced by an
+   acceptance suite rather than by convention:
+     · controls stay outlines at rest, radius <= 2px  (control-style spec)
+     · every visible text node stays white            (ui-theme spec)
+     · the progress panel stays a full-width vertical
+       list, rows <= 28px, panel 280-340px tall       (vertical-progress spec)
+   Panels and surfaces are not controls, so they carry the 12px surface radius;
+   buttons are untouched.
+   =========================================================================== */
+
+:root {
+  /* The single horizontal measure the workspace aligns to.
+
+     This is not a new number: it is the 1540px measure `.page` already uses,
+     and that `.topbar` already mirrors through
+     `padding-inline: max(--page-inset, (100% - 1540px)/2 + --page-inset)`.
+     The workspace was the one route that opted out at 1900px, so above roughly
+     a 1600px viewport its content ran 200px wider than the topbar sitting
+     directly above it. visual-alignment.spec.ts asserts those two edges share a
+     column but only samples up to 1440px, which is why the drift survived. */
+  --ws-measure: 1540px;
+  /* Whole-pixel side columns; the viewer takes what is left, so every column
+     edge lands on an integer instead of on .612 of a pixel. */
+  --ws-rail-left: 300px;
+  --ws-rail-right: 340px;
+  /* Surface radius for panel-sized objects. Controls keep --radius-control. */
+  --ws-panel-radius: var(--radius-xl);
+  /* The output frame grows with the viewport instead of sitting at a fixed
+     405px on every screen from a laptop to a 4K display. */
+  --ws-frame-height: clamp(360px, 52vh, 620px);
+  /* Page title. A third typography role, added rather than bypassed: the two
+     product roles (12px heading / 11px text) describe objects *inside* a page
+     and leave the page itself unnamed, so the workspace h1 rendered at the same
+     12px as every panel caption beside it. This token is used by exactly one
+     element — .workspace-project-name — and is not a general heading size. */
+  --type-title-size: 18px;
+  --type-title-weight: 600;
+  --type-title-line: 24px;
+  --type-title-tracking: -0.4px;
+}
+
+/* --- Page container ------------------------------------------------------ */
+
+.workspace-page {
+  max-width: var(--ws-measure);
+  /* One rhythm for the whole column: 24px between major sections, stated once
+     here as a flow gap instead of as a different margin on each child. */
+  display: flow-root;
+}
+
+/* Every top-level band of the page separates by the same 24px. The command bar
+   owns its own top padding, so the gap is applied as a top margin on what
+   follows it rather than as a bottom margin that would double up. */
+.workspace-page > .checklist-panel,
+.workspace-page > .workspace-grid,
+.workspace-page > .board-panel,
+.workspace-page > .workspace-offline,
+.workspace-page > .workspace-alert,
+.workspace-page > .stalled-callout,
+.workspace-page > .failure-strip,
+.workspace-page > .warning-strip,
+.workspace-page > .job-strip {
+  margin-top: var(--space-6);
+}
+
+/* --- Command bar --------------------------------------------------------- */
+
+.workspace-commandbar {
+  /* 4px of horizontal padding put the title 4px off the guide every panel
+     below it starts on. The bar aligns to the page edge like everything else. */
+  padding: var(--space-5) 0 0;
+  min-height: 0;
+  gap: var(--space-6);
+}
+
+.workspace-project-context { gap: var(--space-3); }
+
+/* The page's h1. See --type-title-* above for why this is a third role. */
+.workspace-project-name {
+  font-size: var(--type-title-size);
+  font-weight: var(--type-title-weight);
+  line-height: var(--type-title-line);
+  letter-spacing: var(--type-title-tracking);
+}
+
+.workspace-project-meta { gap: var(--space-1); }
+
+/* Source name and style/mode metadata are one line of context under the title,
+   not two stacked orphans. */
+.workspace-source-meta,
+.workspace-secondary-meta { line-height: var(--type-text-line); }
+
+/* The mode chip aligns to the title's cap height rather than to the centre of
+   the whole two-line stack, which is what made it look dropped. */
+.workspace-project-context > .mode-chip { align-self: flex-start; margin-top: 3px; }
+
+/* --- Progress ledger ----------------------------------------------------- */
+
+.checklist-panel {
+  margin: 0;
+  border-radius: var(--ws-panel-radius);
+  /* The 2px left accent bar was the loudest edge on the page and it ran the
+     full height of a panel that is mostly finished work. The panel is a
+     hairline card like every other surface; the in-flight row carries the
+     accent instead. */
+  border-left: 1px solid var(--border-soft);
+  overflow: hidden;
+}
+
+.checklist-heading {
+  /* 36, not 40: the panel lives inside a 280-340px height contract that eleven
+     rows already spend 275px of, so the heading's eight spare pixels are the
+     difference between comfortable and failing. */
+  min-height: 36px;
+  padding: 0 var(--space-4);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+/* A 16px disc around an 11px glyph. The row's height is set by this icon, not
+   by its 16px line box, so two pixels here are two pixels on every row. */
+.checklist-icon { flex: 0 0 16px; width: 16px; height: 16px; }
+
+/* Uppercase at 12px/600 with the display tracking pulled negative reads as a
+   compressed shout. A caption set in caps wants tracking opened, not closed. */
+.checklist-heading h2 { letter-spacing: 0.6px; }
+
+.process-checklist {
+  /* Rows meet on hairlines instead of floating 2px apart, so the twelve of them
+     read as one ledger. This also buys back the vertical budget the taller
+     heading spends: the panel stays inside its 280-340px contract. */
+  gap: 0;
+  padding: 0;
+}
+
+/* The connector rail is redrawn against the new padding. It stops at the first
+   and last icon rather than running past them into the panel edges. */
+.process-checklist::before {
+  /* Half a row: 4px of row padding plus half of the 16px icon. */
+  top: 12px;
+  bottom: 12px;
+  left: calc(var(--space-4) + 8px);
+}
+
+.checklist-step {
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-4);
+  border: 0;
+  border-top: 1px solid var(--border-soft);
+  border-radius: 0;
+}
+
+.checklist-step:first-child { border-top: 0; }
+
+/* Status is carried by the icon, which is where a reader already looks. A
+   full-width tinted row for every finished step made twelve completed steps
+   louder than the one in progress. */
+.checklist-step.status-complete,
+.checklist-step.status-skipped,
+.checklist-step.status-pending,
+.checklist-step.status-failed {
+  background: transparent;
+}
+
+.checklist-step.status-active {
+  /* The single row that is actually happening. One surface step up plus the
+     approved selection accent — the same accent a selected tab uses, because
+     this is the same idea: the row the system is currently on. */
+  background: var(--surface-2);
+  border-color: var(--border);
+  box-shadow: inset 2px 0 var(--selector-highlight);
+}
+
+/* Stepped from the status tokens rather than restated as literals, so a change
+   to --success or --error reaches the ledger with them. */
+.checklist-step.status-complete .checklist-icon { border-color: color-mix(in srgb, var(--success) 45%, transparent); }
+.checklist-step.status-failed .checklist-icon { border-color: color-mix(in srgb, var(--error) 45%, transparent); }
+.checklist-step.status-active .checklist-icon { border-color: var(--selector-highlight); }
+
+/* Above the mobile breakpoint the status travels in its own aligned column, so
+   "Complete", "Skipped" and "In progress" share a left edge down all twelve
+   rows instead of ending ragged against the right margin. Below it the existing
+   540px block already stacks label over meta; that rule is left alone. */
+@media (min-width: 541px) {
+  .checklist-step-body { gap: var(--space-6); }
+  .checklist-step-meta {
+    flex: 0 0 auto;
+    justify-content: flex-end;
+    flex-wrap: nowrap;
+    gap: var(--space-3);
+    text-align: right;
+  }
+  /* One fixed column for the status word; the detail sits to its left and
+     truncates there rather than pushing the status out of alignment. */
+  .checklist-status-text {
+    order: 2;
+    flex: 0 0 76px;
+    text-align: left;
+  }
+  .checklist-detail,
+  .checklist-progress { order: 1; }
+  .checklist-detail-text { max-width: 46ch; }
+}
+
+/* --- The three-panel slab ------------------------------------------------ */
+
+.workspace-grid {
+  /* Whole pixels. `minmax(205px,.62fr) minmax(420px,1.5fr) minmax(220px,.7fr)`
+     resolved to 310.612 / 751.487 / 350.7 and put every hairline inside those
+     panels on a different subpixel. */
+  grid-template-columns: var(--ws-rail-left) minmax(0, 1fr) var(--ws-rail-right);
+  min-height: 0;
+}
+
+/* One framed object with hairline dividers, rather than three cards pushed
+   together. The corners are rounded per-panel instead of by clipping the grid,
+   so a focus ring inside a panel is never cut off at the panel edge. */
+.workspace-grid > .panel:first-child {
+  border-radius: var(--ws-panel-radius) 0 0 var(--ws-panel-radius);
+}
+.workspace-grid > .panel:last-child {
+  border-radius: 0 var(--ws-panel-radius) var(--ws-panel-radius) 0;
+}
+.workspace-grid > .panel + .panel { border-left: 1px solid var(--border-soft); }
+
+/* Panel chrome is one height across all three columns. The source tabs, the
+   viewer toolbar and the inspector title were 40 / 40 / 40 by coincidence and
+   drifted apart the moment any of them gained a control. */
+.panel-tabs,
+.inspector-tabs,
+.panel-title,
+.viewer-toolbar {
+  min-height: 40px;
+  padding-inline: var(--space-4);
+}
+.panel-tabs button,
+.inspector-tabs button { padding: 0 var(--space-3); }
+.panel-tabs button:first-child,
+.inspector-tabs button:first-child { margin-left: calc(var(--space-3) * -1); }
+
+.source-content,
+.inspector-content { padding: var(--space-4); }
+
+.source-card { padding: var(--space-3); border-radius: var(--radius-md); }
+.source-icon { border-radius: var(--radius-sm); }
+
+/* --- Output viewer ------------------------------------------------------- */
+
+.viewer-panel {
+  grid-template-rows: 40px minmax(0, 1fr) 40px;
+  background: var(--canvas);
+}
+
+.viewer-stage {
+  min-height: 0;
+  padding: var(--space-6);
+  background: var(--canvas);
+}
+
+/* The protagonist. A 9:16 short rendered 228px wide inside a 751px panel was
+   the smallest object on a page built to show it. */
+.viewer-frame {
+  height: var(--ws-frame-height);
+  max-width: 100%;
+  border-radius: var(--radius-lg);
+  box-shadow: none;
+}
+
+.viewer-frame.landscape { width: min(100%, 860px); }
+
+.transport { padding-inline: var(--space-4); gap: var(--space-3); }
+
+/* --- Inspector ----------------------------------------------------------- */
+
+.score-total { gap: var(--space-4); padding-bottom: var(--space-4); }
+.score-total > span { width: 44px; height: 44px; border-width: 1px; }
+.score-explanation { margin: var(--space-4) 0; }
+.factor-list { gap: var(--space-3); }
+/* The bar is the measure being read; 3px was a hairline pretending to be one. */
+.factor-list > div { grid-template-columns: minmax(0, 1fr) 96px 28px; }
+.factor-list > div > div { height: 4px; border-radius: var(--radius-control); }
+.factor-list i { border-radius: var(--radius-control); }
+
+/* --- Board --------------------------------------------------------------- */
+
+.board-panel {
+  margin-top: var(--space-6);
+  border-radius: var(--ws-panel-radius);
+  overflow: hidden;
+}
+
+.board-header {
+  min-height: 40px;
+  padding: 0 var(--space-4);
+  gap: var(--space-2) var(--space-4);
+}
+
+.clip-board,
+.beat-board {
+  gap: var(--space-3);
+  padding: var(--space-4);
+  /* A tile cut in half at the right edge reads as a layout bug unless the page
+     says it is a scroller. Snap points make the scroll deliberate. */
+  scroll-snap-type: x proximity;
+  scroll-padding-left: var(--space-4);
+}
+
+.clip-tile,
+.beat-tile { scroll-snap-align: start; border-radius: var(--radius-md); }
+
+.beat-tile { padding: var(--space-3); gap: var(--space-3); }
+.beat-visual { border-radius: var(--radius-sm); }
+.clip-tile-body { padding: var(--space-3); gap: var(--space-2); }
+
+/* A tile is a target, so it answers the pointer. One surface step and a
+   stronger hairline — no lift, no shadow, no colour: the page's depth is
+   carried by the surface ladder, and a hover that invented its own treatment
+   would be the only object on the page doing so. The global
+   prefers-reduced-motion block already zeroes the transition. */
+.clip-tile,
+.beat-tile { transition: background-color .12s ease, border-color .12s ease; }
+.clip-tile:hover,
+.beat-tile:hover { background: var(--surface-3); border-color: var(--border-strong); }
+.clip-tile.active:hover { border-color: var(--selector-highlight); }
+
+/* The beat tile's status chip sits in a grid row of its own (`grid-column:
+   span 2`), and a grid item stretches to its row by default — so the chip grew
+   to 32.5px and 40.5px on tiles whose text wrapped, while the same component in
+   the topbar and the command bar stayed 24px. `--chip-height` exists precisely
+   so a row of these never staggers; the chip holds it here too. */
+.beat-tile .status { align-self: start; }
+
+/* --- Responsive ---------------------------------------------------------- */
+
+@media (max-width: 1180px) {
+  :root { --ws-rail-left: 260px; --ws-rail-right: 300px; }
+}
+
+@media (max-width: 1180px) {
+  /* The source column is the first thing a narrow viewport can afford to lose,
+     and the existing 1180px block already hides it. This restates the surviving
+     two-column geometry in whole pixels on the same breakpoint, so the
+     inspector is not 240px wide from 1180 to 1025 and 300px below that. */
+  .workspace-grid { grid-template-columns: minmax(0, 1fr) 300px; }
+}
+
+@media (max-width: 820px) {
+  /* Stacked: the slab becomes one rounded card per panel. */
+  .workspace-grid > .panel:first-child,
+  .workspace-grid > .panel:last-child { border-radius: var(--ws-panel-radius); }
+  .workspace-grid > .panel + .panel {
+    border-left: 1px solid var(--border-soft);
+    margin-top: var(--space-3);
+  }
+  .viewer-stage { padding: var(--space-4); }
+}
+
+@media (max-width: 600px) {
+  :root { --type-title-size: 16px; --type-title-line: 22px; }
+  .workspace-commandbar { padding-top: var(--space-4); }
+  .checklist-heading,
+  .board-header,
+  .source-content,
+  .inspector-content { padding-inline: var(--space-3); }
+  .checklist-step { padding-inline: var(--space-3); }
+  .process-checklist::before { left: calc(var(--space-3) + 8px); }
+}
