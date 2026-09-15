@@ -34,6 +34,19 @@ const profile = {
   status: "connected", capabilities: ["OpenRouter text generation", "OpenRouter TTS"], fallbacks: { planning: "Deterministic planner" },
 };
 
+const activityProject = {
+  schemaVersion: 1 as const, id: "activity-project", name: "Activity project", mode: "clip" as const,
+  style: "educational" as const, state: "active" as const, sourceName: "source.mp4", sourceKind: "upload" as const,
+  requestedCount: 5, latestJobId: "activity-job", createdAt: "2026-01-01", updatedAt: "2026-01-01",
+};
+const activityJob = {
+  schemaVersion: 1 as const, id: "activity-job", projectId: activityProject.id, mode: "clip" as const, state: "active" as const,
+  stage: "render", stageLabel: "Rendering", progress: 20, currentItem: 1, totalItems: 5, style: "educational" as const,
+  processingMode: "fast" as const, warnings: [], clips: [], beats: [],
+  steps: [{ id: "render", label: "Clips rendered", status: "active" as const, currentItem: 1, totalItems: 5 }],
+  createdAt: "2026-01-01", updatedAt: "2026-01-01",
+};
+
 /** A promise the test settles by hand. */
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -148,6 +161,30 @@ describe("App shell", () => {
     expect(mockListJobs).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps the shell jobs poll single-flight while live work is viewed outside Projects", async () => {
+    vi.useFakeTimers();
+    mockGetHealth.mockResolvedValue(health);
+    mockListProjects.mockResolvedValue([activityProject]);
+    const first = deferred<unknown[]>();
+    const second = deferred<unknown[]>();
+    mockListJobs.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise).mockResolvedValue([]);
+    render(<App />);
+    await act(async () => undefined);
+    expect(mockListJobs).toHaveBeenCalledTimes(1);
+
+    await act(async () => { first.resolve([activityJob]); await Promise.resolve(); });
+    fireEvent.click(screen.getByRole("button", { name: /^Library$/ }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(4_000); });
+    expect(mockListJobs).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId("workspace-work-count")).toHaveTextContent("4");
+
+    // A slow read must not be replaced by another request while the user stays
+    // on Library, where the Workspace view is unmounted.
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(mockListJobs).toHaveBeenCalledTimes(2);
+    await act(async () => { second.resolve([activityJob]); });
+  });
+
   it("renders one top-level main landmark and a skip link that targets it", async () => {
     mockGetHealth.mockResolvedValue(health);
     render(<App />);
@@ -165,5 +202,51 @@ describe("App shell", () => {
 
     await act(async () => { skip.click(); });
     expect(document.activeElement).toBe(document.getElementById("main-content"));
+  });
+
+  it("keeps the Workspace name and shows an accessible activity badge", async () => {
+    mockGetHealth.mockResolvedValue(health);
+    mockListProjects.mockResolvedValue([activityProject]);
+    mockListJobs.mockResolvedValue([activityJob]);
+    render(<App />);
+
+    const workspace = await screen.findByRole("button", { name: /^Workspace$/ });
+    const badge = await screen.findByTestId("workspace-work-count");
+    expect(workspace).toHaveAttribute("aria-label", "Workspace");
+    expect(workspace).toHaveAttribute("aria-describedby", "workspace-work-description");
+    expect(badge).toHaveTextContent("4");
+    expect(badge).toHaveAttribute("aria-hidden", "true");
+    expect(workspace).toHaveAccessibleDescription("4 clips remaining across 1 active job");
+  });
+
+  it("updates the badge from later jobs polls on another page and removes it at completion", async () => {
+    vi.useFakeTimers();
+    mockGetHealth.mockResolvedValue(health);
+    mockListProjects.mockResolvedValue([activityProject]);
+    const updated = { ...activityJob, steps: [{ ...activityJob.steps[0], currentItem: 2 }] };
+    const complete = { ...activityJob, state: "complete" as const, stage: "complete", steps: [] };
+    mockListJobs.mockResolvedValueOnce([activityJob]).mockResolvedValueOnce([updated]).mockResolvedValueOnce([complete]);
+    render(<App />);
+    await act(async () => undefined);
+
+    expect(screen.getByTestId("workspace-work-count")).toHaveTextContent("4");
+    fireEvent.click(screen.getByRole("button", { name: /^Library$/ }));
+    expect(screen.getByTestId("workspace-work-count")).toHaveTextContent("4");
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(4_000); });
+    expect(mockListJobs).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId("workspace-work-count")).toHaveTextContent("3");
+    expect(screen.getByRole("button", { name: /^Workspace$/ })).toBeInTheDocument();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(4_000); });
+    expect(mockListJobs).toHaveBeenCalledTimes(3);
+    expect(screen.queryByTestId("workspace-work-count")).not.toBeInTheDocument();
+  });
+
+  it("does not render an activity badge when no work is live", async () => {
+    mockGetHealth.mockResolvedValue(health);
+    render(<App />);
+    await screen.findByRole("button", { name: /^Workspace$/ });
+    expect(screen.queryByTestId("workspace-work-count")).not.toBeInTheDocument();
   });
 });

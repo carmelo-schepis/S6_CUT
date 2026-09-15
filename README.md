@@ -182,7 +182,7 @@ loss and keeps outputs broadly browser-compatible.
 
 Portrait, square, and 4:5 renders preserve the complete source frame when a
 centre crop would discard substantial detail. The full-frame foreground is fitted
-with Lanczos scaling over a mildly darkened, blurred, aspect-cover background.
+with Lanczos scaling over an undarkened, blurred, aspect-cover background.
 Sources close to the target aspect use a simpler high-quality fit/crop. A 1080×1920
 file made from a 360p source is still only 360p detail enlarged to a delivery
 canvas; ordinary scaling cannot recreate missing detail. 1080p or better sources

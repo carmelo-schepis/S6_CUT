@@ -391,6 +391,29 @@ select { line-height: var(--type-text-line); }
 .app-rail nav { display: grid; gap: 5px; min-width: 0; }
 .nav-item { position: relative; display: grid; place-items: center; gap: var(--space-1); min-height: 56px; min-width: 0; width: 100%; border: 0; background: transparent; color: var(--text-primary); font-weight: var(--type-emphasis-weight); }
 .nav-item span { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav-item .nav-work-count {
+  position: absolute;
+  top: var(--space-1);
+  right: 5px;
+  z-index: 2;
+  display: inline-grid;
+  place-items: center;
+  width: auto;
+  min-width: 16px;
+  max-width: none;
+  height: 16px;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-pill);
+  background: var(--success);
+  color: var(--canvas);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: visible;
+  pointer-events: none;
+}
 .nav-item::before { content: ""; position: absolute; left: -8px; top: 12px; bottom: 12px; width: 2px; background: transparent; }
 .nav-item:hover { color: var(--text); background: var(--surface-2); }
 .nav-item.active { color: var(--text); background: var(--surface-3); }
@@ -1356,6 +1379,7 @@ main { min-width: 0; }
 @media (max-width: 600px) {
   .nav-item { gap: 0; }
   .nav-item span { display: none; }
+  .nav-item .nav-work-count { top: 1px; right: 2px; display: inline-grid; }
   .nav-item svg { width: 22px; height: 22px; }
 }
 

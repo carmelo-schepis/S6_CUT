@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 from itertools import pairwise
@@ -8,7 +9,11 @@ from pathlib import Path
 import pytest
 
 from engine.config import Settings
+import engine.media as media_module
 from engine.media import (
+    BACKGROUND_BLUR_FILTER,
+    BACKGROUND_BLUR_PERCENT,
+    BACKGROUND_BLUR_SIGMA,
     MediaError,
     _fast_crop_scale_filter,
     _source_layout_filter,
@@ -149,21 +154,77 @@ def test_fast_crop_scale_filter_even_output() -> None:
         assert oh % 2 == 0, f"Odd output height {oh} for {src_w}x{src_h} -> {tgt_w}x{tgt_h}: {vf}"
 
 
-def test_source_layout_preserves_landscape_foreground() -> None:
-    vf = _source_layout_filter(640, 360, 1080, 1920)
-    assert "split=2" in vf
-    assert "force_original_aspect_ratio=decrease" in vf
-    assert "boxblur=luma_radius=6:luma_power=1" in vf
-    assert "eq=brightness=-0.4" in vf
-    assert "crop=1080:1920:(iw-1080)/2:(ih-1920)/2" in vf
+@pytest.mark.parametrize(
+    ("source", "target"),
+    [
+        ((640, 360), (1080, 1920)),  # landscape -> 9:16
+        ((640, 360), (1080, 1080)),  # landscape -> 1:1
+        ((640, 360), (1080, 1350)),  # landscape -> 4:5
+        ((360, 640), (1920, 1080)),  # portrait -> 16:9
+    ],
+)
+def test_source_layout_uses_identical_undarkened_blurred_fill_for_mismatched_aspects(source, target) -> None:
+    vf = _source_layout_filter(*source, *target)
+    assert BACKGROUND_BLUR_PERCENT == 30
+    assert BACKGROUND_BLUR_SIGMA == 30
+    assert BACKGROUND_BLUR_FILTER == "gblur=sigma=30:steps=2"
+    assert "split=2[foreground][background]" in vf
+    assert BACKGROUND_BLUR_FILTER in vf
+    assert "eq=brightness" not in vf
+    assert "brightness=" not in vf
+    assert "curves=" not in vf
+    assert "colorchannelmixer=" not in vf
+    assert "vignette=" not in vf
+    background = vf.split("[background]", 1)[1].split("[bg]", 1)[0]
+    foreground = vf.split(";[foreground]", 1)[1].split("[fg]", 1)[0]
+    assert "gblur" in background
+    assert "gblur" not in foreground
+    assert "force_original_aspect_ratio=decrease" in foreground
+    assert f"crop={target[0]}:{target[1]}:(iw-{target[0]})/2:(ih-{target[1]})/2" in background
     assert "setsar=1" in vf
+    overscan = re.search(r"scale=(\d+):(\d+):force_original_aspect_ratio=increase", background)
+    assert overscan
+    assert all(int(value) % 2 == 0 for value in overscan.groups())
+    assert int(overscan.group(1)) >= target[0] + 2
+    assert int(overscan.group(2)) >= target[1] + 2
 
 
-def test_source_layout_uses_simple_path_for_native_portrait() -> None:
-    vf = _source_layout_filter(1080, 1920, 1080, 1920)
-    assert "split=2" not in vf
-    assert "flags=lanczos" in vf
-    assert "setsar=1" in vf
+def test_source_layout_uses_simple_path_for_native_and_near_native_aspects() -> None:
+    for source, target in [
+        ((1080, 1920), (1080, 1920)),
+        ((1920, 1080), (1920, 1080)),
+        ((1920, 1080), (2000, 1100)),  # within the existing 12% near-native threshold
+    ]:
+        vf = _source_layout_filter(*source, *target)
+        assert "split=2" not in vf
+        assert "gblur" not in vf
+        assert "brightness=" not in vf
+        assert "flags=lanczos" in vf
+        assert "setsar=1" in vf
+
+
+def test_render_paths_use_shared_source_layout_filter(monkeypatch: pytest.MonkeyPatch, settings: Settings, tmp_path: Path) -> None:
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"source")
+    calls: list[tuple[int, int, int, int]] = []
+    metadata = {"width": 640, "height": 360, "rotation": 0, "audio": False, "duration": 2.0}
+
+    def fake_probe(path: Path, __: Settings):
+        return metadata if path == source else {**metadata, "width": 1080, "height": 1920, "duration": 1.0}
+
+    def fake_layout(src_width: int, src_height: int, target_width: int, target_height: int):
+        calls.append((src_width, src_height, target_width, target_height))
+        return "scale=1080:1920,setsar=1[base]"
+
+    def fake_run(command: list[str], **_: object):
+        Path(command[-1]).write_bytes(b"rendered")
+
+    monkeypatch.setattr(media_module, "probe", fake_probe)
+    monkeypatch.setattr(media_module, "run", fake_run)
+    monkeypatch.setattr(media_module, "_source_layout_filter", fake_layout)
+    render_fast_clip(source, tmp_path / "fast.mp4", start=0, end=1, aspect="9:16", settings=settings, has_audio=False)
+    render_clip(source, tmp_path / "smart.mp4", start=0, end=1, aspect="9:16", words=[], visuals=[], overlays=[], settings=settings, has_audio=False)
+    assert calls == [(640, 360, 1080, 1920), (640, 360, 1080, 1920)]
 
 
 @pytest.mark.parametrize("dimensions", [(0, 360), (640, 0), (-1, 360), (640, -1), ("bad", 360), (640, float("inf"))])
@@ -361,3 +422,59 @@ def test_render_fast_clip_raises_on_missing_audio(settings: Settings, tmp_path: 
     out = tmp_path / "clip.mp4"
     with pytest.raises(MediaError, match="audio"):
         render_fast_clip(src, out, start=0.5, end=2.0, aspect="9:16", settings=settings, has_audio=True)
+
+
+def _gray_frame(settings: Settings, path: Path, timestamp: float, filters: str):
+    size = 64
+    result = subprocess.run(
+        [settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-ss", f"{timestamp:.3f}", "-i", str(path),
+         "-frames:v", "1", "-vf", f"{filters},scale={size}:{size}:flags=bilinear,format=gray", "-f", "rawvideo", "pipe:1"],
+        check=True,
+        capture_output=True,
+    )
+    return result.stdout, size, size
+
+
+def _edge_energy(frame: bytes, width: int, height: int) -> float:
+    total = 0
+    for y in range(height - 1):
+        for x in range(width - 1):
+            index = y * width + x
+            total += abs(frame[index] - frame[index + 1]) + abs(frame[index] - frame[index + width])
+    return total / max(1, (width - 1) * (height - 1) * 2)
+
+
+@pytest.mark.parametrize("aspect", ["9:16", "1:1", "4:5"])
+def test_mismatched_fast_render_has_bright_blurred_fill(settings: Settings, tmp_path: Path, aspect: str) -> None:
+    """Decode synthetic motion to prove blur is limited to the background copy."""
+    _require_ffmpeg(settings)
+    source = _make_source(settings, tmp_path, duration=2.5, width=640, height=360, with_audio=False)
+    output = tmp_path / f"{aspect.replace(':', '-')}.mp4"
+    render_fast_clip(source, output, start=0, end=2, aspect=aspect, settings=settings, has_audio=False, subtitles_enabled=False)
+    target_width, target_height = {"9:16": (1080, 1920), "1:1": (1080, 1080), "4:5": (1080, 1350)}[aspect]
+    result = probe(output, settings)
+    assert (result["width"], result["height"]) == (target_width, target_height)
+
+    fit_scale = min(target_width / 640, target_height / 360)
+    fit_height = round(360 * fit_scale)
+    band_height = max(2, (target_height - fit_height) // 2 - 4)
+    foreground = f"crop={target_width}:{fit_height}:0:{(target_height - fit_height) // 2}"
+    background = [
+        f"crop={target_width}:{band_height}:0:0",
+        f"crop={target_width}:{band_height}:0:{target_height - band_height}",
+    ]
+    ratios = []
+    background_edges = []
+    foreground_edges = []
+    for timestamp in (0.2, 1.0, 1.8):
+        source_frame, _, _ = _gray_frame(settings, source, timestamp, "null")
+        source_luminance = sum(source_frame) / len(source_frame)
+        foreground_frame, width, height = _gray_frame(settings, output, timestamp, foreground)
+        foreground_edges.append(_edge_energy(foreground_frame, width, height))
+        for crop in background:
+            frame, width, height = _gray_frame(settings, output, timestamp, crop)
+            ratios.append((sum(frame) / len(frame)) / max(1, source_luminance))
+            background_edges.append(_edge_energy(frame, width, height))
+            assert sum(frame) / len(frame) > 8, "blurred fill must not produce black edge bands"
+    assert min(ratios) >= 0.72, f"undarkened background/source luminance ratios were {ratios}"
+    assert sum(background_edges) / len(background_edges) < sum(foreground_edges) / len(foreground_edges) * 0.9

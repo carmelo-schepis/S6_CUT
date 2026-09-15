@@ -133,8 +133,8 @@ def gate_clip(clip: dict, job: dict, args, out_dir: Path) -> dict:
           f"nb_frames={frames} expected~{expected:.0f} fps={fps:.2f}")
 
     # Layout discovery: the renderer either centre-crops the source or fits the
-    # whole of it inside a blurred zoom-fill. Later checks must look at the band
-    # the picture actually occupies, not at the deliberately quiet fill.
+    # whole of it inside an undarkened blurred zoom-fill. Later checks must look
+    # at the band the picture actually occupies, not only at the fill.
     _, source_listing, _ = run(["sh", "-c", f"ls /app/data/jobs/{job_id}/source/"])
     source_name = source_listing.strip().splitlines()[0] if source_listing.strip() else None
     source_path = f"/app/data/jobs/{job_id}/source/{source_name}" if source_name else None
@@ -182,9 +182,9 @@ def gate_clip(clip: dict, job: dict, args, out_dir: Path) -> dict:
           f"{black:.2f}s = {report['black_pct']}%")
 
     # 5.5 frame-to-frame motion statistics -----------------------------------
-    # Measured inside the picture band: on a fitted layout roughly two thirds of
-    # the canvas is an intentionally blurred, darkened fill, and including it
-    # drags YDIF below the threshold even when the footage moves normally.
+    # Measured inside the picture band: on a fitted layout the surrounding
+    # canvas is an intentionally blurred source fill, and including it drags
+    # YDIF below the threshold even when the footage moves normally.
     movie = f"movie={path}" + (f",{out_crop}" if out_crop else "")
     _, out, _ = run(["ffprobe", "-f", "lavfi", "-i", f"{movie},signalstats",
                      "-show_entries", "frame_tags=lavfi.signalstats.YAVG,lavfi.signalstats.YDIF",
