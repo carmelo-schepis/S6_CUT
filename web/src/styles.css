@@ -895,20 +895,30 @@ main { min-width: 0; }
   position: relative;
   inset: auto;
   display: grid;
-  align-content: center;
+  /* Ordinary processing has three visible blocks (header, progress, footer).
+     The optional download panel becomes an implicit fourth row, which keeps a
+     footer pinned to the frame floor without reserving an empty row below it. */
+  grid-template-rows: auto auto auto;
+  align-content: space-between;
   justify-items: stretch;
-  gap: 9px;
+  gap: var(--space-6);
+  box-sizing: border-box;
   width: 100%;
+  height: 100%;
   min-width: 0;
   min-height: 0;
   max-height: 100%;
-  padding: 18px;
-  overflow: auto;
+  padding: var(--space-5);
+  overflow-x: hidden;
+  overflow-y: auto;
   text-align: left;
   background:
     radial-gradient(circle at 50% 42%, var(--surface-2) 0, var(--surface-1) 55%, var(--canvas) 100%);
   animation: processing-in .38s ease both;
 }
+.processing-section { min-width: 0; }
+.processing-header { display: grid; }
+.processing-progress { display: grid; gap: var(--space-2); min-width: 0; }
 .processing-state.state-paused { --state-accent: var(--warning); --state-accent-soft: rgba(240,168,75,.38); }
 .processing-state.state-partial { --state-accent: var(--warning); --state-accent-soft: rgba(240,168,75,.38); }
 .processing-state.state-failed { --state-accent: var(--error); --state-accent-soft: rgba(242,56,85,.38); }
@@ -1004,27 +1014,56 @@ main { min-width: 0; }
   to { opacity: 1; }
 }
 
-/* Labelled value pairs: each figure keeps its own label so nothing reads as a
-   run-together sentence when a value grows. */
-.processing-meta, .download-detail-values {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1) var(--space-5);
+/* Labelled value pairs keep labels close to their values without turning a
+   growing timestamp or transfer figure into an inline sentence. */
+.processing-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  gap: var(--space-3) var(--space-5);
   margin: 0;
   font-variant-numeric: tabular-nums;
 }
-/* Label and value share a line when they fit and wrap only when they must.
-   Stacking every pair costs a line each, which General text cannot afford
-   in the smallest processing panel. */
-.processing-meta > div, .download-detail-values > div { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0 var(--space-3); min-width: 0; }
+.processing-meta > div,
+.download-detail-values > div {
+  display: grid;
+  align-content: start;
+  gap: var(--space-1);
+  min-width: 0;
+}
 .processing-meta dt, .download-detail-values dt { color: var(--text-primary); font-weight: var(--type-emphasis-weight); }
 .processing-meta dd, .download-detail-values dd { margin: 0; min-width: 0; color: var(--text-primary); font-weight: var(--type-emphasis-weight); overflow-wrap: anywhere; }
-.download-progress-detail { display: grid; gap: 6px; min-width: 0; padding: 9px 10px; border: 1px solid var(--border); border-radius: 7px; background: rgba(0,0,0,.26); text-align: left; }
-.download-detail-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 5px 10px; min-width: 0; }
-.download-detail-heading strong { color: var(--text); text-transform: capitalize; }
+.download-progress-detail {
+  display: grid;
+  align-self: start;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(0,0,0,.26);
+  text-align: left;
+}
+.download-detail-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--space-1) var(--space-3); min-width: 0; }
+.download-detail-heading strong { color: var(--text); text-transform: capitalize; overflow-wrap: anywhere; }
 .download-detail-heading b { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.download-detail-values {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3) var(--space-4);
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+.download-detail-values time { overflow-wrap: anywhere; }
 .download-message { display: block; margin: 0; min-width: 0; color: var(--text-primary); overflow-wrap: anywhere; }
-.processing-help { margin: 0; max-width: 100%; color: var(--text-primary); }
+.processing-help {
+  align-self: end;
+  margin: 0;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-soft);
+  max-width: 100%;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
 
 /* Processing checklist: a full-width document block before the lower workspace. */
 .checklist-panel {
