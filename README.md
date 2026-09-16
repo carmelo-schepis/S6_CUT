@@ -24,7 +24,7 @@ curl -fsSL https://raw.githubusercontent.com/carmelo-schepis/S6_CUT/main/install
 
 **Private repo / authenticated (works now):**
 ```powershell
-$script = gh api -H "Accept: application/vnd.github.raw+json" repos/carmelo-schepis/S6_CUT/contents/Install-S6_CUT.ps1?ref=main
+$script = (gh api -H "Accept: application/vnd.github.raw+json" repos/carmelo-schepis/S6_CUT/contents/Install-S6_CUT.ps1?ref=main) -join "`n"
 & ([scriptblock]::Create($script)) -Branch main
 ```
 
