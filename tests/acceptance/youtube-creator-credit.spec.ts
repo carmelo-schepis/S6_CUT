@@ -139,10 +139,21 @@ test.describe("YouTube creator credit workflow", () => {
     const video = page.getByRole("region", { name: "Output viewer" }).locator("video");
     await expect(video).toBeVisible();
     await expect(video).toHaveAttribute("src", /01-cut\.mp4/);
+    const playback = await video.evaluate(async (element) => {
+      element.muted = true;
+      await element.play();
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      return { readyState: element.readyState, width: element.videoWidth, height: element.videoHeight, currentTime: element.currentTime, paused: element.paused, ended: element.ended };
+    });
+    expect(playback.readyState).toBeGreaterThanOrEqual(2);
+    expect(playback.width).toBeGreaterThan(0);
+    expect(playback.height).toBeGreaterThan(0);
+    expect(playback.currentTime).toBeGreaterThan(0);
+    expect(playback.paused).toBeFalsy();
     // The label is metadata for the rendered output; the actual credit is
     // burned into the MP4 served by this same final-output video element.
     await expect(page.getByRole("region", { name: "Output viewer" })).toContainText("Source: Known Creator");
-    await page.screenshot({ path: path.join(artifacts, "youtube-preview.png"), fullPage: true });
+    await page.screenshot({ path: path.join(artifacts, "youtube-preview-playing.png"), fullPage: true });
 
     const downloadPromise = page.waitForEvent("download");
     await page.getByRole("button", { name: /Download ZIP/ }).click();
