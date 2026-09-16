@@ -8,6 +8,7 @@ import {
   healthSchema,
   jobSchema,
   libraryFolderSchema,
+  libraryPurgeResultSchema,
   profileSchema,
   openRouterModelSchema,
   projectSchema,
@@ -152,6 +153,15 @@ export async function getProject(id: string): Promise<Project> {
 /** Permanently removes a project together with its project-created Library media. */
 export async function deleteProjectEverywhere(id: string): Promise<void> {
   await request(`/projects/${encodeURIComponent(id)}?delete_assets=true`, { method: "DELETE" });
+}
+
+/** Permanently removes all Library media while preserving app configuration. */
+export async function purgeLibraryContent(confirmation: string) {
+  return libraryPurgeResultSchema.parse(await request("/library/purge", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ confirmation }),
+  }));
 }
 
 export async function changeProjectFolder(id: string, folderId: string, moveExistingAssets: boolean): Promise<Project> {
