@@ -29,54 +29,37 @@ test("keeps the Workspace activity indicator live for a real YouTube import", as
 
   const workspaceGeometry = async () => {
     const button = page.getByRole("button", { name: "Workspace", exact: true });
-    const badge = page.getByTestId("workspace-work-count");
+    const progress = page.getByTestId("workspace-work-progress");
+    const value = page.getByTestId("workspace-work-count");
     const icon = page.getByTestId("workspace-nav-icon");
     const spinner = page.getByTestId("workspace-work-spinner");
     const buttonBox = await button.boundingBox();
-    const badgeBox = await badge.boundingBox();
+    const progressBox = await progress.boundingBox();
+    const valueBox = await value.boundingBox();
     const iconBox = await icon.boundingBox();
     const spinnerBox = await spinner.boundingBox();
     expect(buttonBox).toBeTruthy();
-    expect(badgeBox).toBeTruthy();
+    expect(progressBox).toBeTruthy();
+    expect(valueBox).toBeTruthy();
     expect(iconBox).toBeTruthy();
     expect(spinnerBox).toBeTruthy();
-    const spinnerStyle = await spinner.evaluate((element) => {
+    const progressStyle = await progress.evaluate((element) => {
       const style = getComputedStyle(element);
       return { width: Number.parseFloat(style.width), height: Number.parseFloat(style.height) };
     });
-    expect(spinnerStyle.width).toBeGreaterThanOrEqual(10);
-    expect(spinnerStyle.width).toBeLessThanOrEqual(12);
-    expect(spinnerStyle.height).toBeGreaterThanOrEqual(10);
-    expect(spinnerStyle.height).toBeLessThanOrEqual(12);
-    // A rotated square's visual bounding box grows to ~15.5px at 45°;
-    // computed CSS dimensions above are the actual indicator size.
-    expect(spinnerBox!.width).toBeLessThanOrEqual(17);
-    expect(spinnerBox!.height).toBeLessThanOrEqual(17);
-    expect(spinnerBox!.x).toBeGreaterThan(iconBox!.x + iconBox!.width);
-    expect(spinnerBox!.x - (iconBox!.x + iconBox!.width)).toBeLessThanOrEqual(6);
-    expect(Math.abs((spinnerBox!.y + spinnerBox!.height / 2) - (iconBox!.y + iconBox!.height / 2))).toBeLessThanOrEqual(3);
-    expect(spinnerBox!.x).toBeGreaterThanOrEqual(buttonBox!.x);
-    expect(spinnerBox!.y).toBeGreaterThanOrEqual(buttonBox!.y);
-    expect(spinnerBox!.x + spinnerBox!.width).toBeLessThanOrEqual(buttonBox!.x + buttonBox!.width);
-    expect(spinnerBox!.y + spinnerBox!.height).toBeLessThanOrEqual(buttonBox!.y + buttonBox!.height);
-    const spinnerBadgeOverlap = spinnerBox!.x < badgeBox!.x + badgeBox!.width && spinnerBox!.x + spinnerBox!.width > badgeBox!.x
-      && spinnerBox!.y < badgeBox!.y + badgeBox!.height && spinnerBox!.y + spinnerBox!.height > badgeBox!.y;
-    expect(spinnerBadgeOverlap, "the spinner must not cover the count badge").toBeFalsy();
-    expect(badgeBox!.x).toBeGreaterThanOrEqual(buttonBox!.x);
-    expect(badgeBox!.y).toBeGreaterThanOrEqual(buttonBox!.y);
-    expect(badgeBox!.x + badgeBox!.width).toBeLessThanOrEqual(buttonBox!.x + buttonBox!.width);
-    expect(badgeBox!.y + badgeBox!.height).toBeLessThanOrEqual(buttonBox!.y + buttonBox!.height);
-    const intersects = badgeBox!.x < iconBox!.x + iconBox!.width && badgeBox!.x + badgeBox!.width > iconBox!.x
-      && badgeBox!.y < iconBox!.y + iconBox!.height && badgeBox!.y + badgeBox!.height > iconBox!.y;
-    expect(intersects, "the badge must not cover the Workspace icon").toBeFalsy();
-    for (const other of await page.locator(".nav-item").all()) {
-      if (await other.getAttribute("aria-label") === "Workspace") continue;
-      const otherBox = await other.boundingBox();
-      if (!otherBox) continue;
-      const overlaps = badgeBox!.x < otherBox.x + otherBox.width && badgeBox!.x + badgeBox!.width > otherBox.x
-        && badgeBox!.y < otherBox.y + otherBox.height && badgeBox!.y + badgeBox!.height > otherBox.y;
-      expect(overlaps, "the badge must not cover an adjacent navigation item").toBeFalsy();
-    }
+    expect(progressStyle.width).toBe(28);
+    expect(progressStyle.height).toBe(28);
+    expect(progressBox!.width).toBe(28);
+    expect(progressBox!.height).toBe(28);
+    expect(progressBox!.x).toBeGreaterThan(iconBox!.x + iconBox!.width);
+    expect(progressBox!.x - (iconBox!.x + iconBox!.width)).toBeLessThanOrEqual(5);
+    expect(Math.abs((progressBox!.x + progressBox!.width / 2) - (valueBox!.x + valueBox!.width / 2))).toBeLessThanOrEqual(1);
+    expect(Math.abs((progressBox!.y + progressBox!.height / 2) - (valueBox!.y + valueBox!.height / 2))).toBeLessThanOrEqual(1);
+    expect(progressBox!.x).toBeGreaterThanOrEqual(buttonBox!.x);
+    expect(progressBox!.y).toBeGreaterThanOrEqual(buttonBox!.y);
+    expect(progressBox!.x + progressBox!.width).toBeLessThanOrEqual(buttonBox!.x + buttonBox!.width);
+    expect(progressBox!.y + progressBox!.height).toBeLessThanOrEqual(buttonBox!.y + buttonBox!.height);
+    expect(await page.locator(".nav-work-count").count()).toBe(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), "no horizontal overflow").toBeTruthy();
     return buttonBox;
   };

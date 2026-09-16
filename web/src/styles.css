@@ -191,6 +191,7 @@
      left, which is what keeps adjacent options on one baseline. */
   --control-inset: 4px;
   --icon-size: 14px;
+  --workspace-progress-size: 28px;
   /* Controls are outlines, and an outline states its corner far louder than a
      fill does: at --radius-md every button, input and select read as a rounded
      chip once the fill was gone. One near-square value for the whole control
@@ -391,35 +392,59 @@ select { line-height: var(--type-text-line); }
 .app-rail nav { display: grid; gap: 5px; min-width: 0; }
 .nav-item { position: relative; display: grid; place-items: center; gap: var(--space-1); min-height: 56px; min-width: 0; width: 100%; border: 0; background: transparent; color: var(--text-primary); font-weight: var(--type-emphasis-weight); }
 .nav-item span { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.nav-item .nav-icon-wrap { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-width: 0; max-width: none; overflow: visible; white-space: normal; }
+.nav-item .nav-icon-wrap { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-1); min-width: 0; max-width: none; overflow: visible; white-space: normal; }
 .nav-item .nav-main-icon { width: 19px; height: 19px; flex: 0 0 19px; }
-.nav-item .nav-work-spinner { width: 11px; height: 11px; flex: 0 0 11px; color: var(--success); stroke-width: 2.5; animation: workspace-nav-spin 800ms linear infinite; }
-@keyframes workspace-nav-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) {
-  .nav-item .nav-work-spinner { animation: none; }
-}
-.nav-item .nav-work-count {
-  position: absolute;
-  top: var(--space-1);
-  right: 5px;
-  z-index: 2;
+.nav-item .nav-work-progress {
+  position: relative;
   display: inline-grid;
   place-items: center;
-  width: auto;
-  min-width: 16px;
+  flex: 0 0 var(--workspace-progress-size);
+  width: var(--workspace-progress-size);
+  height: var(--workspace-progress-size);
   max-width: none;
-  height: 16px;
-  padding: 0 var(--space-1);
-  border-radius: var(--radius-pill);
-  background: var(--success);
-  color: var(--canvas);
-  font-size: 10px;
-  font-weight: 700;
+  overflow: visible;
+  color: var(--success);
+}
+.nav-item .nav-work-progress-ring {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.nav-item .nav-work-progress-track,
+.nav-item .nav-work-progress-indicator {
+  fill: none;
+  stroke-width: 2;
+}
+.nav-item .nav-work-progress-track { stroke: var(--surface-4); }
+.nav-item .nav-work-progress-indicator {
+  stroke: currentColor;
+  stroke-dasharray: 30 70;
+  stroke-linecap: round;
+}
+.nav-item .nav-work-progress.is-processing .nav-work-progress-ring {
+  animation: workspace-nav-progress-spin 1.4s linear infinite;
+}
+.nav-item .nav-work-progress-value {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  color: var(--text);
+  font-size: calc(var(--type-text-size) - 2px);
+  font-weight: var(--type-emphasis-weight);
   line-height: 1;
+  letter-spacing: -0.2px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  overflow: visible;
   pointer-events: none;
+}
+@keyframes workspace-nav-progress-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .nav-item .nav-work-progress.is-processing .nav-work-progress-ring { animation: none; }
 }
 .nav-item::before { content: ""; position: absolute; left: -8px; top: 12px; bottom: 12px; width: 2px; background: transparent; }
 .nav-item:hover { color: var(--text); background: var(--surface-2); }

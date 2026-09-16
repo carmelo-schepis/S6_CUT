@@ -204,7 +204,7 @@ describe("App shell", () => {
     expect(document.activeElement).toBe(document.getElementById("main-content"));
   });
 
-  it("keeps the Workspace name and shows an accessible activity badge", async () => {
+  it("keeps the Workspace name and shows accessible activity progress", async () => {
     mockGetHealth.mockResolvedValue(health);
     mockListProjects.mockResolvedValue([activityProject]);
     mockListJobs.mockResolvedValue([activityJob]);
@@ -218,10 +218,10 @@ describe("App shell", () => {
     expect(badge).toHaveAttribute("aria-hidden", "true");
     expect(screen.getByTestId("workspace-nav-icon")).toBeInTheDocument();
     expect(screen.getByTestId("workspace-work-spinner")).toBeInTheDocument();
-    expect(workspace).toHaveAccessibleDescription("4 clips remaining across 1 active job");
+    expect(workspace).toHaveAccessibleDescription("Loading progress: 4 clips remaining across 1 active job");
   });
 
-  it("updates the badge from later jobs polls on another page and removes it at completion", async () => {
+  it("updates Workspace activity progress from later jobs polls and removes it at completion", async () => {
     vi.useFakeTimers();
     mockGetHealth.mockResolvedValue(health);
     mockListProjects.mockResolvedValue([activityProject]);
@@ -269,14 +269,18 @@ describe("App shell", () => {
     else expect(screen.queryByTestId("workspace-work-count")).not.toBeInTheDocument();
   });
 
-  it("keeps the decorative spinner out of the Workspace accessible name", async () => {
+  it("labels the unified Workspace progress indicator without changing the navigation name", async () => {
     mockGetHealth.mockResolvedValue(health);
     mockListProjects.mockResolvedValue([activityProject]);
     mockListJobs.mockResolvedValue([activityJob]);
     render(<App />);
     const workspace = await screen.findByRole("button", { name: /^Workspace$/ });
+    const progress = screen.getByTestId("workspace-work-progress");
     expect(workspace).toHaveAttribute("aria-label", "Workspace");
-    expect(screen.getByTestId("workspace-work-spinner").closest("span")).toHaveAttribute("aria-hidden", "true");
+    expect(workspace).toHaveAccessibleDescription("Loading progress: 4 clips remaining across 1 active job");
+    expect(progress).toHaveAttribute("role", "img");
+    expect(progress).toHaveAttribute("aria-label", "Loading progress: 4 clips remaining across 1 active job");
+    expect(progress).toHaveAttribute("data-progress-value", "4");
   });
 
   it("does not render an activity badge when no work is live", async () => {

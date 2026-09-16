@@ -7,6 +7,7 @@ import { ProjectsView } from "./components/projects-view";
 import { SettingsView } from "./components/settings-view";
 import { StatusBadge } from "./components/common";
 import { WorkspaceView } from "./components/workspace-view";
+import { WorkspaceProgressIndicator } from "./components/workspace-progress-indicator";
 import { ShortsEditorView } from "./components/shorts-editor-view";
 import { TopicToVideoView } from "./components/topic-to-video-view";
 import { HelpDialog } from "./components/help-dialog";
@@ -166,16 +167,19 @@ export function App() {
           const Icon = item.icon;
           const workspace = item.id === "workspace";
           return <button key={item.id} className={page === item.id ? "nav-item active" : "nav-item"} onClick={() => setPage(item.id)} aria-label={item.name} title={item.name} aria-current={page === item.id ? "page" : undefined} aria-describedby={workspace && activity ? "workspace-work-description" : undefined}>
-            <span className="nav-icon-wrap" aria-hidden="true">
-              <Icon className={workspace ? "nav-main-icon" : undefined} data-testid={workspace ? "workspace-nav-icon" : undefined} size={19} />
-              {workspace && activity?.isProcessing ? <LoaderCircle className="nav-work-spinner" data-testid="workspace-work-spinner" /> : null}
+            <span className="nav-icon-wrap">
+              <Icon className={workspace ? "nav-main-icon" : undefined} data-testid={workspace ? "workspace-nav-icon" : undefined} size={19} aria-hidden="true" />
+              {workspace && activity ? <WorkspaceProgressIndicator
+                value={activity.remainingClips}
+                isProcessing={activity.isProcessing}
+                label={`Loading progress: ${activityDescription}`}
+              /> : null}
             </span>
             <span className="nav-label">{item.label}</span>
-            {workspace && activity && <span className="nav-work-count" data-testid="workspace-work-count" aria-hidden="true">{activity.remainingClips}</span>}
           </button>;
         })}
       </nav>
-      {activity && <span id="workspace-work-description" className="sr-only">{activityDescription}</span>}
+      {activity && <span id="workspace-work-description" className="sr-only">Loading progress: {activityDescription}</span>}
       {/* Help sits at the foot of the rail, below the destinations. The engine
           reading is not here: startup is announced once by the engine-startup
           row, and the steady-state status lives in the topbar badge. */}
