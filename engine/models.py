@@ -432,6 +432,18 @@ class AssetDeleteResult(ApiModel):
     failed: dict[str, str] = Field(default_factory=dict)
 
 
+class LibraryPurgeInput(ApiModel):
+    confirmation: str = Field(min_length=1, max_length=64)
+
+
+class LibraryPurgeResult(ApiModel):
+    assets_deleted: int = Field(ge=0)
+    projects_deleted: int = Field(ge=0)
+    blobs_deleted: int = Field(ge=0)
+    bytes_reclaimed: int = Field(ge=0)
+    warnings: list[str] = Field(default_factory=list)
+
+
 class Asset(ApiModel):
     id: str
     title: str = Field(min_length=1, max_length=200)

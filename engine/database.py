@@ -867,12 +867,23 @@ class Database:
                 db.execute("DELETE FROM jobs WHERE id=?", (job.id,))
             db.execute("DELETE FROM projects WHERE id=?", (project_id,))
 
-    def delete_project_everywhere(self, project_id: str) -> list[str]:
+    def delete_project_everywhere(self, project_id: str, *, allow_protected: bool = False) -> list[str]:
         """Atomically delete one project's records, assets, and durable refs.
 
-        The returned blob paths had no references after the transaction. Callers
-        may remove those files only after this method returns, so a crash can
-        leave an orphan but can never remove a blob another record still needs.
+        This compatibility wrapper preserves the original path-only return
+        value. The coordinated purge uses the stats-bearing variant below.
+        """
+        paths, _ = self.delete_project_everywhere_with_stats(project_id, allow_protected=allow_protected)
+        return paths
+
+    def delete_project_everywhere_with_stats(self, project_id: str, *, allow_protected: bool = False) -> tuple[list[str], int]:
+        """Atomically delete one project's records, assets, and durable refs.
+
+        Returned paths have no references after the transaction. Files are left
+        for the caller to remove after commit, so a failure can leave an orphan
+        but can never remove a blob another record still needs. ``allow_protected``
+        is reserved for the explicit global Library purge; ordinary project
+        deletion keeps the pinned-media safeguard.
         """
         with self._lock, self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -882,7 +893,7 @@ class Database:
             jobs = [Job.model_validate_json(row["payload"]).model_copy(update={"library_folder_id": row["library_folder_id"] or UNSORTED_FOLDER_ID}) for row in job_rows]
             asset_rows = db.execute("SELECT * FROM assets WHERE source_project_id=?", (project_id,)).fetchall()
             assets = [self._asset_from_row(row) for row in asset_rows]
-            if any(asset.protected for asset in assets):
+            if not allow_protected and any(asset.protected for asset in assets):
                 raise ValueError("Unprotect associated media before deleting this project everywhere")
 
             job_ids = [job.id for job in jobs]
@@ -906,13 +917,45 @@ class Database:
             db.execute("DELETE FROM projects WHERE id=?", (project_id,))
 
             unreferenced_paths: list[str] = []
+            bytes_reclaimed = 0
             for blob_id in affected_blob_ids:
-                row = db.execute("SELECT relative_path FROM media_blobs WHERE id=?", (blob_id,)).fetchone()
+                row = db.execute("SELECT relative_path,byte_size FROM media_blobs WHERE id=?", (blob_id,)).fetchone()
                 count = db.execute("SELECT COUNT(*) FROM media_blob_refs WHERE blob_id=?", (blob_id,)).fetchone()[0]
                 if row and count == 0:
                     unreferenced_paths.append(str(row["relative_path"]))
+                    bytes_reclaimed += max(0, int(row["byte_size"] or 0))
                     db.execute("DELETE FROM media_blobs WHERE id=?", (blob_id,))
-        return unreferenced_paths
+        return unreferenced_paths, bytes_reclaimed
+
+    def purge_library_assets(self) -> tuple[int, list[str], int]:
+        """Delete every remaining Library asset in one protected transaction.
+
+        This is intentionally separate from ``delete_asset``: it is only called
+        after the API has validated the global purge confirmation and removed
+        linked projects through JobManager. It bypasses protected-item rules but
+        still removes only asset references and only drops a blob row when its
+        reference count reaches zero.
+        """
+        with self._lock, self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            rows = db.execute("SELECT id,blob_id FROM assets").fetchall()
+            asset_ids = [str(row["id"]) for row in rows]
+            affected_blob_ids = {str(row["blob_id"]) for row in rows if row["blob_id"]}
+            if asset_ids:
+                marks = ",".join("?" for _ in asset_ids)
+                db.execute(f"DELETE FROM media_blob_refs WHERE ref_type='asset' AND ref_id IN ({marks})", asset_ids)
+                db.execute(f"DELETE FROM assets WHERE id IN ({marks})", asset_ids)
+
+            unreferenced_paths: list[str] = []
+            bytes_reclaimed = 0
+            for blob_id in affected_blob_ids:
+                row = db.execute("SELECT relative_path,byte_size FROM media_blobs WHERE id=?", (blob_id,)).fetchone()
+                count = db.execute("SELECT COUNT(*) FROM media_blob_refs WHERE blob_id=?", (blob_id,)).fetchone()[0]
+                if row and count == 0:
+                    unreferenced_paths.append(str(row["relative_path"]))
+                    bytes_reclaimed += max(0, int(row["byte_size"] or 0))
+                    db.execute("DELETE FROM media_blobs WHERE id=?", (blob_id,))
+        return len(asset_ids), unreferenced_paths, bytes_reclaimed
 
     def update_project_folder(self, project_id: str, folder_id: str, move_existing_assets: bool) -> Project:
         destination = self.get_folder(folder_id)

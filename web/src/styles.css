@@ -191,6 +191,7 @@
      left, which is what keeps adjacent options on one baseline. */
   --control-inset: 4px;
   --icon-size: 14px;
+  --workspace-progress-size: 28px;
   /* Controls are outlines, and an outline states its corner far louder than a
      fill does: at --radius-md every button, input and select read as a rounded
      chip once the fill was gone. One near-square value for the whole control
@@ -391,35 +392,59 @@ select { line-height: var(--type-text-line); }
 .app-rail nav { display: grid; gap: 5px; min-width: 0; }
 .nav-item { position: relative; display: grid; place-items: center; gap: var(--space-1); min-height: 56px; min-width: 0; width: 100%; border: 0; background: transparent; color: var(--text-primary); font-weight: var(--type-emphasis-weight); }
 .nav-item span { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.nav-item .nav-icon-wrap { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-width: 0; max-width: none; overflow: visible; white-space: normal; }
+.nav-item .nav-icon-wrap { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-1); min-width: 0; max-width: none; overflow: visible; white-space: normal; }
 .nav-item .nav-main-icon { width: 19px; height: 19px; flex: 0 0 19px; }
-.nav-item .nav-work-spinner { width: 11px; height: 11px; flex: 0 0 11px; color: var(--success); stroke-width: 2.5; animation: workspace-nav-spin 800ms linear infinite; }
-@keyframes workspace-nav-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) {
-  .nav-item .nav-work-spinner { animation: none; }
-}
-.nav-item .nav-work-count {
-  position: absolute;
-  top: var(--space-1);
-  right: 5px;
-  z-index: 2;
+.nav-item .nav-work-progress {
+  position: relative;
   display: inline-grid;
   place-items: center;
-  width: auto;
-  min-width: 16px;
+  flex: 0 0 var(--workspace-progress-size);
+  width: var(--workspace-progress-size);
+  height: var(--workspace-progress-size);
   max-width: none;
-  height: 16px;
-  padding: 0 var(--space-1);
-  border-radius: var(--radius-pill);
-  background: var(--success);
-  color: var(--canvas);
-  font-size: 10px;
-  font-weight: 700;
+  overflow: visible;
+  color: var(--success);
+}
+.nav-item .nav-work-progress-ring {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.nav-item .nav-work-progress-track,
+.nav-item .nav-work-progress-indicator {
+  fill: none;
+  stroke-width: 2;
+}
+.nav-item .nav-work-progress-track { stroke: var(--surface-4); }
+.nav-item .nav-work-progress-indicator {
+  stroke: currentColor;
+  stroke-dasharray: 30 70;
+  stroke-linecap: round;
+}
+.nav-item .nav-work-progress.is-processing .nav-work-progress-ring {
+  animation: workspace-nav-progress-spin 1.4s linear infinite;
+}
+.nav-item .nav-work-progress-value {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  color: var(--text);
+  font-size: calc(var(--type-text-size) - 2px);
+  font-weight: var(--type-emphasis-weight);
   line-height: 1;
+  letter-spacing: -0.2px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  overflow: visible;
   pointer-events: none;
+}
+@keyframes workspace-nav-progress-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .nav-item .nav-work-progress.is-processing .nav-work-progress-ring { animation: none; }
 }
 .nav-item::before { content: ""; position: absolute; left: -8px; top: 12px; bottom: 12px; width: 2px; background: transparent; }
 .nav-item:hover { color: var(--text); background: var(--surface-2); }
@@ -856,11 +881,12 @@ main { min-width: 0; }
    outlined. Styling it as General text would misrepresent the output. */
 .caption-preview { position: absolute; left: 8%; right: 8%; bottom: 15%; padding: 7px 5px; text-align: center; font-size: clamp(10px, 1.2vw, 15px); font-weight: 900; line-height: 1.25; text-transform: uppercase; text-shadow: -1px -1px 0 #000, 1px 1px 0 #000, 0 2px 4px #000; }.caption-preview span.active { color: #ffd677; }
 
-/* Processing is a content-sized status card, not a second tall video frame. */
+/* Processing stays inside the same ratio-correct frame as completed output.
+   The card may scroll within that frame, but it never changes the frame's
+   declared output shape. */
 .workspace-grid:has(.processing-state) { min-height: 0; align-items: start; }
 .viewer-panel:has(.processing-state) { grid-template-rows: auto auto auto; align-self: start; }
 .viewer-stage:has(.processing-state) { min-height: 0; padding: 12px; }
-.viewer-frame:has(.processing-state) { width: min(100%, 560px); height: auto; max-width: 100%; aspect-ratio: auto; }
 
 /* Processing state loader (viewer filmstrip) */
 .processing-state {
@@ -869,20 +895,30 @@ main { min-width: 0; }
   position: relative;
   inset: auto;
   display: grid;
-  align-content: center;
+  /* Ordinary processing has three visible blocks (header, progress, footer).
+     The optional download panel becomes an implicit fourth row, which keeps a
+     footer pinned to the frame floor without reserving an empty row below it. */
+  grid-template-rows: auto auto auto;
+  align-content: space-between;
   justify-items: stretch;
-  gap: 9px;
+  gap: var(--space-6);
+  box-sizing: border-box;
   width: 100%;
+  height: 100%;
   min-width: 0;
   min-height: 0;
   max-height: 100%;
-  padding: 18px;
-  overflow: auto;
+  padding: var(--space-5);
+  overflow-x: hidden;
+  overflow-y: auto;
   text-align: left;
   background:
     radial-gradient(circle at 50% 42%, var(--surface-2) 0, var(--surface-1) 55%, var(--canvas) 100%);
   animation: processing-in .38s ease both;
 }
+.processing-section { min-width: 0; }
+.processing-header { display: grid; }
+.processing-progress { display: grid; gap: var(--space-2); min-width: 0; }
 .processing-state.state-paused { --state-accent: var(--warning); --state-accent-soft: rgba(240,168,75,.38); }
 .processing-state.state-partial { --state-accent: var(--warning); --state-accent-soft: rgba(240,168,75,.38); }
 .processing-state.state-failed { --state-accent: var(--error); --state-accent-soft: rgba(242,56,85,.38); }
@@ -978,27 +1014,56 @@ main { min-width: 0; }
   to { opacity: 1; }
 }
 
-/* Labelled value pairs: each figure keeps its own label so nothing reads as a
-   run-together sentence when a value grows. */
-.processing-meta, .download-detail-values {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1) var(--space-5);
+/* Labelled value pairs keep labels close to their values without turning a
+   growing timestamp or transfer figure into an inline sentence. */
+.processing-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  gap: var(--space-3) var(--space-5);
   margin: 0;
   font-variant-numeric: tabular-nums;
 }
-/* Label and value share a line when they fit and wrap only when they must.
-   Stacking every pair costs a line each, which General text cannot afford
-   in the smallest processing panel. */
-.processing-meta > div, .download-detail-values > div { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0 var(--space-3); min-width: 0; }
+.processing-meta > div,
+.download-detail-values > div {
+  display: grid;
+  align-content: start;
+  gap: var(--space-1);
+  min-width: 0;
+}
 .processing-meta dt, .download-detail-values dt { color: var(--text-primary); font-weight: var(--type-emphasis-weight); }
 .processing-meta dd, .download-detail-values dd { margin: 0; min-width: 0; color: var(--text-primary); font-weight: var(--type-emphasis-weight); overflow-wrap: anywhere; }
-.download-progress-detail { display: grid; gap: 6px; min-width: 0; padding: 9px 10px; border: 1px solid var(--border); border-radius: 7px; background: rgba(0,0,0,.26); text-align: left; }
-.download-detail-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 5px 10px; min-width: 0; }
-.download-detail-heading strong { color: var(--text); text-transform: capitalize; }
+.download-progress-detail {
+  display: grid;
+  align-self: start;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(0,0,0,.26);
+  text-align: left;
+}
+.download-detail-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--space-1) var(--space-3); min-width: 0; }
+.download-detail-heading strong { color: var(--text); text-transform: capitalize; overflow-wrap: anywhere; }
 .download-detail-heading b { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.download-detail-values {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3) var(--space-4);
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+.download-detail-values time { overflow-wrap: anywhere; }
 .download-message { display: block; margin: 0; min-width: 0; color: var(--text-primary); overflow-wrap: anywhere; }
-.processing-help { margin: 0; max-width: 100%; color: var(--text-primary); }
+.processing-help {
+  align-self: end;
+  margin: 0;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-soft);
+  max-width: 100%;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
 
 /* Processing checklist: a full-width document block before the lower workspace. */
 .checklist-panel {
@@ -1224,7 +1289,7 @@ main { min-width: 0; }
 
 /* Settings */
 .settings-grid { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(300px, .9fr); align-items: start; gap: var(--space-3); }
-.settings-column { display: grid; align-content: start; gap: var(--space-3); min-width: 0; }.settings-card { min-width: 0; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-1); padding: var(--space-4); }.settings-card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--space-3); padding-bottom: var(--space-3); border-bottom: 1px solid var(--border-soft); }.settings-card-head > div { display: flex; align-items: center; gap: var(--space-2); }.settings-card-head svg { color: var(--copper); }.settings-card-head h2 { margin: 0; font-size: var(--type-heading-size); font-weight: var(--type-heading-weight); line-height: var(--type-heading-line); letter-spacing: var(--type-heading-tracking); }.settings-card-head p { margin: 3px 0 0; color: var(--text-primary); }.settings-card-head > button { min-height: var(--control-height-small); padding: var(--control-pad-y) var(--control-pad-x); border: 0; background: transparent; color: var(--text-primary); }
+.settings-column { display: grid; align-content: start; gap: var(--space-3); min-width: 0; }.settings-card { min-width: 0; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-1); padding: var(--space-4); }.library-danger-card { border-color: color-mix(in srgb, var(--error) 48%, var(--border)); }.library-danger-card .settings-card-head svg { color: var(--error); }.library-danger-content { display: grid; gap: var(--space-3); padding-top: var(--space-3); }.library-danger-content p { margin: 0; color: var(--text-primary); }.library-danger-content strong { color: var(--text); }.library-purge-empty { padding-left: 0; padding-right: 0; }.library-purge-empty > svg { color: var(--success); }.purge-dialog { max-height: min(92vh, 620px); overflow-y: auto; }.purge-dialog-heading { display: flex; align-items: flex-start; gap: var(--space-2); }.purge-dialog-heading svg { flex: 0 0 auto; color: var(--error); }.purge-dialog-heading h2 { min-width: 0; }.purge-warning { padding: var(--space-2) var(--space-3); border: 1px solid color-mix(in srgb, var(--error) 42%, var(--border)); background: color-mix(in srgb, var(--error) 9%, transparent); }.purge-confirmation-field { display: block; margin-bottom: var(--space-1); color: var(--text); }.purge-confirmation-field code { color: var(--text); font-weight: var(--type-emphasis-weight); }.purge-dialog > input { width: 100%; }.purge-dialog .form-error { margin: var(--space-2) 0 0; }.settings-card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--space-3); padding-bottom: var(--space-3); border-bottom: 1px solid var(--border-soft); }.settings-card-head > div { display: flex; align-items: center; gap: var(--space-2); }.settings-card-head svg { color: var(--copper); }.settings-card-head h2 { margin: 0; font-size: var(--type-heading-size); font-weight: var(--type-heading-weight); line-height: var(--type-heading-line); letter-spacing: var(--type-heading-tracking); }.settings-card-head p { margin: 3px 0 0; color: var(--text-primary); }.settings-card-head > button { min-height: var(--control-height-small); padding: var(--control-pad-y) var(--control-pad-x); border: 0; background: transparent; color: var(--text-primary); }
 /* The control keeps its label on one line, so the group wraps instead. */
 .profile-head-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: var(--space-2); }
 .profile-head-actions .button { padding: var(--control-pad-y) var(--control-pad-x); }.profile-list { display: grid; gap: 6px; margin-top: 10px; }.profile-row { display: grid; grid-template-columns: var(--control-height) minmax(0, 1fr) auto auto; gap: var(--space-2); align-items: center; padding: var(--space-3); border: 1px solid var(--border); background: var(--surface-2); }.profile-mark { width: 32px; height: 32px; display: grid; place-items: center; background: var(--canvas); color: var(--red-muted); }.profile-info { min-width: 0; }.profile-info > div:first-child { display: flex; gap: 6px; align-items: center; }.profile-info strong { color: var(--text); font-size: var(--type-heading-size); font-weight: var(--type-heading-weight); line-height: var(--type-heading-line); letter-spacing: var(--type-heading-tracking); }.selected-label { display: flex; align-items: center; gap: 3px; color: var(--text-primary); }.profile-info p { margin: 3px 0; color: var(--text-primary); }.profile-secrets { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-5); margin: var(--space-2) 0 0; }
@@ -1611,6 +1676,7 @@ main { min-width: 0; }
 /* Every top-level band of the page separates by the same 24px. The command bar
    owns its own top padding, so the gap is applied as a top margin on what
    follows it rather than as a bottom margin that would double up. */
+.workspace-page > .notice-panel,
 .workspace-page > .checklist-panel,
 .workspace-page > .workspace-grid,
 .workspace-page > .board-panel,
@@ -1819,13 +1885,15 @@ main { min-width: 0; }
 /* The protagonist. A 9:16 short rendered 228px wide inside a 751px panel was
    the smallest object on a page built to show it. */
 .viewer-frame {
-  height: var(--ws-frame-height);
+  --viewer-aspect-width: 9;
+  --viewer-aspect-height: 16;
+  width: min(100%, calc(var(--ws-frame-height) * var(--viewer-aspect-width) / var(--viewer-aspect-height)));
+  height: auto;
   max-width: 100%;
+  aspect-ratio: var(--viewer-aspect-width) / var(--viewer-aspect-height);
   border-radius: var(--radius-lg);
   box-shadow: none;
 }
-
-.viewer-frame.landscape { width: min(100%, 860px); }
 
 .transport { padding-inline: var(--space-4); gap: var(--space-3); }
 
