@@ -16,7 +16,7 @@ Updated: 2026-09-11
 - Independent FFmpeg renders with centre 9:16/1:1/16:9 crop, H.264/AAC, word-highlight captions, matched Library overlays for source clips, and Script-mode text-card beats, followed by FFprobe output validation and atomic publication.
 - Progressive workspace through SSE with polling fallback, clip selection, score inspector, storyboard/Beat board, partial success, pause/resume, stop-and-keep, and scoped retry. The internal EDL remains authoritative while the redundant layered-timeline panel is no longer rendered.
 - ZIP export with numbered successful media, `manifest.json`, `credits.json`, and warning/failure summary.
-- Personal Media Library with persistent three-level business folders, Unsorted migration, combined search/type/origin/policy filters, signed previews, protected state, and resilient refresh handling.
+- Personal Media Library with persistent three-level business folders, Unsorted migration, combined search/type/origin/policy filters, signed previews, protected state, resilient refresh handling, and an exact-confirmation global purge that preserves application configuration.
 - Validated uploads, YouTube sources, Fast/Smart clips, Script outputs, and retries publish idempotently into a shared content-addressed blob store with durable project/job/clip/Library references and neutral matching defaults.
 - Script exact-span planning every roughly 2-3 seconds, OpenRouter TTS -> local espeak-ng -> silent narration fallback, word alignment, storyboard, captions, visual beats, and render.
 - Provider profiles with configurable OpenRouter model, optional OpenRouter speech model and voice, test/duplicate/delete, masked read API, session-only or Fernet-encrypted persistent secrets.

@@ -57,7 +57,7 @@ The canonical job/clip/beat records are the first versioned EDL. FFmpeg consumes
 4. word-by-word ASS captions with current-word highlight;
 5. source speech or generated narration.
 
-The source file and Library sources are immutable. Manual editing can create later EDL versions without transcoding over originals. Business folders are metadata-only organizational containers, never filesystem or security boundaries. Physical blobs are eligible for retention cleanup only after their durable reference count reaches zero.
+The source file and Library sources are immutable. Manual editing can create later EDL versions without transcoding over originals. Business folders are metadata-only organizational containers, never filesystem or security boundaries. Physical blobs are eligible for retention cleanup only after their durable reference count reaches zero. The Settings Library purge is an explicit destructive operation: after exact confirmation and a queued/active-job safety check, it removes all Library assets, cascades linked projects and generated media, bypasses protected-item safeguards only for that operation, and preserves profiles, secrets, settings, the database, and folder records.
 
 ## Security model
 
