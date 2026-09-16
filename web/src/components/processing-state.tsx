@@ -43,26 +43,30 @@ export function ProcessingState({ job, waitingForEngine = false }: { job: Job; w
 
   return <div className={`processing-state state-${job.state}`}>
     <div className="processing-live sr-only" aria-live="polite">{stageLabel}</div>
-    <div className="processing-heading">
-      <span aria-hidden="true">{waitingForEngine ? <WifiOff size={18} /> : job.state === "paused" ? <Pause size={18} /> : job.state === "recovered" ? <RotateCcw size={18} /> : <Film size={18} />}</span>
-      <div><strong>{stageLabel}</strong><small>{stageDetail}</small></div>
-      <b aria-label={`Overall progress ${Math.round(progress)} percent`}>{Math.round(progress)}%</b>
-    </div>
-    <div className="processing-progress-summary"><span>Overall progress</span></div>
-    <div className="processing-progress-bar" role="progressbar" aria-label="Overall processing progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress)}><span style={{ width: `${progress}%` }} /></div>
-    <div className="processing-filmstrip" aria-hidden="true">
-      <div className="filmstrip-perforations top" />
-      <div className="processing-track">
-        {[0, 1, 2, 3, 4].map((index) => <span key={index} className={index < activeBlocks ? "active" : ""} style={{ "--clip-index": index } as CSSProperties} />)}
-        <i style={{ left: `${progress}%` }} />
+    <section className="processing-section processing-header" aria-label="Processing status">
+      <div className="processing-heading">
+        <span aria-hidden="true">{waitingForEngine ? <WifiOff size={18} /> : job.state === "paused" ? <Pause size={18} /> : job.state === "recovered" ? <RotateCcw size={18} /> : <Film size={18} />}</span>
+        <div><strong>{stageLabel}</strong><small>{stageDetail}</small></div>
+        <b aria-label={`Overall progress ${Math.round(progress)} percent`}>{Math.round(progress)}%</b>
       </div>
-      <div className="filmstrip-perforations bottom" />
-    </div>
-    <dl className="processing-meta">
-      <div><dt>Elapsed</dt><dd>{elapsedSince(job.createdAt, now)}</dd></div>
-      {hasItems && <div><dt>Item</dt><dd>{job.currentItem} of {job.totalItems}</dd></div>}
-    </dl>
-    {download && <section className="download-progress-detail" aria-label="Download status">
+    </section>
+    <section className="processing-section processing-progress" aria-label="Progress details">
+      <div className="processing-progress-summary"><span>Overall progress</span></div>
+      <div className="processing-progress-bar" role="progressbar" aria-label="Overall processing progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress)}><span style={{ width: `${progress}%` }} /></div>
+      <div className="processing-filmstrip" aria-hidden="true">
+        <div className="filmstrip-perforations top" />
+        <div className="processing-track">
+          {[0, 1, 2, 3, 4].map((index) => <span key={index} className={index < activeBlocks ? "active" : ""} style={{ "--clip-index": index } as CSSProperties} />)}
+          <i style={{ left: `${progress}%` }} />
+        </div>
+        <div className="filmstrip-perforations bottom" />
+      </div>
+      <dl className="processing-meta">
+        <div><dt>Elapsed</dt><dd>{elapsedSince(job.createdAt, now)}</dd></div>
+        {hasItems && <div><dt>Item</dt><dd>{job.currentItem} of {job.totalItems}</dd></div>}
+      </dl>
+    </section>
+    {download && <section className="processing-section download-progress-detail" aria-label="Download status">
       <div className="download-detail-heading"><strong>{download.phase}</strong>{download.percent != null && <b>{Math.round(download.percent)}%</b>}</div>
       {download.percent != null && <div className="download-detail-track" aria-hidden="true"><span style={{ width: `${download.percent}%` }} /></div>}
       <dl className="download-detail-values">
