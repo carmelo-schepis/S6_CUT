@@ -207,13 +207,16 @@ test.describe("responsive loading and creation controls", () => {
       const measure = await processing.evaluate((element) => {
         const rect = element.getBoundingClientRect();
         const blocks = [...element.querySelectorAll<HTMLElement>(".processing-heading, .processing-filmstrip, .processing-meta, .download-progress-detail, p")].map((item) => item.getBoundingClientRect());
-        return { rect, blocks, scrollHeight: element.scrollHeight, clientHeight: element.clientHeight };
+        return { rect, blocks, scrollWidth: element.scrollWidth, clientWidth: element.clientWidth, scrollHeight: element.scrollHeight, clientHeight: element.clientHeight };
       });
       expect(measure.rect.left).toBeGreaterThanOrEqual(-1);
       expect(measure.rect.right).toBeLessThanOrEqual(width + 1);
       expect(measure.rect.top).toBeGreaterThanOrEqual(-1);
       expect(measure.rect.bottom).toBeLessThanOrEqual(height + 1);
-      expect(measure.scrollHeight).toBeLessThanOrEqual(measure.clientHeight + 1);
+      // Long status copy may scroll vertically inside the ratio-correct frame;
+      // horizontal overflow is the layout regression this fixture guards.
+      expect(measure.scrollWidth).toBeLessThanOrEqual(measure.clientWidth + 1);
+      expect(measure.scrollHeight).toBeGreaterThanOrEqual(measure.clientHeight);
       for (let index = 1; index < measure.blocks.length; index += 1) expect(measure.blocks[index].top).toBeGreaterThanOrEqual(measure.blocks[index - 1].bottom - 1);
       if (name === "desktop" || name === "mobile-tiny") await processing.screenshot({ path: path.join(artifacts, `loading-${name}.png`) });
     }

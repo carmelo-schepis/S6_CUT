@@ -14,7 +14,7 @@ test.describe("responsive layout regressions", () => {
       const nav = page.locator(".app-rail nav");
       const measurement = await nav.evaluate((element) => {
         const items = [...element.querySelectorAll<HTMLElement>(".nav-item")];
-        const labelNodes = items.map((item) => item.querySelector<HTMLElement>("span")!);
+        const labelNodes = items.map((item) => item.querySelector<HTMLElement>(".nav-label")!);
         const labels = labelNodes.map((label) => label.getBoundingClientRect());
         const icons = items.map((item) => item.querySelector<SVGElement>("svg")!.getBoundingClientRect());
         const itemRects = items.map((item) => item.getBoundingClientRect());

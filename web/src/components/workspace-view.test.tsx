@@ -473,6 +473,10 @@ describe("WorkspaceView – output aspect ratio presentation", () => {
     renderView({ project: { ...project, latestJobId: ratioJob.id } });
 
     expect(await screen.findByText(`Output · ${aspect}`)).toBeInTheDocument();
+    const frame = document.querySelector(".viewer-frame");
+    expect(frame).toHaveAttribute("data-output-aspect-ratio", aspect);
+    const [aspectWidth, aspectHeight] = aspect.split(":");
+    expect(frame).toHaveStyle({ aspectRatio: `${aspectWidth} / ${aspectHeight}` });
     expect(screen.getByText(new RegExp(`0:10 · ${aspect} · ${width} × ${height} px`))).toBeInTheDocument();
     expect(screen.queryByText(`Output · ${aspect === "9:16" ? "1:1" : "9:16"}`)).not.toBeInTheDocument();
   });

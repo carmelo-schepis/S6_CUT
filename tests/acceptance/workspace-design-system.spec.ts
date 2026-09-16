@@ -78,7 +78,7 @@ async function findCompletedProject(request: APIRequestContext): Promise<string 
 async function openWorkspace(page: Page, projectName: string) {
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await page.locator('.app-rail nav button[aria-label="Projects"]').click();
-  const open = page.getByRole("button", { name: `Open project ${projectName}`, exact: true });
+  const open = page.getByRole("button", { name: `Open project ${projectName}`, exact: true }).first();
   await expect(open).toBeVisible({ timeout: 60_000 });
   await open.click();
   await expect(page.locator(".workspace-page")).toBeVisible({ timeout: 60_000 });

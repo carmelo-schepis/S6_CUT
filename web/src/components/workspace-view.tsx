@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { AlertTriangle, Captions, Check, Clock, Download, Eye, FileText, Film, Pause, Play, RefreshCw, RotateCcw, RotateCw, SlidersHorizontal, Sparkles, Square, Volume2, Zap } from "lucide-react";
 import { changeProjectFolder, controlJob, createZip, getJob, jobEventsUrl, listAssets, listFolders, readableError, retryClip, setClipSelection } from "../api";
 import { emitLibraryChanged } from "../library-sync";
@@ -12,6 +12,18 @@ import { ProcessChecklist } from "./process-checklist";
 // J and L shuttle the preview by a readable step rather than a single frame;
 // the frame buttons cover frame-accurate movement.
 const TRANSPORT_NUDGE_SECONDS = 1;
+
+const outputAspectDimensions = {
+  "9:16": [9, 16],
+  "16:9": [16, 9],
+  "1:1": [1, 1],
+  "4:5": [4, 5],
+} as const;
+
+type ViewerFrameStyle = CSSProperties & {
+  "--viewer-aspect-width": number;
+  "--viewer-aspect-height": number;
+};
 
 const detailsTabLabels = { score: "Score", captions: "Captions", asset: "Asset", info: "Info" } as const;
 
@@ -397,6 +409,12 @@ export function WorkspaceView({ project, health, providersLoaded = true, hasSele
     selectedClip?.height ?? selectedOutputAsset?.height,
     job?.contentFormat ?? project?.contentFormat,
   );
+  const [viewerAspectWidth, viewerAspectHeight] = outputAspectDimensions[outputAspectRatio];
+  const viewerFrameStyle: ViewerFrameStyle = {
+    aspectRatio: `${viewerAspectWidth} / ${viewerAspectHeight}`,
+    "--viewer-aspect-width": viewerAspectWidth,
+    "--viewer-aspect-height": viewerAspectHeight,
+  };
   const selectedIds = job?.clips.filter((clip) => clip.selected && clip.state === "complete").map((clip) => clip.id) || [];
   const savedCount = job?.clips.filter((clip) => clip.state === "complete" && clip.libraryAssetId).length || 0;
   const providerRelatedFailure = Boolean(job?.error && /openrouter|provider|credential|api key|model|voice/i.test(job.error));
@@ -525,7 +543,7 @@ export function WorkspaceView({ project, health, providersLoaded = true, hasSele
       <section className="viewer-panel panel" aria-label="Output viewer">
         <div className="viewer-toolbar"><span>Output · {outputAspectRatio}</span>{creatorCredit && <span className="viewer-credit" role="note">{creatorCredit}</span>}<div><IconButton label="Toggle safe areas" aria-pressed={safeAreasVisible} onClick={() => setSafeAreasVisible((value) => !value)}><Eye size={15} /></IconButton><IconButton label={previewMuted ? "Unmute preview" : "Mute preview"} aria-pressed={previewMuted} onClick={() => { const player = playerRef.current; if (player) player.muted = !player.muted; setPreviewMuted((value) => !value); }}><Volume2 size={15} /></IconButton></div></div>
         <div className="viewer-stage">
-          <div className={`viewer-frame ${project.mode} ${project.contentFormat === "long" ? "landscape" : ""} ${safeAreasVisible ? "show-safe-areas" : ""}`}>
+          <div className={`viewer-frame ${project.mode} ${safeAreasVisible ? "show-safe-areas" : ""}`} style={viewerFrameStyle} data-output-aspect-ratio={outputAspectRatio}>
             {previewSource ? <><video
               key={previewSource.identity}
               ref={playerRef}

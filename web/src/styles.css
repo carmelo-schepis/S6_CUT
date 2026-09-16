@@ -881,11 +881,12 @@ main { min-width: 0; }
    outlined. Styling it as General text would misrepresent the output. */
 .caption-preview { position: absolute; left: 8%; right: 8%; bottom: 15%; padding: 7px 5px; text-align: center; font-size: clamp(10px, 1.2vw, 15px); font-weight: 900; line-height: 1.25; text-transform: uppercase; text-shadow: -1px -1px 0 #000, 1px 1px 0 #000, 0 2px 4px #000; }.caption-preview span.active { color: #ffd677; }
 
-/* Processing is a content-sized status card, not a second tall video frame. */
+/* Processing stays inside the same ratio-correct frame as completed output.
+   The card may scroll within that frame, but it never changes the frame's
+   declared output shape. */
 .workspace-grid:has(.processing-state) { min-height: 0; align-items: start; }
 .viewer-panel:has(.processing-state) { grid-template-rows: auto auto auto; align-self: start; }
 .viewer-stage:has(.processing-state) { min-height: 0; padding: 12px; }
-.viewer-frame:has(.processing-state) { width: min(100%, 560px); height: auto; max-width: 100%; aspect-ratio: auto; }
 
 /* Processing state loader (viewer filmstrip) */
 .processing-state {
@@ -1636,6 +1637,7 @@ main { min-width: 0; }
 /* Every top-level band of the page separates by the same 24px. The command bar
    owns its own top padding, so the gap is applied as a top margin on what
    follows it rather than as a bottom margin that would double up. */
+.workspace-page > .notice-panel,
 .workspace-page > .checklist-panel,
 .workspace-page > .workspace-grid,
 .workspace-page > .board-panel,
@@ -1844,13 +1846,15 @@ main { min-width: 0; }
 /* The protagonist. A 9:16 short rendered 228px wide inside a 751px panel was
    the smallest object on a page built to show it. */
 .viewer-frame {
-  height: var(--ws-frame-height);
+  --viewer-aspect-width: 9;
+  --viewer-aspect-height: 16;
+  width: min(100%, calc(var(--ws-frame-height) * var(--viewer-aspect-width) / var(--viewer-aspect-height)));
+  height: auto;
   max-width: 100%;
+  aspect-ratio: var(--viewer-aspect-width) / var(--viewer-aspect-height);
   border-radius: var(--radius-lg);
   box-shadow: none;
 }
-
-.viewer-frame.landscape { width: min(100%, 860px); }
 
 .transport { padding-inline: var(--space-4); gap: var(--space-3); }
 
