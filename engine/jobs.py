@@ -1602,35 +1602,40 @@ class JobManager:
         self._save(job, private)
         self.complete_step(job, "ready", detail="Project ready", private=private)
 
-    async def delete_project(self, project_id: str, *, delete_assets: bool = False) -> None:
+    async def delete_project(self, project_id: str, *, delete_assets: bool = False, allow_protected: bool = False):
         """Stop a project's workers before deleting their durable records.
 
         The marker is visible to every cooperative checkpoint immediately. The
         synchronous deletion then waits for each job lock, so no worker can
-        publish or upsert a job after its project has been removed.
+        publish or upsert a job after its project has been removed. Protected
+        media remains guarded unless the explicit global Library purge opts in.
         """
         with self._deletion_lock:
             if not self.db.get_project(project_id):
                 raise KeyError(project_id)
             self._deleting_projects.add(project_id)
         try:
-            await asyncio.to_thread(self._delete_project_records, project_id, delete_assets)
+            return await asyncio.to_thread(self._delete_project_records, project_id, delete_assets, allow_protected)
         finally:
             with self._deletion_lock:
                 self._deleting_projects.discard(project_id)
 
-    def _delete_project_records(self, project_id: str, delete_assets: bool = False) -> None:
+    def _delete_project_records(self, project_id: str, delete_assets: bool = False, allow_protected: bool = False):
         jobs = [job for job in self.db.list_jobs() if job.project_id == project_id]
         locks = [self.job_locks[job.id] for job in sorted(jobs, key=lambda item: item.id)]
         for lock in locks:
             lock.acquire()
         try:
-            unreferenced_paths = self.db.delete_project_everywhere(project_id) if delete_assets else []
-            if not delete_assets:
+            if delete_assets:
+                unreferenced_paths, bytes_reclaimed = self.db.delete_project_everywhere_with_stats(project_id, allow_protected=allow_protected)
+            else:
+                unreferenced_paths, bytes_reclaimed = [], 0
                 self.db.delete_project(project_id)
         finally:
             for lock in reversed(locks):
                 lock.release()
+        warnings: list[str] = []
+        blobs_deleted = len(unreferenced_paths)
         for job in jobs:
             try:
                 directory = confined(self.settings.data_path, "jobs", job.id)
@@ -1639,12 +1644,73 @@ class JobManager:
                 elif directory.exists():
                     shutil.rmtree(directory)
             except (OSError, ValueError) as exc:
-                logger.warning("Could not remove deleted job workspace %s: %s", job.id, redact(str(exc)))
+                logger.warning("Could not remove deleted job workspace: %s", redact(str(exc)))
+                warnings.append("Some deleted project workspaces could not be removed from disk.")
         for relative in unreferenced_paths:
             try:
-                confined(self.settings.data_path, *relative.split("/")).unlink(missing_ok=True)
+                target = confined(self.settings.data_path, *relative.split("/"))
+                if bytes_reclaimed == 0 and target.is_file():
+                    try:
+                        bytes_reclaimed += target.stat().st_size
+                    except OSError:
+                        pass
+                target.unlink(missing_ok=True)
             except (OSError, ValueError) as exc:
                 logger.warning("Could not remove unreferenced project blob: %s", redact(str(exc)))
+                warnings.append("Some deleted media files could not be removed from disk.")
+        return {"bytes_reclaimed": bytes_reclaimed, "blobs_deleted": blobs_deleted, "warnings": list(dict.fromkeys(warnings))}
+
+    async def purge_library_content(self):
+        """Remove all Library content after the API has checked job safety.
+
+        Project-linked media goes through the same coordinated deletion path as
+        ordinary project deletion, with protected media overridden only for this
+        explicit global operation. Remaining assets are removed in one database
+        transaction after all linked projects have committed their deletion.
+        """
+        blocked_states = {"queued", "active", "paused", "stalled", "recovered"}
+        blocked = [job for job in self.db.list_jobs() if job.state in blocked_states]
+        if blocked:
+            raise ValueError("Library content cannot be purged while processing jobs are queued or running")
+
+        assets = self.db.list_assets(include_archived=True)
+        project_ids = sorted({asset.source_project_id for asset in assets if asset.source_project_id and self.db.get_project(asset.source_project_id)})
+        assets_deleted = 0
+        projects_deleted = 0
+        blobs_deleted = 0
+        bytes_reclaimed = 0
+        warnings: list[str] = []
+        for project_id in project_ids:
+            assets_deleted += sum(1 for asset in assets if asset.source_project_id == project_id)
+            result = await self.delete_project(project_id, delete_assets=True, allow_protected=True)
+            projects_deleted += 1
+            blobs_deleted += result["blobs_deleted"]
+            bytes_reclaimed += result["bytes_reclaimed"]
+            warnings.extend(result["warnings"])
+
+        ordinary_assets_deleted, paths, ordinary_bytes = await asyncio.to_thread(self.db.purge_library_assets)
+        assets_deleted += ordinary_assets_deleted
+        blobs_deleted += len(paths)
+        bytes_reclaimed += ordinary_bytes
+        for relative in paths:
+            try:
+                target = confined(self.settings.data_path, *relative.split("/"))
+                if ordinary_bytes == 0 and target.is_file():
+                    try:
+                        bytes_reclaimed += target.stat().st_size
+                    except OSError:
+                        pass
+                target.unlink(missing_ok=True)
+            except (OSError, ValueError) as exc:
+                logger.warning("Could not remove unreferenced Library blob: %s", redact(str(exc)))
+                warnings.append("Some deleted media files could not be removed from disk.")
+        return {
+            "assets_deleted": assets_deleted,
+            "projects_deleted": projects_deleted,
+            "blobs_deleted": blobs_deleted,
+            "bytes_reclaimed": max(0, bytes_reclaimed),
+            "warnings": list(dict.fromkeys(warnings)),
+        }
 
     def prune_retained_jobs(self) -> int:
         """Prune only terminal job workspaces while retaining durable job records.

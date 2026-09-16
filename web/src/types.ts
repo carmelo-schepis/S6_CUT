@@ -330,6 +330,15 @@ export type AssetPage = z.infer<typeof assetPageSchema>;
 
 export const assetDeleteResultSchema = z.object({ deleted: z.array(z.string()), failed: z.record(z.string()) });
 
+export const libraryPurgeResultSchema = z.object({
+  assetsDeleted: z.number().int().nonnegative(),
+  projectsDeleted: z.number().int().nonnegative(),
+  blobsDeleted: z.number().int().nonnegative(),
+  bytesReclaimed: z.number().int().nonnegative(),
+  warnings: z.array(z.string()),
+});
+export type LibraryPurgeResult = z.infer<typeof libraryPurgeResultSchema>;
+
 export type MatchExplanation = {
   query: string;
   selected: LibraryAsset | null;

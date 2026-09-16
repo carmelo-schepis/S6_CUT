@@ -5,15 +5,16 @@ import { SettingsView } from "./settings-view";
 
 vi.mock("../api", () => {
   const readableError = (e: unknown) => e instanceof Error ? e.message : "Something went wrong. Try again.";
-  return { readableError, listProfiles: vi.fn(), listOpenRouterModels: vi.fn(), saveProfile: vi.fn(), testProfile: vi.fn(), deleteProfile: vi.fn(), duplicateProfile: vi.fn() };
+  return { readableError, listProfiles: vi.fn(), listOpenRouterModels: vi.fn(), saveProfile: vi.fn(), testProfile: vi.fn(), deleteProfile: vi.fn(), duplicateProfile: vi.fn(), purgeLibraryContent: vi.fn() };
 });
 
-import { deleteProfile, listOpenRouterModels, listProfiles, saveProfile, testProfile } from "../api";
+import { deleteProfile, listOpenRouterModels, listProfiles, purgeLibraryContent, saveProfile, testProfile } from "../api";
 const mockListProfiles = vi.mocked(listProfiles);
 const mockListModels = vi.mocked(listOpenRouterModels);
 const mockSaveProfile = vi.mocked(saveProfile);
 const mockTestProfile = vi.mocked(testProfile);
 const mockDeleteProfile = vi.mocked(deleteProfile);
+const mockPurgeLibraryContent = vi.mocked(purgeLibraryContent);
 
 const health: Health = { status: "ready", version: "test", database: true, ffmpeg: true, ffprobe: true, whisper: true, ytdlp: true, localTts: true, dataPath: "Local mounted data directory", freeBytes: 1_000_000, activeWorkers: 0, queuedJobs: 0, fallbacks: { planning: "deterministic" } };
 const connectedProfile: ProviderProfile = {
@@ -24,7 +25,7 @@ const baseProfile: ProviderProfile = { id: "p2", name: "Minimal", textModelId: "
 function renderView() { return render(<SettingsView health={health} onHealthRefresh={vi.fn(async () => undefined)} onProfilesChanged={vi.fn()} />); }
 
 describe("SettingsView", () => {
-  beforeEach(() => { mockListProfiles.mockReset(); mockListModels.mockReset(); mockSaveProfile.mockReset(); mockTestProfile.mockReset(); mockDeleteProfile.mockReset(); mockListModels.mockResolvedValue([]); });
+  beforeEach(() => { mockListProfiles.mockReset(); mockListModels.mockReset(); mockSaveProfile.mockReset(); mockTestProfile.mockReset(); mockDeleteProfile.mockReset(); mockPurgeLibraryContent.mockReset(); mockListModels.mockResolvedValue([]); });
   it("renders one OpenRouter section with separate capability states", async () => {
     mockListProfiles.mockResolvedValue([connectedProfile]); renderView();
     const article = await screen.findByRole("article");
@@ -59,6 +60,19 @@ describe("SettingsView", () => {
     mockListProfiles.mockResolvedValue([connectedProfile]); mockListModels.mockResolvedValue([{ id: "free/speech", name: "Free speech", outputModalities: ["speech"], free: true, voices: ["alloy"] }]);
     renderView(); await screen.findByText("Work profile"); fireEvent.click(screen.getByRole("button", { name: "Edit Work profile" }));
     await waitFor(() => expect(mockListModels).toHaveBeenCalledWith("speech"));
+  });
+  it("requires the exact destructive confirmation phrase and shows the empty summary", async () => {
+    mockListProfiles.mockResolvedValue([baseProfile]);
+    mockPurgeLibraryContent.mockResolvedValue({ assetsDeleted: 4, projectsDeleted: 1, blobsDeleted: 4, bytesReclaimed: 42, warnings: [] });
+    renderView(); await screen.findByText("Minimal");
+    fireEvent.click(screen.getByRole("button", { name: /Delete all Library content/i }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByRole("button", { name: "Delete permanently" })).toBeDisabled();
+    fireEvent.change(within(dialog).getByLabelText(/Type DELETE ALL CONTENT/i), { target: { value: "DELETE ALL CONTENT" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete permanently" }));
+    await waitFor(() => expect(mockPurgeLibraryContent).toHaveBeenCalledWith("DELETE ALL CONTENT"));
+    expect(await screen.findByText("Library is empty")).toBeInTheDocument();
+    expect(screen.getByText(/4 media items, 1 linked project, and 4 files removed/)).toBeInTheDocument();
   });
   it("tests, deletes, and refreshes profiles", async () => {
     mockListProfiles.mockResolvedValue([baseProfile]); mockTestProfile.mockResolvedValue(baseProfile); mockDeleteProfile.mockResolvedValue(undefined); globalThis.confirm = vi.fn(() => true);

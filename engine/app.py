@@ -29,7 +29,7 @@ from .jobs import JobManager, ProjectDeletingError, QueueFullError, SwitchFastEr
 from .library import LibraryRules
 from .media import MediaError, available, probe, validate_video_upload
 from .models import (
-    Asset, AssetDelete, AssetDeleteResult, AssetMove, AssetOrigin, AssetUpdate, AssetPage, CaptionCue, CaptionDownload, CaptionReviewInput, Clip, FolderCreate, FolderMove, FolderUpdate, Health, Job,
+    Asset, AssetDelete, AssetDeleteResult, AssetMove, AssetOrigin, AssetUpdate, AssetPage, CaptionCue, CaptionDownload, CaptionReviewInput, Clip, FolderCreate, FolderMove, FolderUpdate, Health, Job, LibraryPurgeInput, LibraryPurgeResult,
     LibraryFolder, MatchExplanation, ContentFormat, ProcessingMode, ProfileInput, Project, ProjectFolderUpdate,
     OpenRouterModel, ProviderProfile, ScriptJobInput, SelectionInput, ShortsJobInput, TopicBeat, TopicVideoInput, TopicVideoPlan, now_iso,
 )
@@ -933,6 +933,16 @@ async def remove_library_folder(folder_id: str, destination_folder_id: str = UNS
         raise HTTPException(409, "Confirm removal; assets and child folders will be moved to the destination")
     try:
         db.remove_folder(folder_id, destination_folder_id)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.post("/api/v1/library/purge", response_model=LibraryPurgeResult)
+async def purge_library(value: LibraryPurgeInput) -> LibraryPurgeResult:
+    if value.confirmation != "DELETE ALL CONTENT":
+        raise HTTPException(409, "Type DELETE ALL CONTENT exactly to confirm this permanent action.")
+    try:
+        return LibraryPurgeResult.model_validate(await manager.purge_library_content())
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
 
