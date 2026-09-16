@@ -6,6 +6,9 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const fixture = path.join(root, "tests/fixtures/openrouter-fallback.mp4");
 const artifacts = path.join(root, "test-artifacts/openrouter-fallback");
+const profileKey = process.env.S6_E2E_PROFILE_KEY;
+
+test.skip(!profileKey, "requires S6_E2E_PROFILE_KEY for the isolated real-provider fallback test");
 
 async function checklistStatuses(page: import("@playwright/test").Page) {
   return page.locator(".process-checklist li").evaluateAll((rows) => rows.map((row) => ({
@@ -36,8 +39,6 @@ test.describe("OpenRouter Smart fallback", () => {
     // trace never records a password-field value. The browser still verifies
     // the connected profile in Settings before creating the job.
     const gateway = process.env.S6_ACCEPTANCE_URL || "http://127.0.0.1:8080";
-    const profileKey = process.env.S6_E2E_PROFILE_KEY;
-    if (!profileKey) throw new Error("The isolated acceptance harness did not provide a profile key");
     const profileResponse = await fetch(`${gateway}/api/v1/profiles`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({
       name: "E2E OpenRouter failure", modelId: "openai/gpt-4.1-mini", openrouterKey: profileKey, persistence: "encrypted", selected: true,
     }) });
@@ -48,7 +49,7 @@ test.describe("OpenRouter Smart fallback", () => {
 
     await page.goto("/", { waitUntil: "domcontentloaded" });
     await expect(page).toHaveTitle(/S6_cut/i);
-    await expect(page.getByText("All local tools ready")).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByText("Local engine ready")).toBeVisible({ timeout: 60_000 });
 
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
@@ -56,7 +57,7 @@ test.describe("OpenRouter Smart fallback", () => {
     await expect(providerRow).toContainText("Connected; isolated provider failure test is ready", { timeout: 30_000 });
 
     await page.getByRole("button", { name: "Projects", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "Make the first cut" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
     await page.locator('input[aria-label="Choose video file"]').setInputFiles(fixture);
     const projectName = `OpenRouter fallback ${Date.now()}`;
     await page.getByLabel("Project name").fill(projectName);
@@ -106,7 +107,7 @@ test.describe("OpenRouter Smart fallback", () => {
     await page.screenshot({ path: path.join(artifacts, "complete-fallback.png"), fullPage: true });
 
     await page.reload({ waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("heading", { name: "Make the first cut" })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible({ timeout: 30_000 });
     const projectCard = page.locator(".project-card").filter({ hasText: projectName }).first();
     await expect(projectCard).toBeVisible({ timeout: 30_000 });
     await projectCard.click();

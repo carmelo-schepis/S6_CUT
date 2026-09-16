@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { CircleHelp, BriefcaseBusiness, Film, FolderKanban, HardDrive, Library, LoaderCircle, Scissors, Settings, SlidersHorizontal, Sparkles } from "lucide-react";
 import { getHealth, listJobs, listProfiles, listProjects, readableError } from "./api";
 import { JobsView } from "./components/jobs-view";
@@ -7,10 +7,12 @@ import { ProjectsView } from "./components/projects-view";
 import { SettingsView } from "./components/settings-view";
 import { StatusBadge } from "./components/common";
 import { WorkspaceView } from "./components/workspace-view";
+import { WorkspaceProgressIndicator } from "./components/workspace-progress-indicator";
 import { ShortsEditorView } from "./components/shorts-editor-view";
 import { TopicToVideoView } from "./components/topic-to-video-view";
 import { HelpDialog } from "./components/help-dialog";
-import { jobPollInterval } from "./project-status";
+import { hasLiveWork, jobPollInterval, workspaceActivity } from "./project-status";
+import { onLibraryChanged } from "./library-sync";
 import { usePoll } from "./use-poll";
 import type { Health, Job, Project, ProviderProfile } from "./types";
 
@@ -46,6 +48,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const refreshRevision = useRef(0);
 
   // `getHealth` aborts itself after HEALTH_TIMEOUT_MS, so a wedged engine
   // rejects here instead of leaving the promise pending forever — which used to
@@ -60,24 +63,31 @@ export function App() {
   const runHealth = usePoll(pollHealth, HEALTH_POLL_MS, true, true);
 
   const jobsPollMs = jobPollInterval(jobs);
+  const latestJobsSnapshot = useRef<Job[]>([]);
 
   // Runs immediately on entering Projects: waiting a full interval let a
   // finished project keep showing its creation-time badge while its progress
   // bar already read 100%.
   const pollJobs = useCallback(() => listJobs()
-    .then(setJobs)
+    .then((value) => { latestJobsSnapshot.current = value; setJobs(value); })
     .catch((cause) => setError(readableError(cause))), []);
-  const runJobs = usePoll(pollJobs, jobsPollMs, page === "projects");
+  const jobsPollingEnabled = page === "projects" || hasLiveWork(jobs);
+  const runJobs = usePoll(pollJobs, jobsPollMs, jobsPollingEnabled);
 
   // Each read applies its own slice the moment it settles. Gating all four on a
   // single `allSettled` meant the engine badge kept saying "Connecting…" until
   // the heavy project and job reads returned — so a healthy engine still looked
   // unreachable for as long as the slowest list took.
   const refresh = useCallback(async () => {
+    const revision = ++refreshRevision.current;
     const projectsDone = listProjects().then(
-      (value) => { setProjects(value); setSelectedProjectId((current) => current && value.some((project) => project.id === current) ? current : value[0]?.id || null); },
+      (value) => {
+        if (revision !== refreshRevision.current) return;
+        setProjects(value);
+        setSelectedProjectId((current) => current && value.some((project) => project.id === current) ? current : value[0]?.id || null);
+      },
       () => undefined,
-    ).finally(() => setLoaded(true));
+    ).finally(() => { if (revision === refreshRevision.current) setLoaded(true); });
 
     // Health and jobs go through their polls so a manual Retry can never start
     // a second read alongside the one already in flight.
@@ -95,6 +105,11 @@ export function App() {
     void Promise.resolve().then(refresh).catch((cause) => setError(readableError(cause)));
   }, [refresh]);
 
+  useEffect(() => onLibraryChanged(() => {
+    setLoaded(false);
+    void refresh();
+  }), [refresh]);
+
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "auto" });
   }, [page]);
@@ -106,11 +121,28 @@ export function App() {
 
   const onCreated = (project: Project) => {
     setProjects((current) => [project, ...current.filter((item) => item.id !== project.id)]);
+    // The guarded poll picks up the job immediately without racing the shell's
+    // existing /jobs request. If that request began before creation and returns
+    // an older snapshot, one guarded follow-up closes the gap without ever
+    // putting two /jobs requests on the wire together.
+    void runJobs().then(() => {
+      const createdJobIsLive = project.mode === "clip" && latestJobsSnapshot.current.some((job) => job.projectId === project.id && job.mode === "clip" && hasLiveWork([job]));
+      if (!createdJobIsLive) void runJobs();
+    });
     openProject(project.id);
+  };
+  const onDeleted = (projectId: string) => {
+    setProjects((current) => current.filter((project) => project.id !== projectId));
+    setJobs((current) => current.filter((job) => job.projectId !== projectId));
+    setSelectedProjectId((current) => current === projectId ? null : current);
   };
 
   const selected = projects.find((project) => project.id === selectedProjectId) || null;
-  const hasSelectedProvider = profiles.some((profile) => profile.selected && profile.openrouterConfigured && profile.openrouterStatus === "connected");
+  const activity = workspaceActivity(projects, jobs);
+  const activityDescription = activity
+    ? `${activity.remainingClips} clip${activity.remainingClips === 1 ? "" : "s"} remaining across ${activity.liveJobCount} active job${activity.liveJobCount === 1 ? "" : "s"}`
+    : "";
+  const hasSelectedProvider = profiles.some((profile) => profile.selected && profile.openrouterConfigured && profile.textStatus === "connected");
   const openProviders = () => setPage("settings");
 
   return <div className="app-shell">
@@ -133,11 +165,21 @@ export function App() {
       <nav>
         {nav.map((item) => {
           const Icon = item.icon;
-          return <button key={item.id} className={page === item.id ? "nav-item active" : "nav-item"} onClick={() => setPage(item.id)} aria-label={item.name} title={item.name} aria-current={page === item.id ? "page" : undefined}>
-            <Icon size={19} /><span>{item.label}</span>
+          const workspace = item.id === "workspace";
+          return <button key={item.id} className={page === item.id ? "nav-item active" : "nav-item"} onClick={() => setPage(item.id)} aria-label={item.name} title={item.name} aria-current={page === item.id ? "page" : undefined} aria-describedby={workspace && activity ? "workspace-work-description" : undefined}>
+            <span className="nav-icon-wrap">
+              <Icon className={workspace ? "nav-main-icon" : undefined} data-testid={workspace ? "workspace-nav-icon" : undefined} size={19} aria-hidden="true" />
+              {workspace && activity ? <WorkspaceProgressIndicator
+                value={activity.remainingClips}
+                isProcessing={activity.isProcessing}
+                label={`Loading progress: ${activityDescription}`}
+              /> : null}
+            </span>
+            <span className="nav-label">{item.label}</span>
           </button>;
         })}
       </nav>
+      {activity && <span id="workspace-work-description" className="sr-only">Loading progress: {activityDescription}</span>}
       {/* Help sits at the foot of the rail, below the destinations. The engine
           reading is not here: startup is announced once by the engine-startup
           row, and the steady-state status lives in the topbar badge. */}
@@ -168,12 +210,12 @@ export function App() {
       {error && <div className="global-alert" role="alert"><strong>Engine unavailable.</strong> {error} <button onClick={() => refresh()}>Retry</button></div>}
 
       <main id="main-content" tabIndex={-1}>
-        {page === "projects" && <ProjectsView projects={projects} jobs={jobs} health={health} healthChecked={healthChecked} loaded={loaded} providersLoaded={profilesLoaded} hasSelectedProvider={hasSelectedProvider} onConfigureProviders={openProviders} onCreated={onCreated} onOpen={openProject} onRefresh={refresh} />}
+        {page === "projects" && <ProjectsView projects={projects} jobs={jobs} health={health} healthChecked={healthChecked} loaded={loaded} providersLoaded={profilesLoaded} hasSelectedProvider={hasSelectedProvider} onConfigureProviders={openProviders} onCreated={onCreated} onOpen={openProject} onDeleted={onDeleted} onRefresh={refresh} />}
         {page === "library" && <LibraryView />}
         {page === "workspace" && <WorkspaceView key={selected?.id || "none"} project={selected} health={health} providersLoaded={profilesLoaded} hasSelectedProvider={hasSelectedProvider} onConfigureProviders={openProviders} onProjectUpdated={refresh} onGoProjects={() => setPage("projects")} />}
         {page === "shorts-editor" && <ShortsEditorView onJobCreated={refresh} />}
         {page === "ai-video" && <TopicToVideoView profiles={profiles} profilesLoaded={profilesLoaded} onConfigureProviders={openProviders} onJobCreated={refresh} />}
-        {page === "jobs" && <JobsView onOpenProject={openProject} />}
+        {page === "jobs" && <JobsView jobs={jobs} onRefresh={runJobs} onOpenProject={openProject} />}
         {page === "settings" && <SettingsView health={health} onHealthRefresh={refresh} onProfilesChanged={setProfiles} onSkipSetup={() => setPage("projects")} />}
       </main>
     </div>

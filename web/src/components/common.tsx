@@ -13,7 +13,7 @@ export function IconButton({ label, children, ...props }: ButtonHTMLAttributes<H
   return <button className="icon-button" aria-label={label} title={label} {...props}>{children}</button>;
 }
 
-export function StatusBadge({ state, label }: { state: JobState | "local" | "offline" | "fallback" | "ready" | "checking"; label?: string }) {
+export function StatusBadge({ state, label, className = "" }: { state: JobState | "local" | "offline" | "fallback" | "ready" | "checking"; label?: string; className?: string }) {
   const normalized = state.replace("_", "-");
   const text = label || state.replace("_", " ");
   const icon = state === "complete" || state === "ready" || state === "local" ? <Check size={12} />
@@ -22,7 +22,7 @@ export function StatusBadge({ state, label }: { state: JobState | "local" | "off
         : state === "checking" ? <LoaderCircle size={12} className="spin" />
         : state === "active" || state === "queued" || state === "recovered" ? <LoaderCircle size={12} className="spin" />
           : <AlertTriangle size={12} />;
-  return <span className={`status status-${normalized}`}>{icon}<span>{text}</span></span>;
+  return <span className={`status status-${normalized} ${className}`}>{icon}<span>{text}</span></span>;
 }
 
 /**
@@ -96,8 +96,9 @@ export function formatDimensions(aspect: string | null | undefined, width: numbe
 }
 
 export function formatDuration(seconds: number): string {
-  const minutes = Math.floor(seconds / 60);
-  const remainder = Math.round(seconds % 60).toString().padStart(2, "0");
+  const roundedSeconds = Math.max(0, Math.round(seconds));
+  const minutes = Math.floor(roundedSeconds / 60);
+  const remainder = (roundedSeconds % 60).toString().padStart(2, "0");
   return `${minutes}:${remainder}`;
 }
 

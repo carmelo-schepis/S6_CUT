@@ -1,4 +1,4 @@
-const CACHE = "s6-cut-shell-v2";
+const CACHE = "s6-cut-shell-v3";
 const SHELL = [
   "/",
   "/manifest.webmanifest",
@@ -44,12 +44,12 @@ self.addEventListener("fetch", (event) => {
   if (!isShellAsset(url, request)) return;
 
   event.respondWith(
-    caches.match(request).then((cached) => cached || fetch(request).then((response) => {
+    fetch(request, { cache: "no-store" }).then((response) => {
       if (response.ok) {
         const copy = response.clone();
-        void caches.open(CACHE).then((cache) => cache.put(request, copy));
+        event.waitUntil(caches.open(CACHE).then((cache) => cache.put(request, copy)));
       }
       return response;
-    })),
+    }).catch(() => caches.match(request)),
   );
 });

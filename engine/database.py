@@ -83,6 +83,7 @@ class Database:
     def _migrate(self, db: sqlite3.Connection) -> None:
         """Apply additive migrations transactionally; safe to repeat after interruption."""
         version = db.execute("SELECT COALESCE(MAX(version), 0) FROM schema_migrations").fetchone()[0]
+        applied_versions = {row[0] for row in db.execute("SELECT version FROM schema_migrations")}
         if version < 1:
             db.execute("INSERT OR IGNORE INTO schema_migrations VALUES(1,?)", (now_iso(),))
         if version < 2:
@@ -171,6 +172,72 @@ class Database:
                 );
             """)
             db.execute("INSERT OR IGNORE INTO schema_migrations VALUES(4,?)", (stamp,))
+        # Check membership as well as the maximum: an interrupted/recovered
+        # database can contain a newer migration while an earlier one is
+        # missing, and profile payloads still need that earlier rewrite.
+        if version < 5 or 5 not in applied_versions:
+            stamp = now_iso()
+            # Provider profiles used to combine text settings with a second
+            # provider's credential and voice. Rewrite only the profile JSON;
+            # jobs, projects, media, and the encryption key remain untouched.
+            for row in db.execute("SELECT id, payload FROM profiles").fetchall():
+                try:
+                    old = json.loads(row["payload"])
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    continue
+                if "textModelId" in old or "textStatus" in old:
+                    continue
+                openrouter_configured = bool(old.get("openrouterConfigured"))
+                text_status = old.get("openrouterStatus", "configured" if openrouter_configured else "not_configured")
+                if text_status == "unavailable_model_or_voice":
+                    text_status = "unavailable"
+                tts_status = "not_configured"
+                new = {
+                    "id": old.get("id", row["id"]), "name": old.get("name", "Provider profile"),
+                    "textModelId": old.get("modelId", "openai/gpt-4.1-mini"), "ttsModelId": None,
+                    "ttsVoice": None, "ttsSpeed": 1.0, "selected": bool(old.get("selected")),
+                    "persistence": old.get("persistence", "encrypted"),
+                    "openrouterConfigured": openrouter_configured,
+                    "openrouterMasked": old.get("openrouterMasked"), "textStatus": text_status,
+                    "ttsStatus": tts_status, "textMessage": old.get("openrouterMessage"),
+                    "textLastCheckedAt": old.get("openrouterLastCheckedAt"),
+                    "ttsMessage": "Select an OpenRouter speech model to enable narration.",
+                    "ttsLastCheckedAt": None,
+                    "status": "partial" if text_status == "connected" else ("configured" if openrouter_configured else "local only"),
+                    "capabilities": [item for item in old.get("capabilities", []) if "eleven" not in str(item).casefold()],
+                    "fallbacks": old.get("fallbacks", {}),
+                }
+                db.execute("UPDATE profiles SET payload=? WHERE id=?", (json.dumps(new, separators=(",", ":")), row["id"]))
+            for row in db.execute("SELECT id, payload FROM jobs").fetchall():
+                try:
+                    old_job = json.loads(row["payload"])
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    continue
+                changed = False
+                for step in old_job.get("steps", []) if isinstance(old_job, dict) else []:
+                    if isinstance(step, dict) and step.get("id") == "elevenlabs":
+                        step["id"] = "tts"
+                        step["label"] = "Generated narration"
+                        if isinstance(step.get("detail"), str):
+                            step["detail"] = "Generated narration"
+                        changed = True
+                if changed:
+                    db.execute("UPDATE jobs SET payload=? WHERE id=?", (json.dumps(old_job, separators=(",", ":")), row["id"]))
+            db.execute("INSERT OR IGNORE INTO schema_migrations VALUES(5,?)", (stamp,))
+        if version < 6 or 6 not in applied_versions:
+            stamp = now_iso()
+            columns = {row[1] for row in db.execute("PRAGMA table_info(projects)")}
+            if "library_deleted" not in columns:
+                db.execute("ALTER TABLE projects ADD COLUMN library_deleted INTEGER NOT NULL DEFAULT 0")
+            db.execute("INSERT OR IGNORE INTO schema_migrations VALUES(6,?)", (stamp,))
+        if version < 7 or 7 not in applied_versions:
+            # Legacy installations could lose Library asset rows while leaving
+            # their project/job history behind. Those projects are proven
+            # orphaned when no asset still points at their project id. Keep the
+            # history for explicit cleanup/recovery, but exclude it everywhere
+            # the recent-project list is read.
+            db.execute("UPDATE projects SET library_deleted=1 WHERE NOT EXISTS (SELECT 1 FROM assets WHERE assets.source_project_id=projects.id)")
+            db.execute("INSERT OR IGNORE INTO schema_migrations VALUES(7,?)", (now_iso(),))
 
     @staticmethod
     def _json(model: BaseModel) -> str:
@@ -200,7 +267,15 @@ class Database:
 
     def list_projects(self) -> list[Project]:
         with self._connect() as db:
-            rows = db.execute("SELECT payload,library_folder_id FROM projects ORDER BY updated_at DESC").fetchall()
+            rows = db.execute("""
+                SELECT payload,library_folder_id FROM projects
+                WHERE library_deleted=0
+                  AND (
+                    json_extract(payload, '$.state') IN ('queued','active','paused','recovered','stalled')
+                    OR EXISTS (SELECT 1 FROM assets WHERE assets.source_project_id=projects.id)
+                  )
+                ORDER BY updated_at DESC
+            """).fetchall()
         return [Project.model_validate_json(row["payload"]).model_copy(update={"library_folder_id": self.resolve_folder_id(row["library_folder_id"])}) for row in rows]
 
     def save_job(self, job: Job, private: dict[str, Any] | None = None) -> None:
@@ -259,6 +334,11 @@ class Database:
     def delete_profile(self, profile_id: str) -> None:
         with self._connect() as db:
             db.execute("DELETE FROM profiles WHERE id=?", (profile_id,))
+
+    def replace_profile_secret(self, profile_id: str, secret_payload: bytes) -> None:
+        """Replace one profile's encrypted secret during provider migration."""
+        with self._lock, self._connect() as db:
+            db.execute("UPDATE profiles SET secret_payload=? WHERE id=?", (secret_payload, profile_id))
 
     def save_asset(self, asset: Asset) -> None:
         with self._lock, self._connect() as db:
@@ -333,6 +413,8 @@ class Database:
                 "ON CONFLICT(id) DO UPDATE SET relative_path=excluded.relative_path,byte_size=excluded.byte_size",
                 (asset.blob_id, asset.content_hash, relative_path, byte_size, stamp),
             )
+            if asset.source_project_id:
+                db.execute("UPDATE projects SET library_deleted=0 WHERE id=?", (asset.source_project_id,))
             if asset.origin == "project-source":
                 row = db.execute("SELECT * FROM assets WHERE origin=? AND source_project_id=?", (asset.origin, asset.source_project_id)).fetchone()
             elif asset.origin in {"generated-clip", "script-output"}:
@@ -458,6 +540,8 @@ class Database:
                 "ON CONFLICT(id) DO UPDATE SET content_hash=excluded.content_hash,updated_at=excluded.updated_at,payload=excluded.payload,folder_id=excluded.folder_id,origin=excluded.origin,blob_id=excluded.blob_id,source_project_id=excluded.source_project_id,source_job_id=excluded.source_job_id,source_clip_id=excluded.source_clip_id",
                 (asset.id, asset.content_hash, stamp, self._json(asset), asset.folder_id, asset.origin, asset.blob_id, asset.source_project_id, asset.source_job_id, asset.source_clip_id),
             )
+            if asset.source_project_id:
+                db.execute("UPDATE projects SET library_deleted=0 WHERE id=?", (asset.source_project_id,))
 
             # 3. Durable references
             db.execute("DELETE FROM media_blob_refs WHERE ref_type='clip-output' AND ref_id=?", (clip.id,))
@@ -607,6 +691,8 @@ class Database:
                 raise ValueError("Protected assets cannot be removed")
             db.execute("DELETE FROM media_blob_refs WHERE ref_type='asset' AND ref_id=?", (asset_id,))
             db.execute("DELETE FROM assets WHERE id=?", (asset_id,))
+            if asset.source_project_id and not db.execute("SELECT 1 FROM assets WHERE source_project_id=? LIMIT 1", (asset.source_project_id,)).fetchone():
+                db.execute("UPDATE projects SET library_deleted=1 WHERE id=?", (asset.source_project_id,))
             blob = db.execute("SELECT relative_path FROM media_blobs WHERE id=?", (asset.blob_id,)).fetchone()
             count = db.execute("SELECT COUNT(*) FROM media_blob_refs WHERE blob_id=?", (asset.blob_id,)).fetchone()[0]
         return asset, str(blob["relative_path"]) if blob else None, bool(blob and count == 0)
@@ -780,6 +866,53 @@ class Database:
                     db.execute("DELETE FROM media_blob_refs WHERE ref_type='clip-output' AND ref_id=?", (clip.id,))
                 db.execute("DELETE FROM jobs WHERE id=?", (job.id,))
             db.execute("DELETE FROM projects WHERE id=?", (project_id,))
+
+    def delete_project_everywhere(self, project_id: str) -> list[str]:
+        """Atomically delete one project's records, assets, and durable refs.
+
+        The returned blob paths had no references after the transaction. Callers
+        may remove those files only after this method returns, so a crash can
+        leave an orphan but can never remove a blob another record still needs.
+        """
+        with self._lock, self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if not db.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone():
+                raise KeyError(project_id)
+            job_rows = db.execute("SELECT id,payload,library_folder_id FROM jobs WHERE project_id=?", (project_id,)).fetchall()
+            jobs = [Job.model_validate_json(row["payload"]).model_copy(update={"library_folder_id": row["library_folder_id"] or UNSORTED_FOLDER_ID}) for row in job_rows]
+            asset_rows = db.execute("SELECT * FROM assets WHERE source_project_id=?", (project_id,)).fetchall()
+            assets = [self._asset_from_row(row) for row in asset_rows]
+            if any(asset.protected for asset in assets):
+                raise ValueError("Unprotect associated media before deleting this project everywhere")
+
+            job_ids = [job.id for job in jobs]
+            clip_ids = [clip.id for job in jobs for clip in job.clips]
+            asset_ids = [asset.id for asset in assets]
+            ref_filters = [("project-source", project_id)]
+            ref_filters.extend(("job-source", job_id) for job_id in job_ids)
+            ref_filters.extend(("clip-output", clip_id) for clip_id in clip_ids)
+            ref_filters.extend(("asset", asset_id) for asset_id in asset_ids)
+            affected_blob_ids = {asset.blob_id for asset in assets}
+            for ref_type, ref_id in ref_filters:
+                affected_blob_ids.update(row["blob_id"] for row in db.execute("SELECT blob_id FROM media_blob_refs WHERE ref_type=? AND ref_id=?", (ref_type, ref_id)).fetchall())
+                db.execute("DELETE FROM media_blob_refs WHERE ref_type=? AND ref_id=?", (ref_type, ref_id))
+
+            if asset_ids:
+                marks = ",".join("?" for _ in asset_ids)
+                db.execute(f"DELETE FROM assets WHERE id IN ({marks})", asset_ids)
+            if job_ids:
+                marks = ",".join("?" for _ in job_ids)
+                db.execute(f"DELETE FROM jobs WHERE id IN ({marks})", job_ids)
+            db.execute("DELETE FROM projects WHERE id=?", (project_id,))
+
+            unreferenced_paths: list[str] = []
+            for blob_id in affected_blob_ids:
+                row = db.execute("SELECT relative_path FROM media_blobs WHERE id=?", (blob_id,)).fetchone()
+                count = db.execute("SELECT COUNT(*) FROM media_blob_refs WHERE blob_id=?", (blob_id,)).fetchone()[0]
+                if row and count == 0:
+                    unreferenced_paths.append(str(row["relative_path"]))
+                    db.execute("DELETE FROM media_blobs WHERE id=?", (blob_id,))
+        return unreferenced_paths
 
     def update_project_folder(self, project_id: str, folder_id: str, move_existing_assets: bool) -> Project:
         destination = self.get_folder(folder_id)

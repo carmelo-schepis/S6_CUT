@@ -35,7 +35,7 @@ test.describe("S6_cut generates real playable video", () => {
     const observed = new Set<string>();
 
     await page.goto("/", { waitUntil: "domcontentloaded" });
-    await expect(page.getByText("All local tools ready")).toBeVisible({ timeout: 90_000 });
+    await expect(page.getByText("Local engine ready")).toBeVisible({ timeout: 90_000 });
 
     await createClipProject(page, { name: projectName, count: 2, mode: "Smart", aspect: "9:16", min: 8, max: 20, captions: true, source: { kind: "file", path: fixture } });
     await waitForProjectReady(page, observed);
@@ -168,7 +168,7 @@ test.describe("S6_cut generates real playable video", () => {
     const observed = new Set<string>();
 
     await page.goto("/", { waitUntil: "domcontentloaded" });
-    await expect(page.getByText("All local tools ready")).toBeVisible({ timeout: 90_000 });
+    await expect(page.getByText("Local engine ready")).toBeVisible({ timeout: 90_000 });
 
     await createClipProject(page, { name: projectName, count: 2, mode: "Fast", aspect: "9:16", min: 8, max: 20, captions: false, source: { kind: "file", path: fixture } });
     await waitForProjectReady(page, observed);
@@ -237,7 +237,7 @@ test.describe("S6_cut generates real playable video", () => {
     expect((await fetch(`${gateway}/api/v1/profiles/${profile.id}/test`, { method: "POST" })).ok).toBeTruthy();
 
     await page.goto("/", { waitUntil: "domcontentloaded" });
-    await expect(page.getByText("All local tools ready")).toBeVisible({ timeout: 90_000 });
+    await expect(page.getByText("Local engine ready")).toBeVisible({ timeout: 90_000 });
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await expect(page.getByRole("article").filter({ hasText: "Authenticity OpenRouter failure" }).first())
       .toContainText(/Connected/, { timeout: 30_000 });
@@ -288,7 +288,7 @@ test.describe("S6_cut generates real playable video", () => {
       + "Local narration keeps the whole pipeline offline and repeatable.";
 
     await page.goto("/", { waitUntil: "domcontentloaded" });
-    await expect(page.getByText("All local tools ready")).toBeVisible({ timeout: 90_000 });
+    await expect(page.getByText("Local engine ready")).toBeVisible({ timeout: 90_000 });
     await openProjects(page);
 
     await page.getByRole("button", { name: /Script mode/ }).click();

@@ -46,7 +46,6 @@ def _killed_worker(run_id: str, path: str, settings: Settings, events: Any) -> N
 
 
 def test_worker_exit_message_explains_a_killed_worker() -> None:
-    """An operator must be able to act on the failure, not just observe it."""
     killed = worker_exit_message(-int(signal.SIGKILL))
     assert "signal 9" in killed
     assert "memory" in killed.lower()
@@ -57,12 +56,34 @@ def test_worker_exit_message_explains_a_killed_worker() -> None:
 
 
 def test_supervision_reports_an_out_of_memory_kill(tmp_path: Path) -> None:
-    """A worker killed by SIGKILL must not surface as an unexplained exit."""
     source = tmp_path / "audio.wav"
     source.write_bytes(b"test")
-
     with pytest.raises(media.MediaError) as error:
         supervise(source, Settings.from_env(), worker=_killed_worker)
-
     assert "signal 9" in str(error.value)
     assert "memory" in str(error.value).lower()
+
+
+def _slow_start_worker(run_id: str, path: str, settings: Settings, events: Any) -> None:
+    import time
+    events.put({"type": "started", "run_id": run_id})
+    time.sleep(1.2)
+    events.put({"type": "progress", "run_id": run_id, "fraction": .1, "detail": "first segment"})
+    events.put({"type": "completed", "run_id": run_id, "result": {"language": "en", "words": [], "segments": []}})
+
+
+def test_long_source_is_given_time_for_the_pre_segment_pass(tmp_path: Path) -> None:
+    from dataclasses import replace
+    source = tmp_path / "audio.wav"
+    source.write_bytes(b"test")
+    impatient = replace(Settings.from_env(), transcription_stall_seconds=30)
+    result = supervise(source, impatient, worker=_slow_start_worker, source_seconds=2048.0)
+    assert result["language"] == "en"
+
+
+def test_stall_budget_is_unchanged_for_short_sources(tmp_path: Path) -> None:
+    from engine.transcription import startup_budget_seconds
+    settings = Settings.from_env()
+    assert startup_budget_seconds(settings, None) == settings.transcription_stall_seconds
+    assert startup_budget_seconds(settings, 200.0) == settings.transcription_stall_seconds
+    assert startup_budget_seconds(settings, 2048.0) > 500

@@ -5,9 +5,14 @@ test.describe("S6 Cut Help", () => {
     const consoleErrors: string[] = [];
     const failedRequests: string[] = [];
     page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
-    page.on("requestfailed", (request) => failedRequests.push(`${request.method()} ${request.url()} ${request.failure()?.errorText || "failed"}`));
+    page.on("requestfailed", (request) => {
+      const errorText = request.failure()?.errorText || "failed";
+      // Navigating away can abort an in-flight video preview request; it is not
+      // an application failure. Every other failed request remains actionable.
+      if (errorText !== "net::ERR_ABORTED") failedRequests.push(`${request.method()} ${request.url()} ${errorText}`);
+    });
     await page.goto("/", { waitUntil: "networkidle" });
-    await expect(page.getByText("All local tools ready")).toBeVisible();
+    await expect(page.getByText("Local engine ready")).toBeVisible();
     const launcher = page.getByRole("button", { name: "Open S6 Cut Help" });
     await expect(launcher).toBeVisible();
     await launcher.click();
@@ -51,7 +56,10 @@ test.describe("S6 Cut Help", () => {
     const dialog = page.getByRole("dialog", { name: "S6 Cut Help" });
     await expect(dialog).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(await page.evaluate(() => window.innerWidth));
-    expect(await dialog.boundingBox()).toMatchObject({ width: 370 });
+    // The backdrop insets the dialog by the same guide the page uses, so the
+    // dialog's edges line up with the content behind it at every width.
+    const inset = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--page-inset")));
+    expect(await dialog.boundingBox()).toMatchObject({ width: 390 - inset * 2 });
     await page.getByRole("button", { name: "Video layouts", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Video layouts", exact: true })).toBeVisible();
     await page.waitForTimeout(800);

@@ -2,13 +2,28 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+import sqlite3
 
 from fastapi.testclient import TestClient
 
-from engine.app import _project_name, app, db, settings, signer
+from engine.app import _project_name, app, db, profiles, settings, signer
 
 
 client = TestClient(app)
+
+
+def test_topic_plan_reports_storage_pressure_without_internal_error(monkeypatch) -> None:
+    async def unavailable(*_: object, **__: object):
+        raise sqlite3.OperationalError("disk I/O error")
+
+    monkeypatch.setattr(profiles, "openrouter_json", unavailable)
+    response = client.post("/api/v1/ai/topic-plan", json={
+        "topic": "Why bees matter", "audience": "General audience", "tone": "Friendly",
+        "language": "English", "callToAction": "", "instructions": "", "durationSeconds": 30,
+        "aspectRatio": "9:16", "variants": 1, "customScript": "", "modelId": "openai/test",
+    })
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Local project storage is temporarily unavailable. Free disk space and try again."
 
 
 def test_project_name_normalization_has_safe_fallbacks() -> None:
@@ -41,7 +56,7 @@ def test_script_job_preserves_exact_source_and_returns_durable_records() -> None
 def test_provider_secrets_are_masked_and_never_returned() -> None:
     key = "sk-or-v1-a-very-private-test-key"
     response = client.post("/api/v1/profiles", json={
-        "name": "Only OpenRouter", "modelId": "openai/test", "openrouterKey": key,
+        "name": "Only OpenRouter", "textModelId": "openai/test", "openrouterKey": key,
         "persistence": "encrypted", "selected": True,
     })
     assert response.status_code == 200, response.text
@@ -54,9 +69,8 @@ def test_provider_secrets_are_masked_and_never_returned() -> None:
 
 def test_provider_tests_report_each_optional_service_independently(monkeypatch) -> None:
     created = client.post("/api/v1/profiles", json={
-        "name": "Independent providers", "modelId": "openai/test", "voiceId": "voice-ok",
-        "openrouterKey": "openrouter-secret", "elevenlabsKey": "elevenlabs-secret",
-        "persistence": "encrypted", "selected": True,
+        "name": "Independent provider capabilities", "textModelId": "openai/test", "ttsModelId": "free/speech", "ttsVoice": "alloy",
+        "openrouterKey": "openrouter-secret", "persistence": "encrypted", "selected": True,
     }).json()
 
     class Response:
@@ -75,9 +89,7 @@ def test_provider_tests_report_each_optional_service_independently(monkeypatch) 
             return None
 
         async def get(self, url: str, **_: object):
-            if "openrouter" in url:
-                return Response(401, {})
-            return Response(200, {"voices": [{"voice_id": "voice-ok"}]})
+            return Response(401, {})
 
         async def post(self, url: str, **_: object):
             return Response(200, {"choices": [{"message": {"content": '{"ok":true}'}}]})
@@ -85,15 +97,14 @@ def test_provider_tests_report_each_optional_service_independently(monkeypatch) 
     monkeypatch.setattr("engine.providers.httpx.AsyncClient", lambda **_: Client())
     response = client.post(f"/api/v1/profiles/{created['id']}/test")
     assert response.status_code == 200
-    assert response.json()["openrouterStatus"] == "invalid_credentials"
-    assert response.json()["elevenlabsStatus"] == "connected"
+    assert response.json()["textStatus"] == "invalid_credentials"
+    assert response.json()["ttsStatus"] == "invalid_credentials"
     assert "openrouter-secret" not in response.text
-    assert "elevenlabs-secret" not in response.text
 
 
 def test_openrouter_test_requires_a_structured_generation(monkeypatch) -> None:
     created = client.post("/api/v1/profiles", json={
-        "name": "Generation verification", "modelId": "openai/test", "openrouterKey": "verification-secret",
+        "name": "Generation verification", "textModelId": "openai/test", "openrouterKey": "verification-secret",
         "persistence": "encrypted", "selected": True,
     }).json()
 
@@ -122,8 +133,8 @@ def test_openrouter_test_requires_a_structured_generation(monkeypatch) -> None:
     monkeypatch.setattr("engine.providers.httpx.AsyncClient", lambda **_: Client())
     response = client.post(f"/api/v1/profiles/{created['id']}/test")
     assert response.status_code == 200
-    assert response.json()["openrouterStatus"] == "connected"
-    assert "structured planning request succeeded" in response.json()["openrouterMessage"]
+    assert response.json()["textStatus"] == "connected"
+    assert "text generation succeeded" in response.json()["textMessage"]
 
 
 def test_invalid_profile_input_never_echoes_a_raw_key() -> None:
@@ -183,3 +194,18 @@ def test_specific_job_routes_are_not_shadowed_by_control_actions(monkeypatch, tm
     assert export.status_code == 422
     paused = client.post(f"/api/v1/jobs/{job_id}/control/pause")
     assert paused.status_code == 200
+
+
+def test_long_form_always_resolves_to_the_fast_pipeline() -> None:
+    """Long form renders through the fast pipeline whatever mode was asked for,
+    so every caller that builds a checklist must agree on that. When the creation
+    route decided on processing mode alone, a long-form Auto/Smart job was given
+    the smart checklist and then died in the fast renderer on a missing 'plan'
+    step. engine/app.py builds the creation checklist from this predicate."""
+    from engine.jobs import uses_fast_pipeline
+
+    assert uses_fast_pipeline("smart", "long") is True
+    assert uses_fast_pipeline("fast", "long") is True
+    assert uses_fast_pipeline("fast", "short") is True
+    assert uses_fast_pipeline("smart", "short") is False
+    assert uses_fast_pipeline(None, None) is False

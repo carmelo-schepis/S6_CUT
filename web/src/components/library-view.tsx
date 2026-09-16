@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent, type MouseEvent } from "react";
 import { Archive, FileImage, Folder, FolderPlus, ImagePlus, Library, RefreshCw, Search, ShieldCheck, Trash2, Upload } from "lucide-react";
 import { archiveFolder, createFolder, deleteAsset, deleteAssets, getHealth, listAssets, listFolders, moveAssets, moveFolder, readableError, removeFolder, updateAsset, updateFolder, uploadAsset } from "../api";
-import { bindRevalidationOnFocus, createBoundedRevalidation, onLibraryChanged } from "../library-sync";
+import { bindRevalidationOnFocus, createBoundedRevalidation, emitLibraryChanged, onLibraryChanged } from "../library-sync";
 import type { AssetOrigin, Health, LibraryAsset, LibraryFolder } from "../types";
 import { Button, EmptyState, Field, FieldGroup, PageHeader, StatusBadge, formatAge } from "./common";
+import { LazyVideoThumbnail } from "./lazy-video-thumbnail";
 import { VideoPreviewDialog } from "./video-preview-dialog";
 
 const originLabels = { "manual-import": "Manual", "project-source": "Source", "generated-clip": "Generated clip", "script-output": "Script output" } as const;
@@ -35,22 +36,39 @@ export function LibraryView() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteFeedback, setDeleteFeedback] = useState<string | null>(null);
+  const loadFlight = useRef<Promise<void> | null>(null);
+  const initialLoadComplete = useRef(false);
 
-  const load = useCallback(async (retry = true) => {
-    setLoading(true);
-    for (let attempt = 0; attempt < (retry ? 3 : 1); attempt += 1) {
-      try {
-        const [nextAssets, nextFolders] = await Promise.all([listAssets({ includeArchived: showArchived }), listFolders({ includeArchived: showArchived })]);
-        setAssets(nextAssets); setFolders(nextFolders); setError(null);
-        setSelected((current) => nextAssets.find((asset) => asset.id === current?.id) || nextAssets[0] || null);
-        setLoading(false); return;
-      } catch {
-        if (attempt < 2 && retry) await sleep(300 * 2 ** attempt);
+  const load = useCallback((retry = true) => {
+    if (loadFlight.current) return loadFlight.current;
+    const request = async () => {
+      setLoading(true);
+      for (let attempt = 0; attempt < (retry ? 3 : 1); attempt += 1) {
+        try {
+          const [nextAssets, nextFolders] = await Promise.all([listAssets({ includeArchived: showArchived }), listFolders({ includeArchived: showArchived })]);
+          // A refresh re-signs URLs. Retain an already working URL for the same
+          // immutable blob so a harmless revalidation cannot restart media.
+          setAssets((current) => {
+            const previous = new Map(current.map((asset) => [asset.id, asset]));
+            return nextAssets.map((asset) => {
+              const existing = previous.get(asset.id);
+              return existing?.blobId === asset.blobId ? { ...asset, previewUrl: existing.previewUrl || asset.previewUrl } : asset;
+            });
+          });
+          setFolders(nextFolders); setError(null);
+          setSelected((current) => nextAssets.find((asset) => asset.id === current?.id) || nextAssets[0] || null);
+          return;
+        } catch {
+          if (attempt < 2 && retry) await sleep(300 * 2 ** attempt);
+        }
       }
-    }
-    setError("Could not reach the local S6 Cut media library.");
-    void getHealth().then(setHealth).catch(() => setHealth(null));
-    setLoading(false);
+      // Keep the last successful cards on screen while a transient request fails.
+      setError("Could not reach the local S6 Cut media library.");
+      void getHealth().then(setHealth).catch(() => setHealth(null));
+    };
+    const flight = request().finally(() => { setLoading(false); initialLoadComplete.current = true; loadFlight.current = null; });
+    loadFlight.current = flight;
+    return flight;
   }, [showArchived]);
 
   // Initial load on mount
@@ -62,8 +80,13 @@ export function LibraryView() {
   // Set up bounded revalidation and cross-view event subscription
   useEffect(() => {
     const reval = createBoundedRevalidation(() => load(false));
-    const unsubFocus = bindRevalidationOnFocus(() => reval.signal());
-    const unsubEvent = onLibraryChanged(() => reval.signal());
+    // A focus event commonly accompanies the first paint. Ignore it until the
+    // initial read has settled instead of scheduling a second full read.
+    const signalRevalidation = () => {
+      if (initialLoadComplete.current) reval.signal();
+    };
+    const unsubFocus = bindRevalidationOnFocus(signalRevalidation);
+    const unsubEvent = onLibraryChanged(signalRevalidation);
     return () => {
       unsubFocus();
       unsubEvent();
@@ -90,10 +113,15 @@ export function LibraryView() {
     try { const next = await updateAsset(selected.id, patch); setSelected(next); setAssets((current) => current.map((asset) => asset.id === next.id ? next : asset)); } catch (cause) { setError(readableError(cause)); }
   };
   const removeSelectedAsset = async () => {
-    if (!selected || selected.protected || !window.confirm(`Remove “${selected.title}” from the Library? Project references and exports will remain usable.`)) return;
+    const projectLinked = selected?.sourceProjectId;
+    const confirmation = projectLinked
+      ? `Remove “${selected?.title}” from the Library? This removes the Library item only. Its project and job history will remain. Use the Projects screen’s “Delete project everywhere” action for complete removal.`
+      : `Remove “${selected?.title}” from the Library? This removes the Library item only.`;
+    if (!selected || selected.protected || !window.confirm(confirmation)) return;
     try {
       await deleteAsset(selected.id);
       setAssets((current) => current.filter((asset) => asset.id !== selected.id));
+      emitLibraryChanged();
       setSelected(null);
       setSelectedIds((current) => current.filter((id) => id !== selected.id));
     } catch (cause) { setError(readableError(cause)); }
@@ -142,6 +170,7 @@ export function LibraryView() {
       const result = await deleteAssets(ids);
       const deletedCount = result.deleted.length;
       setAssets((current) => current.filter((asset) => !result.deleted.includes(asset.id)));
+      if (deletedCount) emitLibraryChanged();
       setSelectedIds((current) => current.filter((id) => !result.deleted.includes(id)));
       setSelected((current) => current && result.deleted.includes(current.id) ? null : current);
       if (result.failed && Object.keys(result.failed).length) {
@@ -204,12 +233,12 @@ export function LibraryView() {
     </div>
 
     {previewAsset && <VideoPreviewDialog asset={previewAsset} opener={previewOpener} onClose={closePreview} />}
-    {deleteDialogOpen && selectedIds.length > 0 && <DeleteConfirmationDialog count={selectedIds.length} deleting={deleting} onCancel={() => { setDeleteDialogOpen(false); queueMicrotask(() => document.querySelector<HTMLButtonElement>('[data-delete-selected="true"]')?.focus()); }} onConfirm={() => void confirmDelete()} />}
+    {deleteDialogOpen && selectedIds.length > 0 && <DeleteConfirmationDialog count={selectedIds.length} projectLinked={selectedIds.some((assetId) => assets.find((asset) => asset.id === assetId)?.sourceProjectId)} deleting={deleting} onCancel={() => { setDeleteDialogOpen(false); queueMicrotask(() => document.querySelector<HTMLButtonElement>('[data-delete-selected="true"]')?.focus()); }} onConfirm={() => void confirmDelete()} />}
 
   </div>;
 }
 
-function DeleteConfirmationDialog({ count, deleting, onCancel, onConfirm }: { count: number; deleting: boolean; onCancel: () => void; onConfirm: () => void }) {
+function DeleteConfirmationDialog({ count, projectLinked, deleting, onCancel, onConfirm }: { count: number; projectLinked: boolean; deleting: boolean; onCancel: () => void; onConfirm: () => void }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     dialogRef.current?.querySelector<HTMLButtonElement>("button:not([disabled])")?.focus();
@@ -227,8 +256,9 @@ function DeleteConfirmationDialog({ count, deleting, onCancel, onConfirm }: { co
   }, [deleting, onCancel]);
   const title = count === 1 ? "Delete selected media?" : `Delete ${count} media items?`;
   const message = count === 1 ? "This will permanently delete the selected media item. This action cannot be undone." : `This will permanently delete these ${count} media items. This action cannot be undone.`;
+  const projectHistoryNote = projectLinked ? " This removes the Library item only. Its project and job history will remain. Use the Projects screen’s “Delete project everywhere” action for complete removal." : "";
   return <div className="dialog-backdrop"><div ref={dialogRef} className="confirmation-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-dialog-title" aria-describedby="delete-dialog-message">
-    <h2 id="delete-dialog-title">{title}</h2><p id="delete-dialog-message">{message}</p>
+    <h2 id="delete-dialog-title">{title}</h2><p id="delete-dialog-message">{message}{projectHistoryNote}</p>
     <div className="dialog-actions"><Button disabled={deleting} onClick={onCancel}>Cancel</Button><Button variant="danger" disabled={deleting} onClick={onConfirm}><Trash2 size={15} aria-hidden="true" />{deleting ? "Deleting…" : count === 1 ? "Delete media" : `Delete ${count} items`}</Button></div>
   </div></div>;
 }
@@ -263,7 +293,7 @@ function LibraryAssetCard({ asset, isSelected, isInspected, onPreview, onInspect
 function AssetPreview({ asset }: { asset: LibraryAsset }) {
   const [unavailable, setUnavailable] = useState(false);
   if (asset.mediaType.startsWith("video/") && asset.previewUrl && !unavailable) {
-    return <div className="asset-preview"><video src={asset.previewUrl} muted preload="metadata" aria-hidden="true" tabIndex={-1} onError={() => setUnavailable(true)} /></div>;
+    return <LazyVideoThumbnail key={asset.blobId} className="asset-preview" src={asset.previewUrl} onError={() => setUnavailable(true)} />;
   }
   return <div className="asset-preview"><FileImage size={29} /><span>{unavailable ? "UNAVAILABLE" : asset.mediaType.split("/")[1]?.toUpperCase() || "MEDIA"}</span>{asset.protected && <ShieldCheck size={14} />}</div>;
 }

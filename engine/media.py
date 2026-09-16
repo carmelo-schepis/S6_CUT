@@ -43,6 +43,18 @@ YOUTUBE_EXTRACTOR_ARGS = (
     "youtubepot-bgutilhttp:base_url=http://pot-provider:4416",
 )
 
+# Product-level layout treatment for mismatched Shorts aspect ratios. FFmpeg
+# exposes Gaussian blur as sigma rather than a percentage, so keep the product
+# value and its rendering mapping together instead of scattering magic numbers
+# across Fast and Smart paths.
+BACKGROUND_BLUR_PERCENT = 30
+BACKGROUND_BLUR_SIGMA = 30
+BACKGROUND_BLUR_STEPS = 2
+BACKGROUND_BLUR_FILTER = f"gblur=sigma={BACKGROUND_BLUR_SIGMA}:steps={BACKGROUND_BLUR_STEPS}"
+BACKGROUND_OVERSCAN_FACTOR = 1.12
+CREDIT_BOTTOM_INSET_RATIO = 0.0125
+CREDIT_MIN_MARGIN = 12
+
 
 class MediaError(RuntimeError):
     pass
@@ -935,6 +947,10 @@ def _wrap_credit(value: str | None, max_chars: int) -> str:
     return "\n".join(lines)
 
 
+def _credit_margin(height: int) -> int:
+    return max(CREDIT_MIN_MARGIN, round(height * CREDIT_BOTTOM_INSET_RATIO))
+
+
 def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duration: float, visuals: Iterable[tuple[str, float, float]], width: int, height: int, style: str = "educational", creator_credit: str | None = None, credit_alignment: int = 3) -> None:
     preset = _subtitle_preset(style)
     metrics = _ass_style_metrics(width, height)
@@ -948,9 +964,9 @@ def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duratio
     usable = max(1, width - 2 * margin_x)
     max_chars = max(8, int(usable * _CAPTION_WRAP_FRACTION / (_CHAR_WIDTH_FACTOR * fontsize)))
     credit_fontsize = max(20, round(26 * visual_scale))
-    # Keep the credit inside the same 8% mobile safe-area convention as the
-    # preview, while leaving it below the bottom-centred caption band.
-    credit_margin = max(100, round(height * .08))
+    # Keep the credit anchored to the bottom edge with only a small inset for
+    # glyphs, outlines, and the translucent panel.
+    credit_margin = _credit_margin(height)
     credit_max_chars = max(12, int(usable * .92 / (_CHAR_WIDTH_FACTOR * credit_fontsize)))
     credit_text = _wrap_credit(creator_credit, credit_max_chars) if creator_credit else ""
     # A translucent light face with a dark stroke stays legible over changing
@@ -1025,15 +1041,16 @@ def _source_layout_filter(src_width: int, src_height: int, target_width: int, ta
     target_aspect = target_width / target_height
     if abs(source_aspect / target_aspect - 1) <= 0.12:
         return f"scale={target_width}:{target_height}:force_original_aspect_ratio=increase:flags=lanczos,crop={target_width}:{target_height},setsar=1[base]"
-    # Keep the enlarged border layer visually quiet without affecting the
-    # fitted foreground branch, captions, or later overlays.  Overscaling it
-    # before the final crop keeps softened edges outside the output canvas.
-    background_width = max(target_width + 2, round(target_width * 1.04 / 2) * 2)
-    background_height = max(target_height + 2, round(target_height * 1.04 / 2) * 2)
+    # Overscale the undarkened background before blurring and cropping so the
+    # Gaussian edge softening stays outside the delivery canvas. The fitted
+    # foreground remains a separate sharp branch; captions and later overlays
+    # are applied after this composition by the shared render filters.
+    background_width = max(target_width + 2, math.ceil(target_width * BACKGROUND_OVERSCAN_FACTOR / 2) * 2)
+    background_height = max(target_height + 2, math.ceil(target_height * BACKGROUND_OVERSCAN_FACTOR / 2) * 2)
     return (
         "split=2[foreground][background];"
         f"[background]scale={background_width}:{background_height}:force_original_aspect_ratio=increase:flags=lanczos,"
-        f"crop={background_width}:{background_height},boxblur=luma_radius=6:luma_power=1,eq=brightness=-0.4,"
+        f"crop={background_width}:{background_height},{BACKGROUND_BLUR_FILTER},"
         f"crop={target_width}:{target_height}:(iw-{target_width})/2:(ih-{target_height})/2,setsar=1[bg];"
         f"[foreground]scale={target_width}:{target_height}:force_original_aspect_ratio=decrease:flags=lanczos,"
         "setsar=1[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2:format=auto,setsar=1[base]"

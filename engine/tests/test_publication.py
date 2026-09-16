@@ -8,8 +8,10 @@ checklists, and legacy backfill repair — without touching the web surface.
 from __future__ import annotations
 
 import asyncio
+import json
 import tempfile
 import zipfile
+from datetime import datetime, timedelta, timezone
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -24,7 +26,7 @@ from engine.database import Database, UNSORTED_FOLDER_ID
 from engine.jobs import JobManager
 from engine.library import LibraryRules
 from engine.media import MediaError, sha256_file
-from engine.models import Clip, Job, LibraryFolder, Project, now_iso
+from engine.models import Clip, Job, LibraryFolder, Project, ProvenanceRecord, now_iso
 from engine.providers import ProfileService
 from engine.security import SecretVault
 
@@ -509,15 +511,35 @@ def test_source_publication_and_exports_preserved(monkeypatch: pytest.MonkeyPatc
     assert sources[0].source_project_id == job.project_id
     assert job.source_blob_id == sources[0].blob_id
 
+    job.clips[0].creator_credit = "Source: Example Creator"
+    job.clips[0].provenance = [ProvenanceRecord(
+        id="provenance-1", provider="personal-library", creator="Example Creator",
+        original_url="https://example.test/source", licence="CC BY 4.0",
+        attribution="Example Creator", query="launch", match_reason="Matched title",
+        content_hash="abc123",
+    )]
+    job.warnings.append("One output used a local fallback.")
+    test_db.save_job(job, test_db.get_job_private(job.id))
+
     output = test_manager.build_export(job.id, [clip.id for clip in job.clips])
-    import zipfile
     with zipfile.ZipFile(output) as archive:
         names = archive.namelist()
         assert names == [
             "Publication campaign/01-01-cut.mp4",
             "Publication campaign/02-02-cut.mp4",
+            "Publication campaign/manifest.json",
+            "Publication campaign/credits.json",
+            "Publication campaign/warning-summary.json",
         ]
-        assert all(name.casefold().endswith(".mp4") for name in names)
+        manifest = json.loads(archive.read("Publication campaign/manifest.json"))
+        credits = json.loads(archive.read("Publication campaign/credits.json"))
+        warnings = json.loads(archive.read("Publication campaign/warning-summary.json"))
+
+    assert manifest["project"]["name"] == "Publication campaign"
+    assert manifest["outputs"][0]["creator_credit"] == "Source: Example Creator"
+    assert manifest["outputs"][0]["provenance"][0]["attribution"] == "Example Creator"
+    assert credits["credits"][0]["provenance"][0]["licence"] == "CC BY 4.0"
+    assert "One output used a local fallback." in warnings["job_warnings"]
 
 
 def test_bulk_export_filters_artifacts_sanitizes_unicode_title_and_orders_mp4(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -553,9 +575,12 @@ def test_bulk_export_filters_artifacts_sanitizes_unicode_title_and_orders_mp4(mo
             "Café - Launch- Final-/01-same.mp4",
             "Café - Launch- Final-/02-same.mp4",
             "Café - Launch- Final-/03-third.mp4",
+            "Café - Launch- Final-/manifest.json",
+            "Café - Launch- Final-/credits.json",
+            "Café - Launch- Final-/warning-summary.json",
         ]
-        assert all(name.casefold().endswith(".mp4") for name in names)
-        assert all(archive.getinfo(name).file_size > 0 for name in names)
+        media = [name for name in names if name.casefold().endswith(".mp4")]
+        assert all(archive.getinfo(name).file_size > 0 for name in media)
 
 
 def test_bulk_export_rejects_missing_completed_mp4(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -700,6 +725,140 @@ def test_finished_clip_media_survives_job_directory_pruning() -> None:
         app_module.db, app_module.manager, app_module.settings = original
 
 
+def test_generated_asset_deletion_keeps_completed_clip_playable_after_pruning() -> None:
+    tmp_path = _tmpdir()
+    test_db, test_manager, test_rules, test_settings = _cluster(tmp_path)
+    output = tmp_path / "jobs" / "deleted-asset-job" / "clips" / "01-cut.mp4"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(b"durable-rendered-output")
+    asset = test_rules.register_managed_video(
+        output, title="Deleted asset campaign — Cut 01", origin="generated-clip",
+        project_id="deleted-asset-project", job_id="deleted-asset-job", clip_id="deleted-asset-clip",
+        metadata={"duration": 8.0, "width": 1080, "height": 1920},
+    )
+    test_db.save_project(Project(
+        id="deleted-asset-project", name="Deleted asset campaign", mode="clip", style="educational",
+        state="complete", source_name="source.mp4", source_kind="upload", requested_count=1,
+    ))
+    clip = Clip(
+        id="deleted-asset-clip", index=1, state="complete", start=0, end=8, duration=8,
+        opening_line="Cut 01", output_name="01-cut.mp4", blob_id=asset.blob_id, library_asset_id=asset.id,
+    )
+    test_db.save_job(Job(
+        id="deleted-asset-job", project_id="deleted-asset-project", mode="clip", processing_mode="fast",
+        state="complete", stage="complete", stage_label="Ready", progress=100, style="educational", clips=[clip],
+    ), {"aspect_ratio": "9:16"})
+
+    import engine.app as app_module
+    original = (app_module.db, app_module.manager, app_module.settings)
+    app_module.db, app_module.manager, app_module.settings = test_db, test_manager, test_settings
+    try:
+        with TestClient(app) as client:
+            deleted = client.delete(f"/api/v1/library/assets/{asset.id}")
+            assert deleted.status_code == 204, deleted.text
+            assert test_db.get_asset(asset.id) is None
+
+            # The transient job output may be pruned, but its immutable blob is
+            # still referenced by the completed clip and must remain downloadable.
+            output.unlink()
+            recovered = client.get("/api/v1/jobs/deleted-asset-job")
+            assert recovered.status_code == 200, recovered.text
+            url = recovered.json()["clips"][0]["downloadUrl"]
+            assert url.startswith(f"/api/v1/library/blobs/{asset.blob_id}/preview?")
+            served = client.get(url)
+            assert served.status_code == 200, served.text
+            assert served.content == b"durable-rendered-output"
+    finally:
+        app_module.db, app_module.manager, app_module.settings = original
+
+
+def test_single_asset_deletion_removes_an_unreferenced_blob() -> None:
+    tmp_path = _tmpdir()
+    test_db, test_manager, test_rules, test_settings = _cluster(tmp_path)
+    source = tmp_path / "poster.png"
+    source.write_bytes(b"single-asset-blob")
+    asset = test_rules.register_file(
+        source, title="Disposable poster", media_type="image/png", origin="manual-import",
+        folder_id=UNSORTED_FOLDER_ID,
+    )
+    relative = test_db.blob_relative_path(asset.blob_id)
+    assert relative and (tmp_path / relative).is_file()
+
+    import engine.app as app_module
+    original = (app_module.db, app_module.manager, app_module.settings)
+    app_module.db, app_module.manager, app_module.settings = test_db, test_manager, test_settings
+    try:
+        with TestClient(app) as client:
+            response = client.delete(f"/api/v1/library/assets/{asset.id}")
+            assert response.status_code == 204, response.text
+        assert test_db.get_asset(asset.id) is None
+        assert not (tmp_path / relative).exists()
+    finally:
+        app_module.db, app_module.manager, app_module.settings = original
+
+
+def test_project_deletion_waits_for_worker_and_blocks_stale_job_upserts() -> None:
+    tmp_path = _tmpdir()
+    test_db, test_manager, _, test_settings = _cluster(tmp_path)
+    project = Project(id="deleting-project", name="Deleting", mode="clip", style="educational",
+                      state="active", source_name="source.mp4", source_kind="upload", requested_count=1)
+    job = Job(id="deleting-job", project_id=project.id, mode="clip", processing_mode="fast",
+              state="active", stage="render", stage_label="Rendering", progress=50, style="educational")
+    test_db.save_project(project)
+    test_db.save_job(job, {"aspect_ratio": "9:16"})
+    workspace = tmp_path / "jobs" / job.id
+    workspace.mkdir(parents=True)
+    (workspace / "state.json").write_text("{}")
+
+    async def delete_while_worker_holds_lock() -> None:
+        lock = test_manager.job_locks[job.id]
+        lock.acquire()
+        deletion = asyncio.create_task(test_manager.delete_project(project.id))
+        await asyncio.sleep(0)
+        assert test_db.get_project(project.id) is not None
+        lock.release()
+        await deletion
+
+    asyncio.run(delete_while_worker_holds_lock())
+    assert test_db.get_project(project.id) is None
+    assert test_db.get_job(job.id) is None
+    assert not workspace.exists()
+
+    # Simulates a worker's final in-memory checkpoint after deletion. _save must
+    # not recreate the database row via its normal upsert path.
+    test_manager._save(job, {"aspect_ratio": "9:16"})
+    assert test_db.get_job(job.id) is None
+
+
+def test_retention_prunes_only_old_terminal_workspaces() -> None:
+    tmp_path = _tmpdir()
+    test_db, test_manager, _, test_settings = _cluster(tmp_path)
+    test_manager.settings = replace(test_settings, retention_days=30, max_retained_jobs=1)
+    current = datetime.now(timezone.utc)
+    project = Project(id="retention-project", name="Retention", mode="clip", style="educational",
+                      state="complete", source_name="source.mp4", source_kind="upload", requested_count=1)
+    test_db.save_project(project)
+    recent = Job(id="recent-job", project_id=project.id, mode="clip", processing_mode="fast",
+                 state="complete", stage="complete", stage_label="Ready", progress=100, style="educational",
+                 updated_at=current.isoformat())
+    old = Job(id="old-job", project_id=project.id, mode="clip", processing_mode="fast",
+              state="complete", stage="complete", stage_label="Ready", progress=100, style="educational",
+              updated_at=(current - timedelta(days=31)).isoformat())
+    test_db.save_job(recent, {"aspect_ratio": "9:16"})
+    test_db.save_job(old, {"aspect_ratio": "9:16"})
+    for job in (recent, old):
+        directory = tmp_path / "jobs" / job.id
+        directory.mkdir(parents=True)
+        (directory / "state.json").write_text("{}")
+
+    assert test_manager.prune_retained_jobs() == 1
+    assert (tmp_path / "jobs" / recent.id).is_dir()
+    assert not (tmp_path / "jobs" / old.id).exists()
+    # Retention removes transient work, not the durable project/job history.
+    assert test_db.get_job(recent.id) is not None
+    assert test_db.get_job(old.id) is not None
+
+
 def test_clip_without_recoverable_media_reports_no_download_link() -> None:
     """With neither a job file nor a live Library blob, no link is advertised."""
     tmp_path = _tmpdir()
@@ -724,3 +883,51 @@ def test_clip_without_recoverable_media_reports_no_download_link() -> None:
             assert payload["previewUrl"] is None
     finally:
         app_module.db, app_module.manager, app_module.settings = original
+
+
+def test_stop_keep_during_render_survives_the_publication_checkpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stop & keep must survive publication of the clip that was already in flight.
+
+    Publication commits the job checkpoint inside its own transaction, so it
+    never passes through ``_save()``'s cancellation precedence. A stop-keep that
+    landed while a clip was rendering was therefore overwritten by the worker's
+    in-memory ``active`` state the moment that clip published: the job resumed,
+    rendered every remaining clip, and held the only configured worker for the
+    rest of the job while everything queued behind it starved.
+
+    The clip already in flight still publishes — keeping finished outputs is
+    what stop-keep promises — but the job must stay stopped.
+    """
+    tmp_path = _tmpdir()
+    test_db, test_manager, _, _ = _cluster(tmp_path)
+    rendered: list[Path] = []
+
+    def render_then_stop(source: Path, output: Path, **kwargs: Any) -> None:
+        _fake_render(source, output, **kwargs)
+        rendered.append(output)
+        if len(rendered) != 1:
+            return
+        # Exactly what POST /jobs/{id}/control/stop-keep writes while a worker
+        # is mid-render: the database row is the only record of the stop.
+        stopping = test_db.get_job("stop-keep-job")
+        assert stopping is not None
+        stopping.state, stopping.stage_label = "cancelled_kept", "Stopped; completed outputs kept"
+        for step in stopping.steps:
+            if step.status == "active":
+                step.status, step.completed_at, step.detail = "skipped", now_iso(), "Stopped by user"
+        test_db.save_job(stopping)
+
+    job = _run_fast_job(monkeypatch, test_db, test_manager, "stop-keep-job", count=5, render_hook=render_then_stop)
+
+    assert job is not None
+    assert job.state == "cancelled_kept", f"publication resurrected the stopped job as {job.state!r}"
+    assert len(rendered) == 1, f"rendering continued past the stop: {len(rendered)} of 5 clips rendered"
+    # The worker is released rather than held for the remaining four clips.
+    assert test_manager.active_workers == 0
+
+    complete = [clip for clip in job.clips if clip.state == "complete"]
+    assert len(complete) == 1, "the clip already in flight is kept"
+    assert complete[0].library_asset_id is not None, "a kept clip still carries its Library asset"
+    asset = test_db.get_asset(complete[0].library_asset_id)
+    assert asset is not None and asset.source_clip_id == complete[0].id
+    assert not [step for step in job.steps if step.status == "active"], "a stopped job leaves no active step"

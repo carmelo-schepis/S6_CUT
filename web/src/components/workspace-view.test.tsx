@@ -219,7 +219,7 @@ describe("WorkspaceView – timeline removal", () => {
 });
 
 describe("WorkspaceView – processing checklist placement", () => {
-  it("renders the checklist above the board from API-provided steps", async () => {
+  it("renders the vertical checklist before the lower workspace from API-provided steps", async () => {
     const withSteps: Job = {
       ...freshSmartJob,
       steps: [
@@ -230,10 +230,13 @@ describe("WorkspaceView – processing checklist placement", () => {
     mockGetJob.mockResolvedValue(withSteps);
     renderView();
     expect(await screen.findByRole("list", { name: "Short creation progress" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Short creation progress" })).toBeInTheDocument();
     expect(screen.getByText("Source received")).toBeInTheDocument();
     const checklist = document.querySelector(".checklist-panel")!;
-    const board = document.querySelector(".board-panel")!;
-    expect(checklist.compareDocumentPosition(board) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const lowerWorkspace = document.querySelector("[data-testid=\"lower-workspace\"]")!;
+    expect(checklist.compareDocumentPosition(lowerWorkspace) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(checklist.querySelector(".process-checklist")).toBeInTheDocument();
+    expect(checklist.querySelector("[aria-current=\"step\"]")).toHaveTextContent("In progress");
   });
 
   it("renders no checklist when the job has no steps", async () => {
@@ -411,8 +414,8 @@ describe("WorkspaceView – publication metadata, Details rename, read-only capt
   it("shows a retryable preview placeholder when the video thumbnail fails to load", async () => {
     renderView();
     expect(await screen.findByText("Test — Cut 01")).toBeInTheDocument();
+    await waitFor(() => expect(document.querySelector<HTMLVideoElement>(".clip-thumbnail")).toBeTruthy());
     const video = document.querySelector<HTMLVideoElement>(".clip-thumbnail");
-    expect(video).toBeTruthy();
     expect(video?.src).toContain("/api/v1/media/dl/one.mp4");
     fireEvent.error(video!);
     expect(screen.getByRole("button", { name: "Retry preview" })).toBeInTheDocument();
@@ -470,6 +473,10 @@ describe("WorkspaceView – output aspect ratio presentation", () => {
     renderView({ project: { ...project, latestJobId: ratioJob.id } });
 
     expect(await screen.findByText(`Output · ${aspect}`)).toBeInTheDocument();
+    const frame = document.querySelector(".viewer-frame");
+    expect(frame).toHaveAttribute("data-output-aspect-ratio", aspect);
+    const [aspectWidth, aspectHeight] = aspect.split(":");
+    expect(frame).toHaveStyle({ aspectRatio: `${aspectWidth} / ${aspectHeight}` });
     expect(screen.getByText(new RegExp(`0:10 · ${aspect} · ${width} × ${height} px`))).toBeInTheDocument();
     expect(screen.queryByText(`Output · ${aspect === "9:16" ? "1:1" : "9:16"}`)).not.toBeInTheDocument();
   });

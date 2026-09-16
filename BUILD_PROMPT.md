@@ -79,7 +79,7 @@ For local development, provide one documented command for the frontend and engin
 
 ### 4. Provider and fallback rules
 
-**The application must work when OpenRouter is the only configured API.** ElevenLabs and all media-provider keys are optional. Missing, invalid, rate-limited, or offline optional providers must never crash an entire project.
+**The application must work when OpenRouter is the only configured API.** The OpenRouter key is optional. Missing, invalid, rate-limited, or offline provider access must never crash an entire project.
 
 Implement typed provider interfaces and capability checks. The required degradation behavior is:
 
@@ -90,7 +90,7 @@ Implement typed provider interfaces and capability checks. The required degradat
 | Caption wording | OpenRouter may clean punctuation and choose phrase groupings | use the timed transcript directly |
 | Caption timing | Whisper/TTS alignment | Whisper/TTS alignment; never invent timestamps with an LLM |
 | Script analysis | OpenRouter structured output | deterministic sentence/phrase beat planner |
-| Script narration | ElevenLabs if selected | use a documented local TTS engine; if local TTS is unavailable, offer a clearly labelled no-narration render rather than failing |
+| Script narration | OpenRouter speech model if selected | use a documented local TTS engine; if local TTS is unavailable, offer a clearly labelled no-narration render rather than failing |
 | Image/GIF selection | personal library, then enabled no-key/licensed web sources, then optional keyed sources | library, no-key source, curated fallback, or text card |
 | Generated images | optional configured provider | skip generation and continue |
 | YouTube ingest | local yt-dlp in the engine | local file upload remains available; report URL-specific failures clearly |
@@ -99,7 +99,7 @@ OpenRouter is the single general-purpose LLM integration. In **Settings → Prof
 
 - add, edit, test, duplicate, select, and delete named profiles;
 - enter an OpenRouter API key and configurable model ID;
-- optionally enter an ElevenLabs key and voice ID;
+- optionally enter an OpenRouter key, speech model, and compatible voice;
 - configure enabled web media sources and any source-specific keys;
 - see masked secrets, connection health, capabilities, and the exact fallback for every service;
 - choose session-only or encrypted persistent storage where supported.
@@ -180,7 +180,7 @@ Accept pasted text and `.txt`/`.md` uploads. Preserve the exact source script an
 The script pipeline is:
 
 1. validate and normalize the script without silently rewriting it;
-2. create narration using the chosen ElevenLabs voice or the local TTS fallback;
+2. create narration using the chosen OpenRouter speech model and voice or the local TTS fallback;
 3. cache voice per paragraph using text + voice/settings hashes;
 4. align narration to words and sentences;
 5. plan semantic visual beats targeting a new visual roughly every 2–3 seconds, allowing natural phrase boundaries;
@@ -189,7 +189,7 @@ The script pipeline is:
 8. render narration, captions, images/GIFs/video, transitions, optional user music, and ducking;
 9. publish a preview and final MP4 with credits/provenance.
 
-If ElevenLabs is missing, do not display a fatal error. Use local TTS. If neither narration path is operational, explain that the output will be silent and allow the user to continue or add their own voice track. If OpenRouter is missing or fails, use deterministic sentence/phrase beats and straightforward search queries.
+If OpenRouter speech is missing, do not display a fatal error. Use local TTS. If neither narration path is operational, explain that the output will be silent and allow the user to continue or add their own voice track. If OpenRouter is missing or fails, use deterministic sentence/phrase beats and straightforward search queries.
 
 Provide a storyboard/Beat board where the user can see the chosen asset, intended concept/entity, source, confidence, rule state, and progress. Allow replace, upload, personal-only, web-only, retry same query, relaxed query, pin, and never-use actions without restarting the whole project.
 
@@ -328,7 +328,7 @@ Then deliver these vertical milestones:
 3. **Batch product:** style-aware ranking, sentence/silence boundaries, multiple independent clips, progressive results, recovery, selection, ZIP.
 4. **URL ingest and profiles:** constrained YouTube import, OpenRouter profile/settings/health, optional LLM enhancement, full fallback tests.
 5. **Library and resolver:** asset ingest, labels/rules, Tier-0 matching, no-key licensed source, provenance, automatic timed overlays.
-6. **Script mode:** script → local/ElevenLabs voice → forced alignment → 2–3 second beat plan → storyboard → composed video.
+6. **Script mode:** script → OpenRouter speech/local voice → forced alignment → 2–3 second beat plan → storyboard → composed video.
 7. **Editor polish:** shared preview/export EDL, replacements, transcript/caption edits, basic trim/reframe, keyboard/accessibility/responsive behavior.
 8. **Appliance quality:** TrueNAS/Portainer docs, backup/restore, retention, restart recovery, security hardening, real-media release test.
 
@@ -339,9 +339,9 @@ At every milestone, integrate a working path into the actual UI. Do not build an
 Add automated unit, contract, integration, and end-to-end coverage. At minimum prove:
 
 1. With no API keys, a local speech video produces at least one valid captioned short.
-2. With **only an OpenRouter key**, Clip mode and Script mode continue without ElevenLabs or keyed media sources.
+2. With **only an OpenRouter key**, Clip mode and Script mode continue without keyed media sources.
 3. With OpenRouter unavailable/malformed/rate-limited, deterministic fallback completes the job with a visible warning.
-4. With ElevenLabs absent or failing, local TTS is used; if deliberately disabled, the user can produce a silent script video.
+4. With OpenRouter speech absent or failing, local TTS is used; if deliberately disabled, the user can produce a silent script video.
 5. A transcript candidate is snapped to valid word/sentence boundaries and does not exceed source duration.
 6. One failed clip or corrupt GIF does not discard successful clips.
 7. “Beatles” or another fixed named-entity fixture produces a timed entity visual request and either a relevant library/web result or a declared text-card fallback—never an unrelated silent substitution.

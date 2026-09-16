@@ -1,6 +1,8 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Health, Job, Project } from "../types";
+import type { Health, Job, LibraryAsset, Project } from "../types";
 import { ProjectsView } from "./projects-view";
 
 // ---------------------------------------------------------------
@@ -9,12 +11,27 @@ import { ProjectsView } from "./projects-view";
 vi.mock("../api", () => {
   const readableError = (e: unknown) =>
     e instanceof Error ? e.message : "Something went wrong. Try again.";
-  return { readableError, createClipJob: vi.fn(), createScriptJob: vi.fn(), listFolders: vi.fn(async () => []), createFolder: vi.fn() };
+  return { readableError, createClipJob: vi.fn(), createScriptJob: vi.fn(), deleteProjectEverywhere: vi.fn(), listAssets: vi.fn(async () => []), listFolders: vi.fn(async () => []), createFolder: vi.fn() };
 });
 
-import { createClipJob, createScriptJob } from "../api";
+import { createClipJob, createScriptJob, deleteProjectEverywhere, listAssets } from "../api";
 const mockCreateClipJob = vi.mocked(createClipJob);
 const mockCreateScriptJob = vi.mocked(createScriptJob);
+const mockDeleteProjectEverywhere = vi.mocked(deleteProjectEverywhere);
+const mockListAssets = vi.mocked(listAssets);
+
+const storedValues = new Map<string, string>();
+Object.defineProperty(globalThis, "localStorage", {
+  configurable: true,
+  value: {
+    clear: () => storedValues.clear(),
+    getItem: (key: string) => storedValues.get(key) ?? null,
+    key: (index: number) => [...storedValues.keys()][index] ?? null,
+    get length() { return storedValues.size; },
+    removeItem: (key: string) => storedValues.delete(key),
+    setItem: (key: string, value: string) => storedValues.set(key, value),
+  } satisfies Storage,
+});
 
 const health: Health = {
   status: "ready", version: "test", database: true, ffmpeg: true, ffprobe: true,
@@ -29,6 +46,14 @@ const project: Project = {
   latestJobId: "job-id", createdAt: "2026-08-13T00:00:00Z", updatedAt: "2026-08-13T00:00:00Z",
 };
 
+const sourceAsset: LibraryAsset = {
+  id: "source-asset", title: "Interview source", description: "", mediaType: "video/mp4", filename: "interview.mp4",
+  tags: [], triggers: [], aliases: [], negativeTriggers: [], policy: "neutral", protected: false,
+  minSpacingSeconds: 0, maxUsesPerProject: 1, licence: "User supplied", attribution: "", contentHash: "source-hash",
+  folderId: "folder-id", origin: "project-source", blobId: "source-blob", sourceProjectId: project.id,
+  previewUrl: "/api/v1/library/assets/source-asset/preview?fresh", brands: [], people: [], createdAt: "2026-08-13T00:00:00Z",
+};
+
 const undefinedJob: Job = {
   schemaVersion: 1, id: "job-id", projectId: "project-id", mode: "script", state: "queued",
   stage: "queued", stageLabel: "Queued on this machine", progress: 0, currentItem: 0, totalItems: 0,
@@ -38,8 +63,12 @@ const undefinedJob: Job = {
 
 describe("Projects create flow", () => {
   beforeEach(() => {
+    storedValues.clear();
     mockCreateClipJob.mockReset();
     mockCreateScriptJob.mockReset();
+    mockDeleteProjectEverywhere.mockReset();
+    mockListAssets.mockReset();
+    mockListAssets.mockResolvedValue([]);
   });
   it("keeps the three-step path and real project card accessible", () => {
     const open = vi.fn();
@@ -47,7 +76,80 @@ describe("Projects create flow", () => {
     expect(screen.getByRole("heading", { name: "Create a project" })).toBeInTheDocument();
     expect(screen.getByText("Editorial style")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Create 5 short clips/i })).toBeEnabled();
-    fireEvent.click(screen.getByRole("button", { name: /Interview/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Open project Interview" }));
+    expect(open).toHaveBeenCalledWith("project-id");
+  });
+
+  it("keeps long titles and every status badge as distinct, non-shrinking card content", () => {
+    const labels = ["1 fast cut ready", "2 fast cuts ready", "5 clips ready", "Render failed", "Rendering clips"];
+    const states: Job["state"][] = ["complete", "complete", "complete", "failed", "active"];
+    const projects = labels.map((label, index) => ({ ...project, id: `long-project-${index}`, latestJobId: `long-job-${index}`, name: `A deliberately long project title that must truncate before ${label} ${index}` }));
+    const jobs = labels.map((label, index) => ({ ...undefinedJob, id: `long-job-${index}`, projectId: `long-project-${index}`, state: states[index], stageLabel: label }));
+    const { container } = render(<ProjectsView projects={projects} jobs={jobs} health={health} onCreated={vi.fn()} onOpen={vi.fn()} onRefresh={vi.fn(async () => undefined)} />);
+
+    const titleRows = [...container.querySelectorAll<HTMLElement>(".project-card-title")];
+    expect(titleRows).toHaveLength(labels.length);
+    for (const [index, row] of titleRows.entries()) {
+      const title = row.querySelector("strong");
+      const status = row.querySelector(".project-card-status");
+      expect(title).toHaveAttribute("title", projects[index].name);
+      expect(status).toHaveTextContent(labels[index]);
+      expect(title).not.toBe(status);
+      expect(status).toHaveClass("status");
+    }
+
+    const css = readFileSync(join(process.cwd(), "web", "src", "styles.css"), "utf8");
+    expect(css).toContain(".project-card-title strong { flex: 1 1 8rem; min-width: 0;");
+    expect(css).toContain(".project-card-status { flex: 0 0 auto; max-width: 100%; white-space: nowrap; }");
+  });
+
+  it("keeps preview, open, and delete controls distinct and confirms global deletion", async () => {
+    const open = vi.fn();
+    const deleted = vi.fn();
+    mockListAssets.mockResolvedValue([sourceAsset]);
+    mockDeleteProjectEverywhere.mockResolvedValue(undefined);
+    render(<ProjectsView projects={[project]} health={health} onCreated={vi.fn()} onOpen={open} onDeleted={deleted} onRefresh={vi.fn(async () => undefined)} />);
+    const preview = await screen.findByRole("button", { name: "Preview source video for Interview" });
+    expect(screen.getByRole("button", { name: "Open project Interview" })).toBeInTheDocument();
+    const deleteButton = screen.getByRole("button", { name: "Delete project Interview everywhere" });
+    expect(preview.closest("article")?.querySelectorAll("button")).toHaveLength(3);
+    fireEvent.click(deleteButton);
+    expect(screen.getByRole("dialog", { name: "Delete “Interview” everywhere?" })).toHaveTextContent(/all associated jobs and clip history/i);
+    expect(mockDeleteProjectEverywhere).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(mockDeleteProjectEverywhere).not.toHaveBeenCalled();
+    await waitFor(() => expect(deleteButton).toHaveFocus());
+
+    fireEvent.click(deleteButton);
+    fireEvent.click(screen.getByRole("button", { name: "Delete project everywhere" }));
+    await waitFor(() => expect(mockDeleteProjectEverywhere).toHaveBeenCalledTimes(1));
+    expect(mockDeleteProjectEverywhere).toHaveBeenCalledWith(project.id);
+    expect(deleted).toHaveBeenCalledWith(project.id);
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it("keeps a project visible and reports a failed global deletion", async () => {
+    mockDeleteProjectEverywhere.mockRejectedValue(new Error("Unprotect associated media before deleting this project everywhere"));
+    render(<ProjectsView projects={[project]} health={health} onCreated={vi.fn()} onOpen={vi.fn()} onRefresh={vi.fn(async () => undefined)} />);
+    fireEvent.click(screen.getByRole("button", { name: "Delete project Interview everywhere" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete project everywhere" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/Unprotect associated media/i);
+    expect(screen.getByRole("button", { name: "Open project Interview" })).toBeInTheDocument();
+  });
+
+  it("opens a fresh source-video preview without opening the project", async () => {
+    const open = vi.fn();
+    const freshAsset = { ...sourceAsset, previewUrl: "/api/v1/library/assets/source-asset/preview?renewed" };
+    mockListAssets.mockResolvedValueOnce([sourceAsset]).mockResolvedValueOnce([freshAsset]);
+    render(<ProjectsView projects={[project]} health={health} onCreated={vi.fn()} onOpen={open} onRefresh={vi.fn(async () => undefined)} />);
+    const preview = await screen.findByRole("button", { name: "Preview source video for Interview" });
+    fireEvent.click(preview);
+    expect(await screen.findByRole("dialog", { name: "Interview source video preview" })).toBeInTheDocument();
+    expect(open).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog").querySelector("video")?.getAttribute("src")).toContain("renewed");
+    fireEvent.click(screen.getByRole("button", { name: "Close video preview" }));
+    expect(preview).toHaveFocus();
+    fireEvent.click(screen.getByRole("button", { name: "Open project Interview" }));
     expect(open).toHaveBeenCalledWith("project-id");
   });
 
@@ -55,10 +157,19 @@ describe("Projects create flow", () => {
     const staleProject = { ...project, state: "queued" as const };
     const completeJob = { ...undefinedJob, state: "complete" as const, stage: "complete", stageLabel: "Project ready", progress: 100 };
     render(<ProjectsView projects={[staleProject]} jobs={[completeJob]} health={health} onCreated={vi.fn()} onOpen={vi.fn()} onRefresh={vi.fn(async () => undefined)} />);
-    const card = screen.getByRole("button", { name: /Interview/ });
+    const card = screen.getByRole("button", { name: /Open project Interview/ }).closest(".project-card");
     expect(card).toHaveTextContent("Project ready");
     expect(card).toHaveTextContent("100%");
     expect(card).not.toHaveTextContent("queued");
+  });
+
+  it("shows a completed clip's measured output aspect rather than assuming 9:16", () => {
+    const squareJob: Job = {
+      ...undefinedJob, mode: "clip", state: "complete", stage: "complete", stageLabel: "Project ready", progress: 100,
+      clips: [{ id: "clip-id", index: 1, state: "complete", start: 0, end: 10, duration: 10, openingLine: "", score: null, selected: true, fallbackUsed: false, provenance: [], width: 1080, height: 1080 }],
+    };
+    render(<ProjectsView projects={[project]} jobs={[squareJob]} health={health} onCreated={vi.fn()} onOpen={vi.fn()} onRefresh={vi.fn(async () => undefined)} />);
+    expect(screen.getByRole("button", { name: "Open project Interview" })).toHaveTextContent("3 short clips · 1:1");
   });
 
   it("selects Long form by keyboard-friendly control and sends landscape format", async () => {
@@ -79,6 +190,25 @@ describe("Projects create flow", () => {
     expect(screen.getByText(/Upload .txt or .md/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Create script video/i })).toBeEnabled();
     expect(screen.queryByRole("button", { name: "Auto" })).not.toBeInTheDocument();
+  });
+
+  it("clears a clip validation error when switching to Script mode", () => {
+    render(<ProjectsView projects={[]} health={health} onCreated={vi.fn()} onOpen={vi.fn()} onRefresh={vi.fn(async () => undefined)} />);
+    fireEvent.click(screen.getByRole("tab", { name: "YouTube" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "YouTube URL" }), { target: { value: "https://example.com/not-youtube" } });
+    fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Only public HTTPS YouTube URLs are supported.");
+    fireEvent.click(screen.getByRole("button", { name: /Script mode/i }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("clears a script validation error when the script is edited", () => {
+    render(<ProjectsView projects={[]} health={health} onCreated={vi.fn()} onOpen={vi.fn()} onRefresh={vi.fn(async () => undefined)} />);
+    fireEvent.click(screen.getByRole("button", { name: /Script mode/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Create script video/i }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Add at least 10 characters of script.");
+    fireEvent.change(screen.getByPlaceholderText(/Paste the exact script/i), { target: { value: "A valid disposable script." } });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("defaults to Auto mode and resolves no-provider auto to a Fast local cut note", () => {
@@ -104,6 +234,17 @@ describe("Projects create flow", () => {
     render(<ProjectsView projects={[]} health={health} providersLoaded hasSelectedProvider={false} onCreated={vi.fn()} onOpen={vi.fn()} onRefresh={vi.fn(async () => undefined)} />);
     expect(screen.getByText(/No provider is connected, so Auto runs as a fast local cut\./i)).toBeInTheDocument();
     expect(screen.getByText(/Add optional AI providers/i)).toBeInTheDocument();
+  });
+
+  it("remembers when the optional provider callout is dismissed", () => {
+    const props = { projects: [], health, providersLoaded: true, hasSelectedProvider: false, onCreated: vi.fn(), onOpen: vi.fn(), onRefresh: vi.fn(async () => undefined) };
+    const first = render(<ProjectsView {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "Continue locally" }));
+    expect(screen.queryByText(/Add optional AI providers/i)).not.toBeInTheDocument();
+    first.unmount();
+
+    render(<ProjectsView {...props} />);
+    expect(screen.queryByText(/Add optional AI providers/i)).not.toBeInTheDocument();
   });
 
   it("reports a connected provider once /profiles confirms it", () => {

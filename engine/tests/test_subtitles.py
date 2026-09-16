@@ -9,6 +9,7 @@ from engine.media import (
     _ass_style_metrics,
     _caption_words_with_emojis,
     _credit_alignment,
+    _credit_margin,
     _has_emoji,
     _wrap_credit,
     _is_emoji,
@@ -50,6 +51,10 @@ def _caption_events(ass: str) -> list[str]:
         if line.startswith("Dialogue: 10,"):
             events.append(line)
     return events
+
+
+def _dialogue_events(ass: str, style: str) -> list[str]:
+    return [line for line in ass.splitlines() if f",{style}," in line and line.startswith("Dialogue: ")]
 
 
 def _write(tmp: Path, words: list[dict[str, object]], *, width: int = 1080, height: int = 1920) -> str:
@@ -99,7 +104,7 @@ def test_short_subtitle_is_single_centred_line(tmp_path: Path) -> None:
 def test_long_subtitle_wraps_without_splitting_words(tmp_path: Path) -> None:
     words = _words(
         "Connect", "OpenRouter", "for", "enhanced", "planning",
-        "and", "ElevenLabs", "for", "premium", "narration",
+        "and", "OpenRouter", "for", "premium", "narration",
     )
     ass = _write(tmp_path, words)
     events = _caption_events(ass)
@@ -237,6 +242,7 @@ def test_youtube_creator_credit_is_full_duration_in_safe_corner(tmp_path: Path) 
     credit = _parse_styles(ass)["Credit"]
     assert credit["Alignment"] == "3"  # lower-right, outside centred captions
     assert credit["MarginR"] == credit["MarginL"]
+    assert int(credit["MarginV"]) == _credit_margin(1920) == 24
     assert "Dialogue: 2,0,0:00:12.50,Credit,,0,0,0,,Source: Maker \\{One\\}" in ass
 
 
@@ -250,25 +256,39 @@ def test_creator_credit_wraps_truncates_and_uses_subtle_contrast(tmp_path: Path)
     style = _parse_styles(path.read_text(encoding="utf-8"))["Credit"]
     assert style["PrimaryColour"].startswith("&H22")  # modest transparency
     assert style["BorderStyle"] == "3"  # translucent contrast panel
-    assert int(style["MarginR"]) >= 80 and int(style["MarginV"]) >= 100
+    assert int(style["MarginR"]) >= 80
+    assert int(style["MarginV"]) == _credit_margin(1920)
 
 
-def test_credit_stays_in_safe_margins_at_supported_canvas_sizes(tmp_path: Path) -> None:
+def test_credit_stays_at_the_bottom_for_supported_canvas_sizes(tmp_path: Path) -> None:
     for width, height in ((1080, 1920), (1080, 1350), (1080, 1080), (1920, 1080)):
         path = tmp_path / f"credit-{width}x{height}.ass"
         write_ass(path, [], offset=0, duration=12, visuals=[], width=width, height=height, creator_credit="Source: 频道 🎬 · Maker {One} !?; punctuation")
-        styles = _parse_styles(path.read_text(encoding="utf-8"))
-        credit = styles["Credit"]
+        text = path.read_text(encoding="utf-8")
+        credit = _parse_styles(text)["Credit"]
+        margin_v = int(credit["MarginV"])
         assert credit["Alignment"] in {"1", "3"}
+        assert margin_v == _credit_margin(height) > 0
+        assert margin_v <= round(height * .02)
         assert int(credit["MarginL"]) >= 40 and int(credit["MarginR"]) >= 40
-        assert int(credit["MarginV"]) >= 60
-        event = next(line for line in path.read_text(encoding="utf-8").splitlines() if line.startswith("Dialogue: 2,"))
+        assert int(credit["MarginL"]) < width // 2 and int(credit["MarginR"]) < width // 2
+        event = next(line for line in text.splitlines() if line.startswith("Dialogue: 2,"))
         assert "0:00:12.00" in event
         assert "Source: 频道" in event
+        assert r"\N" not in event
+
+    wrapped = tmp_path / "credit-wrapped.ass"
+    write_ass(wrapped, [], offset=0, duration=3, visuals=[], width=1080, height=1080, creator_credit="Source: 频道 🎬 " + "LongCreatorName " * 8)
+    wrapped_text = wrapped.read_text(encoding="utf-8")
+    wrapped_event = next(line for line in wrapped_text.splitlines() if line.startswith("Dialogue: 2,"))
+    assert r"\N" in wrapped_event
+    assert "频道 🎬" in wrapped_event
 
     plain = tmp_path / "no-credit.ass"
     write_ass(plain, [], offset=0, duration=4, visuals=[], width=1080, height=1920)
-    assert "Style: Credit," not in plain.read_text(encoding="utf-8")
+    plain_text = plain.read_text(encoding="utf-8")
+    assert "Style: Credit," not in plain_text
+    assert not _dialogue_events(plain_text, "Credit")
 
 
 def test_credit_alignment_chooses_the_quieter_lower_corner(monkeypatch, tmp_path: Path) -> None:
@@ -290,6 +310,16 @@ def test_credit_alignment_chooses_the_quieter_lower_corner(monkeypatch, tmp_path
     assert _credit_alignment(source, start=0, end=2, width=1080, height=1920, settings=settings) == 3
     monkeypatch.setattr("engine.media.subprocess.run", lambda *args, **kwargs: sample(False))
     assert _credit_alignment(source, start=0, end=2, width=1080, height=1920, settings=settings) == 1
+
+
+def test_source_clip_ass_has_captions_and_credit_but_no_visual_dialogue(tmp_path: Path) -> None:
+    path = tmp_path / "source-clip.burn.ass"
+    write_ass(path, _words("The", "GPT", "answer"), offset=0, duration=6, visuals=[], width=1080, height=1920, creator_credit="Source: Creator", credit_alignment=1)
+    ass = path.read_text(encoding="utf-8")
+    assert _caption_events(ass)
+    assert any("GPT" in event for event in _caption_events(ass))
+    assert _dialogue_events(ass, "Credit")
+    assert not _dialogue_events(ass, "Visual")
 
 
 def test_visual_style_keeps_top_centre_alignment(tmp_path: Path) -> None:

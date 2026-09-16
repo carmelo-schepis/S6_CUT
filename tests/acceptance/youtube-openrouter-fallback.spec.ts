@@ -28,7 +28,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const artifacts = path.resolve(root, process.env.S6_YOUTUBE_ROOT || "test-artifacts/youtube-openrouter");
 
 const url = process.env.S6_YOUTUBE_URL;
-if (!url) throw new Error("S6_YOUTUBE_URL must supply the authorised public YouTube URL under test");
+const profileKey = process.env.S6_E2E_PROFILE_KEY;
+test.skip(!url || !profileKey, "requires S6_YOUTUBE_URL and S6_E2E_PROFILE_KEY for the authorised provider-fallback test");
 const match = /[?&]v=([\w-]{11})|youtu\.be\/([\w-]{11})/.exec(url);
 const videoId = match?.[1] || match?.[2] || "";
 
@@ -70,8 +71,6 @@ test.describe("Smart planning survives an OpenRouter failure on a YouTube import
     // Seed the connected profile through the gateway API so no password-field
     // value is ever recorded in a Playwright trace. The browser still confirms
     // the profile is connected in Settings before any job is created.
-    const profileKey = process.env.S6_E2E_PROFILE_KEY;
-    if (!profileKey) throw new Error("The isolated harness did not provide a profile key");
     const profileResponse = await fetch(`${gateway}/api/v1/profiles`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -85,7 +84,7 @@ test.describe("Smart planning survives an OpenRouter failure on a YouTube import
     expect((await fetch(`${gateway}/api/v1/profiles/${profile.id}/test`, { method: "POST" })).ok).toBeTruthy();
 
     await page.goto("/", { waitUntil: "domcontentloaded" });
-    await expect(page.getByText("All local tools ready")).toBeVisible({ timeout: 90_000 });
+    await expect(page.getByText("Local engine ready")).toBeVisible({ timeout: 90_000 });
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
     await expect(page.getByRole("article").filter({ hasText: "E2E OpenRouter failure" }).first())

@@ -19,6 +19,7 @@ vi.mock("./api", async (importOriginal) => {
 
 import { App } from "./App";
 import { TimeoutError } from "./api";
+import { emitLibraryChanged } from "./library-sync";
 
 const health = {
   status: "ready" as const, version: "0.1.0", database: true, ffmpeg: true, ffprobe: true,
@@ -27,12 +28,23 @@ const health = {
 };
 
 const profile = {
-  id: "p1", name: "Studio", modelId: "openai/gpt-4o-mini", voiceId: null, selected: true,
-  persistence: "encrypted", openrouterConfigured: true, elevenlabsConfigured: false,
-  openrouterMasked: "••••1234", elevenlabsMasked: null, openrouterStatus: "connected" as const,
-  elevenlabsStatus: "not_configured" as const, openrouterMessage: "Connected",
-  openrouterLastCheckedAt: null, elevenlabsMessage: "Optional", elevenlabsLastCheckedAt: null,
-  status: "connected", capabilities: ["structured planning"], fallbacks: { planning: "Deterministic planner" },
+  id: "p1", name: "Studio", textModelId: "openai/gpt-4o-mini", ttsModelId: "free/speech", ttsVoice: "alloy", ttsSpeed: 1, selected: true,
+  persistence: "encrypted", openrouterConfigured: true, openrouterMasked: "••••1234", textStatus: "connected" as const,
+  ttsStatus: "connected" as const, textMessage: "Connected", ttsMessage: "Connected", textLastCheckedAt: null, ttsLastCheckedAt: null,
+  status: "connected", capabilities: ["OpenRouter text generation", "OpenRouter TTS"], fallbacks: { planning: "Deterministic planner" },
+};
+
+const activityProject = {
+  schemaVersion: 1 as const, id: "activity-project", name: "Activity project", mode: "clip" as const,
+  style: "educational" as const, state: "active" as const, sourceName: "source.mp4", sourceKind: "upload" as const,
+  requestedCount: 5, latestJobId: "activity-job", createdAt: "2026-01-01", updatedAt: "2026-01-01",
+};
+const activityJob = {
+  schemaVersion: 1 as const, id: "activity-job", projectId: activityProject.id, mode: "clip" as const, state: "active" as const,
+  stage: "render", stageLabel: "Rendering", progress: 20, currentItem: 1, totalItems: 5, style: "educational" as const,
+  processingMode: "fast" as const, warnings: [], clips: [], beats: [],
+  steps: [{ id: "render", label: "Clips rendered", status: "active" as const, currentItem: 1, totalItems: 5 }],
+  createdAt: "2026-01-01", updatedAt: "2026-01-01",
 };
 
 /** A promise the test settles by hand. */
@@ -51,6 +63,22 @@ describe("App shell", () => {
     mockListProfiles.mockReset().mockResolvedValue([profile]);
   });
   afterEach(() => vi.useRealTimers());
+
+  it("refreshes Recent projects when a Library deletion changes persisted records", async () => {
+    const recentProject = {
+      schemaVersion: 1 as const, id: "deleted-project", name: "Deleted library project", mode: "clip" as const,
+      style: "educational" as const, state: "complete" as const, sourceName: "source.mp4", sourceKind: "upload" as const,
+      requestedCount: 1, createdAt: "2026-01-01", updatedAt: "2026-01-01",
+    };
+    mockListProjects.mockResolvedValueOnce([recentProject]).mockResolvedValue([]);
+    mockGetHealth.mockResolvedValue(health);
+    render(<App />);
+
+    expect(await screen.findByRole("button", { name: "Open project Deleted library project" })).toBeInTheDocument();
+    emitLibraryChanged();
+    await waitFor(() => expect(mockListProjects).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Open project Deleted library project" })).not.toBeInTheDocument());
+  });
 
   it("shows exactly one engine startup message while the first health read is outstanding", async () => {
     const pending = deferred<typeof health>();
@@ -133,6 +161,30 @@ describe("App shell", () => {
     expect(mockListJobs).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps the shell jobs poll single-flight while live work is viewed outside Projects", async () => {
+    vi.useFakeTimers();
+    mockGetHealth.mockResolvedValue(health);
+    mockListProjects.mockResolvedValue([activityProject]);
+    const first = deferred<unknown[]>();
+    const second = deferred<unknown[]>();
+    mockListJobs.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise).mockResolvedValue([]);
+    render(<App />);
+    await act(async () => undefined);
+    expect(mockListJobs).toHaveBeenCalledTimes(1);
+
+    await act(async () => { first.resolve([activityJob]); await Promise.resolve(); });
+    fireEvent.click(screen.getByRole("button", { name: /^Library$/ }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(4_000); });
+    expect(mockListJobs).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId("workspace-work-count")).toHaveTextContent("4");
+
+    // A slow read must not be replaced by another request while the user stays
+    // on Library, where the Workspace view is unmounted.
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(mockListJobs).toHaveBeenCalledTimes(2);
+    await act(async () => { second.resolve([activityJob]); });
+  });
+
   it("renders one top-level main landmark and a skip link that targets it", async () => {
     mockGetHealth.mockResolvedValue(health);
     render(<App />);
@@ -150,5 +202,92 @@ describe("App shell", () => {
 
     await act(async () => { skip.click(); });
     expect(document.activeElement).toBe(document.getElementById("main-content"));
+  });
+
+  it("keeps the Workspace name and shows accessible activity progress", async () => {
+    mockGetHealth.mockResolvedValue(health);
+    mockListProjects.mockResolvedValue([activityProject]);
+    mockListJobs.mockResolvedValue([activityJob]);
+    render(<App />);
+
+    const workspace = await screen.findByRole("button", { name: /^Workspace$/ });
+    const badge = await screen.findByTestId("workspace-work-count");
+    expect(workspace).toHaveAttribute("aria-label", "Workspace");
+    expect(workspace).toHaveAttribute("aria-describedby", "workspace-work-description");
+    expect(badge).toHaveTextContent("4");
+    expect(badge).toHaveAttribute("aria-hidden", "true");
+    expect(screen.getByTestId("workspace-nav-icon")).toBeInTheDocument();
+    expect(screen.getByTestId("workspace-work-spinner")).toBeInTheDocument();
+    expect(workspace).toHaveAccessibleDescription("Loading progress: 4 clips remaining across 1 active job");
+  });
+
+  it("updates Workspace activity progress from later jobs polls and removes it at completion", async () => {
+    vi.useFakeTimers();
+    mockGetHealth.mockResolvedValue(health);
+    mockListProjects.mockResolvedValue([activityProject]);
+    const updated = { ...activityJob, steps: [{ ...activityJob.steps[0], currentItem: 2 }] };
+    const complete = { ...activityJob, state: "complete" as const, stage: "complete", steps: [] };
+    mockListJobs.mockResolvedValueOnce([activityJob]).mockResolvedValueOnce([updated]).mockResolvedValueOnce([complete]);
+    render(<App />);
+    await act(async () => undefined);
+
+    expect(screen.getByTestId("workspace-work-count")).toHaveTextContent("4");
+    expect(screen.getByTestId("workspace-work-spinner")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^Library$/ }));
+    expect(screen.getByTestId("workspace-work-count")).toHaveTextContent("4");
+    expect(screen.getByTestId("workspace-work-spinner")).toBeInTheDocument();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(4_000); });
+    expect(mockListJobs).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId("workspace-work-count")).toHaveTextContent("3");
+    expect(screen.getByRole("button", { name: /^Workspace$/ })).toBeInTheDocument();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(4_000); });
+    expect(mockListJobs).toHaveBeenCalledTimes(3);
+    expect(screen.queryByTestId("workspace-work-count")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("workspace-work-spinner")).not.toBeInTheDocument();
+  });
+
+  it.each(["queued", "active", "recovered"] as const)("shows the processing spinner for %s work", async (state) => {
+    mockGetHealth.mockResolvedValue(health);
+    mockListProjects.mockResolvedValue([activityProject]);
+    mockListJobs.mockResolvedValue([{ ...activityJob, state }]);
+    render(<App />);
+    expect(await screen.findByTestId("workspace-work-spinner")).toBeInTheDocument();
+    expect(screen.getByTestId("workspace-work-count")).toBeInTheDocument();
+  });
+
+  it.each(["complete", "failed", "cancelled_kept", "paused", "stalled"] as const)("does not show the spinner for %s work", async (state) => {
+    mockGetHealth.mockResolvedValue(health);
+    mockListProjects.mockResolvedValue([activityProject]);
+    mockListJobs.mockResolvedValue([{ ...activityJob, state }]);
+    render(<App />);
+    await screen.findByRole("button", { name: /^Workspace$/ });
+    expect(screen.getByTestId("workspace-nav-icon")).toBeInTheDocument();
+    expect(screen.queryByTestId("workspace-work-spinner")).not.toBeInTheDocument();
+    if (state === "paused" || state === "stalled") expect(screen.getByTestId("workspace-work-count")).toBeInTheDocument();
+    else expect(screen.queryByTestId("workspace-work-count")).not.toBeInTheDocument();
+  });
+
+  it("labels the unified Workspace progress indicator without changing the navigation name", async () => {
+    mockGetHealth.mockResolvedValue(health);
+    mockListProjects.mockResolvedValue([activityProject]);
+    mockListJobs.mockResolvedValue([activityJob]);
+    render(<App />);
+    const workspace = await screen.findByRole("button", { name: /^Workspace$/ });
+    const progress = screen.getByTestId("workspace-work-progress");
+    expect(workspace).toHaveAttribute("aria-label", "Workspace");
+    expect(workspace).toHaveAccessibleDescription("Loading progress: 4 clips remaining across 1 active job");
+    expect(progress).toHaveAttribute("role", "img");
+    expect(progress).toHaveAttribute("aria-label", "Loading progress: 4 clips remaining across 1 active job");
+    expect(progress).toHaveAttribute("data-progress-value", "4");
+  });
+
+  it("does not render an activity badge when no work is live", async () => {
+    mockGetHealth.mockResolvedValue(health);
+    render(<App />);
+    await screen.findByRole("button", { name: /^Workspace$/ });
+    expect(screen.getByTestId("workspace-nav-icon")).toBeInTheDocument();
+    expect(screen.queryByTestId("workspace-work-count")).not.toBeInTheDocument();
   });
 });

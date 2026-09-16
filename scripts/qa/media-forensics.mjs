@@ -453,7 +453,7 @@ export async function extractFrames(file, outputDir, { fractions = [0.05, 0.25, 
  * Prove an output came from a specific source range.
  *
  * The renderer fits the whole landscape source inside the vertical canvas over
- * a blurred backdrop, so the comparison crops the output back down to that
+ * an undarkened Gaussian-blurred backdrop, so the comparison crops the output back down to that
  * foreground band before hashing. Captions are burned in below the band and do
  * not contaminate it.
  */

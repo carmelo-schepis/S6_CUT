@@ -117,7 +117,7 @@ Copy `.env.example` to `.env`. Important values:
 | `S6_YTDLP_CONNECT_TIMEOUT` | `45` | YouTube connection/setup timeout in seconds |
 | `S6_YTDLP_INACTIVITY_TIMEOUT` | `300` | No-byte inactivity period before a download fails; actively progressing large files are not cut off |
 
-Provider profiles can be configured in Settings. Persistent secrets are encrypted with a locally generated instance key and are never returned by read APIs. Headless deployments may set `OPENROUTER_API_KEY` and `ELEVENLABS_API_KEY` in `.env` or Docker secrets orchestration. Protect `.env` like any other credential file.
+The OpenRouter profile can be configured in Settings. Persistent secrets are encrypted with a locally generated instance key and are never returned by read APIs. Headless deployments may set `OPENROUTER_API_KEY` in `.env` or Docker secrets orchestration. Protect `.env` like any other credential file.
 
 ### Whisper performance tuning
 
@@ -137,7 +137,7 @@ Whisper job stages report real, incrementally observed progress: each fraction i
 | Smart transcription/timing | Local Faster-Whisper | Local Whisper supplies timing; an LLM never performs transcription |
 | Smart clip selection | Optional OpenRouter ordering over validated local candidates | Deterministic local candidate planning |
 | Script planning | Optional OpenRouter structured planning boundary | Deterministic exact-span phrase planner |
-| Narration | Selected ElevenLabs voice | Local espeak-ng; then explicitly silent render |
+| Narration | Selected OpenRouter speech model and voice | Local espeak-ng; then explicitly silent render |
 | Visuals | Required/preferred personal Library | Relevant local text card; wrong media is not substituted |
 | YouTube | Constrained local yt-dlp | Local upload remains available and the URL failure is scoped |
 
@@ -182,7 +182,7 @@ loss and keeps outputs broadly browser-compatible.
 
 Portrait, square, and 4:5 renders preserve the complete source frame when a
 centre crop would discard substantial detail. The full-frame foreground is fitted
-with Lanczos scaling over a mildly darkened, blurred, aspect-cover background.
+with Lanczos scaling over an undarkened, blurred, aspect-cover background.
 Sources close to the target aspect use a simpler high-quality fit/crop. A 1080×1920
 file made from a 360p source is still only 360p detail enlarged to a delivery
 canvas; ordinary scaling cannot recreate missing detail. 1080p or better sources

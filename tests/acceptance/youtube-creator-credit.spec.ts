@@ -76,8 +76,8 @@ async function installFixture(page: Page, sourceKind: "youtube" | "upload") {
 
 async function openWorkspace(page: Page, projectName: string) {
   await page.goto("/", { waitUntil: "domcontentloaded" });
-  await expect(page.getByRole("heading", { name: "Make the first cut" })).toBeVisible();
-  await page.getByRole("button", { name: new RegExp(projectName) }).click();
+  await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
+  await page.getByRole("button", { name: `Open project ${projectName}`, exact: true }).click();
   await expect(page.getByRole("heading", { name: projectName })).toBeVisible();
   await expect(page.getByRole("region", { name: "Output viewer" })).toBeVisible();
 }
@@ -126,7 +126,7 @@ test.describe("YouTube creator credit workflow", () => {
     });
 
     await page.goto("/", { waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("heading", { name: "Make the first cut" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
     await page.getByRole("tab", { name: "YouTube" }).click();
     await page.getByLabel("YouTube URL").fill("https://www.youtube.com/watch?v=known-creator-fixture");
     await page.getByRole("button", { name: "Fast", exact: true }).click();
@@ -139,10 +139,21 @@ test.describe("YouTube creator credit workflow", () => {
     const video = page.getByRole("region", { name: "Output viewer" }).locator("video");
     await expect(video).toBeVisible();
     await expect(video).toHaveAttribute("src", /01-cut\.mp4/);
+    const playback = await video.evaluate(async (element) => {
+      element.muted = true;
+      await element.play();
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      return { readyState: element.readyState, width: element.videoWidth, height: element.videoHeight, currentTime: element.currentTime, paused: element.paused, ended: element.ended };
+    });
+    expect(playback.readyState).toBeGreaterThanOrEqual(2);
+    expect(playback.width).toBeGreaterThan(0);
+    expect(playback.height).toBeGreaterThan(0);
+    expect(playback.currentTime).toBeGreaterThan(0);
+    expect(playback.paused).toBeFalsy();
     // The label is metadata for the rendered output; the actual credit is
     // burned into the MP4 served by this same final-output video element.
     await expect(page.getByRole("region", { name: "Output viewer" })).toContainText("Source: Known Creator");
-    await page.screenshot({ path: path.join(artifacts, "youtube-preview.png"), fullPage: true });
+    await page.screenshot({ path: path.join(artifacts, "youtube-preview-playing.png"), fullPage: true });
 
     const downloadPromise = page.waitForEvent("download");
     await page.getByRole("button", { name: /Download ZIP/ }).click();
@@ -162,7 +173,7 @@ test.describe("YouTube creator credit workflow", () => {
     expect((await secondDownloadPromise).suggestedFilename()).toBe("youtube-credit.zip");
 
     await page.reload({ waitUntil: "domcontentloaded" });
-    await page.getByRole("button", { name: /Created YouTube short/ }).click();
+    await page.getByRole("button", { name: "Open project Created YouTube short", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Created YouTube short" })).toBeVisible();
     await expect(page.getByRole("region", { name: "Output viewer" }).locator("video")).toBeVisible();
     await page.screenshot({ path: path.join(artifacts, "youtube-preview-after-refresh.png"), fullPage: true });

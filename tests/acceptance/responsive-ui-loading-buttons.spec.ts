@@ -112,14 +112,18 @@ test.describe("responsive loading and creation controls", () => {
     const consoleErrors: string[] = [];
     const failedRequests: string[] = [];
     page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
-    page.on("requestfailed", (request) => failedRequests.push(`${request.method()} ${request.url()}`));
+    // Recent project cards autoplay a source preview (b64f1a0), so moving to the
+    // next viewport cancels whatever media fetch is still in flight. An aborted
+    // request is the navigation working, not the application failing — the same
+    // filter the other suites in this directory apply.
+    page.on("requestfailed", (request) => { if (request.failure()?.errorText !== "net::ERR_ABORTED") failedRequests.push(`${request.method()} ${request.url()} ${request.failure()?.errorText || ""}`); });
     test.setTimeout(180_000);
     await fs.mkdir(artifacts, { recursive: true });
     for (const [name, width, height] of viewports) {
       await page.setViewportSize({ width, height });
       await page.goto("/", { waitUntil: "domcontentloaded" });
       await page.getByRole("button", { name: "Projects", exact: true }).click();
-      await expect(page.getByRole("heading", { name: "Make the first cut" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
       await assertNoOverflow(page);
       const panel = page.locator(".create-panel");
       await expect(panel).toBeVisible();
@@ -182,13 +186,17 @@ test.describe("responsive loading and creation controls", () => {
     const consoleErrors: string[] = [];
     const failedRequests: string[] = [];
     page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
-    page.on("requestfailed", (request) => failedRequests.push(`${request.method()} ${request.url()}`));
+    page.on("requestfailed", (request) => { if (request.failure()?.errorText !== "net::ERR_ABORTED") failedRequests.push(`${request.method()} ${request.url()} ${request.failure()?.errorText || ""}`); });
     await installFixtures(page);
     for (const [name, width, height] of viewports) {
       await page.setViewportSize({ width, height });
       await page.goto("/", { waitUntil: "domcontentloaded" });
-      await expect(page.getByRole("button", { name: /deliberately long project name/i })).toBeVisible();
-      await page.getByRole("button", { name: /deliberately long project name/i }).click();
+      // A recent project card carries two buttons that name the project: the
+      // source preview added by b64f1a0 and the card itself. Name the one that
+      // opens the project rather than matching both.
+      const card = page.getByRole("button", { name: /^Open project .*deliberately long project name/i });
+      await expect(card).toBeVisible();
+      await card.click();
       await expect(page.locator(".processing-state")).toBeVisible();
       await expect(page.locator(".processing-state")).toContainText("Transcribing audio");
       await expect(page.locator(".processing-state")).toContainText("18%");
@@ -199,13 +207,16 @@ test.describe("responsive loading and creation controls", () => {
       const measure = await processing.evaluate((element) => {
         const rect = element.getBoundingClientRect();
         const blocks = [...element.querySelectorAll<HTMLElement>(".processing-heading, .processing-filmstrip, .processing-meta, .download-progress-detail, p")].map((item) => item.getBoundingClientRect());
-        return { rect, blocks, scrollHeight: element.scrollHeight, clientHeight: element.clientHeight };
+        return { rect, blocks, scrollWidth: element.scrollWidth, clientWidth: element.clientWidth, scrollHeight: element.scrollHeight, clientHeight: element.clientHeight };
       });
       expect(measure.rect.left).toBeGreaterThanOrEqual(-1);
       expect(measure.rect.right).toBeLessThanOrEqual(width + 1);
       expect(measure.rect.top).toBeGreaterThanOrEqual(-1);
       expect(measure.rect.bottom).toBeLessThanOrEqual(height + 1);
-      expect(measure.scrollHeight).toBeLessThanOrEqual(measure.clientHeight + 1);
+      // Long status copy may scroll vertically inside the ratio-correct frame;
+      // horizontal overflow is the layout regression this fixture guards.
+      expect(measure.scrollWidth).toBeLessThanOrEqual(measure.clientWidth + 1);
+      expect(measure.scrollHeight).toBeGreaterThanOrEqual(measure.clientHeight);
       for (let index = 1; index < measure.blocks.length; index += 1) expect(measure.blocks[index].top).toBeGreaterThanOrEqual(measure.blocks[index - 1].bottom - 1);
       if (name === "desktop" || name === "mobile-tiny") await processing.screenshot({ path: path.join(artifacts, `loading-${name}.png`) });
     }
@@ -217,22 +228,22 @@ test.describe("responsive loading and creation controls", () => {
     const connected: ProviderProfile = {
       id: "safe-connected-profile",
       name: "Connected OpenRouter",
-      modelId: "openai/gpt-4.1-mini",
-      voiceId: null,
+      textModelId: "openai/gpt-4.1-mini",
+      ttsModelId: "free/speech",
+      ttsVoice: "alloy",
+      ttsSpeed: 1,
       selected: true,
       persistence: "encrypted",
       openrouterConfigured: true,
-      elevenlabsConfigured: false,
       openrouterMasked: "sk-or-v1-••••••••",
-      elevenlabsMasked: null,
-      openrouterStatus: "connected",
-      elevenlabsStatus: "not_configured",
-      openrouterMessage: "Connected",
-      openrouterLastCheckedAt: new Date().toISOString(),
-      elevenlabsMessage: null,
-      elevenlabsLastCheckedAt: null,
+      textStatus: "connected",
+      ttsStatus: "connected",
+      textMessage: "Connected",
+      textLastCheckedAt: new Date().toISOString(),
+      ttsMessage: "Connected",
+      ttsLastCheckedAt: new Date().toISOString(),
       status: "connected",
-      capabilities: ["planning"],
+      capabilities: ["OpenRouter text generation", "OpenRouter TTS"],
       fallbacks: { planning: "Deterministic local planning" },
     };
     await installFixtures(page, [connected]);

@@ -61,8 +61,8 @@ test("Docker-served studio acceptance workflow", async ({ page, request }) => {
 
   await page.goto("/");
   await expect(page).toHaveTitle(/S6_cut/i);
-  await expect(page.getByRole("heading", { name: "Make the first cut" })).toBeVisible();
-  await expect(page.getByText("All local tools ready")).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
+  await expect(page.getByText("Local engine ready")).toBeVisible({ timeout: 60_000 });
   await capture(page, "desktop-projects");
 
   // Basic keyboard/focus and responsive evidence.
@@ -96,7 +96,9 @@ test("Docker-served studio acceptance workflow", async ({ page, request }) => {
   await expect(page.getByRole("tabpanel", { name: "Media" })).toBeVisible();
   await capture(page, "workspace-media");
   await page.getByRole("tab", { name: "Transcript" }).click();
-  await page.getByRole("button", { name: "captions", exact: true }).click();
+  // The inspector tabs were relabelled to sentence case (987dddb); this asserts
+  // the label a reader sees, not the state key behind it.
+  await page.getByRole("button", { name: "Captions", exact: true }).click();
   await expect(page.getByText(/Caption style and timing are fixed when the job is created/)).toBeVisible();
 
   const selected = page.locator('input[type="checkbox"]:checked');
@@ -183,11 +185,11 @@ test("Docker-served studio acceptance workflow", async ({ page, request }) => {
   await expect(page.getByText("Secrets", { exact: true })).toBeVisible();
   await expect(page.getByText(/Trusted LAN only by default/)).toBeVisible();
   // Empty installs may open setup inline; existing installs keep the form
-  // closed until requested. Either way, secret fields remain masked.
+  // closed until requested. Either way, the API key remains masked.
   if (await page.locator('input[type="password"]').count() === 0) {
     await page.getByRole("button", { name: /New profile/ }).click();
   }
-  await expect(page.locator('input[type="password"]')).toHaveCount(2);
+  await expect(page.locator('input[type="password"]')).toHaveCount(1);
   await capture(page, "settings-security");
 
   // Jobs navigation and API-backed job list remain usable after the workflow.

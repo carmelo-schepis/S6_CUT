@@ -31,10 +31,14 @@ describe("VideoSourcePicker", () => {
     fireEvent.click(screen.getByRole("button", { name: "Remove" }));
     expect(onFile).toHaveBeenCalledWith(null);
   });
-  it("renders YouTube wording and keyboard-focusable source area", () => {
-    const onModeChange = vi.fn();
-    render(<VideoSourcePicker mode="url" onModeChange={onModeChange} file={null} onFile={vi.fn()} url="" onUrl={vi.fn()} />);
-    expect(screen.getByLabelText("YouTube URL")).toBeInTheDocument();
+  it("renders the YouTube example as a placeholder without changing input behavior", () => {
+    const onUrl = vi.fn();
+    render(<VideoSourcePicker mode="url" onModeChange={vi.fn()} file={null} onFile={vi.fn()} url="" onUrl={onUrl} />);
+    const input = screen.getByLabelText("YouTube URL");
+    expect(input).toHaveAttribute("placeholder", "https://www.youtube.com/watch?v=...");
+    expect(input).toHaveValue("");
+    fireEvent.change(input, { target: { value: "https://www.youtube.com/watch?v=abc123" } });
+    expect(onUrl).toHaveBeenCalledWith("https://www.youtube.com/watch?v=abc123");
     expect(screen.getByText(/DRM and access controls are never bypassed/i)).toBeInTheDocument();
   });
 });

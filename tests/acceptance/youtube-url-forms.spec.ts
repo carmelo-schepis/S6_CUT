@@ -22,7 +22,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const artifacts = path.join(root, "test-artifacts/youtube-import");
 
 const url = process.env.S6_YOUTUBE_URL;
-if (!url) throw new Error("S6_YOUTUBE_URL must supply the authorised public YouTube URL under test");
+test.skip(!url, "requires S6_YOUTUBE_URL with an authorised public YouTube URL");
 const match = /[?&]v=([\w-]{11})|youtu\.be\/([\w-]{11})/.exec(url);
 const videoId = match?.[1] || match?.[2] || "";
 
@@ -82,7 +82,7 @@ test.describe("accepted YouTube URL forms import the same video", () => {
       const startedAt = Date.now();
 
       await page.goto("/", { waitUntil: "domcontentloaded" });
-      await expect(page.getByText("All local tools ready")).toBeVisible({ timeout: 90_000 });
+      await expect(page.getByText("Local engine ready")).toBeVisible({ timeout: 90_000 });
 
       await createClipProject(page, {
         name: projectName, count: 1, mode: "Fast", aspect: "9:16",

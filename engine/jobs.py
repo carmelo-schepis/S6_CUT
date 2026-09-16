@@ -6,18 +6,20 @@ import json
 import logging
 import math
 import os
+import shutil
 import threading
 import time
 import uuid
 import zipfile
 from collections import defaultdict, deque
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from . import media as media_module
 from .config import Settings
 from .database import Database
-from .library import LibraryRules
+from .library import LibraryRules, ResolvedVisual
 from .media import (
     DownloadStalled, MediaError, available, download_youtube, probe, probe_audio, render_clip, render_script,
     _metadata_text, sha256_file, synthesize_local, transcribe, youtube_import_metadata, youtube_import_title,
@@ -114,6 +116,10 @@ class SwitchFastError(RuntimeError):
     pass
 
 
+class ProjectDeletingError(RuntimeError):
+    pass
+
+
 def job_processing_mode(job: Job, private: dict[str, Any]) -> ProcessingMode:
     """Resolved processing mode: private snapshot first, public record next, legacy jobs default to smart."""
     value = private.get("processing_mode") or job.processing_mode or "smart"
@@ -123,6 +129,22 @@ def job_processing_mode(job: Job, private: dict[str, Any]) -> ProcessingMode:
 def job_content_format(job: Job, private: dict[str, Any]) -> ContentFormat:
     value = private.get("content_format") or job.content_format or "short"
     return value if value in {"short", "long"} else "short"
+
+
+def uses_fast_pipeline(processing_mode: str | None, content_format: str | None) -> bool:
+    """Whether a clip job renders through the fast path.
+
+    Long form always does, whatever processing mode was requested. Every caller
+    that builds a checklist or routes a job must ask this one question: when the
+    creation route, the checklist builder and the processor disagreed, a
+    long-form Smart job was given the smart checklist and then run through the
+    fast renderer, which asks for a 'plan' step the smart checklist lacks.
+    """
+    return content_format == "long" or processing_mode == "fast"
+
+
+def job_uses_fast_pipeline(job: Job, private: dict[str, Any]) -> bool:
+    return uses_fast_pipeline(job_processing_mode(job, private), job_content_format(job, private))
 
 
 def _youtube_creator_name(value: object) -> str | None:
@@ -145,6 +167,24 @@ def _consume_youtube_sidecar(source: Path) -> None:
         source.with_suffix(".info.json").unlink(missing_ok=True)
     except OSError:
         pass
+
+
+def _source_clip_visual_metadata(visual: ResolvedVisual, duration: float) -> tuple[list[tuple[Path, float, float]], list[ProvenanceRecord]]:
+    """Return only source-clip overlays and provenance that will be rendered.
+
+    Source clips no longer use generated text cards. A personal-library asset is
+    recorded only when its resolved file exists and the render window is long
+    enough for the same overlay branch to composite it.
+    """
+    if not visual.asset or not visual.asset_path or not visual.asset_path.exists() or duration <= 1:
+        return [], []
+    overlay = (visual.asset_path, .65, min(3.4, duration - .2))
+    provenance = ProvenanceRecord(
+        id=str(uuid.uuid4()), provider="personal-library", licence=visual.asset.licence,
+        attribution=visual.asset.attribution or visual.asset.title, query=visual.label,
+        match_reason=visual.match_reason, content_hash=visual.asset.content_hash,
+    )
+    return [overlay], [provenance]
 
 
 def _creator_render_kwargs(render, credit: str | None) -> dict[str, str]:
@@ -200,6 +240,8 @@ class JobManager:
         self._queued_ids: set[str] = set()
         self._pending_order: deque[str] = deque()
         self._queue_lock = threading.Lock()
+        self._deleting_projects: set[str] = set()
+        self._deletion_lock = threading.RLock()
 
     async def start(self) -> None:
         if self.workers:
@@ -217,6 +259,7 @@ class JobManager:
         # Repair legacy/committed-but-unlinked publications once on startup.  The
         # backfill is idempotent, so repeated startups never duplicate assets.
         self.repair_publications()
+        self.prune_retained_jobs()
 
     def repair_publications(self) -> int:
         """Backfill missing automatic Library assets for completed clips.
@@ -301,10 +344,21 @@ class JobManager:
             finally:
                 self.queue.task_done()
 
+    def _project_is_deleting(self, project_id: str) -> bool:
+        with self._deletion_lock:
+            return project_id in self._deleting_projects
+
     # DO-NOT-CHANGE: always syncs linked Project.state and writes jobs/<id>/state.json
     def _save(self, job: Job, private: dict[str, Any] | None = None) -> None:
+        if self._project_is_deleting(job.project_id):
+            return
         current = self.db.get_job(job.id)
-        if current and current.state == "cancelled_kept" and job.state != "cancelled_kept" and not (private or {}).get("retry_import"):
+        # A project deletion waits on the job lock before removing records. A
+        # stale worker can still hold an in-memory Job afterwards; never let its
+        # final checkpoint recreate the deleted row through the database upsert.
+        if not current:
+            return
+        if current.state == "cancelled_kept" and job.state != "cancelled_kept" and not (private or {}).get("retry_import"):
             job.state = "cancelled_kept"
             job.stage = current.stage
             job.stage_label = current.stage_label
@@ -334,6 +388,8 @@ class JobManager:
 
     def _cooperate(self, job: Job) -> bool:
         while True:
+            if self._project_is_deleting(job.project_id):
+                return False
             current = self.db.get_job(job.id)
             if not current:
                 return False
@@ -461,8 +517,10 @@ class JobManager:
     def _script_steps(self) -> list[ProcessingStep]:
         return [
             ProcessingStep(id="validate", label="Script validated"),
+            ProcessingStep(id="planning", label="Planning complete"),
+            ProcessingStep(id="script_generation", label="Script generation complete"),
             ProcessingStep(id="narration", label="Narration prepared"),
-            ProcessingStep(id="elevenlabs", label="ElevenLabs narration"),
+            ProcessingStep(id="tts", label="OpenRouter speech narration"),
             ProcessingStep(id="local_voice", label="Local narration fallback"),
             ProcessingStep(id="align", label="Words aligned"),
             ProcessingStep(id="plan", label="Visual beats planned"),
@@ -532,8 +590,7 @@ class JobManager:
         if job.mode == "script":
             job.steps = self._script_steps()
         else:
-            mode = job_processing_mode(job, private)
-            job.steps = self._fast_steps() if mode == "fast" else self._smart_steps(bool(private.get("use_openrouter")))
+            job.steps = self._fast_steps() if job_uses_fast_pipeline(job, private) else self._smart_steps(bool(private.get("use_openrouter")))
         self._restore_proven_steps(job, private, as_of)
         self._save(job, private)
 
@@ -727,6 +784,8 @@ class JobManager:
         project = self.db.get_project(job.project_id)
         project_name = project.name if project else "Project"
         title = f"{project_name} — Script video" if script else _semantic_clip_title(project_name, clip)
+        if self._project_is_deleting(job.project_id):
+            raise media_module.TranscriptionCancelled("Project was deleted before output publication")
         origin = "script-output" if script else "generated-clip"
 
         digest = sha256_file(output)
@@ -767,6 +826,25 @@ class JobManager:
             "embedded": bool(private.get("embed_subtitles", job.embed_subtitles)),
             "updated_at": now_iso(),
         }
+        # A stop-keep that lands while this clip was rendering exists only in the
+        # database row: the in-memory job still says "active", and publication
+        # commits the job checkpoint directly (database.py step 6), so it never
+        # passes through _save()'s cancellation precedence and silently
+        # resurrects the job. The render loop's next _cooperate() then reads
+        # "active" and keeps going, so Stop & keep rendered every remaining clip
+        # and held the only worker for the whole job.
+        #
+        # The output still publishes — keeping finished outputs is exactly what
+        # stop-keep promises, and the clip/asset transaction is untouched — but
+        # the checkpoint defers to the cancellation exactly as _save() does, so
+        # the next cooperation point stops the job and frees the worker.
+        current = self.db.get_job(job.id)
+        if current and current.state == "cancelled_kept" and job.state != "cancelled_kept" and not private.get("retry_import"):
+            job.state = current.state
+            job.stage = current.stage
+            job.stage_label = current.stage_label
+            job.error = current.error
+            job.steps = current.steps
         return self.db.publish_clip_output(job, clip, asset, relative, output.stat().st_size, private=private)
 
     def _download_progress(self, job: Job, private: dict[str, Any], update: dict[str, Any]) -> None:
@@ -872,11 +950,7 @@ class JobManager:
         if isinstance(rerender, dict) and rerender.get("run_id"):
             self._process_caption_rerender(job, private, rerender)
             return
-        if job_content_format(job, private) == "long":
-            self._process_clip_fast(job, private)
-            return
-        mode = job_processing_mode(job, private)
-        if mode == "fast":
+        if job_uses_fast_pipeline(job, private):
             self._process_clip_fast(job, private)
         else:
             self._process_clip_smart(job, private)
@@ -957,6 +1031,7 @@ class JobManager:
                     audio, self.settings, progress=callback,
                     cancelled=lambda: not self._cooperate(job), heartbeat=heartbeat,
                     meaningful=lambda fraction: setattr(job, "transcription_processed_seconds", min(duration, duration * fraction)),
+                    source_seconds=duration,
                 )
         finally:
             job.transcription_elapsed_seconds = time.monotonic() - started
@@ -1106,6 +1181,17 @@ class JobManager:
                 raise MediaError("The transcript did not contain a valid complete moment inside the requested duration range")
             if len(candidates) < int(private["count"]):
                 job.warnings.append(f"Found {len(candidates)} valid clips instead of {private['count']}; complete boundaries were prioritised over filler.")
+            # select_candidates falls back to chunking the transcript when no
+            # sentence run fits the requested range, and that fallback cannot
+            # honour the floor. Saying so keeps a short cut from reading as if
+            # it satisfied the requested duration.
+            requested_minimum = float(private["min_duration"])
+            short = [item for item in candidates if item.end - item.start < requested_minimum - 0.05]
+            if short:
+                job.warnings.append(
+                    f"{len(short)} clip(s) are shorter than the requested {requested_minimum:g}s minimum "
+                    f"(shortest {min(item.end - item.start for item in short):.1f}s); the transcript held no longer complete moment."
+                )
             clips: list[Clip] = []
             for index, candidate in enumerate(candidates, 1):
                 clip = clip_from_candidate(candidate, index)
@@ -1113,11 +1199,9 @@ class JobManager:
                 excerpt = " ".join(str(word["text"]) for word in candidate.words)
                 visual = self.rules.resolve(excerpt)
                 clip.visual_label = visual.label
-                clip.fallback_used = visual.source != "library"
-                if visual.asset:
-                    clip.provenance.append(ProvenanceRecord(id=str(uuid.uuid4()), provider="personal-library", licence=visual.asset.licence, attribution=visual.asset.attribution or visual.asset.title, query=visual.label, match_reason=visual.match_reason, content_hash=visual.asset.content_hash))
-                else:
-                    clip.provenance.append(ProvenanceRecord(id=str(uuid.uuid4()), provider="local-text-card", licence="Generated locally by S6_cut", attribution="No attribution required", query=visual.label, match_reason=visual.match_reason))
+                # The source renderer uses source footage plus real library
+                # media only; it never burns the planner's text-card fallback.
+                clip.fallback_used = False
                 clips.append(clip)
             job.clips = clips
             job.total_items = len(clips)
@@ -1157,13 +1241,18 @@ class JobManager:
                 for word in clip_words
             ]
             visual = self.rules.resolve(" ".join(str(word["text"]) for word in clip_words))
-            overlays = [(visual.asset_path, .65, min(3.4, clip.duration - .2))] if visual.asset_path and visual.asset_path.exists() and clip.duration > 1 else []
-            visuals = [(clip.visual_label or "Key idea", .45, min(3.0, clip.duration))]
+            overlays, provenance = _source_clip_visual_metadata(visual, clip.duration)
+            # Provenance describes media actually composited into this source
+            # clip. Remove legacy/generated-card records and replace any prior
+            # library match when a retry resolves the clip again.
+            clip.provenance = [record for record in clip.provenance if record.provider not in {"local-text-card", "personal-library"}]
+            clip.provenance.extend(provenance)
+            clip.fallback_used = False
             try:
                 render_kwargs = {
                     "start": clip.start, "end": clip.end, "aspect": private["aspect_ratio"],
                     "words": clip_words if subtitles_enabled or bool(private.get("embed_subtitles", job.embed_subtitles)) else [],
-                    "visuals": visuals, "overlays": overlays, "settings": self.settings, "style": job.style,
+                    "visuals": [], "overlays": overlays, "settings": self.settings, "style": job.style,
                     **({"embed_subtitles": True} if private.get("embed_subtitles", job.embed_subtitles) else {}),
                     **_creator_render_kwargs(render_clip, youtube_creator_credit(job, private)),
                 }
@@ -1324,10 +1413,19 @@ class JobManager:
             job.current_item = completed_before
             job.total_items = len(job.clips)
             output = output_dir / f"{position:02d}-cut.mp4"
-            subtitles_enabled = bool(private.get("burn_subtitles", private.get("subtitles_enabled", job.burn_subtitles)))
+            subtitles_requested = bool(private.get("burn_subtitles", private.get("subtitles_enabled", job.burn_subtitles)))
+            embed_subtitles_requested = bool(private.get("embed_subtitles", job.embed_subtitles))
+            caption_options_requested = subtitles_requested or embed_subtitles_requested or bool(private.get("caption_downloads_enabled", False)) or bool(private.get("caption_review_enabled", False))
+            captions_enabled = job_processing_mode(job, private) != "fast"
+            subtitles_enabled = subtitles_requested and captions_enabled
+            embed_subtitles = embed_subtitles_requested and captions_enabled
             words: list[dict[str, Any]] = []
             try:
-                captions_required = subtitles_enabled or bool(private.get("embed_subtitles", job.embed_subtitles)) or bool(private.get("caption_downloads_enabled", False)) or bool(private.get("caption_review_enabled", False))
+                captions_required = captions_enabled and caption_options_requested
+                if caption_options_requested and not captions_enabled and has_audio:
+                    warning = "Fast mode skips caption transcription and rendering; choose Smart mode for captions."
+                    if warning not in job.warnings:
+                        job.warnings.append(warning)
                 if captions_required and has_audio:
                     try:
                         words = self._transcribe_fast_window(job, private, source, clip, output_dir)
@@ -1341,7 +1439,7 @@ class JobManager:
                             warning = f"Clip {clip.index}: Local captioning unavailable; exported without captions. ({detail})"
                         job.warnings.append(warning)
                 render_kwargs: dict[str, Any] = {"start": clip.start, "end": clip.end, "aspect": private["aspect_ratio"], "has_audio": has_audio, "settings": self.settings}
-                if private.get("embed_subtitles", job.embed_subtitles):
+                if embed_subtitles:
                     render_kwargs["embed_subtitles"] = True
                 if words:
                     render_kwargs.update({"words": words, "style": job.style, "subtitles_enabled": subtitles_enabled})
@@ -1370,21 +1468,35 @@ class JobManager:
         if len(script.strip()) < 10:
             raise MediaError("The script is too short to render")
         self.complete_step(job, "validate", detail=f"Script validated — {len(script)} characters", private=private)
+        self.skip_step(job, "planning", detail="Plan supplied by the reviewed topic workflow", private=private)
+        self.skip_step(job, "script_generation", detail="Reviewed script supplied by the user", private=private)
         if private.get("narration") != "silent":
             if private.get("narration") == "auto":
                 try:
-                    self.start_step(job, "elevenlabs", detail="Requesting ElevenLabs narration", label="Creating paragraph-safe narration", progress=15, private=private)
-                    candidate = work / "narration-elevenlabs.mp3"
-                    if self.profiles.synthesize_elevenlabs(script, candidate):
-                        narration = candidate
-                        self.complete_step(job, "elevenlabs", detail="ElevenLabs narration complete", private=private)
+                    self.start_step(job, "tts", detail="Requesting OpenRouter speech narration", label="Creating paragraph-safe narration", progress=15, private=private)
+                    candidate = work / "narration-openrouter.mp3"
+                    if candidate.is_file():
+                        try:
+                            probe_audio(candidate, self.settings)
+                            narration = candidate
+                        except MediaError:
+                            candidate.unlink(missing_ok=True)
+                    if narration is None:
+                        result = self.profiles.synthesize_openrouter(script, candidate, validate=lambda path: probe_audio(path, self.settings))
+                        if result:
+                            narration = candidate
+                            private["tts"] = {"model": result.model, "voice": result.voice, "request_id": result.request_id, "generation_id": result.generation_id, "usage": result.usage, "cost": result.cost, "reused": result.reused}
+                            detail = "Reused completed OpenRouter narration" if result.reused else "OpenRouter narration complete"
+                            self.complete_step(job, "tts", detail=detail, private=private)
+                        else:
+                            self.skip_step(job, "tts", detail="OpenRouter TTS is not configured; used local narration", private=private)
                     else:
-                        self.skip_step(job, "elevenlabs", detail="No connected provider; used local narration", private=private)
+                        self.complete_step(job, "tts", detail="Reused completed OpenRouter narration", private=private)
                 except Exception as exc:
-                    self.fail_step(job, "elevenlabs", detail=redact(str(exc)), private=private)
-                    job.warnings.append(f"{provider_runtime_message(exc, 'ElevenLabs')}; used the local voice fallback.")
+                    self.fail_step(job, "tts", detail=redact(str(exc)), private=private)
+                    job.warnings.append(f"{provider_runtime_message(exc, 'OpenRouter TTS')}; used the local voice fallback.")
             else:
-                self.skip_step(job, "elevenlabs", detail="Local narration selected", private=private)
+                self.skip_step(job, "tts", detail="Local narration selected", private=private)
             if narration is None and available(self.settings.local_tts):
                 self.start_step(job, "local_voice", detail="Synthesising local narration", label="Synthesising local narration", progress=15, private=private)
                 try:
@@ -1394,17 +1506,19 @@ class JobManager:
                     self.fail_step(job, "local_voice", detail=redact(str(exc)), private=private)
                     job.warnings.append("Local narration failed; continued with a clearly labelled silent render.")
             elif narration is not None:
-                self.skip_step(job, "local_voice", detail="ElevenLabs narration succeeded", private=private)
+                self.skip_step(job, "local_voice", detail="OpenRouter narration succeeded", private=private)
             else:
                 self.skip_step(job, "local_voice", detail="Local TTS unavailable; used silent render", private=private)
             if narration is None:
                 self.skip_step(job, "narration", detail="No narration engine available; silent render used", private=private)
-                job.warnings.append("No local or optional narration engine was available. Continued with a clearly labelled silent render.")
+                job.warnings.append("No narration engine was available. Continued with a clearly labelled silent render.")
             else:
                 self.complete_step(job, "narration", detail="Narration ready", private=private)
         else:
             self.skip_step(job, "narration", detail="Silent render selected", private=private)
-            self.skip_step(job, "elevenlabs", detail="Silent render selected", private=private)
+            self.skip_step(job, "planning", detail="Silent render selected", private=private)
+            self.skip_step(job, "script_generation", detail="Silent render selected", private=private)
+            self.skip_step(job, "tts", detail="Silent render selected", private=private)
             self.skip_step(job, "local_voice", detail="Silent render selected", private=private)
         if narration:
             duration = probe_audio(narration, self.settings)["duration"]
@@ -1488,10 +1602,99 @@ class JobManager:
         self._save(job, private)
         self.complete_step(job, "ready", detail="Project ready", private=private)
 
+    async def delete_project(self, project_id: str, *, delete_assets: bool = False) -> None:
+        """Stop a project's workers before deleting their durable records.
+
+        The marker is visible to every cooperative checkpoint immediately. The
+        synchronous deletion then waits for each job lock, so no worker can
+        publish or upsert a job after its project has been removed.
+        """
+        with self._deletion_lock:
+            if not self.db.get_project(project_id):
+                raise KeyError(project_id)
+            self._deleting_projects.add(project_id)
+        try:
+            await asyncio.to_thread(self._delete_project_records, project_id, delete_assets)
+        finally:
+            with self._deletion_lock:
+                self._deleting_projects.discard(project_id)
+
+    def _delete_project_records(self, project_id: str, delete_assets: bool = False) -> None:
+        jobs = [job for job in self.db.list_jobs() if job.project_id == project_id]
+        locks = [self.job_locks[job.id] for job in sorted(jobs, key=lambda item: item.id)]
+        for lock in locks:
+            lock.acquire()
+        try:
+            unreferenced_paths = self.db.delete_project_everywhere(project_id) if delete_assets else []
+            if not delete_assets:
+                self.db.delete_project(project_id)
+        finally:
+            for lock in reversed(locks):
+                lock.release()
+        for job in jobs:
+            try:
+                directory = confined(self.settings.data_path, "jobs", job.id)
+                if directory.is_symlink():
+                    directory.unlink(missing_ok=True)
+                elif directory.exists():
+                    shutil.rmtree(directory)
+            except (OSError, ValueError) as exc:
+                logger.warning("Could not remove deleted job workspace %s: %s", job.id, redact(str(exc)))
+        for relative in unreferenced_paths:
+            try:
+                confined(self.settings.data_path, *relative.split("/")).unlink(missing_ok=True)
+            except (OSError, ValueError) as exc:
+                logger.warning("Could not remove unreferenced project blob: %s", redact(str(exc)))
+
+    def prune_retained_jobs(self) -> int:
+        """Prune only terminal job workspaces while retaining durable job records.
+
+        Published media remains in the content-addressed Library, allowing old
+        clips to remain playable after the transient job directory is removed.
+        """
+        terminal = {"complete", "failed", "partial", "cancelled_kept"}
+        cutoff = datetime.now(timezone.utc) - timedelta(days=self.settings.retention_days)
+        pruned = 0
+        retained = 0
+        for job in self.db.list_jobs():
+            if job.state not in terminal:
+                continue
+            try:
+                updated = datetime.fromisoformat(job.updated_at.replace("Z", "+00:00"))
+                if updated.tzinfo is None:
+                    updated = updated.replace(tzinfo=timezone.utc)
+            except ValueError:
+                updated = datetime.min.replace(tzinfo=timezone.utc)
+            retain_by_count = retained < self.settings.max_retained_jobs
+            retained += 1
+            if retain_by_count and updated >= cutoff:
+                continue
+            lock = self.job_locks[job.id]
+            if not lock.acquire(blocking=False):
+                continue
+            try:
+                current = self.db.get_job(job.id)
+                if not current or current.state not in terminal:
+                    continue
+                directory = confined(self.settings.data_path, "jobs", job.id)
+                if directory.is_symlink():
+                    directory.unlink(missing_ok=True)
+                    pruned += 1
+                elif directory.is_dir():
+                    shutil.rmtree(directory)
+                    pruned += 1
+            except (OSError, ValueError) as exc:
+                logger.warning("Could not prune job workspace %s: %s", job.id, redact(str(exc)))
+            finally:
+                lock.release()
+        return pruned
+
     async def control(self, job_id: str, action: str) -> Job:
         job = self.db.get_job(job_id)
         if not job:
             raise KeyError(job_id)
+        if self._project_is_deleting(job.project_id):
+            raise ProjectDeletingError("This project is being deleted")
         if action == "retry-import":
             private = self.db.get_job_private(job.id)
             if job.mode != "clip" or not private.get("url"):
@@ -1514,9 +1717,12 @@ class JobManager:
             await self.enqueue(job.id)
             return job
         if action == "switch-fast":
-            if self.queue.full():
-                raise QueueFullError("The local render queue is full. Wait before switching to fast cut.")
-            new_job = self._switch_to_fast(job)
+            with self._deletion_lock:
+                if job.project_id in self._deleting_projects:
+                    raise ProjectDeletingError("This project is being deleted")
+                if self.queue.full():
+                    raise QueueFullError("The local render queue is full. Wait before switching to fast cut.")
+                new_job = self._switch_to_fast(job)
             await self.enqueue(new_job.id)
             return new_job
         if action == "pause" and job.state in {"queued", "active", "recovered"}:
@@ -1561,6 +1767,9 @@ class JobManager:
 
     # DO-NOT-CHANGE: creates a NEW job reusing the same source; old job stays cancelled_kept
     def _switch_to_fast(self, job: Job) -> Job:
+        with self._deletion_lock:
+            if job.project_id in self._deleting_projects:
+                raise ProjectDeletingError("This project is being deleted")
         if job.mode != "clip":
             raise SwitchFastError("Only clip projects can switch to fast cut")
         if job.state in {"complete", "cancelled_kept"}:
@@ -1617,7 +1826,17 @@ class JobManager:
             except ValueError:
                 continue
             temporary = source.name.startswith(".") or any(marker in source.stem.casefold() for marker in (".partial", ".uploading", ".tmp", ".temp", ".ytdl"))
-            if source.is_file() and not source.is_symlink() and source.stat().st_size > 0 and source.suffix.casefold() == ".mp4" and not temporary:
+            if temporary:
+                continue
+            if not (source.is_file() and not source.is_symlink() and source.stat().st_size > 0 and source.suffix.casefold() == ".mp4"):
+                # Retention removes a job's transient workspace. Published clips
+                # remain in their immutable Library blobs and must still export.
+                relative = self.db.blob_relative_path(clip.blob_id) if clip.blob_id else None
+                try:
+                    source = confined(self.settings.data_path, *(relative or "").split("/"))
+                except ValueError:
+                    continue
+            if source.is_file() and not source.is_symlink() and source.stat().st_size > 0 and source.suffix.casefold() == ".mp4":
                 export_sources.append((clip, source))
         if not export_sources:
             raise ValueError("No completed MP4 videos are available to export")
@@ -1625,8 +1844,59 @@ class JobManager:
         export_dir = self.settings.data_path / "exports" / job.id
         export_dir.mkdir(parents=True, exist_ok=True)
         output = export_dir / f"{title}.zip"
+        manifest_outputs = []
+        credits = []
+        warning_summary = []
+        for number, (clip, source) in enumerate(export_sources, 1):
+            filename = f"{number:02d}-{safe_filename(source.stem, 'cut')}.mp4"
+            manifest_outputs.append({
+                "index": clip.index,
+                "filename": filename,
+                "title": clip.title,
+                "duration_seconds": clip.duration,
+                "dimensions": {"width": clip.width, "height": clip.height},
+                "source_range_seconds": {"start": clip.start, "end": clip.end},
+                "creator_credit": clip.creator_credit,
+                "library_asset_id": clip.library_asset_id,
+                "blob_id": clip.blob_id,
+                "provenance": [record.model_dump(mode="json") for record in clip.provenance],
+            })
+            if clip.creator_credit or clip.provenance:
+                credits.append({
+                    "clip_index": clip.index,
+                    "filename": filename,
+                    "creator_credit": clip.creator_credit,
+                    "provenance": [record.model_dump(mode="json") for record in clip.provenance],
+                })
+            if clip.caption_qa_warnings or clip.error:
+                warning_summary.append({
+                    "clip_index": clip.index,
+                    "caption_warnings": clip.caption_qa_warnings,
+                    "error": clip.error,
+                })
+        manifest = {
+            "schema_version": 1,
+            "project": {
+                "id": project.id if project else None,
+                "name": project.name if project else title,
+                "mode": project.mode if project else job.mode,
+                "source_kind": project.source_kind if project else None,
+                "source_name": project.source_name if project else None,
+                "source_creator": project.source_creator if project else None,
+            },
+            "job": {
+                "id": job.id,
+                "processing_mode": job.processing_mode,
+                "content_format": job.content_format,
+                "created_at": job.created_at,
+                "updated_at": job.updated_at,
+            },
+            "outputs": manifest_outputs,
+        }
         with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True) as archive:
-            for number, (_, source) in enumerate(export_sources, 1):
-                stem = safe_filename(source.stem, "cut")
-                archive.write(source, f"{title}/{number:02d}-{stem}.mp4")
+            for output_record, (_, source) in zip(manifest_outputs, export_sources, strict=True):
+                archive.write(source, f"{title}/{output_record['filename']}")
+            archive.writestr(f"{title}/manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+            archive.writestr(f"{title}/credits.json", json.dumps({"schema_version": 1, "credits": credits}, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+            archive.writestr(f"{title}/warning-summary.json", json.dumps({"schema_version": 1, "job_warnings": job.warnings, "clips": warning_summary}, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
         return output

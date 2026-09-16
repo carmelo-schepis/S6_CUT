@@ -8,6 +8,7 @@ import json
 import math
 import os
 import shutil
+import sqlite3
 import time
 import uuid
 from collections import defaultdict, deque
@@ -24,7 +25,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from . import __version__
 from .config import settings
 from .database import Database, MAX_FOLDER_DEPTH, UNSORTED_FOLDER_ID
-from .jobs import JobManager, QueueFullError, SwitchFastError
+from .jobs import JobManager, ProjectDeletingError, QueueFullError, SwitchFastError, uses_fast_pipeline
 from .library import LibraryRules
 from .media import MediaError, available, probe, validate_video_upload
 from .models import (
@@ -97,6 +98,28 @@ def _not_found(kind: str = "Record") -> HTTPException:
     return HTTPException(404, f"{kind} not found")
 
 
+async def _delete_asset_and_cleanup(asset_id: str) -> str | None:
+    """Delete an asset and clean its durable project relationship, if any.
+
+    A project-source asset is the required input for its project. Removing it
+    therefore uses the existing coordinated project deletion path, which
+    removes the project, jobs, generated assets, durable references, job
+    workspaces, and unreferenced immutable blobs in the same workflow. Ordinary
+    Library assets retain their existing reference-counted deletion semantics.
+    Returns the deleted source project id when the request cascaded a project.
+    """
+    asset = db.get_asset(asset_id)
+    if asset and asset.origin == "project-source" and asset.source_project_id and db.get_project(asset.source_project_id):
+        await manager.delete_project(asset.source_project_id, delete_assets=True)
+        return asset.source_project_id
+
+    _, relative, unreferenced = await asyncio.to_thread(db.delete_asset, asset_id)
+    if unreferenced and relative:
+        target = confined(settings.data_path, *relative.split("/"))
+        target.unlink(missing_ok=True)
+    return None
+
+
 # DO-NOT-CHANGE: signs f"jobs/{relative}" or f"exports/{relative}" — only these prefixes
 # are allowed in download_file; never expose raw paths
 def _download_url(relative: str) -> str:
@@ -118,9 +141,25 @@ def _clip_media(job_id: str, clip: Clip) -> tuple[str, str] | None:
         asset = db.get_asset(asset_id)
         blob_id = asset.blob_id if asset else None
     if asset_id and blob_id:
-        expires, signature = signer.sign(f"library-asset:{asset_id}:{blob_id}")
-        url = f"/api/v1/library/assets/{asset_id}/preview?expires={expires}&signature={signature}"
-        return url, url
+        asset = db.get_asset(asset_id)
+        if asset and asset.blob_id == blob_id:
+            expires, signature = signer.sign(f"library-asset:{asset_id}:{blob_id}")
+            url = f"/api/v1/library/assets/{asset_id}/preview?expires={expires}&signature={signature}"
+            return url, url
+    # A completed clip keeps its immutable clip-output blob reference even when
+    # its Library record is removed. Serve that durable blob so deleting a
+    # Library item never turns the project's ready output into a dead link.
+    if blob_id:
+        relative = db.blob_relative_path(blob_id)
+        if relative:
+            try:
+                blob = confined(settings.data_path, *relative.split("/"))
+            except ValueError:
+                blob = None
+            if blob and blob.is_file():
+                expires, signature = signer.sign(f"library-blob:{blob_id}")
+                url = f"/api/v1/library/blobs/{blob_id}/preview?expires={expires}&signature={signature}"
+                return url, url
     # No published Library copy (an unusual, repairable state): fall back to the
     # job output, but only advertise it if the file is really there. This branch
     # is rare, so its filesystem check does not affect normal listings.
@@ -237,11 +276,13 @@ async def change_project_folder(project_id: str, value: ProjectFolderUpdate) -> 
 
 
 @app.delete("/api/v1/projects/{project_id}", status_code=204)
-async def delete_project(project_id: str) -> None:
+async def delete_project(project_id: str, delete_assets: bool = False) -> None:
     try:
-        db.delete_project(project_id)
+        await manager.delete_project(project_id, delete_assets=delete_assets)
     except KeyError as exc:
         raise _not_found("Project") from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 @app.get("/api/v1/projects/{project_id}", response_model=Project)
@@ -356,7 +397,7 @@ async def create_clip_job(
             raise HTTPException(422, str(exc)) from exc
         source_name, source_kind = "YouTube import", "youtube"
     project = Project(id=project_id, name=_project_name(name, Path(source_name).stem), mode="clip", style=style, state="queued", source_name=source_name, source_kind=source_kind, requested_count=count, content_format=content_format, latest_job_id=job_id, library_folder_id=library_folder_id)
-    steps = manager._fast_steps() if mode == "fast" else manager._smart_steps(bool(private["use_openrouter"]))
+    steps = manager._fast_steps() if uses_fast_pipeline(mode, content_format) else manager._smart_steps(bool(private["use_openrouter"]))
     if source_kind == "upload":
         checkpoint_time = now_iso()
         steps[0].status, steps[0].detail = "complete", "Upload atomically stored"
@@ -509,12 +550,15 @@ async def topic_plan(value: TopicVideoInput) -> TopicVideoPlan:
         beats = [TopicBeat(narration=" ".join(words[index:index + chunk]), seconds=max(1, value.duration_seconds / max(1, (len(words) + chunk - 1) // chunk)), keywords=[value.topic]) for index in range(0, len(words), chunk)][:30]
         return TopicVideoPlan(title=value.topic[:200], hook=words[0][:500], narration=narration, beats=beats, estimated_duration=value.duration_seconds)
     schema = {"type": "object", "additionalProperties": False, "properties": {"title": {"type": "string"}, "hook": {"type": "string"}, "narration": {"type": "string"}, "beats": {"type": "array", "items": {"type": "object", "additionalProperties": False, "properties": {"narration": {"type": "string"}, "seconds": {"type": "number"}, "keywords": {"type": "array", "items": {"type": "string"}}}, "required": ["narration", "seconds", "keywords"]}}, "estimated_duration": {"type": "number"}, "description": {"type": "string"}, "hashtags": {"type": "array", "items": {"type": "string"}}}, "required": ["title", "hook", "narration", "beats", "estimated_duration", "description", "hashtags"]}
-    prompt = f"Create a concise video plan in {value.language} about {value.topic!r}. Audience: {value.audience}. Tone: {value.tone}. Target seconds: {value.duration_seconds}. CTA: {value.call_to_action}. Extra instructions: {value.instructions}. Return only JSON matching the schema; use local-library visual keywords and never claim licensing."
+    target_words = round(value.duration_seconds * 2.5)
+    prompt = f"Create a concise video plan in {value.language} about {value.topic!r}. Audience: {value.audience}. Tone: {value.tone}. Target seconds: {value.duration_seconds}; write approximately {target_words} spoken words so narration duration matches the target at a natural pace. CTA: {value.call_to_action}. Extra instructions: {value.instructions}. Return only JSON matching the schema; use local-library visual keywords and never claim licensing."
     try:
         result = await profiles.openrouter_json([{"role": "user", "content": prompt}], schema, require_saved_profile=True, model_id=value.model_id)
     except ProviderError as exc:
-        status_code = {"not_configured": 503, "invalid_credentials": 502, "rate_limited": 429, "timeout_offline": 503, "unavailable_model": 422, "malformed_response": 502}.get(exc.category, 502)
+        status_code = {"not_configured": 503, "invalid_credentials": 502, "rate_limited": 429, "timeout_offline": 503, "unavailable_model": 422, "unsupported_model_or_voice": 422, "malformed_response": 502}.get(exc.category, 502)
         raise HTTPException(status_code, exc.safe_message) from exc
+    except sqlite3.Error as exc:
+        raise HTTPException(503, "Local project storage is temporarily unavailable. Free disk space and try again.") from exc
     if not result:
         raise HTTPException(503, "OpenRouter is not configured. Add and test a provider in Settings, or enter a custom script.")
     try:
@@ -529,19 +573,22 @@ async def create_script_job(request: Request, value: ScriptJobInput) -> dict[str
     if manager.queue.full():
         raise HTTPException(429, "The local processing queue is full. Try again after an active job completes.")
     folder_id = value.library_folder_id or UNSORTED_FOLDER_ID
-    selected_folder = db.get_folder(folder_id)
-    if not selected_folder:
-        raise _not_found("Library folder")
-    if selected_folder.archived:
-        raise HTTPException(409, "Archived folders cannot receive new projects")
-    project_id, job_id = str(uuid.uuid4()), str(uuid.uuid4())
-    first_line = next((line.strip() for line in value.script.splitlines() if line.strip()), "Script project")
-    name = _project_name(value.name, first_line[:70])
-    project = Project(id=project_id, name=name, mode="script", style=value.style, state="queued", source_name=f"{len(value.script)} character script", source_kind="script", requested_count=1, latest_job_id=job_id, library_folder_id=folder_id)
-    job = Job(id=job_id, project_id=project_id, library_folder_id=folder_id, mode="script", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style=value.style, steps=manager._script_steps())
-    private = {"script": value.script, "aspect_ratio": value.aspect_ratio, "narration": value.narration, "library_folder_id": folder_id}
-    db.save_project(project)
-    db.save_job(job, private)
+    try:
+        selected_folder = db.get_folder(folder_id)
+        if not selected_folder:
+            raise _not_found("Library folder")
+        if selected_folder.archived:
+            raise HTTPException(409, "Archived folders cannot receive new projects")
+        project_id, job_id = str(uuid.uuid4()), str(uuid.uuid4())
+        first_line = next((line.strip() for line in value.script.splitlines() if line.strip()), "Script project")
+        name = _project_name(value.name, first_line[:70])
+        project = Project(id=project_id, name=name, mode="script", style=value.style, state="queued", source_name=f"{len(value.script)} character script", source_kind="script", requested_count=1, latest_job_id=job_id, library_folder_id=folder_id)
+        job = Job(id=job_id, project_id=project_id, library_folder_id=folder_id, mode="script", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style=value.style, steps=manager._script_steps())
+        private = {"script": value.script, "aspect_ratio": value.aspect_ratio, "narration": value.narration, "library_folder_id": folder_id}
+        db.save_project(project)
+        db.save_job(job, private)
+    except sqlite3.Error as exc:
+        raise HTTPException(503, "Local project storage is temporarily unavailable. Free disk space and try again.") from exc
     await manager.enqueue(job_id)
     return {"project": project, "job": public_job(job)}
 
@@ -687,7 +734,7 @@ async def job_control(job_id: str, action: Literal["pause", "resume", "stop-keep
         raise _not_found("Job") from exc
     except QueueFullError as exc:
         raise HTTPException(429, str(exc)) from exc
-    except SwitchFastError as exc:
+    except (ProjectDeletingError, SwitchFastError) as exc:
         raise HTTPException(409, str(exc)) from exc
     except MediaError as exc:
         raise HTTPException(409, str(exc)) from exc
@@ -757,11 +804,13 @@ async def download_file(relative_path: str, expires: int = Query(...), signature
 
 
 @app.get("/api/v1/openrouter/models", response_model=list[OpenRouterModel])
-async def list_openrouter_models() -> list[OpenRouterModel]:
+async def list_openrouter_models(output_modalities: Annotated[str | None, Query(alias="outputModalities")] = None) -> list[OpenRouterModel]:
+    if output_modalities not in {None, "text", "speech"}:
+        raise HTTPException(422, "Unsupported OpenRouter output modality")
     try:
-        return await profiles.openrouter_models()
+        return await profiles.openrouter_models(output_modalities)
     except ProviderError as exc:
-        status_code = {"not_configured": 503, "invalid_credentials": 502, "rate_limited": 429, "timeout_offline": 503, "malformed_response": 502}.get(exc.category, 502)
+        status_code = {"not_configured": 503, "invalid_credentials": 502, "insufficient_balance": 402, "rate_limited": 429, "timeout_offline": 503, "malformed_response": 502, "unsupported_model_or_voice": 422}.get(exc.category, 502)
         raise HTTPException(status_code, exc.safe_message) from exc
 
 
@@ -922,22 +971,24 @@ async def delete_library_assets(value: AssetDelete) -> AssetDeleteResult:
     """
     deleted: list[str] = []
     failed: dict[str, str] = {}
-    for asset_id in dict.fromkeys(value.asset_ids):
+    requested_ids = list(dict.fromkeys(value.asset_ids))
+    source_projects = {
+        asset_id: asset.source_project_id
+        for asset_id in requested_ids
+        if (asset := db.get_asset(asset_id)) and asset.origin == "project-source" and asset.source_project_id
+    }
+    cascaded_projects: set[str] = set()
+    for asset_id in requested_ids:
+        if source_projects.get(asset_id) in cascaded_projects:
+            deleted.append(asset_id)
+            continue
         if not asset_id.strip():
             failed[asset_id] = "Invalid media ID"
             continue
         try:
-            _, relative, unreferenced = db.delete_asset(asset_id)
-            if unreferenced and relative:
-                try:
-                    target = confined(settings.data_path, *relative.split("/"))
-                    target.unlink(missing_ok=True)
-                except (OSError, ValueError) as exc:
-                    # The database record is already safely removed. Keep the
-                    # orphan for a later cleanup rather than risking a shared
-                    # blob; surface the storage issue in the result.
-                    failed[asset_id] = f"Media record deleted, but file cleanup failed: {exc}"
-                    continue
+            project_id = await _delete_asset_and_cleanup(asset_id)
+            if project_id:
+                cascaded_projects.add(project_id)
             deleted.append(asset_id)
         except KeyError:
             failed[asset_id] = "Media item was already deleted"
@@ -991,6 +1042,23 @@ async def create_asset(
             pass
 
 
+@app.get("/api/v1/library/blobs/{blob_id}/preview")
+# DO-NOT-CHANGE: verifies token library-blob:{id}, serves only a durable clip-output blob
+async def preview_clip_blob(blob_id: str, expires: int = Query(...), signature: str = Query(...)) -> FileResponse:
+    if not signer.verify(f"library-blob:{blob_id}", expires, signature):
+        raise HTTPException(403, "Preview link is invalid or expired")
+    relative = db.blob_relative_path(blob_id)
+    if not relative:
+        raise _not_found("Media blob")
+    try:
+        target = confined(settings.data_path, *relative.split("/"))
+    except ValueError as exc:
+        raise HTTPException(400, "Invalid media blob") from exc
+    if not target.is_file():
+        raise _not_found("Media blob")
+    return FileResponse(target, media_type="video/mp4")
+
+
 @app.get("/api/v1/library/assets/{asset_id}/preview")
 # DO-NOT-CHANGE: verifies token library-asset:{id}:{blob_id}, serves from confined path
 async def preview_asset(asset_id: str, expires: int = Query(...), signature: str = Query(...)) -> FileResponse:
@@ -1015,11 +1083,13 @@ async def preview_asset(asset_id: str, expires: int = Query(...), signature: str
 @app.delete("/api/v1/library/assets/{asset_id}", status_code=204)
 async def delete_library_asset(asset_id: str) -> None:
     try:
-        db.delete_asset(asset_id)
+        await _delete_asset_and_cleanup(asset_id)
     except KeyError as exc:
         raise _not_found("Asset") from exc
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(500, "Media record was deleted, but blob cleanup failed") from exc
 
 
 @app.put("/api/v1/library/assets/{asset_id}", response_model=Asset)
@@ -1060,4 +1130,5 @@ async def cleanup_temporary_files() -> dict[str, int]:
             if path.is_file() and path.stat().st_mtime < cutoff:
                 path.unlink(missing_ok=True)
                 removed += 1
-    return {"removedTemporaryFiles": removed}
+    pruned = await asyncio.to_thread(manager.prune_retained_jobs)
+    return {"removedTemporaryFiles": removed, "prunedJobDirectories": pruned}

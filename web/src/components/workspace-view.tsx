@@ -1,12 +1,39 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { AlertTriangle, Captions, Check, Clock, Download, Eye, FileText, Film, Pause, Play, RefreshCw, RotateCcw, SlidersHorizontal, Sparkles, Square, Volume2, Zap } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
+import { AlertTriangle, Captions, Check, Clock, Download, Eye, FileText, Film, Pause, Play, RefreshCw, RotateCcw, RotateCw, SlidersHorizontal, Sparkles, Square, Volume2, Zap } from "lucide-react";
 import { changeProjectFolder, controlJob, createZip, getJob, jobEventsUrl, listAssets, listFolders, readableError, retryClip, setClipSelection } from "../api";
 import { emitLibraryChanged } from "../library-sync";
 import { jobSchema, type Clip, type Health, type Job, type LibraryAsset, type LibraryFolder, type Project } from "../types";
 import { Button, EmptyState, IconButton, Progress, Skeleton, StatusBadge, WarningList, formatBytes, formatDimensions, formatDuration, resolveOutputAspectRatio, useSingleFlight } from "./common";
 import { jobFacts } from "../status-format";
 import { isTerminalJob, ProcessingState } from "./processing-state";
+import { LazyVideoThumbnail } from "./lazy-video-thumbnail";
 import { ProcessChecklist } from "./process-checklist";
+
+// J and L shuttle the preview by a readable step rather than a single frame;
+// the frame buttons cover frame-accurate movement.
+const TRANSPORT_NUDGE_SECONDS = 1;
+
+const outputAspectDimensions = {
+  "9:16": [9, 16],
+  "16:9": [16, 9],
+  "1:1": [1, 1],
+  "4:5": [4, 5],
+} as const;
+
+type ViewerFrameStyle = CSSProperties & {
+  "--viewer-aspect-width": number;
+  "--viewer-aspect-height": number;
+};
+
+const detailsTabLabels = { score: "Score", captions: "Captions", asset: "Asset", info: "Info" } as const;
+
+/** Moves the playhead within the clip and reports where it landed. */
+function seekBy(player: HTMLVideoElement | null, seconds: number): number | null {
+  if (!player) return null;
+  const limit = Number.isFinite(player.duration) ? player.duration : Number.MAX_SAFE_INTEGER;
+  player.currentTime = Math.min(Math.max(0, player.currentTime + seconds), limit);
+  return player.currentTime;
+}
 
 function folderName(folderId: string | null | undefined, folders: LibraryFolder[], project: Project | null): string {
   if (!folderId) {
@@ -27,17 +54,7 @@ function ClipThumb({ clip }: { clip: Clip }) {
   // Try previewUrl first, then downloadUrl as fallback
   const src = clip.previewUrl || clip.downloadUrl;
   if (src && !failed) {
-    return (
-      <video
-        src={src}
-        muted
-        playsInline
-        preload="metadata"
-        className="clip-thumbnail"
-        aria-hidden="true"
-        onError={() => setFailed(true)}
-      />
-    );
+    return <LazyVideoThumbnail key={clip.id} src={src} videoClassName="clip-thumbnail" onError={() => setFailed(true)} />;
   }
   return (
     <>
@@ -66,6 +83,7 @@ export function WorkspaceView({ project, health, providersLoaded = true, hasSele
   const [mediaLoading, setMediaLoading] = useState(false);
   const [mediaError, setMediaError] = useState<string | null>(null);
   const [detailsTab, setDetailsTab] = useState<"score" | "captions" | "asset" | "info">("score");
+  const [boardFilter, setBoardFilter] = useState<"all" | "selected" | "failed">("all");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [waitingForEngine, setWaitingForEngine] = useState(false);
@@ -233,6 +251,11 @@ export function WorkspaceView({ project, health, providersLoaded = true, hasSele
   const jobLoaded = jobFetched || !project?.latestJobId;
 
   const selectedClip = useMemo(() => job?.clips.find((clip) => clip.id === selectedClipId) || null, [job, selectedClipId]);
+  // "Selected" means the export selection the Include-in-export checkbox drives,
+  // so the filter reads the same flag the ZIP builder does.
+  const boardClips = useMemo(() => (job?.clips || []).filter((clip) => (
+    boardFilter === "all" ? true : boardFilter === "failed" ? clip.state === "failed" : clip.selected
+  )), [boardFilter, job]);
   // Read the publication snapshot, not merely source kind: this prevents old
   // uncredited clips from being presented as if their bytes carried credit.
   const creatorCredit = selectedClip?.creatorCredit || null;
@@ -331,6 +354,11 @@ export function WorkspaceView({ project, health, providersLoaded = true, hasSele
       setPreviewError(true);
     }
   };
+  const nudgePreview = (seconds: number) => {
+    const landed = seekBy(playerRef.current || document.querySelector<HTMLVideoElement>(".viewer-frame video"), seconds);
+    if (landed !== null) setPreviewTime(landed);
+  };
+
   const togglePreviewPlayback = async () => {
     const player = playerRef.current || document.querySelector<HTMLVideoElement>(".viewer-frame video");
     if (!player) return;
@@ -347,6 +375,26 @@ export function WorkspaceView({ project, health, providersLoaded = true, hasSele
     }
   };
 
+  // The transport bar advertises J K L, so the shortcuts are bound for real at
+  // document level. Typing into a field must never scrub the preview, and the
+  // modifier check keeps browser and OS shortcuts intact.
+  const transportRef = useRef({ toggle: togglePreviewPlayback, nudge: nudgePreview });
+  useEffect(() => { transportRef.current = { toggle: togglePreviewPlayback, nudge: nudgePreview }; });
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target?.tagName || "")) return;
+      const key = event.key.toLowerCase();
+      if (key !== "j" && key !== "k" && key !== "l") return;
+      event.preventDefault();
+      if (key === "k") void transportRef.current.toggle();
+      else transportRef.current.nudge(key === "l" ? TRANSPORT_NUDGE_SECONDS : -TRANSPORT_NUDGE_SECONDS);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   const relevantMediaAssets = useMemo(() => {
     const clipIds = new Set(job?.clips.map((clip) => clip.id));
     return mediaAssets.filter((asset) => asset.sourceProjectId === project?.id || asset.sourceJobId === job?.id || (asset.sourceClipId != null && clipIds.has(asset.sourceClipId)));
@@ -361,9 +409,15 @@ export function WorkspaceView({ project, health, providersLoaded = true, hasSele
     selectedClip?.height ?? selectedOutputAsset?.height,
     job?.contentFormat ?? project?.contentFormat,
   );
+  const [viewerAspectWidth, viewerAspectHeight] = outputAspectDimensions[outputAspectRatio];
+  const viewerFrameStyle: ViewerFrameStyle = {
+    aspectRatio: `${viewerAspectWidth} / ${viewerAspectHeight}`,
+    "--viewer-aspect-width": viewerAspectWidth,
+    "--viewer-aspect-height": viewerAspectHeight,
+  };
   const selectedIds = job?.clips.filter((clip) => clip.selected && clip.state === "complete").map((clip) => clip.id) || [];
   const savedCount = job?.clips.filter((clip) => clip.state === "complete" && clip.libraryAssetId).length || 0;
-  const providerRelatedFailure = Boolean(job?.error && /openrouter|elevenlabs|provider|credential|api key|model|voice/i.test(job.error));
+  const providerRelatedFailure = Boolean(job?.error && /openrouter|provider|credential|api key|model|voice/i.test(job.error));
   const providerCouldHelp = providerRelatedFailure || Boolean(job?.state === "failed" && project?.mode === "script" && !hasSelectedProvider);
   const canContinueLocally = providerRelatedFailure && Boolean(project?.mode === "clip" || health?.localTts);
 
@@ -461,10 +515,11 @@ export function WorkspaceView({ project, health, providersLoaded = true, hasSele
     {job?.state === "stalled" && <div className="failure-strip" role="alert"><AlertTriangle size={17} /><div><strong>YouTube download stalled</strong><span>{job.downloadProgress?.message || "No bytes arrived during the configured inactivity window. The retained partial download is safe to retry."}</span></div><Button disabled={busy} onClick={() => act("retry-import")}><RefreshCw size={14} /> Retry import</Button></div>}
     {job?.state === "cancelled_kept" && project.sourceKind === "youtube" && <div className="warning-strip" role="status"><AlertTriangle size={14} /><span>{job.downloadProgress ? `Stopped with partial YouTube download retained (${formatBytes(job.downloadProgress.downloadedBytes)}). Retry import to resume it.` : "YouTube import stopped before the download began. Retry import to start it."}</span><Button disabled={busy} onClick={() => act("retry-import")}><RefreshCw size={14} /> Retry import</Button></div>}
     {job && !["complete", "failed", "cancelled_kept"].includes(job.state) && (() => { const facts = jobFacts(job); return <div className="job-strip"><div className="job-strip-text"><strong>{facts.stage}</strong>{facts.detail && <span>{facts.detail}</span>}</div><Progress value={facts.percent} indeterminate={facts.indeterminate} label={facts.stage} /></div>; })()}
-    {job && job.steps.length > 0 && <ProcessChecklist steps={job.steps} jobState={job.state} compact={isTerminalJob(job)} />}
     {job && job.warnings.length > 0 && <WarningList warnings={job.warnings} />}
 
-    <div className="workspace-grid">
+    {job && job.steps.length > 0 && <ProcessChecklist steps={job.steps} jobState={job.state} />}
+
+    <div className="workspace-grid" data-testid="lower-workspace">
       <aside className="source-panel panel" aria-label="Source material">
         <div className="panel-tabs" role="tablist" aria-label="Source material">
           <button type="button" role="tab" id="workspace-transcript-tab" aria-controls="workspace-transcript-panel" aria-selected={sourceTab === "transcript"} tabIndex={sourceTab === "transcript" ? 0 : -1} className={sourceTab === "transcript" ? "active" : ""} onClick={() => moveSourceTab("transcript")} onKeyDown={handleSourceTabKeyDown}>{project.mode === "clip" ? "Transcript" : "Script"}</button>
@@ -488,7 +543,7 @@ export function WorkspaceView({ project, health, providersLoaded = true, hasSele
       <section className="viewer-panel panel" aria-label="Output viewer">
         <div className="viewer-toolbar"><span>Output · {outputAspectRatio}</span>{creatorCredit && <span className="viewer-credit" role="note">{creatorCredit}</span>}<div><IconButton label="Toggle safe areas" aria-pressed={safeAreasVisible} onClick={() => setSafeAreasVisible((value) => !value)}><Eye size={15} /></IconButton><IconButton label={previewMuted ? "Unmute preview" : "Mute preview"} aria-pressed={previewMuted} onClick={() => { const player = playerRef.current; if (player) player.muted = !player.muted; setPreviewMuted((value) => !value); }}><Volume2 size={15} /></IconButton></div></div>
         <div className="viewer-stage">
-          <div className={`viewer-frame ${project.mode} ${project.contentFormat === "long" ? "landscape" : ""} ${safeAreasVisible ? "show-safe-areas" : ""}`}>
+          <div className={`viewer-frame ${project.mode} ${safeAreasVisible ? "show-safe-areas" : ""}`} style={viewerFrameStyle} data-output-aspect-ratio={outputAspectRatio}>
             {previewSource ? <><video
               key={previewSource.identity}
               ref={playerRef}
@@ -518,17 +573,17 @@ export function WorkspaceView({ project, health, providersLoaded = true, hasSele
             </div>}
           </div>
         </div>
-        <div className="transport"><IconButton label="Previous frame" onClick={() => { const player = playerRef.current; if (player) player.currentTime = Math.max(0, player.currentTime - 1 / 30); }}><RotateCcw size={15} /></IconButton><button className="play-button" aria-label={previewPlaying ? "Pause" : "Play"} aria-pressed={previewPlaying} onClick={() => void togglePreviewPlayback()}>{previewPlaying ? <Pause size={17} fill="currentColor" /> : <Play size={17} fill="currentColor" />}</button><span className="transport-time">{selectedClip ? `${formatDuration(previewTime)} / ${formatDuration(selectedClip.duration)}` : "0:00 / 0:00"}</span><div className="transport-spacer" /><span>J&nbsp; K&nbsp; L</span></div>
+        <div className="transport"><IconButton label="Previous frame" onClick={() => nudgePreview(-1 / 30)}><RotateCcw size={15} /></IconButton><button className="play-button" aria-label={previewPlaying ? "Pause" : "Play"} aria-pressed={previewPlaying} onClick={() => void togglePreviewPlayback()}>{previewPlaying ? <Pause size={17} fill="currentColor" /> : <Play size={17} fill="currentColor" />}</button><IconButton label="Next frame" onClick={() => nudgePreview(1 / 30)}><RotateCw size={15} /></IconButton><span className="transport-time">{selectedClip ? `${formatDuration(previewTime)} / ${formatDuration(selectedClip.duration)}` : "0:00 / 0:00"}</span><div className="transport-spacer" /><span title={`J back ${TRANSPORT_NUDGE_SECONDS}s · K play/pause · L forward ${TRANSPORT_NUDGE_SECONDS}s`}>J&nbsp; K&nbsp; L</span></div>
       </section>
 
       <aside className="inspector-panel panel" aria-label="Clip inspector">
         <div className="panel-title"><strong>Details</strong>{selectedClip && <span>Clip {selectedClip.index}</span>}</div>
         <div className="inspector-tabs">
-          {(["score", "captions", "asset", "info"] as const).map((tab) => <button key={tab} className={detailsTab === tab ? "active" : ""} onClick={() => setDetailsTab(tab)}>{tab}</button>)}
+          {(["score", "captions", "asset", "info"] as const).map((tab) => <button key={tab} type="button" aria-pressed={detailsTab === tab} className={detailsTab === tab ? "active" : ""} onClick={() => setDetailsTab(tab)}>{detailsTabLabels[tab]}</button>)}
         </div>
         <div className="inspector-content">
           <p className="review-hint" role="note">Review and download finished clips here. To change a cut, adjust the project settings and generate a new version.</p>
-          {providersLoaded && !hasSelectedProvider && !providerCalloutDismissed && <div className="provider-callout compact"><Sparkles size={15} /><div><strong>Add optional AI providers</strong><span>Connect OpenRouter for enhanced planning and ElevenLabs for premium narration. Local fallbacks remain available.</span></div><div className="provider-callout-actions"><Button onClick={onConfigureProviders}>Configure providers</Button><Button variant="ghost" onClick={() => setProviderCalloutDismissed(true)}>Continue locally</Button></div></div>}
+          {providersLoaded && !hasSelectedProvider && !providerCalloutDismissed && <div className="provider-callout compact"><Sparkles size={15} /><div><strong>Add optional AI providers</strong><span>Connect OpenRouter for enhanced planning and speech narration. Local modes remain available.</span></div><div className="provider-callout-actions"><Button onClick={onConfigureProviders}>Configure providers</Button><Button variant="ghost" onClick={() => setProviderCalloutDismissed(true)}>Continue locally</Button></div></div>}
           {detailsTab === "score" && (selectedClip ? <ScoreInspector clip={selectedClip} /> : <p className="muted">Select a clip to inspect its auditable score.</p>)}
           {detailsTab === "captions" && <><div className="inspector-section"><label>Preset</label><span className="readonly-preset">Editorial highlight<span className="readonly-tag">Read-only</span></span><span className="preset-options">Minimal · High contrast box</span></div><div className="inspector-note"><Captions size={15} /><span>Caption style and timing are fixed when the job is created and burned in from local word timestamps.</span></div></>}
           {detailsTab === "asset" && <><div className="inspector-section"><label>Visual intention</label><strong>{selectedClip?.visualLabel || job?.beats[0]?.concept || "No visual beat selected"}</strong></div><div className="inspector-section"><label>Source</label><span>{selectedClip?.provenance[0]?.provider || job?.beats[0]?.source || "Text-card fallback"}</span></div><div className="inspector-note"><Sparkles size={15} /><span>{selectedClip?.provenance[0]?.matchReason || job?.beats[0]?.matchReason || "A relevant text card is preferred over unrelated media."}</span></div></>}
@@ -538,11 +593,11 @@ export function WorkspaceView({ project, health, providersLoaded = true, hasSele
     </div>
 
     <section className="board-panel panel">
-      <div className="board-header"><div><strong>{project.mode === "clip" ? "Clip board" : "Beat board"}</strong><span>{!jobLoaded ? "Loading…" : project.mode === "clip" ? `${job?.clips.length || 0} planned · ${job?.clips.filter((clip) => clip.state === "complete").length || 0} ready${savedCount ? ` · ${savedCount} saved to Library` : ""}` : `${job?.beats.length || 0} visual beats`}</span></div><div className="board-filters"><button className="active">All</button><button>Selected</button><button>Failed</button></div></div>
-      {project.mode === "clip" ? <div className="clip-board">{job?.clips.map((clip) => <article key={clip.id} className={`clip-tile ${selectedClipId === clip.id ? "active" : ""} ${clip.state}`} onClick={() => setSelectedClipId(clip.id)}>
+      <div className="board-header"><div><strong>{project.mode === "clip" ? "Clip board" : "Beat board"}</strong><span>{!jobLoaded ? "Loading…" : project.mode === "clip" ? `${job?.clips.length || 0} planned · ${job?.clips.filter((clip) => clip.state === "complete").length || 0} ready${savedCount ? ` · ${savedCount} saved to Library` : ""}` : `${job?.beats.length || 0} visual beats`}</span></div><div className="board-filters">{([["all", "All"], ["selected", "Selected"], ["failed", "Failed"]] as const).map(([value, label]) => <button key={value} type="button" aria-pressed={boardFilter === value} className={boardFilter === value ? "active" : ""} onClick={() => setBoardFilter(value)}>{label}</button>)}</div></div>
+      {project.mode === "clip" ? <div className="clip-board">{boardClips.map((clip) => <article key={clip.id} className={`clip-tile ${selectedClipId === clip.id ? "active" : ""} ${clip.state}`} onClick={() => setSelectedClipId(clip.id)}>
         <div className="clip-thumb"><span className="clip-number">{String(clip.index).padStart(2, "0")}</span>{clip.state === "complete" ? <><ClipThumb clip={clip} /><span className="score-ring">{clip.score ? Math.round(clip.score.total) : "–"}</span></> : clip.state === "failed" ? <AlertTriangle size={24} /> : <RefreshCw size={24} className="spin" />}</div>
         <div className="clip-tile-body"><strong className="clip-title" title={clip.title || `Cut ${String(clip.index).padStart(2, "0")}`}>{clip.title || `Cut ${String(clip.index).padStart(2, "0")}`}</strong><span className="clip-line" title={clip.openingLine || undefined}>{clip.openingLine || "Candidate clip"}</span><span className="clip-meta">{formatDuration(clip.duration)} · {formatDimensions(outputAspectRatio, clip.width, clip.height)} · {folderName(clip.folderId, folders, project)}</span>{clip.state === "complete" && clip.libraryAssetId && <span className="saved-badge"><Check size={11} /> Saved to Library</span>}{clip.state === "failed" ? <Button disabled={busy} onClick={(event) => { event.stopPropagation(); void retryOneClip(clip); }}><RefreshCw size={12} /> Retry clip</Button> : <div className="clip-actions"><Button className="clip-action" disabled={clip.state !== "complete"} onClick={(event) => { event.stopPropagation(); selectClipForPreview(clip); }}><Eye size={12} /> Preview</Button>{clip.state === "complete" && clip.downloadUrl && <a className="button button-secondary clip-action" href={clip.downloadUrl} download onClick={(event) => event.stopPropagation()}><Download size={12} /> Download</a>}<label onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={clip.selected} disabled={clip.state !== "complete"} onChange={() => toggleClip(clip)} /> Include in export</label></div>}</div>
-      </article>) || (jobLoaded ? <div className="board-placeholder">Candidates appear here after local transcription and selection.</div> : <><Skeleton rows={3} className="skeleton-tile" /><Skeleton rows={3} className="skeleton-tile" /><Skeleton rows={3} className="skeleton-tile" /></>)}</div>
+      </article>)}{!boardClips.length && (jobLoaded ? <div className="board-placeholder">{job?.clips.length ? "No clips match this filter." : "Candidates appear here after local transcription and selection."}</div> : <><Skeleton rows={3} className="skeleton-tile" /><Skeleton rows={3} className="skeleton-tile" /><Skeleton rows={3} className="skeleton-tile" /></>)}</div>
         : <div className="beat-board">{job?.beats.map((beat, index) => <article key={beat.id} className="beat-tile"><div className="beat-visual"><span>{String(index + 1).padStart(2, "0")}</span><Sparkles size={22} /></div><div><strong>{beat.concept}</strong><p>{beat.text}</p><span>{formatDuration(beat.start)}–{formatDuration(beat.end)} · {beat.source} · {Math.round(beat.confidence * 100)}%</span></div><StatusBadge state={beat.source === "library" ? "ready" : "fallback"} label={beat.ruleState || beat.source} /></article>)}</div>}
     </section>
 
@@ -558,7 +613,7 @@ const mediaOriginLabels: Record<LibraryAsset["origin"], string> = {
 
 function WorkspaceMediaAsset({ asset, clip }: { asset: LibraryAsset; clip?: Clip }) {
   const mediaType = asset.mediaType.toLowerCase();
-  const preview = mediaType.startsWith("video/") && asset.previewUrl ? <video src={asset.previewUrl} controls muted preload="metadata" aria-label={`${asset.title} preview`} />
+  const preview = mediaType.startsWith("video/") && asset.previewUrl ? <LazyVideoThumbnail key={asset.blobId} src={asset.previewUrl} label={`${asset.title} preview`} />
     : mediaType.startsWith("image/") && asset.previewUrl ? <img src={asset.previewUrl} alt={`${asset.title} preview`} />
       : mediaType.startsWith("audio/") && asset.previewUrl ? <audio src={asset.previewUrl} controls aria-label={`${asset.title} preview`} />
         : <FileText size={24} aria-hidden="true" />;
