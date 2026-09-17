@@ -94,6 +94,12 @@ npm run dev
 
 Open <http://127.0.0.1:5173>. Vite proxies same-origin `/api` requests to port 8001. On Windows, `START_S6_CUT.cmd` builds and starts the production Compose application.
 
+### Installable PWA behavior
+
+The production web UI is an installable Progressive Web App. When served through the same-origin gateway, the browser can install it as **S6_cut** using the browser's install control. The app shell is precached by `/sw.js`, and an already loaded shell can open cached routes while the browser is offline. Offline mode does not make the local engine or media operations available: `/api/` requests, uploads, downloads, exports, and video files are deliberately not cached, so reconnect to the local engine before creating or processing projects.
+
+When a new application bundle is available, S6_cut shows **A new S6_cut version is ready**. Choose **Update app** to activate it; updates do not interrupt an active render automatically.
+
 ## Configuration
 
 Copy `.env.example` to `.env`. Important values:
