@@ -11,6 +11,7 @@ import { WorkspaceProgressIndicator } from "./components/workspace-progress-indi
 import { ShortsEditorView } from "./components/shorts-editor-view";
 import { TopicToVideoView } from "./components/topic-to-video-view";
 import { HelpDialog } from "./components/help-dialog";
+import { PwaStatus } from "./components/pwa-status";
 import { hasLiveWork, jobPollInterval, workspaceActivity } from "./project-status";
 import { onLibraryChanged } from "./library-sync";
 import { usePoll } from "./use-poll";
@@ -120,6 +121,13 @@ export function App() {
   };
 
   const onCreated = (project: Project) => {
+    // A refresh that started before creation can return a project list which
+    // does not contain this project. Letting that stale response win would
+    // replace the selection just set below with the first older project,
+    // stranding the customer in the wrong Workspace (and hiding live job
+    // controls such as YouTube import retry). Invalidate it before merging
+    // the authoritative create response.
+    refreshRevision.current += 1;
     setProjects((current) => [project, ...current.filter((item) => item.id !== project.id)]);
     // The guarded poll picks up the job immediately without racing the shell's
     // existing /jobs request. If that request began before creation and returns
@@ -202,6 +210,7 @@ export function App() {
           <span className="save-state"><HardDrive size={14} /> Saved on this machine</span>
         </div>
       </header>
+      <PwaStatus />
 
       {/* One startup indicator for the whole shell, in the same slot the failure
           alert uses — so "connecting" either resolves or turns into an error

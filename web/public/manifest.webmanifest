@@ -1,12 +1,13 @@
 {
   "name": "S6_cut — Local video studio",
   "short_name": "S6_cut",
+  "lang": "en",
   "description": "A local-first video studio for turning authorised sources and scripts into polished clips.",
   "start_url": "/",
   "id": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#000000",
+  "background_color": "#010102",
   "theme_color": "#0b0b0e",
   "orientation": "any",
   "icons": [
