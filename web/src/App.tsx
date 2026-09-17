@@ -120,6 +120,13 @@ export function App() {
   };
 
   const onCreated = (project: Project) => {
+    // A refresh that started before creation can return a project list which
+    // does not contain this project. Letting that stale response win would
+    // replace the selection just set below with the first older project,
+    // stranding the customer in the wrong Workspace (and hiding live job
+    // controls such as YouTube import retry). Invalidate it before merging
+    // the authoritative create response.
+    refreshRevision.current += 1;
     setProjects((current) => [project, ...current.filter((item) => item.id !== project.id)]);
     // The guarded poll picks up the job immediately without racing the shell's
     // existing /jobs request. If that request began before creation and returns
