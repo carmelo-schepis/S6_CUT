@@ -556,6 +556,18 @@ main { min-width: 0; }
 .engine-startup svg { color: var(--copper-light); flex: 0 0 auto; }
 .global-alert, .workspace-alert { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) max(var(--page-inset), calc((100% - 1540px) / 2 + var(--page-inset))); background: rgba(242,56,85,.16); border-bottom: 1px solid rgba(242,56,85,.35); color: var(--text-primary); }
 .global-alert button, .workspace-alert button { margin-left: auto; background: transparent; border: 0; color: inherit; text-decoration: underline; }
+.pwa-status { display: flex; align-items: center; gap: var(--space-2); min-height: var(--control-height); padding: var(--space-1) max(var(--page-inset), calc((100% - 1540px) / 2 + var(--page-inset))); border-bottom: 1px solid var(--border-soft); color: var(--text-primary); }
+.pwa-status > svg { flex: 0 0 auto; }
+.pwa-status > span { min-width: 0; }
+.pwa-status-offline { background: rgba(240,168,75,.14); border-color: rgba(240,168,75,.3); }
+.pwa-status-offline > svg { color: var(--warning); }
+.pwa-status-online { background: rgba(76,183,130,.12); border-color: rgba(76,183,130,.25); }
+.pwa-status-online > svg { color: var(--success); }
+.pwa-status-update { background: var(--surface-2); border-color: var(--brand-border-soft); }
+.pwa-status-update > svg { color: var(--copper-light); }
+.pwa-update-button { margin-left: auto; flex: 0 0 auto; min-height: var(--control-height-small); padding: 3px var(--space-2); border: 1px solid var(--control-border); border-radius: var(--radius-control); background: transparent; color: var(--text-primary); cursor: pointer; font: inherit; }
+.pwa-update-button:hover { background: var(--surface-4); }
+.pwa-update-button:disabled { cursor: wait; opacity: .7; }
 
 /* Compact controls keep their label on one line: touch and click targets grow
    through padding and min-height, never by wrapping or resizing the type.

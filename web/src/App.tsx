@@ -11,6 +11,7 @@ import { WorkspaceProgressIndicator } from "./components/workspace-progress-indi
 import { ShortsEditorView } from "./components/shorts-editor-view";
 import { TopicToVideoView } from "./components/topic-to-video-view";
 import { HelpDialog } from "./components/help-dialog";
+import { PwaStatus } from "./components/pwa-status";
 import { hasLiveWork, jobPollInterval, workspaceActivity } from "./project-status";
 import { onLibraryChanged } from "./library-sync";
 import { usePoll } from "./use-poll";
@@ -209,6 +210,7 @@ export function App() {
           <span className="save-state"><HardDrive size={14} /> Saved on this machine</span>
         </div>
       </header>
+      <PwaStatus />
 
       {/* One startup indicator for the whole shell, in the same slot the failure
           alert uses — so "connecting" either resolves or turns into an error
