@@ -100,6 +100,10 @@ The production web UI is an installable Progressive Web App. When served through
 
 When a new application bundle is available, S6_cut shows **A new S6_cut version is ready**. Choose **Update app** to activate it; updates do not interrupt an active render automatically.
 
+### Caption styles
+
+Clip captions use the selected Funny, Serious, Educational, or Hype style. The engine renders these presets with the bundled Anton, Archivo Black, and Barlow display faces inside the engine image; it does not depend on a host machine having those fonts installed. Funny uses Archivo Black, Serious and Educational use Barlow, and Hype uses Anton. If a bundled face cannot be resolved at engine startup, the engine logs the requested and substituted font family instead of silently treating the fallback as the selected style. The font files and their SIL Open Font License notices are listed in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) and `third_party_provenance.json`.
+
 ### Stopped YouTube imports
 
 **Stop & keep** preserves a YouTube import as a recoverable Workspace even when it stops during download before producing a Library asset. The project remains visible in the Projects list and the Workspace offers **Retry import**. If a selected project temporarily leaves the recent Projects listing—for example, after its last Library asset is removed—the UI does not silently switch the Workspace to another project; it shows its own empty state and can resolve the project again when it returns.
