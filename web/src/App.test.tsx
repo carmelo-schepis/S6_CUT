@@ -80,6 +80,36 @@ describe("App shell", () => {
     await waitFor(() => expect(screen.queryByRole("button", { name: "Open project Deleted library project" })).not.toBeInTheDocument());
   });
 
+  it("never moves the open Workspace to another project when the selected one leaves the listing", async () => {
+    // A stopped import drops out of the listing until it publishes output. The
+    // shell used to re-point the selection at the newest project, which put an
+    // unrelated live job behind the Workspace controls — so "Stop & keep" for
+    // this import could stop someone else's job.
+    const stoppedImport = {
+      schemaVersion: 1 as const, id: "youtube-import", name: "YouTube import", mode: "clip" as const,
+      style: "educational" as const, state: "cancelled_kept" as const, sourceName: "clip.mp4", sourceKind: "youtube" as const,
+      requestedCount: 5, createdAt: "2026-01-01", updatedAt: "2026-01-01",
+    };
+    let listing = [stoppedImport, activityProject];
+    mockListProjects.mockImplementation(() => Promise.resolve(listing));
+    mockGetHealth.mockResolvedValue(health);
+    render(<App />);
+
+    const openImport = await screen.findByRole("button", { name: "Open project YouTube import" }, { timeout: 5_000 });
+    await act(async () => { fireEvent.click(openImport); });
+    expect(document.querySelector(".topbar-context")).toHaveTextContent("YouTube import");
+
+    listing = [activityProject];
+    const readsBefore = mockListProjects.mock.calls.length;
+    emitLibraryChanged();
+    await waitFor(() => expect(mockListProjects.mock.calls.length).toBeGreaterThan(readsBefore));
+
+    // The Workspace says it has nothing open rather than silently adopting the
+    // other project and its live job controls.
+    expect(await screen.findByText("No project selected")).toBeInTheDocument();
+    expect(document.querySelector(".topbar-context")).not.toHaveTextContent(activityProject.name);
+  });
+
   it("shows exactly one engine startup message while the first health read is outstanding", async () => {
     const pending = deferred<typeof health>();
     mockGetHealth.mockReturnValue(pending.promise);

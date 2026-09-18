@@ -399,9 +399,17 @@ test.describe("responsive controls", () => {
         return { labels, overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth };
       });
 
+      // At ≤600px the rail deliberately drops its captions and each item becomes
+      // the icon alone (styles.css), trading the visible caption for the button's
+      // aria-label — so assert the accessible name at every width, and the caption
+      // only where captions are actually shown.
+      await expect(page.locator(".app-rail").getByRole("button", { name: "Workspace" })).toBeVisible();
+      const captions = measured.labels.filter((label) => label.text.trim().length);
+      if (captions.length) {
+        const workspace = captions.find((label) => label.text === "Workspace");
+        expect(workspace, `${width}px: Workspace caption rendered`).toBeTruthy();
+      }
       if (measured.labels.length) {
-        const workspace = measured.labels.find((label) => label.text === "Workspace");
-        expect(workspace, `${width}px: Workspace label rendered`).toBeTruthy();
         for (const label of measured.labels) {
           expect(label.scroll, `${width}px "${label.text}" scrollWidth`).toBeLessThanOrEqual(label.available + 0.5);
           expect(label.intrinsic, `${width}px "${label.text}" intrinsic width`).toBeLessThanOrEqual(label.available + 0.5);

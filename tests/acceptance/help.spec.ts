@@ -25,8 +25,10 @@ test.describe("S6 Cut Help", () => {
       await expect(page.getByRole("heading", { name: section, exact: true })).toBeVisible();
     }
     for (const label of ["Fast", "Auto", "Smart", "Funny", "Serious", "Educational", "Hype", "9:16 vertical", "16:9 landscape", "1:1 square", "4:5 portrait"]) await expect(dialog.getByText(label, { exact: true }).first()).toBeVisible();
+    // Subtitle-style references render as <video> (covered by
+    // help-subtitle-previews.spec.ts); only the four layout references are <img>.
     const images = dialog.locator("img");
-    expect(await images.count()).toBe(8);
+    expect(await images.count()).toBe(4);
     for (let index = 0; index < await images.count(); index += 1) {
       await expect(images.nth(index)).toHaveJSProperty("complete", true);
       expect(await images.nth(index).evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
