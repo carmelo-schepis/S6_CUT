@@ -210,6 +210,13 @@ npm run build
 docker compose config
 ```
 
+The combined frontend and engine quality gate also checks that retired providers do not return to customer-facing source, then runs the checks above that are available through npm:
+
+```bash
+npm run check
+npm run check:providers
+```
+
 When host FFmpeg/FFprobe are unavailable, the reproducible provisioned check
 runs the same frontend checks and the complete engine suite inside a freshly
 built engine image, with isolated temporary data:
