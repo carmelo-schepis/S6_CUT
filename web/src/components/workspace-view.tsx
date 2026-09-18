@@ -517,7 +517,9 @@ export function WorkspaceView({ project, health, providersLoaded = true, hasSele
     {job && !["complete", "failed", "cancelled_kept"].includes(job.state) && (() => { const facts = jobFacts(job); return <div className="job-strip"><div className="job-strip-text"><strong>{facts.stage}</strong>{facts.detail && <span>{facts.detail}</span>}</div><Progress value={facts.percent} indeterminate={facts.indeterminate} label={facts.stage} /></div>; })()}
     {job && job.warnings.length > 0 && <WarningList warnings={job.warnings} />}
 
-    {job && job.steps.length > 0 && <ProcessChecklist steps={job.steps} jobState={job.state} />}
+    {/* A long-form project renders a landscape video, not a short, so the
+        panel names the work it is actually reporting on. */}
+    {job && job.steps.length > 0 && <ProcessChecklist steps={job.steps} jobState={job.state} label={(job.contentFormat ?? project.contentFormat) === "long" ? "Long-form creation progress" : undefined} />}
 
     <div className="workspace-grid" data-testid="lower-workspace">
       <aside className="source-panel panel" aria-label="Source material">

@@ -7,6 +7,7 @@
  * prove source correspondence; nothing is created or driven through it.
  */
 import { expect, type Locator, type Page } from "@playwright/test";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -15,6 +16,32 @@ import { fileURLToPath } from "node:url";
 export const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 export const gateway = process.env.S6_ACCEPTANCE_URL || "http://127.0.0.1:8080";
 export const OVERALL_DEADLINE_MS = 15 * 60_000;
+
+/**
+ * ZIP inspection through python3's standard library, the way `bulk-export`
+ * already reads exports. The host is not assumed to carry an `unzip` binary —
+ * `extractZip` below goes to the same lengths, borrowing the engine image.
+ */
+function zipPython<T>(zipPath: string, body: string): T {
+  const script = `import json, sys, zipfile\nwith zipfile.ZipFile(sys.argv[1]) as archive:\n${body}`;
+  return JSON.parse(execFileSync("python3", ["-c", script, zipPath], { encoding: "utf8" }).trim()) as T;
+}
+
+/** Entry names inside the archive, in stored order. */
+export function zipNames(zipPath: string): string[] {
+  return zipPython<string[]>(zipPath, "    print(json.dumps(archive.namelist()))");
+}
+
+/** One entry's bytes decoded as UTF-8 text. */
+export function zipEntry(zipPath: string, name: string): string {
+  return zipPython<string>(zipPath, `    print(json.dumps(archive.read(${JSON.stringify(name)}).decode()))`);
+}
+
+/** Throws when any entry fails its CRC, the check `unzip -t` performs. */
+export function assertZipIntact(zipPath: string): void {
+  const damaged = zipPython<string | null>(zipPath, "    print(json.dumps(archive.testzip()))");
+  expect(damaged, `${path.basename(zipPath)} has a corrupt entry`).toBeNull();
+}
 
 export type ClipRecord = {
   index: number;

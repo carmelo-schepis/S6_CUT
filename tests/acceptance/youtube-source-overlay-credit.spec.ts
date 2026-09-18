@@ -11,6 +11,8 @@ import {
   openProjects,
   createClipProject,
   waitForProjectReady,
+  zipEntry,
+  zipNames,
 } from "./support/workspace";
 
 const approvedUrl = "https://www.youtube.com/watch?v=KNVr5pHAygI";
@@ -134,9 +136,9 @@ test("renders a clean Smart YouTube Short with a bottom-edge creator credit", as
       page.getByRole("button", { name: /Download ZIP/ }).click(),
     ]);
     await download.saveAs(zipPath);
-    const manifestName = execFileSync("unzip", ["-Z1", zipPath], { encoding: "utf8" }).split("\n").find((name) => name.endsWith("/manifest.json"));
+    const manifestName = zipNames(zipPath).find((name) => name.endsWith("/manifest.json"));
     expect(manifestName).toBeTruthy();
-    const manifest = JSON.parse(execFileSync("unzip", ["-p", zipPath, manifestName!], { encoding: "utf8" })) as {
+    const manifest = JSON.parse(zipEntry(zipPath, manifestName!)) as {
       project?: { source_creator?: string | null };
       outputs?: { creator_credit?: string | null; provenance?: { provider: string }[] }[];
     };

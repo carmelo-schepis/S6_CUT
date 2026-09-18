@@ -120,6 +120,21 @@ class ProjectDeletingError(RuntimeError):
     pass
 
 
+class ChecklistShapeError(RuntimeError):
+    """A checklist is missing a step its pipeline requires.
+
+    `str()` of this reaches the customer's banner through `job.error`, so it
+    carries no job id or step id — those go to the log at the raise site. The
+    condition is a defect rather than anything the customer got wrong, and a
+    fresh run rebuilds the checklist (see `_repair_step_shape`), so the message
+    says that plainly instead of naming internals.
+    """
+
+    def __init__(self, job_id: str, step_id: str) -> None:
+        super().__init__("This project could not be processed because its progress checklist did not match its pipeline. Start it again to rebuild the checklist.")
+        self.job_id, self.step_id = job_id, step_id
+
+
 def job_processing_mode(job: Job, private: dict[str, Any]) -> ProcessingMode:
     """Resolved processing mode: private snapshot first, public record next, legacy jobs default to smart."""
     value = private.get("processing_mode") or job.processing_mode or "smart"
@@ -412,7 +427,8 @@ class JobManager:
         for step in job.steps:
             if step.id == step_id:
                 return step
-        raise KeyError(f"Job {job.id} has no processing step {step_id!r}")
+        logger.error("Job %s has no processing step %r; its checklist does not match its pipeline", job.id, step_id)
+        raise ChecklistShapeError(job.id, step_id)
 
     def _apply_step(self, job: Job, step: ProcessingStep, *, status: str, detail: str | None = None, current: int | None = None, total: int | None = None, started_at: str | None = None, completed_at: str | None = None) -> None:
         """In-memory mutation shared by every step transition helper."""
@@ -612,9 +628,46 @@ class JobManager:
             job.current_item = done
             job.total_items = total
 
+    def _required_step_ids(self, job: Job, private: dict[str, Any]) -> set[str]:
+        """The step ids the pipeline this job actually runs through will ask for.
+
+        Read from the same builders the checklist is created from, so the shape
+        on disk and the processor cannot drift apart again.
+        """
+        if job.mode == "script":
+            return {step.id for step in self._script_steps()}
+        if job_uses_fast_pipeline(job, private):
+            return {step.id for step in self._fast_steps()}
+        return {step.id for step in self._smart_steps(bool(private.get("use_openrouter")))}
+
+    def _repair_step_shape(self, job: Job, private: dict[str, Any]) -> None:
+        """Rebuild a checklist persisted in the wrong shape for its pipeline.
+
+        A long-form Smart job written before the pipeline decision was unified
+        holds the eleven-step smart checklist yet renders through the fast path,
+        which asks for a 'plan' step that checklist does not contain. Nothing
+        reshaped it afterwards: `_init_steps` only builds when there are no
+        steps at all, retry-import re-pends statuses and `_reset_steps_for_retry`
+        touches render/verify/ready, so every attempt raised the same error.
+        Rebuild the right checklist and restore whatever the job can prove.
+        """
+        if not job.steps or job.state == "complete":
+            return
+        if {step.id for step in job.steps} == self._required_step_ids(job, private):
+            return
+        as_of = job.updated_at
+        if job.mode == "script":
+            job.steps = self._script_steps()
+        else:
+            job.steps = self._fast_steps() if job_uses_fast_pipeline(job, private) else self._smart_steps(bool(private.get("use_openrouter")))
+        # Replays nothing: published clips keep the render counters they earned.
+        self._restore_proven_steps(job, private, as_of)
+        self._save(job, private)
+
     def _reconcile_steps(self, job: Job, private: dict[str, Any]) -> None:
         """Initialize legacy steps and detect retries triggered outside the control path."""
         self._init_steps(job, private)
+        self._repair_step_shape(job, private)
         if job.steps and any(clip.state == "queued" for clip in job.clips):
             render_step = next((step for step in job.steps if step.id == "render"), None)
             if render_step and render_step.status == "complete":
@@ -714,7 +767,11 @@ class JobManager:
                 active = next((step for step in job.steps if step.status == "active"), None)
                 if active:
                     self._apply_step(job, active, status="failed", detail=redact(str(exc)))
-                else:
+                elif not isinstance(exc, ChecklistShapeError):
+                    # A checklist that lacks the step the pipeline asked for has
+                    # no step to blame: marking the first pending one failed put
+                    # the message on an unrelated row ("Audio prepared" for a
+                    # missing 'plan'). The job state already reports the failure.
                     pending = next((step for step in job.steps if step.status == "pending"), None)
                     if pending:
                         self._apply_step(job, pending, status="failed", detail=redact(str(exc)))
