@@ -1,7 +1,7 @@
 import { test, expect, type Page, type Route } from "@playwright/test";
 import path from "node:path";
 import fs from "node:fs/promises";
-import { execFileSync } from "node:child_process";
+import { assertZipIntact, zipEntry } from "./support/workspace";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -163,8 +163,8 @@ test.describe("YouTube creator credit workflow", () => {
     const exportPath = await download.path();
     expect(exportPath).not.toBeNull();
     if (exportPath) {
-      expect(() => execFileSync("unzip", ["-t", exportPath], { encoding: "utf8" })).not.toThrow();
-      const manifest = JSON.parse(execFileSync("unzip", ["-p", exportPath, "manifest.json"], { encoding: "utf8" })) as { creatorCredit?: string; sourceCreator?: string };
+      assertZipIntact(exportPath);
+      const manifest = JSON.parse(zipEntry(exportPath, "manifest.json")) as { creatorCredit?: string; sourceCreator?: string };
       expect(manifest.sourceCreator).toBe("Known Creator");
       expect(manifest.creatorCredit).toBe("Source: Known Creator");
     }

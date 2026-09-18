@@ -1,18 +1,22 @@
 import { expect, test } from "@playwright/test";
 import path from "node:path";
-import { OVERALL_DEADLINE_MS, createClipProject, gateway, jobBoundaries, openProjects, root, waitForProjectReady } from "./support/workspace";
+import { createClipProject, gateway, jobBoundaries, openProjects, root, waitForProjectReady } from "./support/workspace";
 
 const styles = ["Funny", "Serious", "Educational", "Hype"] as const;
 const previewPaths = Object.fromEntries(styles.map((style) => [style, `/help/subtitles-${style.toLowerCase()}.mp4`])) as Record<typeof styles[number], string>;
 const isExpectedBrowserWarning = (text: string) => /Cross-Origin-Opener-Policy header has been ignored.*untrustworthy/i.test(text);
 
 test.use({ storageState: { cookies: [], origins: [] } });
-// This budget has to clear the render wait itself: waitForProjectReady gives a
-// job OVERALL_DEADLINE_MS, and behind a single job worker the whole suite
-// queues, so the earlier flat 12 minutes expired before its own wait could.
-// Derive it so the two cannot drift apart again, and leave room for the Help
-// dialog and the four preview players checked after the render.
-test.setTimeout(OVERALL_DEADLINE_MS + 10 * 60_000);
+// A real YouTube import rendered behind a single job worker: in a full-suite
+// run this job queues behind every other spec's work, and one measured run
+// took 25 minutes end to end against the default 15-minute wait. Budget the
+// wait from that measurement and give the test room for the Help dialog and
+// the four preview players checked afterwards. 45 minutes matches the other
+// real-media spec (shorts-background-blur). A genuine stall still shows up:
+// waitForProjectReady prints progress as it goes, so it is distinguishable
+// from slow.
+const READY_DEADLINE_MS = 35 * 60_000;
+test.setTimeout(45 * 60_000);
 
 test("Help subtitle previews load and play after a YouTube source workflow", async ({ page }) => {
   const consoleErrors: string[] = [];
@@ -48,7 +52,7 @@ test("Help subtitle previews load and play after a YouTube source workflow", asy
       captions: false,
       source: { kind: "url", url: "https://www.youtube.com/watch?v=WwA_7QyqtGI" },
     });
-    await waitForProjectReady(page, observed);
+    await waitForProjectReady(page, observed, "clip", READY_DEADLINE_MS);
     projectId = (await jobBoundaries(projectName)).project.id;
 
     const openAndVerifyPreviews = async () => {

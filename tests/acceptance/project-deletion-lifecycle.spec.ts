@@ -39,13 +39,17 @@ const job = {
 
 test("Delete project everywhere confirms before removing a project card", async ({ page }) => {
   let deletes = 0;
+  // Deleting emits a library-changed signal, so the shell re-reads both lists
+  // straight after the DELETE settles. The fixture has to honour its own
+  // deletion or that re-read legitimately restores the card this test expects
+  // to be gone.
   await page.route("**/api/v1/projects", async (route) => {
     if (route.request().method() !== "GET") return route.fallback();
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([project]) });
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(deletes ? [] : [project]) });
   });
   await page.route("**/api/v1/jobs", async (route) => {
     if (route.request().method() !== "GET") return route.fallback();
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([job]) });
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(deletes ? [] : [job]) });
   });
   await page.route(`**/api/v1/projects/${project.id}?delete_assets=true`, async (route) => {
     deletes += 1;

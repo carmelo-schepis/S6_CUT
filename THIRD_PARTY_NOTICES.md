@@ -15,4 +15,6 @@ No source code was copied from the reference repositories during this build. The
 - **AI YouTube Shorts Generator** — reference-only because the supplied copy lacks a verified licence/revision. No code was copied.
 - **yt-dlp** — Unlicense/public-domain dedication and third-party component notices in the bundled project. S6_cut installs release `2026.7.4` as a constrained, user-authorised YouTube import dependency and does not vendor its source.
 
+- **Anton**, **Archivo Black** and **Barlow** — SIL Open Font License 1.1. Vendored under `engine/fonts/` (each family with its own `OFL.txt`) and installed into the engine image so burned-in captions render in a real display face instead of a synthetically emboldened fallback. Unmodified upstream files from the Google Fonts repository; Reserved Font Names are untouched.
+
 Code licences do not grant rights to source media, downloaded media, models, voices, fonts, or the supplied S6_cut logo. Users must verify their own rights and provider terms.
