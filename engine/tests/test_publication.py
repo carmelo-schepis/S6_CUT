@@ -54,7 +54,11 @@ def _fake_plan(duration: float, count: int, min_duration: float, max_duration: f
     return [(0.0, 10.0), (12.0, 22.0), (24.0, 34.0), (36.0, 46.0), (48.0, 58.0)][:count], None
 
 
-def _fake_render(source: Path, output: Path, *, start: float, end: float, aspect: str, has_audio: bool, settings: Settings) -> None:
+def _fake_render(source: Path, output: Path, *, start: float, end: float, aspect: str, has_audio: bool, settings: Settings, **_: Any) -> None:
+    # Tolerates the optional arguments the real renderer accepts (captions,
+    # creator credit, content format). A double that pins an exact signature
+    # turns any new optional parameter into a failed render rather than the
+    # no-op it is here.
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(b"rendered-publication-clip")
 

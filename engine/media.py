@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 import os
 import re
@@ -17,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import Settings
+from .recipes import CAPTION_REFERENCE_SHORT_EDGE, LookTreatment, caption_preset, known_styles, recipe_for
 from .security import redact, validate_youtube_url
 
 ALLOWED_VIDEO_SUFFIXES = {".mp4", ".mov", ".webm", ".mkv", ".m4v", ".avi"}
@@ -27,6 +29,17 @@ _whisper_models: dict[str, Any] = {}
 # Shared final-delivery profile: high quality, local, and browser compatible.
 DELIVERY_VIDEO_CODEC = "libx264"
 DELIVERY_PRESET = "slow"
+# Long form carries the graded filter chain over minutes rather than seconds,
+# and x264 `slow` roughly doubles what that costs. CRF is unchanged, so this
+# trades ~8% bitrate for ~30% less CPU at the same visual quality — measured on
+# a 10s 1920x1080 graded clip: 23.7s/11.4MB at `slow` against 16.2s/12.3MB at
+# `medium`. Shorts stay on `slow`: they are the primary output and are cheap.
+DELIVERY_PRESET_BY_FORMAT = {"long": "medium"}
+
+
+def delivery_preset(content_format: str | None) -> str:
+    return DELIVERY_PRESET_BY_FORMAT.get(content_format or "", DELIVERY_PRESET)
+
 DELIVERY_CRF = "18"
 DELIVERY_AUDIO_CODEC = "aac"
 DELIVERY_AUDIO_BITRATE = "192k"
@@ -55,6 +68,9 @@ BACKGROUND_BLUR_FILTER = f"gblur=sigma={BACKGROUND_BLUR_SIGMA}:steps={BACKGROUND
 BACKGROUND_OVERSCAN_FACTOR = 1.12
 CREDIT_BOTTOM_INSET_RATIO = 0.0125
 CREDIT_MIN_MARGIN = 12
+
+
+logger = logging.getLogger(__name__)
 
 
 class MediaError(RuntimeError):
@@ -673,6 +689,12 @@ def dimensions(aspect: str) -> tuple[int, int]:
 # captions keep the same visual weight and safe margins, and so the ASS
 # coordinate system always matches the final rendered frame.
 _CAPTION_REFERENCE_HEIGHT = 1920
+# Type weight scales with the SHORT edge, not the height. A caption runs
+# horizontally, so scaling it by height across a 90-degree change of aspect
+# collapsed it: at 16:9 the same preset rendered ~2.5% of frame width against
+# ~8% for a short, which is why long-form captions looked tiny. Vertical
+# offsets (margin_v) still scale with height, and margin_x with width.
+_CAPTION_REFERENCE_SHORT_EDGE = CAPTION_REFERENCE_SHORT_EDGE
 _CAPTION_REFERENCE_FONT = 72
 _CAPTION_REFERENCE_OUTLINE = 5
 _CAPTION_REFERENCE_SHADOW = 2
@@ -684,40 +706,9 @@ _CHAR_WIDTH_FACTOR = 0.55  # average Arial glyph width at 1em
 # Data-driven treatments keep one renderer/timing foundation across modes.
 # ASS colours are written as &HAABBGGRR.  Each preset has a different semantic
 # treatment rather than merely a different accent colour.
-_SUBTITLE_PRESETS = {
-    # Meme-caption treatment: oversized, heavy white type with a hard black
-    # stroke and no panel so reactions and punchlines stay visually punchy.
-    "funny": {
-        "fontname": "Archivo Black", "font": 86, "outline": 8, "shadow": 2,
-        "primary": "&H00FFFFFF&", "highlight": "&H0000D7FF&", "outline_color": "&H00000000&",
-        "back_color": "&H00000000&", "border_style": 1, "bold": 0, "italic": 0,
-        "spacing": 0, "group": 4, "margin_v": 220,
-    },
-    # Calm, editorial type: lighter weight, warm emphasis, and longer thought
-    # groups suit claims and serious dialogue without meme-like treatment.
-    "serious": {
-        "fontname": "Barlow", "font": 64, "outline": 3, "shadow": 1,
-        "primary": "&H00F4F5F7&", "highlight": "&H00D6A56A&", "outline_color": "&H00201810&",
-        "back_color": "&H8808080A&", "border_style": 1, "bold": 0, "italic": 0,
-        "spacing": 0, "group": 6, "margin_v": 250,
-    },
-    # A readable learning label: medium-bold sans with a restrained dark box
-    # and cool highlight to maintain contrast over both light and dark footage.
-    "educational": {
-        "fontname": "Barlow", "font": 68, "outline": 5, "shadow": 1,
-        "primary": "&H00F1F2F4&", "highlight": "&H0077D6FF&", "outline_color": "&H00101010&",
-        "back_color": "&H9908080A&", "border_style": 3, "bold": -1, "italic": 0,
-        "spacing": 0, "group": 6, "margin_v": 245,
-    },
-    # Fast, kinetic hook treatment: compact groups, italic bold type, and a
-    # blue edge/highlight distinguish it from Funny's white-on-black meme look.
-    "hype": {
-        "fontname": "Anton", "font": 80, "outline": 5, "shadow": 3,
-        "primary": "&H00FFFFFF&", "highlight": "&H0048B8FF&", "outline_color": "&H00502010&",
-        "back_color": "&H00000000&", "border_style": 1, "bold": 0, "italic": -1,
-        "spacing": 1, "group": 3, "margin_v": 210,
-    },
-}
+# Projected from the recipe table so a style has exactly one definition. The
+# shape is unchanged: write_ass and the subtitle tests read a plain mapping.
+_SUBTITLE_PRESETS = {style: caption_preset(style) for style in known_styles()}
 
 
 @lru_cache(maxsize=32)
@@ -789,8 +780,13 @@ _EMOJI_KEYWORDS = {
 }
 
 
-def _subtitle_preset(style: str) -> dict[str, Any]:
-    return _SUBTITLE_PRESETS.get(style, _SUBTITLE_PRESETS["educational"])
+def _subtitle_preset(style: str, content_format: str | None = None) -> dict[str, Any]:
+    """Caption treatment for a mode, optionally tuned for the output format.
+
+    `content_format` is passed explicitly rather than inferred from the aspect
+    ratio: 16:9 is the long-form canvas, but a 16:9 short is still a short.
+    """
+    return caption_preset(style, content_format)
 
 
 def _is_emoji(character: str) -> bool:
@@ -845,13 +841,14 @@ def _ass_style_metrics(width: int, height: int) -> dict[str, int]:
     kept. All values are therefore relative to the final render resolution,
     never to the source video.
     """
-    scale = height / _CAPTION_REFERENCE_HEIGHT
+    type_scale = min(width, height) / _CAPTION_REFERENCE_SHORT_EDGE
+    vertical_scale = height / _CAPTION_REFERENCE_HEIGHT
     return {
-        "fontsize": max(28, round(_CAPTION_REFERENCE_FONT * scale)),
-        "outline": max(2, round(_CAPTION_REFERENCE_OUTLINE * scale)),
-        "shadow": max(1, round(_CAPTION_REFERENCE_SHADOW * scale)),
+        "fontsize": max(28, round(_CAPTION_REFERENCE_FONT * type_scale)),
+        "outline": max(2, round(_CAPTION_REFERENCE_OUTLINE * type_scale)),
+        "shadow": max(1, round(_CAPTION_REFERENCE_SHADOW * type_scale)),
         "margin_x": max(40, round(_CAPTION_REFERENCE_MARGIN_X * width / 1080)),
-        "margin_v": max(60, round(_CAPTION_REFERENCE_MARGIN_V * scale)),
+        "margin_v": max(60, round(_CAPTION_REFERENCE_MARGIN_V * vertical_scale)),
     }
 
 
@@ -982,16 +979,62 @@ def _credit_margin(height: int) -> int:
     return max(CREDIT_MIN_MARGIN, round(height * CREDIT_BOTTOM_INSET_RATIO))
 
 
-def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duration: float, visuals: Iterable[tuple[str, float, float]], width: int, height: int, style: str = "educational", creator_credit: str | None = None, credit_alignment: int = 3) -> None:
-    preset = _subtitle_preset(style)
+_SCRIM_STEPS = 24
+
+
+def _scrim_events(look: "LookTreatment", width: int, height: int, duration: float) -> tuple[str, list[str]]:
+    """A bottom scrim drawn by libass, as a stepped alpha ramp.
+
+    This is what replaces the opaque caption panel. Drawing it here rather
+    than in the filter chain is deliberate:
+
+    * ffmpeg's `gradients` source cannot be stopped from rotating (its speed
+      has no zero), so a filter-built scrim would drift over a long clip and
+      render non-deterministically;
+    * it would also force the fast path onto `-filter_complex`, colliding with
+      the subtitle stream mapping;
+    * libass is already running, so the ramp is effectively free, is drawn in
+      PlayRes coordinates so it scales with the canvas, and sits on a layer
+      below the captions without touching the picture above it.
+
+    The ramp is stepped rather than continuous; at this many steps the banding
+    is below what the encoder preserves.
+    """
+    if not look.scrim:
+        return "", []
+    band = max(2, round(height * look.scrim_height))
+    steps = _SCRIM_STEPS
+    top = height - band
+    events: list[str] = []
+    for index in range(steps):
+        # Transparent at the top of the band, `scrim` opacity at the frame edge.
+        opacity = look.scrim * (index + 1) / steps
+        alpha = max(0, min(255, round(255 * (1.0 - opacity))))
+        y0 = top + round(band * index / steps)
+        y1 = top + round(band * (index + 1) / steps)
+        if y1 <= y0:
+            continue
+        draw = f"m 0 {y0} l {width} {y0} {width} {y1} 0 {y1}"
+        events.append(
+            f"Dialogue: 0,{_ass_time(0)},{_ass_time(duration)},Scrim,,0,0,0,,"
+            f"{{\\p1\\an7\\pos(0,0)\\1a&H{alpha:02X}&\\bord0\\shad0}}{draw}{{\\p0}}"
+        )
+    style = "Style: Scrim,Arial,20,&H00000000,&H00000000,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1"
+    return style, events
+
+
+def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duration: float, visuals: Iterable[tuple[str, float, float]], width: int, height: int, style: str = "educational", creator_credit: str | None = None, credit_alignment: int = 3, content_format: str | None = None) -> None:
+    preset = _subtitle_preset(style, content_format)
+    scrim_style, scrim_events = _scrim_events(recipe_for(style, content_format).look, width, height, duration)
     metrics = _ass_style_metrics(width, height)
-    scale = height / _CAPTION_REFERENCE_HEIGHT
-    fontsize = max(28, round(preset["font"] * scale))
-    outline = max(2, round(preset["outline"] * scale))
-    shadow = max(1, round(preset["shadow"] * scale))
+    type_scale = min(width, height) / _CAPTION_REFERENCE_SHORT_EDGE
+    vertical_scale = height / _CAPTION_REFERENCE_HEIGHT
+    fontsize = max(28, round(preset["font"] * type_scale))
+    outline = max(2, round(preset["outline"] * type_scale))
+    shadow = max(1, round(preset["shadow"] * type_scale))
     margin_x = metrics["margin_x"]
-    margin_v = max(60, round(int(preset["margin_v"]) * scale))
-    visual_scale = height / _CAPTION_REFERENCE_HEIGHT
+    margin_v = max(60, round(int(preset["margin_v"]) * vertical_scale))
+    visual_scale = vertical_scale
     usable = max(1, width - 2 * margin_x)
     max_chars = max(8, int(usable * _CAPTION_WRAP_FRACTION / (_CHAR_WIDTH_FACTOR * fontsize)))
     credit_fontsize = max(20, round(26 * visual_scale))
@@ -1016,10 +1059,11 @@ Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackC
 Style: Caption,{preset["fontname"]},{fontsize},{preset["primary"]},{preset["highlight"]},{preset["outline_color"]},{preset["back_color"]},{preset["bold"]},{preset["italic"]},0,0,100,100,{preset["spacing"]},0,{preset["border_style"]},{outline},{shadow},2,{margin_x},{margin_x},{margin_v},1
 Style: Visual,Arial,{max(28, round(56 * visual_scale))},&H008FA8DD,&H000000FF,&H00110B0C,&HCC110B0C,-1,0,0,0,100,100,1,0,3,{max(1, round(2 * visual_scale))},0,8,{margin_x},{margin_x},{max(80, round(400 * visual_scale))},1
 {credit_style}
+{scrim_style}
 [Events]
 Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
 """
-    events: list[str] = []
+    events: list[str] = list(scrim_events)
     local = _caption_words_with_emojis(caption_words_for_clip(words, offset, offset + duration), style)
     for index, word in enumerate(local):
         group_size = int(preset["group"])
@@ -1029,7 +1073,11 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
         for line in lines:
             bits = []
             for item in line:
-                text = _ass_escape(str(item["text"]))
+                # Casing is a burn-in treatment: write_caption_sidecars writes
+                # the same words with their true casing, so a downloaded .srt
+                # is never shouted at the reader.
+                raw = str(item["text"])
+                text = _ass_escape(raw.upper() if preset.get("uppercase") else raw)
                 bits.append(f"{{\\c{preset['highlight']}}}{text}{{\\c{preset['primary']}}}" if item is word else text)
             line_bits.append(" ".join(bits))
         start = max(0, float(word["start"]))
@@ -1171,7 +1219,7 @@ def _filters(width: int, height: int, overlays: list[tuple[Path, float, float]],
 
 # DO-NOT-CHANGE: atomic render (.partial.mp4 + os.replace) with structural output
 # validation (dimensions/audio) before the output is publishable
-def render_clip(source: Path, output: Path, *, start: float, end: float, aspect: str, words: list[dict[str, Any]], visuals: list[tuple[str, float, float]], overlays: list[tuple[Path, float, float]], settings: Settings, style: str = "educational", has_audio: bool = True, embed_subtitles: bool = False, subtitle_language: str = "und", creator_credit: str | None = None) -> None:
+def render_clip(source: Path, output: Path, *, start: float, end: float, aspect: str, words: list[dict[str, Any]], visuals: list[tuple[str, float, float]], overlays: list[tuple[Path, float, float]], settings: Settings, style: str = "educational", has_audio: bool = True, embed_subtitles: bool = False, subtitle_language: str = "und", creator_credit: str | None = None, content_format: str | None = None) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     ass = output.parent / (f"{output.stem}.burn.ass" if creator_credit else f"{output.stem}.ass")
     duration = end - start
@@ -1181,12 +1229,12 @@ def render_clip(source: Path, output: Path, *, start: float, end: float, aspect:
     if source_meta["rotation"] % 180:
         src_width, src_height = src_height, src_width
     credit_alignment = _credit_alignment(source, start=start, end=end, width=width, height=height, settings=settings) if creator_credit else 3
-    write_ass(ass, words, offset=start, duration=duration, visuals=visuals, width=width, height=height, style=style, creator_credit=creator_credit, credit_alignment=credit_alignment)
+    write_ass(ass, words, offset=start, duration=duration, visuals=visuals, width=width, height=height, style=style, creator_credit=creator_credit, credit_alignment=credit_alignment, content_format=content_format)
     write_caption_sidecars(output, words, offset=start, duration=duration, style=style)
     if creator_credit:
         # The downloadable ASS is caption-only; the internal burn script must
         # never be applied a second time to an already credited MP4.
-        write_ass(output.with_suffix(".ass"), words, offset=start, duration=duration, visuals=visuals, width=width, height=height, style=style)
+        write_ass(output.with_suffix(".ass"), words, offset=start, duration=duration, visuals=visuals, width=width, height=height, style=style, content_format=content_format)
     temp = output.with_suffix(".partial.mp4")
     command = [settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{start:.3f}", "-i", str(source), "-t", f"{duration:.3f}"]
     _overlay_inputs(command, overlays)
@@ -1302,6 +1350,76 @@ def plan_long_form_windows(
     return windows, warning
 
 
+# A punch-in is only worth applying when the source has resolution to spare:
+# zooming a frame already scaled down to the canvas just softens it. Mirrors
+# the upscale warning the job pipeline records for undersized sources.
+_PUNCH_IN_HEADROOM = 1.0
+
+
+def _look_stages(look: "LookTreatment") -> tuple[str, str]:
+    """The look chain, split either side of the scrim overlay.
+
+    Returns ``(before_scrim, after_scrim)``. Order is the whole point:
+
+    * the grade runs in yuv444p — eq/curves applied directly in limited-range
+      4:2:0 band badly — and the frame returns to yuv420p only at the very end;
+    * the scrim sits between the grade and the grain, so grain lands on top of
+      it rather than under it;
+    * nothing follows the subtitles filter except the delivery pixel format,
+      because grading or graining burned-in text is what makes captions look
+      cheap. The caller appends ``subtitles=`` after both stages.
+    """
+    if not look.has_picture_filters():
+        return "", ""
+    before: list[str] = ["format=yuv444p"]
+    if look.contrast != 1.0 or look.saturation != 1.0 or look.gamma != 1.0:
+        before.append(f"eq=contrast={look.contrast:.3f}:saturation={look.saturation:.3f}:gamma={look.gamma:.3f}")
+    if look.vignette is not None:
+        before.append(f"vignette=angle={look.vignette:.4f}")
+    after: list[str] = []
+    if look.grain:
+        # Light grain also dithers the gradients the grade can introduce.
+        after.append(f"noise=alls={max(1, round(look.grain * 100))}:allf=t+u:all_seed={look.grain_seed}")
+    return ",".join(before), ",".join(after)
+
+
+def _look_filter(look: "LookTreatment") -> str:
+    """The look chain as one linear string, for callers with no scrim.
+
+    Kept so a graph without an overlay stays a simple ``-vf`` chain.
+    """
+    before, after = _look_stages(look)
+    return ",".join(part for part in (before, after) if part)
+
+
+def punch_in_has_headroom(punch_in: float, src_width: int, src_height: int, width: int, height: int) -> bool:
+    """Whether the source can afford the zoom without being upscaled into it.
+
+    A 6% punch on a frame already scaled to the canvas is a 6% upscale — it
+    costs sharpness and buys nothing. The caller skips the move and records a
+    warning instead, the same way an undersized source is reported.
+    """
+    if punch_in <= 1.0:
+        return False
+    return (min(src_width, src_height) >= min(width, height) * punch_in * _PUNCH_IN_HEADROOM)
+
+
+def _punch_in_filter(punch_in: float, width: int, height: int, duration: float, frame_rate: float) -> str:
+    """A slow zoom that preserves the frame count exactly.
+
+    `zoompan` with `d=1` emits one frame per input frame, and pinning `fps`
+    and `s` stops it resampling the timeline — render_fast_clip fails a clip
+    whose duration drifts past max(0.75, duration * 0.05), and a filter that
+    changes frame count is exactly how that happens.
+    """
+    rate = max(1, round(frame_rate or 30))
+    frames = max(1, round(max(0.1, duration) * rate))
+    return (
+        f"zoompan=z='min(1+{punch_in - 1.0:.4f}*on/{frames},{punch_in:.4f})'"
+        f":d=1:s={width}x{height}:fps={rate},setsar=1"
+    )
+
+
 def _fast_crop_scale_filter(
     src_width: int, src_height: int, target_width: int, target_height: int
 ) -> str:
@@ -1345,6 +1463,7 @@ def render_fast_clip(
     embed_subtitles: bool = False,
     subtitle_language: str = "und",
     creator_credit: str | None = None,
+    content_format: str | None = None,
 ) -> None:
     """Render a fast clip with optional captions and no overlays or visual beats.
 
@@ -1394,16 +1513,34 @@ def render_fast_clip(
     if meta["rotation"] % 180:
         src_width, src_height = src_height, src_width
     vf = _source_layout_filter(src_width, src_height, width, height).removesuffix("[base]")
+    look_treatment = recipe_for(style, content_format).look
+    look_before, look_after = _look_stages(look_treatment)
+    frame_rate = float(meta.get("frame_rate") or 0) or 30.0
+    if look_treatment.punch_in > 1.0:
+        if punch_in_has_headroom(look_treatment.punch_in, src_width, src_height, width, height):
+            vf = f"{vf},{_punch_in_filter(look_treatment.punch_in, width, height, duration, frame_rate)}"
+        else:
+            # Skipped rather than applied as an upscale; the job pipeline
+            # surfaces source-quality warnings for exactly this case.
+            logger.info("Skipping punch-in for %s: source %dx%d has no headroom over %dx%d",
+                        output.name, src_width, src_height, width, height)
+    if look_before:
+        vf = f"{vf},{look_before}"
+    if look_after:
+        vf = f"{vf},{look_after}"
     ass: Path | None = None
     if (subtitles_enabled or embed_subtitles) and words:
         write_caption_sidecars(output, words, offset=0, duration=duration, style=style)
     if (subtitles_enabled and words) or creator_credit:
         ass = output.parent / (f"{output.stem}.burn.ass" if creator_credit else f"{output.stem}.ass")
         credit_alignment = _credit_alignment(source, start=start, end=end, width=width, height=height, settings=settings) if creator_credit else 3
-        write_ass(ass, words or [], offset=0, duration=duration, visuals=[], width=width, height=height, style=style, creator_credit=creator_credit, credit_alignment=credit_alignment)
+        write_ass(ass, words or [], offset=0, duration=duration, visuals=[], width=width, height=height, style=style, creator_credit=creator_credit, credit_alignment=credit_alignment, content_format=content_format)
         if creator_credit:
-            write_ass(output.with_suffix(".ass"), words or [], offset=0, duration=duration, visuals=[], width=width, height=height, style=style)
+            write_ass(output.with_suffix(".ass"), words or [], offset=0, duration=duration, visuals=[], width=width, height=height, style=style, content_format=content_format)
         vf = f"{vf},subtitles={ass.name}"
+    if look_before or look_after:
+        # Back to the delivery pixel format only after the captions are burned.
+        vf = f"{vf},format=yuv420p"
     command = [
         settings.ffmpeg,
         "-hide_banner",
@@ -1427,7 +1564,7 @@ def render_fast_clip(
         "-c:v",
         DELIVERY_VIDEO_CODEC,
         "-preset",
-        DELIVERY_PRESET,
+        delivery_preset(content_format),
         "-crf",
         DELIVERY_CRF,
         "-pix_fmt",

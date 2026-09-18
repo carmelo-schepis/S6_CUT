@@ -225,6 +225,22 @@ def _creator_render_kwargs(render, credit: str | None) -> dict[str, str]:
     return {}
 
 
+def _format_render_kwargs(render, content_format: str) -> dict[str, str]:
+    """Pass the content format only to renderers that accept it.
+
+    Mirrors `_creator_render_kwargs`: editor and test render adapters from
+    older jobs take a narrower signature, and a render is not worth losing to
+    an unexpected keyword.
+    """
+    try:
+        parameters = inspect.signature(render).parameters.values()
+    except (TypeError, ValueError):
+        return {}
+    if any(parameter.name == "content_format" or parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters):
+        return {"content_format": content_format}
+    return {}
+
+
 def probe_source(job: Job, private: dict[str, Any], source: Path, settings: Settings):
     if job_content_format(job, private) == "long":
         return probe(source, settings, max_seconds=settings.max_long_source_seconds)
@@ -1323,6 +1339,7 @@ class JobManager:
                     "visuals": [], "overlays": overlays, "settings": self.settings, "style": job.style,
                     **({"embed_subtitles": True} if private.get("embed_subtitles", job.embed_subtitles) else {}),
                     **_creator_render_kwargs(render_clip, youtube_creator_credit(job, private)),
+                    **_format_render_kwargs(render_clip, job_content_format(job, private)),
                 }
                 try:
                     render_clip(source, output, **render_kwargs)
@@ -1512,6 +1529,7 @@ class JobManager:
                 if words:
                     render_kwargs.update({"words": words, "style": job.style, "subtitles_enabled": subtitles_enabled})
                 render_kwargs.update(_creator_render_kwargs(render, youtube_creator_credit(job, private)))
+                render_kwargs.update(_format_render_kwargs(render, job_content_format(job, private)))
                 render(source, output, **render_kwargs)
                 job, clip, _ = self._publish_output(job, clip, output, private)
             except Exception as exc:

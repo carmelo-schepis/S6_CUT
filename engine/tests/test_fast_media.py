@@ -478,3 +478,166 @@ def test_mismatched_fast_render_has_bright_blurred_fill(settings: Settings, tmp_
             assert sum(frame) / len(frame) > 8, "blurred fill must not produce black edge bands"
     assert min(ratios) >= 0.72, f"undarkened background/source luminance ratios were {ratios}"
     assert sum(background_edges) / len(background_edges) < sum(foreground_edges) / len(foreground_edges) * 0.9
+
+# --- Phase 2: the per-style look chain -----------------------------------
+
+def test_the_identity_look_adds_no_filter() -> None:
+    """While a recipe asks for nothing, the render must be untouched.
+
+    This is what let the recipe refactor land without moving a pixel, and it
+    keeps an ungraded mode genuinely ungraded rather than round-tripping the
+    frame through a no-op chain.
+    """
+    from engine.media import _look_filter
+    from engine.recipes import LookTreatment
+
+    assert _look_filter(LookTreatment()) == ""
+
+
+def test_the_look_chain_grades_before_the_captions_are_burned() -> None:
+    """Nothing may touch the frame after `subtitles=` except the pixel format.
+
+    Grading or graining burned-in text is what makes captions look cheap, so
+    the chain is asserted by position, not just by content.
+    """
+    from engine.media import _look_filter
+    from engine.recipes import LookTreatment
+
+    chain = _look_filter(LookTreatment(contrast=1.1, saturation=0.9, vignette=0.6, grain=0.03))
+    assert chain.startswith("format=yuv444p"), "the grade must run in a wider format than 4:2:0"
+    assert chain.index("eq=") < chain.index("vignette="), "grade before vignette"
+    assert chain.index("vignette=") < chain.index("noise="), "grain is the last thing before captions"
+    assert "subtitles=" not in chain, "the caller appends subtitles after this chain"
+
+
+def test_grain_is_seeded_so_a_graded_render_stays_deterministic() -> None:
+    from engine.media import _look_filter
+    from engine.recipes import LookTreatment
+
+    first = _look_filter(LookTreatment(grain=0.03))
+    second = _look_filter(LookTreatment(grain=0.03))
+    assert first == second
+    assert "all_seed=" in first, "an unseeded noise filter would make renders non-reproducible"
+
+
+def test_punch_in_is_a_long_form_move_and_stays_subtle() -> None:
+    """Shorts are already tight; the slow push belongs to the speech edit.
+
+    The ceiling matters: every percent of zoom crops real pixels, and the
+    headroom guard only permits the move when the source can pay for it.
+    """
+    from engine.recipes import known_styles, recipe_for
+
+    for style in known_styles():
+        assert recipe_for(style, "short").look.punch_in == 1.0, f"{style} shorts should not zoom"
+    long_zooms = {style: recipe_for(style, "long").look.punch_in for style in known_styles()}
+    assert long_zooms["serious"] > 1.0 and long_zooms["hype"] > 1.0
+    assert all(1.0 <= zoom <= 1.10 for zoom in long_zooms.values()), f"a punch-in is out of range: {long_zooms}"
+
+
+@pytest.mark.parametrize("style", ["educational", "serious"])
+def test_a_graded_long_form_render_keeps_its_canvas_and_duration(tmp_path: Path, settings: Settings, style: str) -> None:
+    """The look chain must not cost the render its dimensions or its length.
+
+    render_fast_clip fails a clip whose duration drifts past
+    max(0.75, duration * 0.05), and a filter that changes frame count or fps
+    is exactly how that happens. `educational` is ungraded and `serious`
+    carries the full grade+vignette+grain chain, so this covers both paths.
+    """
+    for binary in (settings.ffmpeg, settings.ffprobe):
+        if not shutil.which(binary):
+            pytest.skip(f"requires {binary}")
+
+    source = tmp_path / "source.mp4"
+    subprocess.run(
+        [settings.ffmpeg, "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=30:duration=8",
+         "-f", "lavfi", "-i", "sine=frequency=440:duration=8", "-c:v", "libx264", "-preset", "ultrafast",
+         "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(source), "-y"],
+        check=True, capture_output=True,
+    )
+    output = tmp_path / f"{style}.mp4"
+    render_fast_clip(
+        source, output, start=1.0, end=5.0, aspect="16:9", settings=settings, has_audio=True,
+        words=[{"text": "stay", "start": 0.0, "end": 0.6, "confidence": 0.9}],
+        style=style, subtitles_enabled=True, content_format="long",
+    )
+
+    assert output.is_file()
+    meta = probe(output, settings)
+    assert (meta["width"], meta["height"]) == (1920, 1080)
+    assert abs(float(meta["duration"]) - 4.0) <= max(0.75, 4.0 * 0.05)
+
+
+# --- Phase 2 follow-ups: scrim, punch-in, per-format delivery ------------
+
+def test_the_scrim_is_drawn_by_libass_not_by_a_filter() -> None:
+    """The scrim must not reach the filter chain.
+
+    ffmpeg's `gradients` source cannot be frozen (its speed has no zero), so a
+    filter-built scrim drifts over a long clip, and it would force the fast
+    path onto -filter_complex where the subtitle stream is mapped. Drawing it
+    in the ASS also stopped scrim-only modes round-tripping the frame through
+    yuv444p for a grade they do not have.
+    """
+    from engine.media import _look_stages
+    from engine.recipes import LookTreatment
+
+    before, after = _look_stages(LookTreatment(scrim=0.4))
+    assert (before, after) == ("", ""), "a scrim must add no picture filter"
+
+
+def test_a_scrim_ramps_from_transparent_to_its_opacity(tmp_path: Path) -> None:
+    from engine.media import _scrim_events
+    from engine.recipes import LookTreatment
+
+    style, events = _scrim_events(LookTreatment(scrim=0.4), 1920, 1080, 3.0)
+    assert style.startswith("Style: Scrim,")
+    assert len(events) > 8, "too few steps would band visibly"
+    alphas = [int(event.split(r"\1a&H")[1][:2], 16) for event in events]
+    # ASS alpha counts down from transparent (0xFF) to the requested opacity.
+    assert alphas == sorted(alphas, reverse=True), "the ramp must darken downwards"
+    assert alphas[0] > alphas[-1]
+    assert all(",Scrim," in event and event.startswith("Dialogue: 0,") for event in events), "the scrim must sit under the captions"
+
+
+def test_no_scrim_means_no_scrim_events() -> None:
+    from engine.media import _scrim_events
+    from engine.recipes import LookTreatment
+
+    assert _scrim_events(LookTreatment(), 1920, 1080, 3.0) == ("", [])
+
+
+def test_punch_in_is_skipped_when_the_source_cannot_afford_it() -> None:
+    """Zooming a frame already scaled to the canvas is just an upscale."""
+    from engine.media import punch_in_has_headroom
+
+    # A 4K source can afford a 6% punch into a 1080p canvas.
+    assert punch_in_has_headroom(1.06, 3840, 2160, 1920, 1080)
+    # A source at exactly the canvas cannot.
+    assert not punch_in_has_headroom(1.06, 1920, 1080, 1920, 1080)
+    # Nor can one slightly above but under the zoom factor.
+    assert not punch_in_has_headroom(1.10, 1920, 1140, 1920, 1080)
+    # No zoom requested is never "headroom".
+    assert not punch_in_has_headroom(1.0, 3840, 2160, 1920, 1080)
+
+
+def test_the_punch_in_filter_pins_frame_rate_and_size() -> None:
+    from engine.media import _punch_in_filter
+
+    chain = _punch_in_filter(1.06, 1920, 1080, 10.0, 30.0)
+    assert "zoompan=" in chain
+    assert ":d=1:" in chain, "d=1 emits one frame per input frame"
+    assert "s=1920x1080" in chain and "fps=30" in chain, "an unpinned zoompan drifts the timeline"
+    assert "setsar=1" in chain
+
+
+def test_long_form_uses_a_faster_encoder_preset_than_shorts() -> None:
+    """A deliberate, measured trade: same CRF, ~30% less CPU for ~8% bitrate.
+
+    Shorts are the primary output and cheap to encode, so they keep `slow`.
+    """
+    from engine.media import DELIVERY_PRESET, delivery_preset
+
+    assert delivery_preset("short") == DELIVERY_PRESET == "slow"
+    assert delivery_preset(None) == "slow"
+    assert delivery_preset("long") == "medium"

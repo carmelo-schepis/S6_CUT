@@ -341,3 +341,76 @@ def test_all_aspect_ratios_keep_caption_centred_and_within_frame(tmp_path: Path)
         assert left >= 40 and right >= 40
         # The rendered caption band never exceeds the final canvas width.
         assert width - left - right > 0
+
+
+# --- Phase 2: caption weight, no panels, and per-format treatment ---------
+
+_ASPECTS = {"9:16": (1080, 1920), "4:5": (1080, 1350), "1:1": (1080, 1080), "16:9": (1920, 1080)}
+
+
+def test_caption_weight_is_constant_across_aspects(tmp_path: Path) -> None:
+    """Type scales with the short edge, so a caption keeps its weight.
+
+    Scaling by height shrank every metric by 44% at 16:9 — the same preset
+    rendered at roughly a third of its intended weight relative to the frame,
+    which is why long-form captions looked tiny next to shorts.
+    """
+    for style in ("funny", "serious", "educational", "hype"):
+        sizes = {}
+        for aspect, (width, height) in _ASPECTS.items():
+            path = tmp_path / f"{style}-{aspect.replace(':', 'x')}.ass"
+            write_ass(path, _words("one", "two"), offset=0, duration=4, visuals=[], width=width, height=height, style=style)
+            sizes[aspect] = int(_parse_styles(path.read_text())["Caption"]["Fontsize"])
+        assert len(set(sizes.values())) == 1, f"{style} caption weight varies by aspect: {sizes}"
+
+
+def test_no_style_renders_an_opaque_caption_panel(tmp_path: Path) -> None:
+    # BorderStyle 3 is the ASS opaque box — the black panel behind the text.
+    for content_format in ("short", "long"):
+        for style in ("funny", "serious", "educational", "hype"):
+            path = tmp_path / f"{style}-{content_format}.ass"
+            write_ass(path, _words("one", "two"), offset=0, duration=4, visuals=[], width=1920, height=1080,
+                      style=style, content_format=content_format)
+            assert _parse_styles(path.read_text())["Caption"]["BorderStyle"] == "1", f"{style}/{content_format} paints a panel"
+
+
+def test_playres_still_matches_the_canvas_for_every_aspect(tmp_path: Path) -> None:
+    for aspect, (width, height) in _ASPECTS.items():
+        path = tmp_path / f"playres-{aspect.replace(':', 'x')}.ass"
+        write_ass(path, _words("one"), offset=0, duration=2, visuals=[], width=width, height=height)
+        ass = path.read_text()
+        assert f"PlayResX: {width}" in ass and f"PlayResY: {height}" in ass, aspect
+
+
+def test_long_form_captions_differ_from_shorts_but_stay_mutually_distinct(tmp_path: Path) -> None:
+    rendered: dict[tuple[str, str], str] = {}
+    for content_format in ("short", "long"):
+        for style in ("funny", "serious", "educational", "hype"):
+            path = tmp_path / f"{style}-{content_format}.ass"
+            write_ass(path, _words("one", "two"), offset=0, duration=4, visuals=[], width=1920, height=1080,
+                      style=style, content_format=content_format)
+            rendered[(style, content_format)] = path.read_text().split("Style: Caption,")[1].split("\n", 1)[0]
+    for content_format in ("short", "long"):
+        lines = {style: rendered[(style, content_format)] for style in ("funny", "serious", "educational", "hype")}
+        assert len(set(lines.values())) == 4, f"styles collapse together in {content_format} form"
+    # And long form is a different treatment from the short of the same style.
+    assert rendered[("serious", "long")] != rendered[("serious", "short")]
+
+
+def test_long_form_uppercase_never_reaches_the_sidecars(tmp_path: Path) -> None:
+    """Casing is a burn-in treatment; a downloaded .srt keeps the real words."""
+    from engine.media import write_caption_sidecars
+
+    words = _words("Stay", "hungry")
+    burned = tmp_path / "burned.ass"
+    write_ass(burned, words, offset=0, duration=4, visuals=[], width=1920, height=1080,
+              style="serious", content_format="long")
+    assert "STAY" in burned.read_text()
+
+    output = tmp_path / "clip.mp4"
+    output.write_bytes(b"x")
+    write_caption_sidecars(output, words, offset=0, duration=4, style="serious")
+    srt = output.with_suffix(".srt")
+    if srt.is_file():
+        assert "Stay" in srt.read_text(), "sidecar was shouted at the reader"
+        assert "STAY" not in srt.read_text()
