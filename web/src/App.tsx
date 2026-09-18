@@ -85,7 +85,16 @@ export function App() {
       (value) => {
         if (revision !== refreshRevision.current) return;
         setProjects(value);
-        setSelectedProjectId((current) => current && value.some((project) => project.id === current) ? current : value[0]?.id || null);
+        // Only *choose* a project when nothing is selected yet. A project can
+        // legitimately leave this list while the customer is working in it —
+        // its last Library asset was deleted, a folder move, an import stopped
+        // before publishing output — and re-pointing the selection at the
+        // newest project put a different project's live job behind the
+        // Workspace controls, so a "Stop & keep" aimed at this import could
+        // stop an unrelated one. Keep the selection instead: the Workspace
+        // shows its own "No project selected" state, and the choice re-resolves
+        // by itself if the project comes back (Retry import makes it live again).
+        setSelectedProjectId((current) => current || value[0]?.id || null);
       },
       () => undefined,
     ).finally(() => { if (revision === refreshRevision.current) setLoaded(true); });
