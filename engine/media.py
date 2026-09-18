@@ -12,6 +12,7 @@ import threading
 import time
 import unicodedata
 from collections.abc import Callable, Iterable
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -687,15 +688,15 @@ _SUBTITLE_PRESETS = {
     # Meme-caption treatment: oversized, heavy white type with a hard black
     # stroke and no panel so reactions and punchlines stay visually punchy.
     "funny": {
-        "fontname": "Arial Black", "font": 86, "outline": 8, "shadow": 2,
+        "fontname": "Archivo Black", "font": 86, "outline": 8, "shadow": 2,
         "primary": "&H00FFFFFF&", "highlight": "&H0000D7FF&", "outline_color": "&H00000000&",
-        "back_color": "&H00000000&", "border_style": 1, "bold": -1, "italic": 0,
+        "back_color": "&H00000000&", "border_style": 1, "bold": 0, "italic": 0,
         "spacing": 0, "group": 4, "margin_v": 220,
     },
     # Calm, editorial type: lighter weight, warm emphasis, and longer thought
     # groups suit claims and serious dialogue without meme-like treatment.
     "serious": {
-        "fontname": "DejaVu Sans", "font": 64, "outline": 3, "shadow": 1,
+        "fontname": "Barlow", "font": 64, "outline": 3, "shadow": 1,
         "primary": "&H00F4F5F7&", "highlight": "&H00D6A56A&", "outline_color": "&H00201810&",
         "back_color": "&H8808080A&", "border_style": 1, "bold": 0, "italic": 0,
         "spacing": 0, "group": 6, "margin_v": 250,
@@ -703,7 +704,7 @@ _SUBTITLE_PRESETS = {
     # A readable learning label: medium-bold sans with a restrained dark box
     # and cool highlight to maintain contrast over both light and dark footage.
     "educational": {
-        "fontname": "DejaVu Sans", "font": 68, "outline": 5, "shadow": 1,
+        "fontname": "Barlow", "font": 68, "outline": 5, "shadow": 1,
         "primary": "&H00F1F2F4&", "highlight": "&H0077D6FF&", "outline_color": "&H00101010&",
         "back_color": "&H9908080A&", "border_style": 3, "bold": -1, "italic": 0,
         "spacing": 0, "group": 6, "margin_v": 245,
@@ -711,12 +712,42 @@ _SUBTITLE_PRESETS = {
     # Fast, kinetic hook treatment: compact groups, italic bold type, and a
     # blue edge/highlight distinguish it from Funny's white-on-black meme look.
     "hype": {
-        "fontname": "DejaVu Sans", "font": 80, "outline": 5, "shadow": 3,
+        "fontname": "Anton", "font": 80, "outline": 5, "shadow": 3,
         "primary": "&H00FFFFFF&", "highlight": "&H0048B8FF&", "outline_color": "&H00502010&",
-        "back_color": "&H00000000&", "border_style": 1, "bold": -1, "italic": -1,
+        "back_color": "&H00000000&", "border_style": 1, "bold": 0, "italic": -1,
         "spacing": 1, "group": 3, "margin_v": 210,
     },
 }
+
+
+@lru_cache(maxsize=32)
+def resolve_font_family(fontname: str) -> str:
+    """The family fontconfig actually hands libass for a requested name.
+
+    Cached for the process: the installed font set is baked into the image and
+    cannot change under a running engine, and each lookup costs a subprocess.
+    """
+    try:
+        result = subprocess.run(["fc-match", "-f", "%{family}", fontname], capture_output=True, text=True, timeout=10, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return result.stdout.strip()
+
+
+def caption_font_mismatches() -> dict[str, str]:
+    """Caption families fontconfig cannot satisfy, as requested -> resolved.
+
+    A missing display face is not a render error: libass quietly substitutes
+    DejaVu Sans and emboldens it synthetically, which is indistinguishable from
+    a badly tuned preset. Naming the substitution makes it a reportable fault.
+    """
+    mismatches: dict[str, str] = {}
+    for requested in sorted({str(preset["fontname"]) for preset in _SUBTITLE_PRESETS.values()}):
+        resolved = resolve_font_family(requested)
+        families = {part.strip().casefold() for part in resolved.split(",") if part.strip()}
+        if requested.casefold() not in families:
+            mismatches[requested] = resolved or "(fontconfig unavailable)"
+    return mismatches
 
 
 # Deterministic fallback configuration used when local transcripts are rendered

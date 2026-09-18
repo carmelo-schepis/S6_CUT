@@ -5,6 +5,7 @@ import errno
 import hashlib
 import importlib.util
 import json
+import logging
 import math
 import os
 import shutil
@@ -25,9 +26,9 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from . import __version__
 from .config import settings
 from .database import Database, MAX_FOLDER_DEPTH, UNSORTED_FOLDER_ID
-from .jobs import JobManager, ProjectDeletingError, QueueFullError, SwitchFastError, uses_fast_pipeline
+from .jobs import JobManager, ProjectDeletingError, QueueFullError, SwitchFastError, can_retry_import, uses_fast_pipeline
 from .library import LibraryRules
-from .media import MediaError, available, probe, validate_video_upload
+from .media import _SUBTITLE_PRESETS, MediaError, available, caption_font_mismatches, probe, validate_video_upload
 from .models import (
     Asset, AssetDelete, AssetDeleteResult, AssetMove, AssetOrigin, AssetUpdate, AssetPage, CaptionCue, CaptionDownload, CaptionReviewInput, Clip, FolderCreate, FolderMove, FolderUpdate, Health, Job, LibraryPurgeInput, LibraryPurgeResult,
     LibraryFolder, MatchExplanation, ContentFormat, ProcessingMode, ProfileInput, Project, ProjectFolderUpdate,
@@ -57,8 +58,20 @@ manager = JobManager(db, rules, profiles, settings)
 creation_times: defaultdict[str, deque[float]] = defaultdict(deque)
 
 
+logger = logging.getLogger(__name__)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    # A caption face that fontconfig cannot satisfy is silently replaced by
+    # DejaVu Sans and synthetically emboldened, which looks like a bad preset
+    # rather than a missing font. Say so at startup instead.
+    mismatched = caption_font_mismatches()
+    if mismatched:
+        for requested, resolved in mismatched.items():
+            logger.error("Caption font %r is not installed; fontconfig resolves it to %r. Captions will render in the wrong face.", requested, resolved)
+    else:
+        logger.info("Caption fonts resolved: %s", ", ".join(sorted({str(preset["fontname"]) for preset in _SUBTITLE_PRESETS.values()})))
     await manager.start()
     try:
         yield
@@ -230,6 +243,12 @@ def public_job(job: Job, *, include_caption_downloads: bool = True) -> Job:
                     expires, signature = signer.sign(relative)
                     sidecars.append(CaptionDownload(format=extension, filename=filename, url=f"/api/v1/jobs/{job.id}/clips/{clip.id}/captions/{extension}?expires={expires}&signature={signature}"))
             clip.caption_downloads = sidecars
+    # Answered here, from the same predicate control() enforces, so the
+    # Workspace never offers a retry the engine would refuse with a 409. Only
+    # the single-job view reads the private payload; the list view leaves the
+    # default, and the Workspace reads jobs singly.
+    if include_caption_downloads:
+        result.can_retry_import = can_retry_import(job, db.get_job_private(job.id))
     return result
 
 

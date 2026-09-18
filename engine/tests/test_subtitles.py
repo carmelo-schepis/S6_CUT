@@ -173,11 +173,14 @@ def test_style_presets_change_caption_treatment(tmp_path: Path) -> None:
 
 def test_funny_uses_meme_preset_and_other_modes_do_not() -> None:
     funny = _subtitle_preset("funny")
-    assert funny["fontname"] == "Arial Black"
+    # Archivo Black replaced "Arial Black", which was never installed: fontconfig
+    # resolved it to DejaVu Sans and libass emboldened that synthetically. With a
+    # real black face the preset must stop asking for bold on top of it.
+    assert funny["fontname"] == "Archivo Black"
     assert funny["font"] > _subtitle_preset("serious")["font"]
     assert funny["primary"] == "&H00FFFFFF&"
     assert funny["outline_color"] == "&H00000000&"
-    assert funny["bold"] == -1
+    assert funny["bold"] == 0
     assert all(_subtitle_preset(style) != funny for style in ("serious", "educational", "hype"))
 
 

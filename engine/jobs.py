@@ -162,6 +162,17 @@ def job_uses_fast_pipeline(job: Job, private: dict[str, Any]) -> bool:
     return uses_fast_pipeline(job_processing_mode(job, private), job_content_format(job, private))
 
 
+def can_retry_import(job: Job, private: dict[str, Any]) -> bool:
+    """Whether this job's source import can actually be re-run.
+
+    The Workspace offers Retry import from this answer rather than inferring it
+    from the project's source kind. The two could disagree — a project marked
+    youtube whose job holds no url — and the customer then got a 409 from the
+    one control the failure screen offered them.
+    """
+    return job.mode == "clip" and bool(private.get("url")) and job.state in {"failed", "stalled", "cancelled_kept"}
+
+
 def _youtube_creator_name(value: object) -> str | None:
     return _metadata_text(value, 120)
 
@@ -1820,10 +1831,10 @@ class JobManager:
             raise ProjectDeletingError("This project is being deleted")
         if action == "retry-import":
             private = self.db.get_job_private(job.id)
-            if job.mode != "clip" or not private.get("url"):
-                raise MediaError("Only YouTube imports can be retried here")
             if job.state not in {"failed", "stalled", "cancelled_kept"}:
                 raise MediaError("This import is already queued or running")
+            if not can_retry_import(job, private):
+                raise MediaError("This project has no YouTube import to retry")
             private["retry_import"] = True
             job.state, job.stage, job.stage_label, job.error = "queued", "source", "Retrying YouTube import", None
             if job.download_progress:

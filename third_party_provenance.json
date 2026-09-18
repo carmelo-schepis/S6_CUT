@@ -3,14 +3,98 @@
   "generatedAt": "2026-08-13",
   "directCodeCopies": [],
   "behavioralReferences": [
-    { "name": "MoneyPrinterTurbo", "licence": "MIT", "revision": "1d1d0d25b3c27609be4683c0cf3dc08c5821788a", "filesReviewed": ["LICENSE", "app/controllers/v1/video.py", "app/controllers/v1/llm.py", "app/services/task.py", "app/models/schema.py"], "use": "Behavioral reference for reviewable topic-to-video planning, stage orchestration, and bounded variants; no code or assets copied" },
-    { "name": "ClippyMe", "licence": "MIT", "revision": "unavailable in supplied copy", "filesReviewed": ["S6_CUT_TAKEAWAYS.md"], "use": "Boundary, recovery, independent clip and security behavior; clean implementation" },
-    { "name": "ReelsGenerator", "licence": "MIT", "revision": "unavailable in supplied copy", "filesReviewed": ["S6_CUT_TAKEAWAYS.md"], "use": "Script, TTS cache and pacing behavior; clean implementation" },
-    { "name": "ViralMint", "licence": "AGPL-3.0", "revision": "unavailable in supplied copy", "filesReviewed": ["S6_CUT_TAKEAWAYS.md"], "use": "Provider health, scoring and storyboard behavior; clean implementation" },
-    { "name": "VUZA", "licence": "MIT", "revision": "unavailable in supplied copy", "filesReviewed": ["S6_CUT_TAKEAWAYS.md"], "use": "Resolver fallback behavior; clean implementation" },
-    { "name": "AI YouTube Shorts Generator", "licence": "unverified", "revision": "unavailable in supplied copy", "filesReviewed": ["S6_CUT_TAKEAWAYS.md"], "use": "Reference-only pipeline vocabulary; no code copied" }
+    {
+      "name": "MoneyPrinterTurbo",
+      "licence": "MIT",
+      "revision": "1d1d0d25b3c27609be4683c0cf3dc08c5821788a",
+      "filesReviewed": [
+        "LICENSE",
+        "app/controllers/v1/video.py",
+        "app/controllers/v1/llm.py",
+        "app/services/task.py",
+        "app/models/schema.py"
+      ],
+      "use": "Behavioral reference for reviewable topic-to-video planning, stage orchestration, and bounded variants; no code or assets copied"
+    },
+    {
+      "name": "ClippyMe",
+      "licence": "MIT",
+      "revision": "unavailable in supplied copy",
+      "filesReviewed": [
+        "S6_CUT_TAKEAWAYS.md"
+      ],
+      "use": "Boundary, recovery, independent clip and security behavior; clean implementation"
+    },
+    {
+      "name": "ReelsGenerator",
+      "licence": "MIT",
+      "revision": "unavailable in supplied copy",
+      "filesReviewed": [
+        "S6_CUT_TAKEAWAYS.md"
+      ],
+      "use": "Script, TTS cache and pacing behavior; clean implementation"
+    },
+    {
+      "name": "ViralMint",
+      "licence": "AGPL-3.0",
+      "revision": "unavailable in supplied copy",
+      "filesReviewed": [
+        "S6_CUT_TAKEAWAYS.md"
+      ],
+      "use": "Provider health, scoring and storyboard behavior; clean implementation"
+    },
+    {
+      "name": "VUZA",
+      "licence": "MIT",
+      "revision": "unavailable in supplied copy",
+      "filesReviewed": [
+        "S6_CUT_TAKEAWAYS.md"
+      ],
+      "use": "Resolver fallback behavior; clean implementation"
+    },
+    {
+      "name": "AI YouTube Shorts Generator",
+      "licence": "unverified",
+      "revision": "unavailable in supplied copy",
+      "filesReviewed": [
+        "S6_CUT_TAKEAWAYS.md"
+      ],
+      "use": "Reference-only pipeline vocabulary; no code copied"
+    }
   ],
   "runtimeComponents": [
-    { "name": "yt-dlp", "version": "2026.7.4", "licence": "Unlicense/public-domain dedication plus bundled third-party notices", "use": "Constrained user-authorised YouTube import" }
+    {
+      "name": "yt-dlp",
+      "version": "2026.7.4",
+      "licence": "Unlicense/public-domain dedication plus bundled third-party notices",
+      "use": "Constrained user-authorised YouTube import"
+    },
+    {
+      "name": "Anton",
+      "version": "2.116 (google/fonts ofl/anton)",
+      "licence": "SIL Open Font License 1.1",
+      "source": "https://github.com/google/fonts/tree/main/ofl/anton",
+      "use": "Burned-in caption display face (condensed heavy caps)",
+      "vendoredAt": "engine/fonts/anton",
+      "licenceFile": "engine/fonts/anton/OFL.txt"
+    },
+    {
+      "name": "Archivo Black",
+      "version": "1.006 (google/fonts ofl/archivoblack)",
+      "licence": "SIL Open Font License 1.1",
+      "source": "https://github.com/google/fonts/tree/main/ofl/archivoblack",
+      "use": "Burned-in caption display face (geometric black)",
+      "vendoredAt": "engine/fonts/archivoblack",
+      "licenceFile": "engine/fonts/archivoblack/OFL.txt"
+    },
+    {
+      "name": "Barlow",
+      "version": "1.408 (google/fonts ofl/barlow; Black and Bold statics)",
+      "licence": "SIL Open Font License 1.1",
+      "source": "https://github.com/google/fonts/tree/main/ofl/barlow",
+      "use": "Burned-in caption text face (clean neutral sans with real heavy weights)",
+      "vendoredAt": "engine/fonts/barlow",
+      "licenceFile": "engine/fonts/barlow/OFL.txt"
+    }
   ]
 }

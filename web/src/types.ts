@@ -183,6 +183,7 @@ export const jobSchema = z.object({
   transcriptionTotalSeconds: z.number().nonnegative().nullable().optional(),
   transcriptionActivity: z.string().nullable().optional(),
   error: z.string().nullable().optional(),
+  canRetryImport: z.boolean().optional(),
   clips: z.array(clipSchema).default([]),
   beats: z.array(beatSchema).default([]),
   steps: z.array(processingStepSchema).default([]),
