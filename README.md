@@ -96,6 +96,20 @@ npm run dev
 
 Open <http://127.0.0.1:5173>. Vite proxies same-origin `/api` requests to port 8001. On Windows, `START_S6_CUT.cmd` builds and starts the production Compose application.
 
+### Installable PWA behavior
+
+The production web UI is an installable Progressive Web App. When served through the same-origin gateway, the browser can install it as **S6_cut** using the browser's install control. Installation and service-worker caching require a secure context: HTTPS is required for network hostnames, while `localhost` and `127.0.0.1` are permitted loopback exceptions. The default `http://localhost:8080` setup therefore supports PWA behavior locally; a LAN hostname or IP needs an HTTPS reverse proxy or VPN deployment. The app shell is precached by `/sw.js`, and an already loaded shell can open cached routes while the browser is offline. Offline mode does not make the local engine or media operations available: `/api/` requests, uploads, downloads, exports, and video files are deliberately not cached, so reconnect to the local engine before creating or processing projects.
+
+When a new application bundle is available, S6_cut shows **A new S6_cut version is ready**. Choose **Update app** to activate it; updates do not interrupt an active render automatically.
+
+### Caption styles
+
+Clip captions use the selected Funny, Serious, Educational, or Hype style. The engine renders these presets with the bundled Anton, Archivo Black, and Barlow display faces inside the engine image; it does not depend on a host machine having those fonts installed. Funny uses Archivo Black, Serious and Educational use Barlow, and Hype uses Anton. If a bundled face cannot be resolved at engine startup, the engine logs the requested and substituted font family instead of silently treating the fallback as the selected style. The font files and their SIL Open Font License notices are listed in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) and `third_party_provenance.json`.
+
+### Stopped YouTube imports
+
+**Stop & keep** preserves a YouTube import as a recoverable Workspace even when it stops during download before producing a Library asset. The project remains visible in the Projects list and the Workspace offers **Retry import**. If a selected project temporarily leaves the recent Projects listing—for example, after its last Library asset is removed—the UI does not silently switch the Workspace to another project; it shows its own empty state and can resolve the project again when it returns.
+
 ## Configuration
 
 Copy `.env.example` to `.env`. Important values:
@@ -201,6 +215,13 @@ npm test
 python -m pytest engine/tests -q
 npm run build
 docker compose config
+```
+
+The combined frontend and engine quality gate also checks that retired providers do not return to customer-facing source, then runs the checks above that are available through npm:
+
+```bash
+npm run check
+npm run check:providers
 ```
 
 When host FFmpeg/FFprobe are unavailable, the reproducible provisioned check
