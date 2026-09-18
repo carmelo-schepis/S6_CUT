@@ -1,13 +1,18 @@
 import { expect, test } from "@playwright/test";
 import path from "node:path";
-import { createClipProject, gateway, jobBoundaries, openProjects, root, waitForProjectReady } from "./support/workspace";
+import { OVERALL_DEADLINE_MS, createClipProject, gateway, jobBoundaries, openProjects, root, waitForProjectReady } from "./support/workspace";
 
 const styles = ["Funny", "Serious", "Educational", "Hype"] as const;
 const previewPaths = Object.fromEntries(styles.map((style) => [style, `/help/subtitles-${style.toLowerCase()}.mp4`])) as Record<typeof styles[number], string>;
 const isExpectedBrowserWarning = (text: string) => /Cross-Origin-Opener-Policy header has been ignored.*untrustworthy/i.test(text);
 
 test.use({ storageState: { cookies: [], origins: [] } });
-test.setTimeout(12 * 60_000);
+// This budget has to clear the render wait itself: waitForProjectReady gives a
+// job OVERALL_DEADLINE_MS, and behind a single job worker the whole suite
+// queues, so the earlier flat 12 minutes expired before its own wait could.
+// Derive it so the two cannot drift apart again, and leave room for the Help
+// dialog and the four preview players checked after the render.
+test.setTimeout(OVERALL_DEADLINE_MS + 10 * 60_000);
 
 test("Help subtitle previews load and play after a YouTube source workflow", async ({ page }) => {
   const consoleErrors: string[] = [];
@@ -83,7 +88,10 @@ test("Help subtitle previews load and play after a YouTube source workflow", asy
         expect(media.contentRange).toMatch(/^bytes 0-15\//i);
         expect(media.rangeBytes).toBe(16);
         expect(media.bytes).toBeGreaterThan(1000);
-        expect(media.origin).toBe("http://100.104.90.37:8080");
+        // Same-origin as the app under test: the point is that previews are
+        // served by this gateway, not a third party. Pinning one machine's
+        // address broke the test on every other host.
+        expect(media.origin, `${style} preview origin`).toBe(new URL(gateway).origin);
         const dimensions = await video.evaluate((element) => {
           const player = element as HTMLVideoElement;
           return { readyState: player.readyState, width: player.videoWidth, height: player.videoHeight, error: player.error?.message ?? null };
