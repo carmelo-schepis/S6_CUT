@@ -22,6 +22,13 @@ RUN python -m pip install --upgrade pip==26.0.1 \
 RUN apt-get update \
     && apt-get install -y --no-install-recommends fonts-noto-color-emoji \
     && rm -rf /var/lib/apt/lists/*
+# Display faces for burned-in captions. Vendored rather than apt-installed so
+# the render is reproducible: without them every style resolved to DejaVu Sans
+# and libass emboldened it synthetically, which smears the outline. Each family
+# ships its SIL Open Font License alongside it; see THIRD_PARTY_NOTICES.md and
+# third_party_provenance.json.
+COPY engine/fonts /usr/share/fonts/truetype/s6cut
+RUN fc-cache -f
 COPY engine /app/engine
 RUN mkdir -p /app/data && chown -R s6cut:s6cut /app
 

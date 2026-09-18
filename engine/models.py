@@ -200,6 +200,10 @@ class Job(ApiModel):
     transcription_total_seconds: float | None = Field(default=None, ge=0)
     transcription_activity: str | None = None
     error: str | None = None
+    # Computed for the public view (see public_job); the persisted value is not
+    # read back. The Workspace renders Retry import from this rather than
+    # guessing, so the offer and the engine's answer cannot disagree.
+    can_retry_import: bool = False
     clips: list[Clip] = Field(default_factory=list)
     beats: list[Beat] = Field(default_factory=list)
     steps: list[ProcessingStep] = Field(default_factory=list)

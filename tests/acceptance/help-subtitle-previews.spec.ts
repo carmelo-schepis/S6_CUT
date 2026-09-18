@@ -7,7 +7,16 @@ const previewPaths = Object.fromEntries(styles.map((style) => [style, `/help/sub
 const isExpectedBrowserWarning = (text: string) => /Cross-Origin-Opener-Policy header has been ignored.*untrustworthy/i.test(text);
 
 test.use({ storageState: { cookies: [], origins: [] } });
-test.setTimeout(12 * 60_000);
+// A real YouTube import rendered behind a single job worker: in a full-suite
+// run this job queues behind every other spec's work, and one measured run
+// took 25 minutes end to end against the default 15-minute wait. Budget the
+// wait from that measurement and give the test room for the Help dialog and
+// the four preview players checked afterwards. 45 minutes matches the other
+// real-media spec (shorts-background-blur). A genuine stall still shows up:
+// waitForProjectReady prints progress as it goes, so it is distinguishable
+// from slow.
+const READY_DEADLINE_MS = 35 * 60_000;
+test.setTimeout(45 * 60_000);
 
 test("Help subtitle previews load and play after a YouTube source workflow", async ({ page }) => {
   const consoleErrors: string[] = [];
@@ -43,7 +52,7 @@ test("Help subtitle previews load and play after a YouTube source workflow", asy
       captions: false,
       source: { kind: "url", url: "https://www.youtube.com/watch?v=WwA_7QyqtGI" },
     });
-    await waitForProjectReady(page, observed);
+    await waitForProjectReady(page, observed, "clip", READY_DEADLINE_MS);
     projectId = (await jobBoundaries(projectName)).project.id;
 
     const openAndVerifyPreviews = async () => {
@@ -83,7 +92,10 @@ test("Help subtitle previews load and play after a YouTube source workflow", asy
         expect(media.contentRange).toMatch(/^bytes 0-15\//i);
         expect(media.rangeBytes).toBe(16);
         expect(media.bytes).toBeGreaterThan(1000);
-        expect(media.origin).toBe("http://100.104.90.37:8080");
+        // Same-origin as the app under test: the point is that previews are
+        // served by this gateway, not a third party. Pinning one machine's
+        // address broke the test on every other host.
+        expect(media.origin, `${style} preview origin`).toBe(new URL(gateway).origin);
         const dimensions = await video.evaluate((element) => {
           const player = element as HTMLVideoElement;
           return { readyState: player.readyState, width: player.videoWidth, height: player.videoHeight, error: player.error?.message ?? null };

@@ -5,6 +5,7 @@
  * rather than a wrong expectation.
  */
 import { test, expect, type Page } from "@playwright/test";
+import { gateway } from "./support/workspace";
 
 const BENIGN_CONSOLE = /Cross-Origin-Opener-Policy header has been ignored.*untrustworthy/i;
 
@@ -24,9 +25,27 @@ async function rail(page: Page, name: string) {
   await page.waitForTimeout(2_500);
 }
 
-/** Opens a Workspace that has at least one rendered clip tile on the board. */
+/**
+ * Opens a Workspace that has at least one rendered clip tile on the board.
+ *
+ * The project is chosen from the job record rather than from whichever card the
+ * shell happens to select or sort first: a stopped-but-kept import heads the
+ * listing with an empty board, and a card can read "ready" while its clips have
+ * since been removed. Every control under test needs real tiles.
+ */
 async function workspaceWithClips(page: Page) {
-  await rail(page, "Workspace");
+  const projects = await (await fetch(`${gateway}/api/v1/projects`)).json() as { id: string; name: string }[];
+  const jobs = await (await fetch(`${gateway}/api/v1/jobs`)).json() as { projectId: string; state: string; clips?: { state: string }[] }[];
+  const withClips = new Set(jobs
+    .filter((job) => job.state === "complete" && (job.clips ?? []).some((clip) => clip.state === "complete"))
+    .map((job) => job.projectId));
+  const target = projects.find((project) => withClips.has(project.id));
+  test.skip(!target, "no project with finished clips on this instance");
+
+  await rail(page, "Projects");
+  const open = page.getByRole("button", { name: `Open project ${target!.name}`, exact: true }).first();
+  await expect(open).toBeVisible({ timeout: 30_000 });
+  await open.click();
   await expect(page.locator(".clip-board .clip-tile").first()).toBeVisible({ timeout: 30_000 });
 }
 

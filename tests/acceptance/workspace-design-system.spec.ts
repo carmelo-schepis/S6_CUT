@@ -70,9 +70,15 @@ async function findCompletedProject(request: APIRequestContext): Promise<string 
   const projects = await projectsResponse.json() as { id: string; name: string }[];
   const jobsResponse = await request.get(`${gateway}/api/v1/jobs`);
   if (!jobsResponse.ok()) return null;
-  const jobs = await jobsResponse.json() as { projectId: string; state: string }[];
-  const complete = new Set(jobs.filter((job) => job.state === "complete").map((job) => job.projectId));
-  return projects.find((project) => complete.has(project.id))?.name ?? null;
+  const jobs = await jobsResponse.json() as { projectId: string; state: string; mode: string; steps?: unknown[] }[];
+  // The rules below measure the full clip ledger — styles.css spends the
+  // 280-340px panel budget on eleven rows. A Fast run publishes six, so taking
+  // whichever completed project merely sorts first measured a short panel and
+  // read as a layout regression. Prefer the longest clip ledger available.
+  const depth = new Map(jobs.filter((job) => job.state === "complete" && job.mode === "clip").map((job) => [job.projectId, job.steps?.length ?? 0]));
+  const candidates = projects.filter((project) => depth.has(project.id));
+  if (!candidates.length) return null;
+  return candidates.sort((a, b) => (depth.get(b.id) ?? 0) - (depth.get(a.id) ?? 0))[0].name;
 }
 
 async function openWorkspace(page: Page, projectName: string) {

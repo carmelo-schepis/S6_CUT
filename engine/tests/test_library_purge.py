@@ -88,8 +88,14 @@ def test_library_purge_rejects_queued_jobs_without_mutation(tmp_path: Path) -> N
     database.save_job(Job(id="queued-job", project_id="missing-project", mode="clip", processing_mode="fast", state="queued", stage="queued", stage_label="Queued", progress=0, style="educational"), {})
     app_module, original = use_cluster(database, manager, settings)
     try:
-        with TestClient(app) as client:
-            response = client.post("/api/v1/library/purge", json={"confirmation": "DELETE ALL CONTENT"})
+        # Deliberately no lifespan here: entering TestClient as a context manager
+        # starts the job worker, which is free to claim this queued job and fail
+        # it (its project and source do not exist) before the request lands. The
+        # job would then no longer be queued and the purge would be allowed —
+        # the assertion below would fail for a reason that has nothing to do with
+        # the guard it is testing. The endpoint reads the database directly, so
+        # it needs no running worker.
+        response = TestClient(app).post("/api/v1/library/purge", json={"confirmation": "DELETE ALL CONTENT"})
         assert response.status_code == 409
         assert "queued or running" in response.json()["detail"]
     finally:

@@ -196,7 +196,9 @@ describe("WorkspaceView – stalled smart detection", () => {
 
   it("offers a retry when a YouTube import is stopped before progress is recorded", async () => {
     const youtubeProject = { ...project, id: "youtube-project", sourceKind: "youtube" as const };
-    const stoppedJob = { ...freshSmartJob, id: "youtube-job", projectId: youtubeProject.id, state: "cancelled_kept" as const, stage: "cancelled", stageLabel: "Stopped; completed outputs kept" };
+    // canRetryImport is the engine's own answer (it holds the import url and the
+    // job is stopped), which is what the Workspace now renders the control from.
+    const stoppedJob = { ...freshSmartJob, id: "youtube-job", projectId: youtubeProject.id, state: "cancelled_kept" as const, stage: "cancelled", stageLabel: "Stopped; completed outputs kept", canRetryImport: true };
     mockGetJob.mockResolvedValue(stoppedJob);
     mockControlJob.mockResolvedValue(stoppedJob);
     renderView({ project: youtubeProject });

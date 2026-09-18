@@ -1,11 +1,22 @@
 import { expect, test } from "@playwright/test";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { createClipProject, jobBoundaries, openProjects, root, waitForProjectReady } from "./support/workspace";
+import { createClipProject, gateway, jobBoundaries, openProjects, root, waitForProjectReady } from "./support/workspace";
 
 const isExpectedBrowserWarning = (text: string) => /Cross-Origin-Opener-Policy header has been ignored.*untrustworthy/i.test(text);
 
 test.use({ storageState: { cookies: [], origins: [] } });
+
+// Both tests below assert absolute counts ("0" recent projects, then exactly
+// the two they create), so they only mean anything on a fresh installation.
+// Run them against an empty stack — point S6_DATA_PATH at a throwaway dataset
+// and S6_ACCEPTANCE_URL at it — rather than a working instance, whose real
+// projects would otherwise report these as failures. Skipping is the same
+// precondition gate the tool-gated smoke tests use; it is not an always-skip.
+test.beforeEach(async () => {
+  const projects = await (await fetch(`${gateway}/api/v1/projects`)).json();
+  test.skip(projects.length > 0, `needs an empty installation; this one has ${projects.length} projects (use an isolated stack)`);
+});
 
 test("repaired installation has no orphaned Library projects", async ({ page }) => {
   const consoleErrors: string[] = [];

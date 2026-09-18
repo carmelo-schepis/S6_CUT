@@ -97,6 +97,20 @@ def test_project_with_any_remaining_associated_asset_stays_visible(tmp_path: Pat
     assert [value.id for value in database.list_projects()] == [second.id]
 
 
+def test_stopped_but_kept_project_stays_visible_before_it_publishes_output(tmp_path: Path) -> None:
+    # Stopping a YouTube import during the download leaves the project
+    # `cancelled_kept` with no asset yet; the Workspace still offers Retry
+    # import for it, so the listing has to keep returning it. A `complete`
+    # project that owns nothing stays hidden — that is the Library rule.
+    database = Database(tmp_path / "s6-cut.sqlite3")
+    stopped = project("project-stopped", "YouTube import").model_copy(update={"state": "cancelled_kept"})
+    finished = project("project-finished", "Finished with nothing")
+    database.save_project(stopped)
+    database.save_project(finished)
+
+    assert [value.id for value in database.list_projects()] == [stopped.id]
+
+
 def test_library_asset_deletion_is_idempotent_and_protected_failures_preserve_project(tmp_path: Path) -> None:
     database = Database(tmp_path / "s6-cut.sqlite3")
     item = project("project-a")
