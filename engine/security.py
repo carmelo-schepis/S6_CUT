@@ -10,7 +10,7 @@ import socket
 import time
 import unicodedata
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from cryptography.fernet import Fernet, InvalidToken
 
@@ -18,6 +18,7 @@ from cryptography.fernet import Fernet, InvalidToken
 SAFE_FILENAME = re.compile(r"[^A-Za-z0-9._-]+")
 ARCHIVE_INVALID = re.compile(r'[<>:"/\\|?*\x00-\x1f\x7f]')
 YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "music.youtube.com"}
+YOUTUBE_VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
 
 
 # DO-NOT-CHANGE: see DO-NOT-CHANGE/AGENTS.md — HMAC payload format, key files, and
@@ -60,14 +61,29 @@ def validate_youtube_url(value: str) -> str:
         raise ValueError("Only public HTTPS YouTube URLs are supported")
     if parsed.username or parsed.password or parsed.port not in (None, 443):
         raise ValueError("Credentials and custom ports are not allowed")
+
+    video_id: str | None = None
+    path_parts = [part for part in parsed.path.split("/") if part]
+    if host == "youtu.be":
+        if len(path_parts) == 1:
+            video_id = path_parts[0]
+    elif parsed.path.rstrip("/") == "/watch":
+        video_ids = parse_qs(parsed.query, keep_blank_values=True).get("v", [])
+        if len(video_ids) == 1:
+            video_id = video_ids[0]
+    elif len(path_parts) == 2 and path_parts[0] in {"shorts", "embed", "live"}:
+        video_id = path_parts[1]
+    if not video_id or not YOUTUBE_VIDEO_ID.fullmatch(video_id):
+        raise ValueError("Only direct YouTube video URLs are supported")
+
     try:
-        for info in socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM):
+        for info in socket.getaddrinfo("www.youtube.com", 443, type=socket.SOCK_STREAM):
             address = ipaddress.ip_address(info[4][0])
             if address.is_private or address.is_loopback or address.is_link_local or address.is_reserved:
                 raise ValueError("The URL resolved to a non-public address")
     except socket.gaierror as exc:
         raise ValueError("The YouTube host could not be resolved") from exc
-    return value.strip()
+    return f"https://www.youtube.com/watch?v={video_id}"
 
 
 class SecretVault:

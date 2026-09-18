@@ -387,7 +387,7 @@ def download_youtube(
     resume: bool = True,
     max_seconds: int | None = None,
 ) -> Path:
-    validate_youtube_url(url)
+    url = validate_youtube_url(url)
     target_dir.mkdir(parents=True, exist_ok=True)
     template = str(target_dir / "source-%(id)s.%(ext)s")
     common = [

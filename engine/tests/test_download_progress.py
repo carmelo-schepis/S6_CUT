@@ -63,7 +63,8 @@ def test_download_youtube_passes_quality_selector_and_keeps_progress_contract(tm
     source = tmp_path / "source-video.mp4"
     source.write_bytes(b"video")
     commands: list[list[str]] = []
-    monkeypatch.setattr("engine.media.validate_youtube_url", lambda _: None)
+    canonical_url = "https://www.youtube.com/watch?v=8xEuFQz4E4A"
+    monkeypatch.setattr("engine.media.validate_youtube_url", lambda _value: canonical_url)
     monkeypatch.setattr("engine.media.probe", lambda *args, **kwargs: {"duration": 1})
 
     def run(command, target_dir, *args, **kwargs):
@@ -73,6 +74,7 @@ def test_download_youtube_passes_quality_selector_and_keeps_progress_contract(tm
     monkeypatch.setattr("engine.media._run_ytdlp_download", run)
     assert download_youtube("https://www.youtube.com/watch?v=fixture", tmp_path, settings) == source.resolve()
     command = commands[0]
+    assert command[-1] == canonical_url
     assert command[command.index("--format") + 1] == YOUTUBE_FORMAT_SELECTOR
     assert command[command.index("--merge-output-format") + 1] == "mp4"
     extractor_args = [command[index + 1] for index, value in enumerate(command) if value == "--extractor-args"]
@@ -83,7 +85,7 @@ def test_download_youtube_uses_explicit_clients_only_as_compatibility_fallback(t
     source = tmp_path / "source-video.mp4"
     source.write_bytes(b"video")
     commands: list[list[str]] = []
-    monkeypatch.setattr("engine.media.validate_youtube_url", lambda _: None)
+    monkeypatch.setattr("engine.media.validate_youtube_url", lambda value: value)
     monkeypatch.setattr("engine.media.probe", lambda *args, **kwargs: {"duration": 1})
 
     def run(command, target_dir, *args, **kwargs):
