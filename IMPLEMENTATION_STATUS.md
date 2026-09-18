@@ -13,10 +13,10 @@ Updated: 2026-09-11
 - New no-provider Auto jobs resolve to Fast local cut: FFprobe-validated, deterministic non-overlapping windows, silent-video support, progressive FFmpeg crop/render, and no Whisper/provider calls.
 - Explicit Smart clips use extracted 16 kHz mono audio, CPU-friendly Faster-Whisper defaults, real segment progress, cancellation checkpoints, versioned transcript cache, optional OpenRouter candidate ordering, and deterministic local fallback.
 - Durable mode-specific processing checklists record real validated checkpoints, provider fallbacks, render counts, partial output verification, retries, pause/cancel, and restart recovery.
-- Independent FFmpeg renders with centre 9:16/1:1/16:9 crop, H.264/AAC, word-highlight captions, visual text cards or matched Library overlays, FFprobe output validation, and atomic publication.
+- Independent FFmpeg renders with centre 9:16/1:1/16:9 crop, H.264/AAC, word-highlight captions, matched Library overlays for source clips, and Script-mode text-card beats, followed by FFprobe output validation and atomic publication.
 - Progressive workspace through SSE with polling fallback, clip selection, score inspector, storyboard/Beat board, partial success, pause/resume, stop-and-keep, and scoped retry. The internal EDL remains authoritative while the redundant layered-timeline panel is no longer rendered.
 - ZIP export with numbered successful media, `manifest.json`, `credits.json`, and warning/failure summary.
-- Personal Media Library with persistent three-level business folders, Unsorted migration, combined search/type/origin/policy filters, signed previews, protected state, and resilient refresh handling.
+- Personal Media Library with persistent three-level business folders, Unsorted migration, combined search/type/origin/policy filters, signed previews, protected state, resilient refresh handling, and an exact-confirmation global purge that preserves application configuration.
 - Validated uploads, YouTube sources, Fast/Smart clips, Script outputs, and retries publish idempotently into a shared content-addressed blob store with durable project/job/clip/Library references and neutral matching defaults.
 - Script exact-span planning every roughly 2-3 seconds, OpenRouter TTS -> local espeak-ng -> silent narration fallback, word alignment, storyboard, captions, visual beats, and render.
 - Provider profiles with configurable OpenRouter model, optional OpenRouter speech model and voice, test/duplicate/delete, masked read API, session-only or Fernet-encrypted persistent secrets.
@@ -60,7 +60,7 @@ Six supplied YouTube sources were driven through the real UI against the live Do
 
 - Reframe is reliable centre crop with reversible source preservation; face/active-speaker trajectory analysis is not implemented yet.
 - The EDL is versioned in the durable job/clip/beat contract, but interactive trim, caption correction, asset replacement, and persisted undo/redo controls are the next editor milestone.
-- The Library resolver is fully local and deterministic. No live no-key web media adapter is enabled; unmatched content uses a visible relevant text card instead of rights-unknown or unrelated media.
+- The Library resolver is fully local and deterministic. No live no-key web media adapter is enabled; unmatched Script-mode visual beats use a visible relevant text card instead of rights-unknown or unrelated media, while Clip mode always preserves the imported source footage.
 - Smart clips may use the selected, tested OpenRouter profile to order validated local candidates. Provider failure is recorded in the checklist and falls back to deterministic local planning; OpenRouter never performs transcription.
 - Local narration uses espeak-ng for dependable offline operation. Higher-quality local neural TTS is not bundled yet.
 - Retention policy is reported/configured; only safe stale partial-file cleanup is automatic in this milestone. Operator-approved project/output cleanup needs a reference-aware UI.

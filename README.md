@@ -6,30 +6,32 @@ There is no S6_cut account, credit system, watermark, artificial usage limit, or
 
 ## Quick start (Docker)
 
-The repository is currently **private**. Authenticated GitHub CLI users can install now using the commands below. Once the repository is made public, the standard anonymous one-liners will work from any device.
+The repository is currently **private**. Authenticated GitHub CLI users can install now using the commands below. Once the repository is made public, the standard anonymous one-liners will work from any device. The commands below pin both the bootstrap script and the installer checkout to the current default branch (`main`).
 
 ### Linux / macOS (bash)
 
 **Private repo / authenticated (works now):**
 ```bash
-gh api -H "Accept: application/vnd.github.raw+json" repos/carmelo-schepis/S6_CUT/contents/install.sh | bash
+gh api -H "Accept: application/vnd.github.raw+json" repos/carmelo-schepis/S6_CUT/contents/install.sh?ref=main | S6_BRANCH=main bash
 ```
 
 **Public repo / anonymous (works after repository visibility is changed to public):**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/carmelo-schepis/S6_CUT/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/carmelo-schepis/S6_CUT/main/install.sh | S6_BRANCH=main bash
 ```
 
 ### Windows (PowerShell)
 
 **Private repo / authenticated (works now):**
 ```powershell
-gh api -H "Accept: application/vnd.github.raw+json" repos/carmelo-schepis/S6_CUT/contents/Install-S6_CUT.ps1 | Invoke-Expression
+$script = (gh api -H "Accept: application/vnd.github.raw+json" repos/carmelo-schepis/S6_CUT/contents/Install-S6_CUT.ps1?ref=main) -join "`n"
+& ([scriptblock]::Create($script)) -Branch main
 ```
 
 **Public repo / anonymous (works after repository visibility is changed to public):**
 ```powershell
-irm https://raw.githubusercontent.com/carmelo-schepis/S6_CUT/master/Install-S6_CUT.ps1 | iex
+$script = irm https://raw.githubusercontent.com/carmelo-schepis/S6_CUT/main/Install-S6_CUT.ps1
+& ([scriptblock]::Create($script)) -Branch main
 ```
 
 The installer checks for Git, Docker, and Docker Compose v2, clones S6_cut into `~/s6_cut` (or updates an existing installation in place), creates `.env` from the template on first run — and never overwrites your configuration — then builds, starts, and waits for the app to become ready. When it finishes you will see:
@@ -138,7 +140,7 @@ Whisper job stages report real, incrementally observed progress: each fraction i
 | Smart clip selection | Optional OpenRouter ordering over validated local candidates | Deterministic local candidate planning |
 | Script planning | Optional OpenRouter structured planning boundary | Deterministic exact-span phrase planner |
 | Narration | Selected OpenRouter speech model and voice | Local espeak-ng; then explicitly silent render |
-| Visuals | Required/preferred personal Library | Relevant local text card; wrong media is not substituted |
+| Visuals | Clip mode cuts the imported source; a valid personal Library asset may be composited as an overlay | Script mode uses a relevant local text card when no eligible visual asset matches; Clip mode never substitutes a text card for source footage |
 | YouTube | Constrained local yt-dlp | Local upload remains available and the URL failure is scoped |
 
 The application remains operational when OpenRouter is the only configured API. Clip mode also works with no API key. Optional provider failure becomes a visible warning and local fallback, not a corrupt project.
@@ -164,6 +166,7 @@ Back up or snapshot the complete data directory while the stack is stopped, or u
 - Uninstall but keep data: run `uninstall.sh` (or `docker compose down --rmi local` for the manual flow), leaving `S6_DATA_PATH` untouched. `uninstall.sh --purge --yes` additionally deletes the installation directory and everything in it — including your data; use it only when you are sure.
 - Remove data: stop the stack, confirm the exact configured absolute data path, and remove that dataset/directory separately. Compose never declares a named volume that silently deletes the host dataset.
 - Deleting one project never deletes a Library source as a side effect. Removing a Library record likewise leaves project and clip references usable.
+- To empty the Library from the UI, open **Settings → Library data**, choose **Delete all Library content**, and type `DELETE ALL CONTENT`. This permanently removes Library media—including archived and protected items—and cascades linked projects and generated media, while preserving provider profiles, secrets, settings, the database, and business-folder records. The action is unavailable while a job is queued or processing.
 - Business folders are organizational containers, not accounts or access-control boundaries; folder names never become filesystem paths.
 - Back up and restore the entire `S6_DATA_PATH` together. The SQLite reference graph and `blobs/` content-addressed files are one backup unit. Existing `library/` files are migrated by reference without destructive startup moves.
 - New managed media uses an atomic same-filesystem hard link into the shared blob store when supported, with an atomic copy fallback for filesystems that cannot hard-link. The schema is already separated into blobs and references so legacy media can be consolidated gradually without startup relocation.
