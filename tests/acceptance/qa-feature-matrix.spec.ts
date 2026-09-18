@@ -49,7 +49,10 @@ test.describe("§6.1 application shell", () => {
     await rail(page, "Settings");
     await page.getByRole("button", { name: /S6_cut Projects/i }).click();
     await page.waitForTimeout(1_500);
-    await expect(page.getByRole("heading", { level: 1, name: /Make the first cut/i })).toBeVisible();
+    // 7542e67 removed the "Make the first cut" introduction; the Projects page
+    // now carries a visually-hidden h1 as its landmark heading.
+    await expect(page.getByRole("heading", { level: 1, name: "Projects" })).toBeAttached();
+    await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
   });
 
   test("PWA assets and title are served", async ({ page, request }) => {
@@ -175,11 +178,15 @@ test.describe("§6.2 Projects", () => {
     await rail(page, "Projects");
     const search = page.getByRole("searchbox", { name: "Search projects" });
     await expect(search, "search appears once there are more than 12 projects").toBeVisible();
-    await search.fill("QA_20260911T140416Z_C1");
-    await page.waitForTimeout(1_000);
     const cards = page.locator(".project-card");
-    expect(await cards.count(), "search should narrow the list").toBeGreaterThan(0);
-    await expect(cards.first()).toContainText("QA_20260911T140416Z_C1");
+    // Search for a project this install actually has: a pinned fixture name
+    // rots as soon as the Library is purged or the data directory is replaced.
+    const existing = (await cards.first().locator(".project-card-title strong").innerText()).trim();
+    expect(existing, "a listed project supplies the search term").not.toBe("");
+    await search.fill(existing);
+    await page.waitForTimeout(1_000);
+    expect(await cards.count(), "search should match the listed project").toBeGreaterThan(0);
+    await expect(cards.first()).toContainText(existing);
     await search.fill("zzz-no-such-project-zzz");
     await page.waitForTimeout(1_000);
     expect(await cards.count()).toBe(0);

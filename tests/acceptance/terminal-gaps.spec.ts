@@ -170,7 +170,9 @@ test("terminal exact viewport, screenshot, and ZIP evidence", async ({ browser, 
     diagnostics.measurements.push(await measure(page, "settings", { width, height }));
     if (name !== "desktop") await page.screenshot({ path: path.join(artifacts, `${name}-settings.png`), fullPage: true });
     await page.getByRole("button", { name: /New profile/ }).click();
-    await expect(page.locator('input[type="password"]')).toHaveCount(2);
+    // One secret field: the OpenRouter key. The second key input belonged to
+    // ElevenLabs, retired when text and speech moved to OpenRouter (aad9837).
+    await expect(page.locator('input[type="password"]')).toHaveCount(1);
     diagnostics.measurements.push(await measure(page, "settings-dialog", { width, height }));
     await context.close();
   }

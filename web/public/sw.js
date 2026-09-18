@@ -1,4 +1,4 @@
-const CACHE = "s6-cut-shell-v4";
+const CACHE = "s6-cut-shell-v5";
 const CACHE_PREFIX = "s6-cut-shell-";
 const SHELL = [
   "/",

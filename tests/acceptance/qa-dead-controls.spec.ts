@@ -26,7 +26,13 @@ async function rail(page: Page, name: string) {
 
 /** Opens a Workspace that has at least one rendered clip tile on the board. */
 async function workspaceWithClips(page: Page) {
-  await rail(page, "Workspace");
+  // Pick a project that actually finished clips rather than whichever one the
+  // shell selects first: a stopped-but-kept import sorts to the top of the
+  // listing with an empty board, and the filters under test need tiles.
+  await rail(page, "Projects");
+  const ready = page.locator(".project-card").filter({ hasText: /ready/i }).first();
+  await expect(ready, "an install with finished clips is required").toBeVisible({ timeout: 30_000 });
+  await ready.getByRole("button", { name: /^Open project / }).click();
   await expect(page.locator(".clip-board .clip-tile").first()).toBeVisible({ timeout: 30_000 });
 }
 
