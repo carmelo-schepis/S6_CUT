@@ -57,17 +57,28 @@ const spread = (values: number[]) => Math.max(...values) - Math.min(...values);
 const STATUS_WORDS = new Set(["Complete", "Skipped", "In progress", "Pending", "Failed", "Paused"]);
 
 /**
- * Open whatever finished project the instance actually has.
+ * Open whatever finished SHORT-FORMAT project the instance actually has.
  *
  * Naming a fixture project would tie this suite to one dataset; rendering a new
  * one would put a 15-minute encode in front of a layout check. It skips cleanly
  * when the instance has nothing finished, the same way the FFmpeg-gated suites
  * skip when the tools are absent.
+ *
+ * `contentFormat === "long"` is excluded deliberately. Since commit 3ae1922
+ * ("Make a style a full edit recipe, and give long form its own look") long
+ * form is a different design contract, not a regression of this one: its ledger
+ * is headed "Long-form creation progress" and its viewer frame is landscape, so
+ * it measures ~325px against the >=360px portrait floor below. That contract is
+ * owned by long-form-checklist.spec.ts; every assertion in this file is written
+ * against the short. Without this filter the picker sorts all-equal ledger
+ * depths, keeps the API's `updated_at DESC` order, and lands on whichever
+ * project ticked last — so this suite passed or failed on which format happened
+ * to be newest.
  */
 async function findCompletedProject(request: APIRequestContext): Promise<string | null> {
   const projectsResponse = await request.get(`${gateway}/api/v1/projects`);
   if (!projectsResponse.ok()) return null;
-  const projects = await projectsResponse.json() as { id: string; name: string }[];
+  const projects = await projectsResponse.json() as { id: string; name: string; contentFormat?: string }[];
   const jobsResponse = await request.get(`${gateway}/api/v1/jobs`);
   if (!jobsResponse.ok()) return null;
   const jobs = await jobsResponse.json() as { projectId: string; state: string; mode: string; steps?: unknown[] }[];
@@ -76,7 +87,7 @@ async function findCompletedProject(request: APIRequestContext): Promise<string 
   // whichever completed project merely sorts first measured a short panel and
   // read as a layout regression. Prefer the longest clip ledger available.
   const depth = new Map(jobs.filter((job) => job.state === "complete" && job.mode === "clip").map((job) => [job.projectId, job.steps?.length ?? 0]));
-  const candidates = projects.filter((project) => depth.has(project.id));
+  const candidates = projects.filter((project) => depth.has(project.id) && project.contentFormat !== "long");
   if (!candidates.length) return null;
   return candidates.sort((a, b) => (depth.get(b.id) ?? 0) - (depth.get(a.id) ?? 0))[0].name;
 }
