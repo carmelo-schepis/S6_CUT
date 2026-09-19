@@ -60,10 +60,15 @@ services:
         target: /app/data
     networks:
       - private
-    # Loopback-only binding: the engine API (and its /api/docs) is reachable
-    # from the host at http://localhost:${S6_ENGINE_PORT:-8001} for local
-    # debugging, but is never exposed to the LAN. nginx remains the only
-    # network-visible service.
+    # Loopback-only binding: this published port is reachable only from the
+    # host at http://localhost:${S6_ENGINE_PORT:-8001}, for local debugging,
+    # and nginx is the only container that publishes to the network.
+    #
+    # It is NOT an access control for the API. The web service proxies /api/
+    # (including /api/docs) straight through to this engine with no
+    # authentication, so every endpoint here — project deletion and Library
+    # purge included — is reachable from whatever interfaces S6_PORT binds the
+    # frontend to. Narrow S6_PORT, or firewall it, to restrict that.
     ports:
       - "127.0.0.1:${S6_ENGINE_PORT:-8001}:8001"
     healthcheck:

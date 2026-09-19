@@ -43,7 +43,7 @@ Frontend: http://localhost:8080
 Backend:  http://localhost:8001
 ```
 
-Open the **Frontend** URL in your browser. The backend engine — including its API docs at `/api/docs` — listens on localhost only and is not exposed to your network.
+Open the **Frontend** URL in your browser. The engine's own port is bound to loopback and is never published to your network. That is not, however, an access control for the API: the web gateway proxies `/api/` — including the API docs at `/api/docs` — through to the engine, and S6_cut has no authentication. The API is therefore reachable from every interface the frontend is published on, which by default is all of them. Anyone who can reach the frontend can create, read and delete your projects and Library media. Set `S6_PORT` to bind it narrower — `S6_PORT=127.0.0.1:8080` restricts it to this machine, and `S6_PORT=<one-address>:8080` to a single interface — or keep it on a trusted network.
 
 Requirements: Git, curl, Docker Engine with Compose v2, with 8 GB RAM recommended and enough storage for source media, the Whisper model, temporary renders, and outputs. The installer does not install Docker for you: on Linux, install Docker Engine; on macOS/Windows, install Docker Desktop.
 
