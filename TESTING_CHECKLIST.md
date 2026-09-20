@@ -1,5 +1,29 @@
 # S6_CUT Autonomous Playwright Test Checklist
 
+## Run: 2026-09-19/20 (live Docker Playwright sweep)
+
+Evidence root: `test-artifacts/qa-sweep-20260919T235544Z/` (screenshots, logs, notes). Existing Compose services were healthy at startup and were not stopped. No project/data deletion or Git operations were performed. This run updates the status below as UI coverage proceeds; prior run evidence remains historical.
+
+| Feature | Route/entry point | Status | Evidence | Notes |
+|---|---|---|---|---|
+| Deployment/health gate | `http://127.0.0.1:8080` | PASS (initial) | `logs/compose-ps.txt`, `logs/health.json` | web, engine and pot-provider healthy; 0 active/queued jobs at startup |
+| Full live route sweep | All seven rail routes + Help | PASS (desktop; mobile shell captured) | `screenshots/`, `logs/live-sweep.json` | Projects, Library, Shorts Editor, AI Video local plan, Jobs, Settings, Workspace and Help exercised; no console/page/request failures |
+| Shorts Editor deep pass | Shorts Editor with persisted completed clips | PASS | `screenshots/shorts-editor-selected.png`, `screenshots/shorts-editor-mobile.png` | Existing clip selected; preview, trim/aspect/subtitle controls and assistant surface verified without queueing a render |
+| AI Video local planning status | AI Video → custom script | FIXED-VERIFIED | `screenshots/ai-video-local-plan-before-fix.png`, `screenshots/ai-video-local-plan-after-fix.png`, `logs/live-sweep.json` | QA-010: status text was constrained to a 20px grid column; scoped `.topic-video-form > .mode-note` to one full-width column; rebuilt web and reran original flow |
+| Workspace completed output | Workspace → persisted complete YouTube project | PASS | `screenshots/workspace-desktop.png` | 11-step ledger, 9:16 preview, score/captions/asset/info tabs, clip board, export controls visually inspected |
+| Safe non-destructive acceptance regression set | Playwright against rebuilt gateway | PARTIAL / HARNESS-INTERRUPTED | `logs/live-sweep.json`, Playwright terminal output, `test-artifacts/test-results/` | The 95-test batch advanced through test 68/95 without an assertion failure being reported, then the runner received SIGTERM from the test harness. The 27-test remainder (theme, alignment, Workspace design, ratio/progress and YouTube-credit fixture checks) passed 27/27. A split rerun was also harness-terminated after 19/53 without a reported assertion failure; no product defect is claimed from these interruptions. |
+
+### Current run defect ledger
+
+- **QA-010 — FIXED-VERIFIED.** Reproduction: AI Video → enter a clearly labeled local custom script → **Create / refresh plan**. Before fix, `Plan ready for review.` rendered one word per line in a 20px-wide first grid track; evidence `screenshots/ai-video-local-plan-before-fix.png`, geometry `logs/live-sweep.json` (`columns: 20px 1110px`, height 64px). Root cause: `.mode-note` is shared with icon + copy notes, but this Topic to Video status is a single direct text node. Fix: `web/src/styles.css` adds `.topic-video-form > .mode-note { grid-template-columns: minmax(0, 1fr); }`. Checks: lint/typecheck, frontend tests, build passed; affected web image rebuilt/recreated; original UI flow rerun and visually inspected in `screenshots/ai-video-local-plan-after-fix.png`; permanent regression `tests/acceptance/ai-video-layout.spec.ts` passed 1/1. No provider request or render was made.
+
+### Current run checks / blockers
+
+- `npm run lint` PASS; `npm run typecheck` PASS; `npm test -- --run` PASS (274 tests); `npm run build` PASS; `docker compose config` PASS.
+- Host `python -m pytest engine/tests -q` and `npm run test:engine` are BLOCKED by this host environment: `/usr/bin/python3` is present but pytest is not installed and no project `.venv/bin/python` is available. The isolated project-defined `npm run check:supported` PASSed in a disposable temporary Compose dataset: **417 engine tests passed**, 2 upstream dependency deprecation warnings; isolated build also passed.
+- `npm run lint`, `npm run typecheck`, `npm test -- --run` (**274 passed**), `npm run build`, and `docker compose config` PASS after the fix. The focused permanent regression `npx playwright test tests/acceptance/ai-video-layout.spec.ts` PASSed **1/1** after the test was made deterministic against the concurrent provider-status note.
+- The broad safe live Playwright batch was harness-interrupted by SIGTERM rather than failing an assertion; its remainder passed 27/27. Destructive/provider/render-heavy specs remain intentionally unrun against shared data (see remaining gaps below).
+
 Run: 2026-09-12, existing Docker deployment (`http://127.0.0.1:8080`), engine `127.0.0.1:8001`. Existing services were left running. Screenshots are under `test-artifacts/qa-sweep/`; prior owner QA evidence is under `test-artifacts/`.
 
 ## Run: 2026-09-17 (regression + video-shorts deep pass)

@@ -760,6 +760,7 @@ main { min-width: 0; }
 .processing-mode-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .format-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .mode-note { display: grid; grid-template-columns: var(--space-5) minmax(0, 1fr); align-items: start; gap: var(--space-2); min-width: 0; margin: var(--space-2) 0 0; color: var(--text-primary); }
+.topic-video-form > .mode-note { grid-template-columns: minmax(0, 1fr); }
 .mode-note-icon { display: grid; place-items: center; width: var(--space-5); height: var(--space-5); color: var(--copper-light); }
 .mode-note-copy { min-width: 0; overflow-wrap: anywhere; }
 .mode-note.warning { color: var(--text-primary); background: rgba(240,168,75,.14); padding: var(--space-2); border: 1px solid rgba(240,168,75,.25); border-radius: 6px; }
