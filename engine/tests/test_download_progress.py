@@ -20,7 +20,7 @@ def settings() -> Settings:
 
 def fake_downloader(tmp_path: Path, body: str) -> Path:
     path = tmp_path / "fake-ytdlp.py"
-    script = f"#!{sys.executable}\nimport time\nfrom pathlib import Path\n{textwrap.indent(textwrap.dedent(body).strip(), "") }\n"
+    script = f"#!{sys.executable}\nimport time\nfrom pathlib import Path\n{textwrap.indent(textwrap.dedent(body).strip(), '')}\n"
     path.write_text(script, encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
     return path
