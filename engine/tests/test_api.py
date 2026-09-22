@@ -55,6 +55,28 @@ def test_health_aliases_stay_available_when_mounted_data_does_not_support_statvf
         assert response.json()["freeBytes"] == 0
 
 
+def test_storage_diagnostics_stay_available_without_statvfs(monkeypatch, tmp_path: Path) -> None:
+    (tmp_path / "jobs").mkdir()
+    (tmp_path / "jobs" / "retained.json").write_text("{}")
+    configured_settings = replace(settings, data_path=tmp_path, retention_days=17, max_retained_jobs=23)
+    monkeypatch.setattr("engine.app.settings", configured_settings)
+
+    def unsupported_disk_usage(_: Path) -> None:
+        raise OSError(95, "Operation not supported")
+
+    monkeypatch.setattr("engine.app.shutil.disk_usage", unsupported_disk_usage)
+
+    response = client.get("/api/v1/storage")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["freeBytes"] == 0
+    assert body["totalBytes"] == 0
+    assert body["files"] == {"jobs": 1, "blobs": 0, "library": 0, "cache": 0, "exports": 0}
+    assert body["retentionDays"] == configured_settings.retention_days
+    assert body["maxRetainedJobs"] == configured_settings.max_retained_jobs
+
+
 def test_script_job_preserves_exact_source_and_returns_durable_records() -> None:
     script = "The Beatles changed popular music. This second sentence explains why."
     response = client.post("/api/v1/jobs/script", json={"script": script, "style": "educational", "aspectRatio": "9:16", "narration": "silent"})
