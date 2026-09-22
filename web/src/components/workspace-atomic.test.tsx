@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Health, Job, LibraryFolder, Project } from "../types";
 import { WorkspaceView } from "./workspace-view";
@@ -137,6 +137,34 @@ describe("WorkspaceView – atomic output publication acceptance", () => {
     renderView();
     expect(await screen.findByText("Cut 01")).toBeInTheDocument();
     expect(screen.getByText(/4 planned · 2 ready · 1 saved to Library/)).toBeInTheDocument();
+  });
+
+  it("filters the clip board by export selection and failed state", async () => {
+    renderView();
+    expect(await screen.findByText("Cut 01")).toBeInTheDocument();
+
+    const all = screen.getByRole("button", { name: "All clips" });
+    const selected = screen.getByRole("button", { name: "Selected clips" });
+    const failed = screen.getByRole("button", { name: "Failed clips" });
+    expect(all).toHaveAttribute("aria-pressed", "true");
+    expect(document.querySelectorAll(".clip-tile")).toHaveLength(4);
+
+    fireEvent.click(selected);
+    expect(selected).toHaveAttribute("aria-pressed", "true");
+    expect(all).toHaveAttribute("aria-pressed", "false");
+    expect(document.querySelectorAll(".clip-tile")).toHaveLength(2);
+    expect(screen.getByText("Cut 01")).toBeInTheDocument();
+    expect(screen.getByText("Cut 02")).toBeInTheDocument();
+    expect(screen.queryByText("Cut 03")).not.toBeInTheDocument();
+
+    fireEvent.click(failed);
+    expect(failed).toHaveAttribute("aria-pressed", "true");
+    expect(document.querySelectorAll(".clip-tile")).toHaveLength(1);
+    expect(screen.getByText("Cut 03")).toBeInTheDocument();
+    expect(screen.queryByText("Cut 01")).not.toBeInTheDocument();
+
+    fireEvent.click(all);
+    expect(document.querySelectorAll(".clip-tile")).toHaveLength(4);
   });
 
   it("exposes no timeline, trim, or layer editing controls and stays a preview surface", async () => {
