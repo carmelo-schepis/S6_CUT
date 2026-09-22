@@ -185,3 +185,25 @@ cross-spec state-ordering artifact on a shared live instance, not a defect in th
 - Baseline health: `test-artifacts/qa-sweep/logs/health.json` reports all capabilities true and zero active/queued jobs. At current-run end, the pre-existing render remained active and two disposable acceptance jobs remained queued because they were blocked behind that render; they were not started or deleted.
 - Tool versions: `test-artifacts/qa-sweep/logs/tool-versions.txt` (engine container).
 - Pre-existing git changes preserved: `web/src/components/common.test.ts`, `common.tsx`, `projects-view.test.tsx`, `projects-view.tsx`, `shorts-editor-view.test.tsx`, `shorts-editor-view.tsx`, plus untracked `.venv-python39-backup/`, `QA_AUTONOMOUS_TEST_LOG.md`, `QA_YOUTUBE_E2E_PROMPT.md`.
+## Opt-in live YouTube acceptance test
+
+The repository includes a deliberately skipped live test at
+`tests/acceptance/youtube-live.spec.ts`. It exercises the normal UI import path
+with the first metadata-only entry in `tests/fixtures/youtube-live-sources.json`,
+then verifies that the produced output is playable, has the expected dimensions,
+and contains changing decoded frames. It is not part of the default deterministic
+suite and it creates project/media data.
+
+Run it only against a disposable isolated deployment/data root, with Chromium
+available and at least 3 GiB of free disk:
+
+```bash
+S6_RUN_LIVE_YOUTUBE=1 S6_ACCEPTANCE_ISOLATED=1 \
+npx playwright test --config playwright.config.ts tests/acceptance/youtube-live.spec.ts
+```
+
+`S6_RUN_LIVE_YOUTUBE=1` enables the test; `S6_ACCEPTANCE_ISOLATED=1` confirms
+that the target is disposable. The test fails before creating data when the
+isolation confirmation is missing. The fixture stores only URL metadata; it does
+not commit downloaded source media. Remove run-owned downloaded/generated video
+artifacts after the run and retain only compact diagnostics.
