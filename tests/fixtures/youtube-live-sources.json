@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "notice": "Compact metadata captured on 2026-09-09 from the user-supplied public YouTube URLs. Titles, descriptions, captions, comments, thumbnails, and media are intentionally omitted. Durations and caption flags are untrusted external metadata used only to shape deterministic tests.",
+  "sources": [
+    {
+      "url": "https://www.youtube.com/watch?v=8xEuFQz4E4A",
+      "canonicalUrlSha256": "9b290949b43282797e1b32cbda5e5256eb035fbabac7f72daf4e83c726434197",
+      "videoId": "8xEuFQz4E4A",
+      "durationSeconds": 134,
+      "automaticCaptionsAvailable": true
+    },
+    {
+      "url": "https://www.youtube.com/watch?v=KNVr5pHAygI",
+      "canonicalUrlSha256": "855510cce7fc6a5ade03139d45306b820d7b0a63fe9cd6f8ab505dc61457deb8",
+      "videoId": "KNVr5pHAygI",
+      "durationSeconds": 107,
+      "automaticCaptionsAvailable": true
+    },
+    {
+      "url": "https://www.youtube.com/watch?v=Ju41cQSe7hY&pp=ugUEEgJlbg%3D%3D",
+      "canonicalUrlSha256": "ee4b78d534fc9c80c2adae2fd261cdab1483f5c0bda6528e05921e32960447b1",
+      "videoId": "Ju41cQSe7hY",
+      "durationSeconds": 415,
+      "automaticCaptionsAvailable": true
+    },
+    {
+      "url": "https://www.youtube.com/watch?v=VTLnDqjfRZQ",
+      "canonicalUrlSha256": "4fd9c9253edc5f09830928e8605dbb71b170b8b48ea48a64151919554039ab37",
+      "videoId": "VTLnDqjfRZQ",
+      "durationSeconds": 57,
+      "automaticCaptionsAvailable": true
+    },
+    {
+      "url": "https://www.youtube.com/watch?v=ZvSEsBpuP3c&pp=ugUHEgVlbi1BVQ%3D%3D",
+      "canonicalUrlSha256": "8f036d3f0946168d0fec672a0a04b7460043a4e179387701577c4cb54c23fcd5",
+      "videoId": "ZvSEsBpuP3c",
+      "durationSeconds": 158,
+      "automaticCaptionsAvailable": true
+    },
+    {
+      "url": "https://www.youtube.com/watch?v=5K9QhkPww44",
+      "canonicalUrlSha256": "5f642754c629c3f1609c515d26277112e3d290c0ea8b0141d1cf70493e1006a8",
+      "videoId": "5K9QhkPww44",
+      "durationSeconds": 263,
+      "automaticCaptionsAvailable": true
+    }
+  ]
+}
