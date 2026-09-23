@@ -60,7 +60,7 @@ Requirements: Git, curl, Docker Engine with Compose v2, with 8 GB RAM recommende
   & $HOME\s6_cut\uninstall.ps1
   ```
 
-No-provider Auto jobs use Fast local cut and do not download Whisper. The first explicit Smart clips job downloads the configured Faster-Whisper model into the mounted data path.
+No-provider Auto jobs use Fast local cut and do not download Whisper. The first explicit Smart clips job downloads the configured Faster-Whisper model into the mounted data path. Music / sung vocals uses its separate configured model and always runs local Smart transcription.
 
 ## Manual installation (Docker Compose)
 
@@ -124,6 +124,8 @@ Copy `.env.example` to `.env`. Important values:
 | `S6_WHISPER_COMPUTE_TYPE` | `int8` | Whisper compute type: `int8`, `int8_float16`, `float16`, `float32`, or `auto` |
 | `S6_WHISPER_BEAM_SIZE` | `1` | Whisper beam size (1–8); lower beams decode faster on CPU |
 | `S6_WHISPER_WORD_TIMESTAMPS` | `true` | Enable word-level timestamps required for caption rendering |
+| `S6_MUSIC_WHISPER_MODEL` | `small` | Local Faster-Whisper model for Music / sung vocals transcription |
+| `S6_MUSIC_WHISPER_BEAM_SIZE` | `5` | Music transcription beam size (clamped to 1–8) |
 | `S6_JOB_WORKERS` | `1` | CPU/RAM-heavy concurrent jobs; start with one |
 | `S6_MAX_QUEUED_JOBS` | `4` | Bounded pending queue |
 | `S6_MAX_UPLOAD_BYTES` | `20000000000` | Streamed source-size ceiling |
@@ -144,6 +146,10 @@ Smart-mode transcription runs locally with Faster-Whisper. The CPU-friendly defa
 - `S6_WHISPER_WORD_TIMESTAMPS=false` skips per-word alignment (faster) but disables word-timed captions; keep it `true` for captioned clips.
 
 Whisper job stages report real, incrementally observed progress: each fraction is derived from an actual decoded segment boundary (`segment.end / duration`), never simulated, and stage labels show the text of the segment just decoded. YouTube imports likewise persist actual downloader byte counts, known totals, speed, ETA, and the last byte-progress timestamp in the job record. A retained partial can be retried with yt-dlp continuation; the import only cleans partial artifacts inside that job directory when it needs a fallback attempt. The engine checks the model cache on disk, so a pre-downloaded model (under `S6_DATA_PATH/models`) skips straight to transcription.
+
+### Music / sung vocals transcription
+
+In Projects → Clip mode, choose **Music / sung vocals** under Source audio to process songs and other sung vocals. This profile is available for short clips only and always selects Smart processing with local Faster-Whisper; OpenRouter planning is bypassed. Word timestamps are retained and voice-activity detection is disabled for this profile. The transcription can miss or hallucinate sung words, so review generated clips. The UI warns when a local upload is too short to fit the requested number of minimum-duration, non-overlapping clips; the API also validates the source duration before queuing. Configure its model and beam independently with `S6_MUSIC_WHISPER_MODEL` and `S6_MUSIC_WHISPER_BEAM_SIZE`; defaults are `small` and `5` (beam clamped to 1–8).
 
 ## Provider and fallback matrix
 
