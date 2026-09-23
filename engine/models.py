@@ -183,6 +183,7 @@ class Job(ApiModel):
     style: Style
     processing_mode: ProcessingMode = "smart"
     content_format: ContentFormat = "short"
+    source_profile: Literal["speech", "music"] = "speech"
     # Snapshot of the user's caption choice; legacy payloads default safely on.
     burn_subtitles: bool = True
     embed_subtitles: bool = False
@@ -236,6 +237,7 @@ class Project(ApiModel):
     source_creator: str | None = Field(default=None, max_length=120)
     requested_count: int = Field(ge=1, le=60)
     content_format: ContentFormat = "short"
+    source_profile: Literal["speech", "music"] = "speech"
     latest_job_id: str | None = None
     library_folder_id: str = UNSORTED_LIBRARY_FOLDER_ID
     source_blob_id: str | None = None

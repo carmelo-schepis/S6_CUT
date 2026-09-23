@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { beatSchema, clipSchema, jobSchema, processingModeSchema, processingStepSchema } from "./types";
+import { beatSchema, clipSchema, jobSchema, processingModeSchema, processingStepSchema, sourceProfileSchema } from "./types";
 
 const score = {
   hook: 80, coherence: 82, ending: 79, energy: 70, practicalValue: 75,
@@ -70,6 +70,12 @@ describe("versioned UI contracts", () => {
     expect(processingStepSchema.safeParse({ ...base, status: "pending", completedAt: "2026-01-01T00:00:00Z" }).success).toBe(false);
     expect(processingStepSchema.safeParse({ ...base, status: "active", currentItem: 4, totalItems: 3 }).success).toBe(false);
     expect(processingStepSchema.safeParse({ ...base, status: "complete", completedAt: "2026-01-01T00:00:00Z" }).success).toBe(true);
+  });
+
+  it("accepts only the persisted source profile values", () => {
+    expect(sourceProfileSchema.parse("speech")).toBe("speech");
+    expect(sourceProfileSchema.parse("music")).toBe("music");
+    expect(sourceProfileSchema.safeParse("song").success).toBe(false);
   });
 
   it("accepts explicit processingMode values", () => {

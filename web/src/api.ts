@@ -20,6 +20,7 @@ import {
   type MatchExplanation,
   type ContentFormat,
   type ProcessingMode,
+  type SourceProfile,
   type Project,
   type ProviderProfile,
   type OpenRouterModel,
@@ -44,6 +45,7 @@ const fieldLabels: Record<string, string> = {
   aspect_ratio: "Aspect",
   content_format: "Format",
   processing_mode: "Mode",
+  source_profile: "Source audio",
   name: "Project name",
   url: "YouTube URL",
   file: "Video file",
@@ -183,6 +185,8 @@ type ClipJobInput = {
   aspectRatio: string;
   contentFormat?: ContentFormat;
   processingMode?: ProcessingMode;
+  /** Serialized as the engine's snake_case multipart field; responses use sourceProfile. */
+  sourceProfile?: SourceProfile;
   burnSubtitles?: boolean;
   embedSubtitles?: boolean;
   libraryFolderId?: string;
@@ -200,6 +204,7 @@ export async function createClipJob(input: ClipJobInput): Promise<{ project: Pro
   form.set("aspect_ratio", input.aspectRatio);
   form.set("content_format", input.contentFormat ?? "short");
   if (input.processingMode) form.set("processing_mode", input.processingMode);
+  form.set("source_profile", input.sourceProfile ?? "speech");
   form.set("burn_subtitles", String(input.burnSubtitles ?? true));
   form.set("embed_subtitles", String(input.embedSubtitles ?? false));
   if (input.libraryFolderId) form.set("library_folder_id", input.libraryFolderId);

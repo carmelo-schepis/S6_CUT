@@ -18,7 +18,7 @@ import {
 const approvedUrl = "https://www.youtube.com/watch?v=KNVr5pHAygI";
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
 const artifacts = path.join(root, "test-artifacts/youtube-source-overlay-credit");
-const dataRoot = path.join(root, "data");
+const dataRoot = process.env.S6_DATA_PATH ? path.resolve(process.env.S6_DATA_PATH) : path.join(root, "data");
 const deadlineMs = 45 * 60_000;
 const mediaImage = process.env.S6_FORENSICS_IMAGE || "s6-cut-engine";
 const workPath = (value: string) => `/work/${path.relative(root, value)}`;

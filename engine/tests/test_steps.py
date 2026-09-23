@@ -454,6 +454,74 @@ def test_openrouter_failure_records_local_planning_fallback(monkeypatch: pytest.
     assert steps["select"].status == "complete"
 
 
+def test_music_downloaded_source_rejects_impossible_count_after_probe(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    tmp_path = _tmpdir()
+    test_db, test_manager = _cluster(tmp_path)
+    monkeypatch.setattr("engine.jobs.probe", _fake_probe)
+    source = tmp_path / "downloaded-music.mp4"
+    source.write_bytes(b"downloaded-fixture")
+    _clip_job(test_db, "music-feasible", "music-feasible-proj", mode="smart", source=source, count=11)
+    job = test_db.get_job("music-feasible")
+    private = test_db.get_job_private(job.id)
+    job.source_profile = "music"
+    private["url"] = "https://www.youtube.com/watch?v=fixture"
+    test_db.save_job(job, private)
+
+    test_manager._process("music-feasible")
+    result = test_db.get_job("music-feasible")
+    assert result is not None
+    assert result.state == "failed"
+    assert "at most 10" in (result.error or "")
+    assert result.clips == []
+
+
+def test_music_smart_path_replaces_sparse_checkpoint_and_keeps_bounded_windows(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    tmp_path = _tmpdir()
+    test_db, test_manager = _cluster(tmp_path)
+    monkeypatch.setattr("engine.jobs.probe", _fake_probe)
+    monkeypatch.setattr(media_module, "extract_audio_16k", _fake_extract)
+    monkeypatch.setattr(media_module, "is_whisper_model_cached", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr("engine.jobs.render_clip", _fake_render_clip)
+    source = tmp_path / "music-source.mp4"
+    source.write_bytes(b"fixture")
+    _clip_job(test_db, "music-checkpoint", "music-checkpoint-proj", mode="smart", source=source, count=5)
+    job = test_db.get_job("music-checkpoint")
+    private = test_db.get_job_private(job.id)
+    job.source_profile = "music"
+    private["transcript"] = {"language": "en", "words": [{"text": "old", "start": 0, "end": 1}], "segments": []}
+    private["transcript_cache_key"] = "transcript:v2:legacy"
+    test_db.save_job(job, private)
+    calls: list[dict[str, Any]] = []
+    lyric_words = []
+    for line in range(8):
+        start = float(line * 12)
+        lyric_words.extend([
+            {"text": f"Lyric{line}", "start": start, "end": start + 4, "confidence": .9},
+            {"text": "continues", "start": start + 4.2, "end": start + 9, "confidence": .9},
+        ])
+
+    def music_transcribe(_: Path, __: Settings, **kwargs: Any) -> dict[str, Any]:
+        calls.append(kwargs)
+        return {"language": "en", "words": lyric_words, "segments": [{"start": 0, "end": 93, "text": "sung words"}]}
+
+    monkeypatch.setattr(media_module, "transcribe", music_transcribe)
+    test_manager._process("music-checkpoint")
+    result = test_db.get_job("music-checkpoint")
+    saved = test_db.get_job_private("music-checkpoint")
+    assert result.state == "complete"
+    assert calls and calls[0]["profile"] == "music"
+    assert saved["transcript_cache_key"].startswith("transcript:v3:")
+    assert saved["transcript"]["words"][0]["text"] == "Lyric0"
+    assert len(result.clips) == 4
+    assert all(10 <= clip.duration <= 30 for clip in result.clips)
+    assert all(left.end <= right.start for left, right in zip(result.clips, result.clips[1:]))
+    assert any("instead of 5" in warning and "no clips were padded or duplicated" in warning for warning in result.warnings), result.warnings
+    transcription_step = next(step for step in result.steps if step.id == "transcribe")
+    assert "lyric coverage is not guaranteed" in transcription_step.detail
+    provider_step = next(step for step in result.steps if step.id == "openrouter")
+    assert provider_step.detail == "Music profile stays local; provider planning skipped"
+
+
 def test_smart_transcription_reports_real_incremental_checkpoints(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)

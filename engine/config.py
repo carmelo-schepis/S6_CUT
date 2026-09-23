@@ -55,6 +55,8 @@ class Settings:
     allowed_origins: tuple[str, ...]
     ffmpeg: str
     ffprobe: str
+    music_whisper_model: str = "small"
+    music_whisper_beam_size: int = 5
     ytdlp: str = "yt-dlp"
     ytdlp_connect_timeout: int = 45
     ytdlp_setup_timeout: int = 300
@@ -78,6 +80,8 @@ class Settings:
             ),
             whisper_beam_size=max(1, min(_int("S6_WHISPER_BEAM_SIZE", 1), 8)),
             whisper_word_timestamps=_bool("S6_WHISPER_WORD_TIMESTAMPS", True),
+            music_whisper_model=os.getenv("S6_MUSIC_WHISPER_MODEL", "small").strip() or "small",
+            music_whisper_beam_size=max(1, min(_int("S6_MUSIC_WHISPER_BEAM_SIZE", 5), 8)),
             job_workers=max(1, min(_int("S6_JOB_WORKERS", 1), 4)),
             max_queued_jobs=max(1, min(_int("S6_MAX_QUEUED_JOBS", 4), 20)),
             max_upload_bytes=max(50_000_000, _int("S6_MAX_UPLOAD_BYTES", 20_000_000_000)),

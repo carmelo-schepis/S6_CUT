@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { FileText, Film, FolderOpen, Plus, Search, Sparkles, Trash2, Zap } from "lucide-react";
 import { createClipJob, createFolder, createScriptJob, deleteProjectEverywhere, listAssets, listFolders, readableError } from "../api";
 import { bindRevalidationOnFocus, createBoundedRevalidation, emitLibraryChanged, onLibraryChanged } from "../library-sync";
-import type { ContentFormat, Health, Job, LibraryAsset, LibraryFolder, ProcessingMode, Project, Style } from "../types";
+import type { ContentFormat, Health, Job, LibraryAsset, LibraryFolder, ProcessingMode, Project, SourceProfile, Style } from "../types";
 import { authoritativeJob, projectStatus } from "../project-status";
 import { Button, Field, FieldGroup, Progress, Skeleton, StatusBadge, StepBadge, formatAge, resolveOutputAspectRatio, useSingleFlight } from "./common";
 import { LazyVideoThumbnail } from "./lazy-video-thumbnail";
@@ -11,6 +11,7 @@ import { VideoSourcePicker } from "./video-source-picker";
 
 const RECENT_FOLDER_KEY = "s6-cut.recent-library-folder";
 const PROVIDER_CALLOUT_DISMISSED_KEY = "s6-cut.provider-callout-dismissed";
+const MUSIC_PROFILE_NOTE = "Music / sung vocals always uses Smart transcription locally. VAD disabled; word timestamps retained. Sung words may still be missed or hallucinated, so review outputs.";
 
 // Recent projects is a shortlist, not the whole archive: rendering every
 // project produced a 30,000px-tall page once the library passed a hundred.
@@ -54,6 +55,8 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
   const [aspectRatio, setAspectRatio] = useState("9:16");
   const [narration, setNarration] = useState<"auto" | "local" | "silent">("auto");
   const [processingMode, setProcessingMode] = useState<ProcessingMode>("auto");
+  const [sourceProfile, setSourceProfile] = useState<SourceProfile>("speech");
+  const [sourceDuration, setSourceDuration] = useState<{ file: File; seconds: number } | null>(null);
   const [burnSubtitles, setBurnSubtitles] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -78,6 +81,17 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
   const sourceAssetsRevision = useRef(0);
   const scriptInput = useRef<HTMLInputElement>(null);
   const singleFlight = useSingleFlight();
+
+  useEffect(() => {
+    if (mode !== "clip" || sourceType !== "file" || !file) return;
+    const objectUrl = URL.createObjectURL(file);
+    const video = document.createElement("video");
+    video.preload = "metadata";
+    video.onloadedmetadata = () => setSourceDuration(Number.isFinite(video.duration) ? { file, seconds: video.duration } : null);
+    video.onerror = () => setSourceDuration(null);
+    video.src = objectUrl;
+    return () => { URL.revokeObjectURL(objectUrl); video.removeAttribute("src"); };
+  }, [file, mode, sourceType]);
 
   useEffect(() => {
     void listFolders().then((next) => {
@@ -107,8 +121,7 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
   }, []);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void loadSourceAssets(), 0);
-    return () => window.clearTimeout(timer);
+    void Promise.resolve().then(loadSourceAssets);
   }, [loadSourceAssets]);
 
   useEffect(() => {
@@ -187,11 +200,13 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
       if (!Number.isFinite(minDuration) || minDuration < 8) return setError("Minimum seconds must be at least 8.");
       if (!Number.isFinite(maxDuration) || maxDuration <= minDuration) return setError("Maximum seconds must be greater than minimum seconds.");
       if (contentFormat === "short" && maxDuration > 180) return setError("Short-form clips can be at most 180 seconds.");
+      if (musicConfigurationMessage) return setError(musicConfigurationMessage);
+      if (musicFeasibilityMessage) return setError(musicFeasibilityMessage);
     }
     setSubmitting(true);
     try {
       const result = mode === "clip"
-        ? await createClipJob({ file: sourceType === "file" ? file || undefined : undefined, url: sourceType === "url" ? url.trim() : undefined, name: projectName.trim() || undefined, style, count, minDuration, maxDuration, aspectRatio: contentFormat === "long" ? "16:9" : aspectRatio, contentFormat, processingMode, burnSubtitles: fastMode ? false : burnSubtitles, libraryFolderId: libraryFolderId || undefined })
+        ? await createClipJob({ file: sourceType === "file" ? file || undefined : undefined, url: sourceType === "url" ? url.trim() : undefined, name: projectName.trim() || undefined, style, count, minDuration, maxDuration, aspectRatio: contentFormat === "long" ? "16:9" : aspectRatio, contentFormat, processingMode: sourceProfile === "music" ? "smart" : processingMode, sourceProfile, burnSubtitles: fastMode ? false : burnSubtitles, libraryFolderId: libraryFolderId || undefined })
         : await createScriptJob({ script, name: projectName.trim() || undefined, style, aspectRatio, narration, libraryFolderId: libraryFolderId || undefined });
       if (libraryFolderId) localStorage.setItem(RECENT_FOLDER_KEY, libraryFolderId);
       onCreated(result.project);
@@ -212,8 +227,17 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
   // Until /profiles answers we do not know whether a provider is connected, and
   // must not assert that none is: that read can take several seconds, and the
   // claim was wrong for the whole of it whenever a provider was in fact set up.
-  const fastMode = processingMode === "fast" || (processingMode === "auto" && providersLoaded && !hasSelectedProvider);
-  const modeNote = processingMode === "fast"
+  const fastMode = sourceProfile === "speech" && (processingMode === "fast" || (processingMode === "auto" && providersLoaded && !hasSelectedProvider));
+  const knownSourceDuration = sourceType === "file" && sourceDuration?.file === file ? sourceDuration.seconds : null;
+  const musicConfigurationMessage = sourceProfile === "music" && contentFormat !== "short"
+    ? "Music / sung vocals is currently available for short clips only. Choose Short form to continue."
+    : null;
+  const musicFeasibilityMessage = sourceProfile === "music" && knownSourceDuration !== null && Number.isFinite(minDuration) && minDuration > 0 && count > Math.floor((knownSourceDuration + 1e-9) / minDuration)
+    ? `This ${knownSourceDuration.toFixed(1)}s source can fit at most ${Math.floor(knownSourceDuration / minDuration)} non-overlapping clips of at least ${minDuration}s. Reduce the count or minimum duration; the requested count will not be changed automatically.`
+    : null;
+  const modeNote = sourceProfile === "music"
+    ? MUSIC_PROFILE_NOTE
+    : processingMode === "fast"
     ? "Fast runs deterministically on this machine. It skips transcription and captions."
     : processingMode === "smart"
       ? !providersLoaded ? "Checking connected providers… Smart uses one when available, otherwise local Whisper and deterministic planning."
@@ -255,7 +279,7 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
       <div className="create-grid">
         <div className="create-step source-step">
           <div className="step-label"><StepBadge step={1} /><span className="step-label-text">{mode === "clip" ? "Add source" : "Add script"}</span></div>
-          {mode === "clip" ? <VideoSourcePicker mode={sourceType} onModeChange={(next) => { setError(null); setSourceType(next as "file" | "url"); }} file={file} onFile={(next, pickerError) => { setFile(next); if (pickerError) setError(pickerError); else setError(null); }} url={url} onUrl={setUrl} /> : <div className="script-input-wrap">
+          {mode === "clip" ? <VideoSourcePicker mode={sourceType} onModeChange={(next) => { setError(null); setSourceType(next as "file" | "url"); }} file={file} onFile={(next, pickerError) => { setFile(next); setSourceDuration(null); if (pickerError) setError(pickerError); else setError(null); }} url={url} onUrl={setUrl} /> : <div className="script-input-wrap">
             <textarea value={script} onChange={(event) => { setScript(event.target.value); setError(null); }} placeholder="Paste the exact script. S6_cut preserves this source text…" rows={8} />
             <div className="script-meta"><span>{script.length.toLocaleString()} characters</span><input ref={scriptInput} type="file" accept=".txt,.md,text/plain,text/markdown" onChange={(event) => loadScriptFile(event.target.files?.[0])} hidden /><button onClick={() => scriptInput.current?.click()}><FolderOpen size={14} /> Upload .txt or .md</button></div>
           </div>}
@@ -281,23 +305,29 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
           </FieldGroup>
 
           {mode === "clip" ? <>
+            <FieldGroup title="Source audio" hint={sourceProfile === "music" ? MUSIC_PROFILE_NOTE : "Choose speech for spoken content or music for sung vocals and lyrics."}>
+              <div className="segmented mode-tabs" aria-label="Source audio profile">
+                <button type="button" aria-pressed={sourceProfile === "speech"} className={sourceProfile === "speech" ? "active" : ""} onClick={() => setSourceProfile("speech")}>Speech</button>
+                <button type="button" aria-pressed={sourceProfile === "music"} className={sourceProfile === "music" ? "active" : ""} onClick={() => setSourceProfile("music")}>Music / sung vocals</button>
+              </div>
+            </FieldGroup>
             <FieldGroup title="Format" hint={contentFormat === "long" ? "Landscape scenes are selected across the whole source." : "Vertical clips are selected for short-form viewing."}>
               <div className="segmented mode-tabs format-tabs" aria-label="Content format">
                 <button type="button" aria-pressed={contentFormat === "short"} className={contentFormat === "short" ? "active" : ""} onClick={() => { setContentFormat("short"); setAspectRatio("9:16"); }}>Short form · 9:16</button>
-                <button type="button" aria-pressed={contentFormat === "long"} className={contentFormat === "long" ? "active" : ""} onClick={() => { setContentFormat("long"); setAspectRatio("16:9"); }}>Long form · 16:9</button>
+                <button type="button" aria-pressed={contentFormat === "long"} className={contentFormat === "long" ? "active" : ""} disabled={sourceProfile === "music"} onClick={() => { setContentFormat("long"); setAspectRatio("16:9"); }}>Long form · 16:9</button>
               </div>
               <Field label={contentFormat === "long" ? "Scenes requested" : "Clips requested"}>
                 <div className="count-control"><button onClick={() => setCount(Math.max(1, count - 1))} aria-label="Fewer clips">−</button><strong aria-live="polite">{count}</strong><button onClick={() => setCount(Math.min(30, count + 1))} aria-label="More clips">+</button></div>
               </Field>
             </FieldGroup>
 
-            <FieldGroup title="Processing mode" hint={modeNote}>
+            {sourceProfile === "speech" && <FieldGroup title="Processing mode" hint={modeNote}>
               <div className="segmented mode-tabs processing-mode-tabs" aria-label="Processing mode">
                 <button type="button" aria-pressed={processingMode === "auto"} className={processingMode === "auto" ? "active" : ""} onClick={() => setProcessingMode("auto")}><Sparkles size={13} /> <span>Auto</span></button>
                 <button type="button" aria-pressed={processingMode === "fast"} className={processingMode === "fast" ? "active" : ""} onClick={() => { setProcessingMode("fast"); setBurnSubtitles(false); }}><Zap size={13} /> <span>Fast</span></button>
                 <button type="button" aria-pressed={processingMode === "smart"} className={processingMode === "smart" ? "active" : ""} onClick={() => setProcessingMode("smart")}><Sparkles size={13} /> <span>Smart</span></button>
               </div>
-            </FieldGroup>
+            </FieldGroup>}
           </> : <FieldGroup title="Narration" hint="Automatic uses a local voice when needed, then a clearly labelled silent render.">
             <Field label="Narration source"><select value={narration} onChange={(event) => setNarration(event.target.value as typeof narration)}><option value="auto">Automatic fallback</option><option value="local">Local voice only</option><option value="silent">Silent render (no narration)</option></select></Field>
           </FieldGroup>}
@@ -319,8 +349,9 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
           </div>}
 
           <div className="create-actions">
+            {(musicConfigurationMessage || musicFeasibilityMessage) && <p className="form-error" role="status">{musicConfigurationMessage || musicFeasibilityMessage}</p>}
             {error && <p className="form-error" role="alert">{error}</p>}
-            <Button variant="primary" className="create-button" disabled={submitting || health?.ffmpeg === false} onClick={submit}>{submitting ? "Creating…" : <><Plus size={16} /> {mode === "clip" ? `Create ${count} ${contentFormat === "long" ? "landscape clip" : "short clip"}${count === 1 ? "" : "s"}` : "Create script video"}</>}</Button>
+            <Button variant="primary" className="create-button" disabled={submitting || health?.ffmpeg === false || Boolean(musicConfigurationMessage || musicFeasibilityMessage)} onClick={submit}>{submitting ? "Creating…" : <><Plus size={16} /> {mode === "clip" ? `Create ${count} ${contentFormat === "long" ? "landscape clip" : "short clip"}${count === 1 ? "" : "s"}` : "Create script video"}</>}</Button>
           </div>
         </div>
 

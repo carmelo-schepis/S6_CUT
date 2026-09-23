@@ -20,6 +20,8 @@ from engine.media import (
     _whisper_model_cache_path,
     extract_audio_16k,
     is_whisper_model_cached,
+    transcription_cache_identity,
+    transcription_cache_key,
     transcribe,
 )
 
@@ -175,17 +177,23 @@ class TestWhisperConfig:
         assert s.whisper_compute_type == "int8"
         assert s.whisper_beam_size == 1
         assert s.whisper_word_timestamps is True
+        assert s.music_whisper_model == "small"
+        assert s.music_whisper_beam_size == 5
 
     def test_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("S6_WHISPER_DEVICE", "cuda")
         monkeypatch.setenv("S6_WHISPER_COMPUTE_TYPE", "float16")
         monkeypatch.setenv("S6_WHISPER_BEAM_SIZE", "5")
         monkeypatch.setenv("S6_WHISPER_WORD_TIMESTAMPS", "false")
+        monkeypatch.setenv("S6_MUSIC_WHISPER_MODEL", "medium")
+        monkeypatch.setenv("S6_MUSIC_WHISPER_BEAM_SIZE", "7")
         s = Settings.from_env()
         assert s.whisper_device == "cuda"
         assert s.whisper_compute_type == "float16"
         assert s.whisper_beam_size == 5
         assert s.whisper_word_timestamps is False
+        assert s.music_whisper_model == "medium"
+        assert s.music_whisper_beam_size == 7
 
     def test_device_choices(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("S6_WHISPER_DEVICE", "INVALID")
@@ -334,6 +342,32 @@ class TestWhisperModelCached:
         s = _settings_with(settings, tmp_path, whisper_model=str(model_dir))
         assert is_whisper_model_cached(s) is True
         assert _whisper_model_cache_path(s) == model_dir
+
+    def test_cached_status_follows_selected_profile_model(self, settings: Settings, tmp_path: Path) -> None:
+        speech_model = tmp_path / "speech-model"
+        music_model = tmp_path / "music-model"
+        for model_dir in (speech_model, music_model):
+            model_dir.mkdir()
+            (model_dir / "model.bin").write_bytes(b"fake-model")
+        s = _settings_with(settings, tmp_path, whisper_model=str(speech_model), music_whisper_model=str(music_model))
+        assert is_whisper_model_cached(s, profile="speech") is True
+        assert is_whisper_model_cached(s, profile="music") is True
+
+        (music_model / "model.bin").unlink()
+        assert is_whisper_model_cached(s, profile="speech") is True
+        assert is_whisper_model_cached(s, profile="music") is False
+
+    def test_transcription_cache_identity_separates_decoding_profiles(self, settings: Settings) -> None:
+        speech = transcription_cache_identity(settings, profile="speech", language="en")
+        music = transcription_cache_identity(settings, profile="music", language="en")
+        other_language = transcription_cache_identity(settings, profile="music", language="fr")
+        other_beam = transcription_cache_identity(settings, profile="music", language="en", beam_size=4)
+
+        assert speech != music
+        assert music != other_language
+        assert music != other_beam
+        assert transcription_cache_identity(settings, profile="music", language="en") == music
+        assert transcription_cache_key("source-digest", settings, profile="music", language="en") == f"{music}:source-digest"
 
     def test_not_cached_with_local_path_missing_model_bin(self, settings: Settings, tmp_path: Path) -> None:
         model_dir = tmp_path / "my-model"
@@ -551,6 +585,23 @@ class TestTranscribeModelInit:
         assert kwargs["device"] == "cuda"
         assert kwargs["compute_type"] == "float16"
 
+    def test_music_profile_uses_lyric_focused_settings(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        from engine import media
+        _mock_whisper(monkeypatch)
+        monkeypatch.setattr("engine.media._media_duration", lambda *a, **kw: 30.0)
+        source = _dummy_source(tmp_path)
+        media._whisper_models.clear()
+
+        transcribe(source, Settings.from_env(), profile="music", language="en")
+
+        init_call = next(entry[1] for entry in MockWhisperModel.LOG if entry[0] == "init")
+        tx_call = next(entry[1] for entry in MockWhisperModel.LOG if entry[0] == "transcribe")
+        assert init_call["model"] == "small"
+        assert tx_call["vad_filter"] is False
+        assert tx_call["beam_size"] == 5
+        assert tx_call["word_timestamps"] is True
+        assert tx_call["language"] == "en"
+
     def test_transcribe_passes_beam_and_word_timestamps(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         _mock_whisper(monkeypatch)
         monkeypatch.setattr("engine.media._media_duration", lambda *a, **kw: 30.0)
@@ -564,6 +615,7 @@ class TestTranscribeModelInit:
         kwargs = tx_calls[0][1]
         assert kwargs["beam_size"] == 2
         assert kwargs["word_timestamps"] is False
+        assert kwargs["vad_filter"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -580,6 +632,8 @@ def _settings_with(existing: Settings, data_path: Path, **overrides: Any) -> Set
         whisper_compute_type=overrides.get("whisper_compute_type", existing.whisper_compute_type),
         whisper_beam_size=overrides.get("whisper_beam_size", existing.whisper_beam_size),
         whisper_word_timestamps=overrides.get("whisper_word_timestamps", existing.whisper_word_timestamps),
+        music_whisper_model=overrides.get("music_whisper_model", existing.music_whisper_model),
+        music_whisper_beam_size=overrides.get("music_whisper_beam_size", existing.music_whisper_beam_size),
         job_workers=existing.job_workers,
         max_queued_jobs=existing.max_queued_jobs,
         max_upload_bytes=existing.max_upload_bytes,

@@ -48,6 +48,7 @@ describe("engine API boundary", () => {
     vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
       const body = init?.body as FormData;
       expect(body.get("processing_mode")).toBe("fast");
+      expect(body.get("source_profile")).toBe("speech");
       expect(body.get("style")).toBe("serious");
       expect(body.get("library_folder_id")).toBe("business-1");
       return new Response(JSON.stringify({
@@ -69,6 +70,32 @@ describe("engine API boundary", () => {
     });
     expect(result.project.id).toBe("p");
     expect(result.job.processingMode).toBe("smart"); // legacy backend omission defaults to Smart
+  });
+
+  it("serializes the opted-in music profile as source_profile and preserves Smart", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = init?.body as FormData;
+      expect(body.get("source_profile")).toBe("music");
+      expect(body.get("processing_mode")).toBe("smart");
+      return new Response(JSON.stringify({
+        project: {
+          schemaVersion: 1, id: "music-project", name: "Music", mode: "clip", style: "serious", state: "queued",
+          sourceName: "song.mp4", sourceKind: "upload", requestedCount: 1, contentFormat: "short", sourceProfile: "music",
+          createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
+        },
+        job: {
+          schemaVersion: 1, id: "music-job", projectId: "music-project", mode: "clip", state: "queued", stage: "q",
+          stageLabel: "Q", progress: 0, style: "serious", processingMode: "smart", contentFormat: "short", sourceProfile: "music",
+          warnings: [], clips: [], beats: [], steps: [], createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
+        },
+      }), { status: 202, headers: { "Content-Type": "application/json" } });
+    }));
+    const result = await createClipJob({
+      style: "serious", count: 1, minDuration: 8, maxDuration: 20, aspectRatio: "9:16",
+      processingMode: "smart", sourceProfile: "music",
+    });
+    expect(result.project.sourceProfile).toBe("music");
+    expect(result.job.sourceProfile).toBe("music");
   });
 
   it("sends scoped caption save and rerender requests without constructing media URLs", async () => {

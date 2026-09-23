@@ -361,6 +361,7 @@ async def create_clip_job(
     name: Annotated[str | None, Form()] = None,
     style: Annotated[Literal["funny", "serious", "educational", "hype"], Form()] = "educational",
     processing_mode: Annotated[Literal["fast", "smart", "auto"], Form()] = "auto",
+    source_profile: Annotated[Literal["speech", "music"], Form()] = "speech",
     count: Annotated[int, Form(ge=1, le=30)] = 5,
     min_duration: Annotated[float, Form(ge=8, le=120)] = 20,
     max_duration: Annotated[float, Form(ge=10, le=1800)] = 60,
@@ -382,6 +383,8 @@ async def create_clip_job(
         raise HTTPException(422, "Provide exactly one local video or supported YouTube URL")
     if min_duration >= max_duration:
         raise HTTPException(422, "Minimum duration must be shorter than maximum duration")
+    if source_profile == "music" and content_format != "short":
+        raise HTTPException(422, "Music / sung vocals is currently available for short clips only")
     if content_format == "short" and max_duration > 180:
         raise HTTPException(422, "Short form clips support a maximum duration of 180 seconds")
     if content_format == "long":
@@ -389,12 +392,12 @@ async def create_clip_job(
     source_limit = settings.max_long_source_seconds if content_format == "long" else settings.max_source_seconds
     project_id, job_id = str(uuid.uuid4()), str(uuid.uuid4())
     smart_available = profiles.smart_available()
-    mode = resolve_processing_mode(processing_mode, smart_available)
+    mode = "smart" if source_profile == "music" else resolve_processing_mode(processing_mode, smart_available)
     private: dict[str, object] = {
         "count": count, "min_duration": min_duration, "max_duration": max_duration,
         "aspect_ratio": aspect_ratio, "content_format": content_format, "processing_mode": mode,
         "burn_subtitles": burn_subtitles, "embed_subtitles": embed_subtitles,
-        "use_openrouter": mode == "smart" and smart_available,
+        "use_openrouter": mode == "smart" and smart_available and source_profile == "speech",
         "library_folder_id": library_folder_id,
     }
     if file:
@@ -409,6 +412,12 @@ async def create_clip_job(
         except MediaError as exc:
             source.unlink(missing_ok=True)
             raise HTTPException(422, str(exc)) from exc
+        if source_profile == "music" and isinstance(source_metadata, dict):
+            source_duration = float(source_metadata["duration"])
+            feasible_count = math.floor((source_duration + 1e-9) / min_duration)
+            if feasible_count < count:
+                source.unlink(missing_ok=True)
+                raise HTTPException(422, f"Cannot create {count} non-overlapping music clips of at least {min_duration:g}s from a {source_duration:.1f}s source; at most {feasible_count} can fit without padding or duplication.")
         private["source_path"] = str(source)
         private["source_hash"] = source_hash
         if isinstance(source_metadata, dict):
@@ -420,8 +429,8 @@ async def create_clip_job(
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         source_name, source_kind = "YouTube import", "youtube"
-    project = Project(id=project_id, name=_project_name(name, Path(source_name).stem), mode="clip", style=style, state="queued", source_name=source_name, source_kind=source_kind, requested_count=count, content_format=content_format, latest_job_id=job_id, library_folder_id=library_folder_id)
-    steps = manager._fast_steps() if uses_fast_pipeline(mode, content_format) else manager._smart_steps(bool(private["use_openrouter"]))
+    project = Project(id=project_id, name=_project_name(name, Path(source_name).stem), mode="clip", style=style, state="queued", source_name=source_name, source_kind=source_kind, requested_count=count, content_format=content_format, source_profile=source_profile, latest_job_id=job_id, library_folder_id=library_folder_id)
+    steps = manager._fast_steps() if uses_fast_pipeline(mode, content_format) else manager._smart_steps(bool(private["use_openrouter"]), source_profile)
     if source_kind == "upload":
         checkpoint_time = now_iso()
         steps[0].status, steps[0].detail = "complete", "Upload atomically stored"
@@ -430,7 +439,7 @@ async def create_clip_job(
             steps[1].status = "complete"
             steps[1].detail = f"Source validated - {float(source_metadata['duration']):.1f}s"
             steps[1].started_at = steps[1].completed_at = checkpoint_time
-    job = Job(id=job_id, project_id=project_id, library_folder_id=library_folder_id, mode="clip", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style=style, processing_mode=mode, content_format=content_format, burn_subtitles=burn_subtitles, embed_subtitles=embed_subtitles, steps=steps)
+    job = Job(id=job_id, project_id=project_id, library_folder_id=library_folder_id, mode="clip", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style=style, processing_mode=mode, content_format=content_format, source_profile=source_profile, burn_subtitles=burn_subtitles, embed_subtitles=embed_subtitles, steps=steps)
     db.save_project(project)
     db.save_job(job, private)
     try:

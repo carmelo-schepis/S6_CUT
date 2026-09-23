@@ -25,6 +25,8 @@ export type ProcessingMode = z.infer<typeof processingModeSchema>;
 
 export const contentFormatSchema = z.enum(["short", "long"]);
 export type ContentFormat = z.infer<typeof contentFormatSchema>;
+export const sourceProfileSchema = z.enum(["speech", "music"]);
+export type SourceProfile = z.infer<typeof sourceProfileSchema>;
 
 export const downloadProgressSchema = z.object({
   downloadedBytes: z.number().nonnegative(),
@@ -167,6 +169,7 @@ export const jobSchema = z.object({
   style: styleSchema,
   processingMode: processingModeSchema.default("smart"),
   contentFormat: contentFormatSchema.default("short"),
+  sourceProfile: sourceProfileSchema.optional(),
   burnSubtitles: z.boolean().optional(),
   embedSubtitles: z.boolean().optional(),
   warnings: z.array(z.string()).default([]),
@@ -208,6 +211,7 @@ export const projectSchema = z.object({
   sourceCreator: z.string().nullable().optional(),
   requestedCount: z.number(),
   contentFormat: contentFormatSchema.default("short"),
+  sourceProfile: sourceProfileSchema.optional(),
   latestJobId: z.string().nullable().optional(),
   libraryFolderId: z.string().optional(),
   sourceBlobId: z.string().nullable().optional(),

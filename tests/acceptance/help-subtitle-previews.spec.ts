@@ -52,8 +52,10 @@ test("Help subtitle previews load and play after a YouTube source workflow", asy
       captions: false,
       source: { kind: "url", url: "https://www.youtube.com/watch?v=WwA_7QyqtGI" },
     });
-    await waitForProjectReady(page, observed, "clip", READY_DEADLINE_MS);
+    // Capture the durable ID as soon as the project exists so finally can
+    // clean it up even if a slow real-media job hits the generous wait limit.
     projectId = (await jobBoundaries(projectName)).project.id;
+    await waitForProjectReady(page, observed, "clip", READY_DEADLINE_MS);
 
     const openAndVerifyPreviews = async () => {
       await page.getByRole("button", { name: "Open S6 Cut Help" }).click();

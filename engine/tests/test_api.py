@@ -26,6 +26,48 @@ def test_topic_plan_reports_storage_pressure_without_internal_error(monkeypatch)
     assert response.json()["detail"] == "Local project storage is temporarily unavailable. Free disk space and try again."
 
 
+def test_music_clip_request_forces_smart_and_persists_source_profile(monkeypatch) -> None:
+    from engine import app as app_module
+
+    saved: dict[str, object] = {}
+    monkeypatch.setattr(app_module, "validate_youtube_url", lambda value: value)
+    monkeypatch.setattr(app_module.profiles, "smart_available", lambda: False)
+    monkeypatch.setattr(app_module.db, "save_project", lambda project: saved.update(project=project))
+    monkeypatch.setattr(app_module.db, "save_job", lambda job, private=None: saved.update(job=job, private=private))
+
+    async def enqueue(_: str) -> None:
+        return None
+
+    monkeypatch.setattr(app_module.manager, "enqueue", enqueue)
+    folder = app_module.db.list_folders()[0]
+    response = client.post("/api/v1/jobs/clip", data={
+        "url": "https://www.youtube.com/watch?v=fixture", "source_profile": "music",
+        "processing_mode": "fast", "count": "1", "min_duration": "8", "max_duration": "20",
+        "library_folder_id": folder.id,
+    })
+    assert response.status_code == 202
+    body = response.json()
+    assert body["project"]["sourceProfile"] == "music"
+    assert body["job"]["sourceProfile"] == "music"
+    assert body["job"]["processingMode"] == "smart"
+    assert saved["private"]["use_openrouter"] is False
+
+
+def test_music_upload_rejects_impossible_non_overlapping_count(monkeypatch) -> None:
+    from engine import app as app_module
+
+    monkeypatch.setattr(app_module, "validate_video_upload", lambda *args, **kwargs: {
+        "duration": 284.0, "width": 1920, "height": 1080, "audio": True,
+    })
+    folder = app_module.db.list_folders()[0]
+    response = client.post("/api/v1/jobs/clip", data={
+        "source_profile": "music", "count": "21", "min_duration": "20", "max_duration": "60",
+        "library_folder_id": folder.id,
+    }, files={"file": ("song.mp4", b"fixture", "video/mp4")})
+    assert response.status_code == 422
+    assert "at most 14" in response.json()["detail"]
+
+
 def test_project_name_normalization_has_safe_fallbacks() -> None:
     assert _project_name("  QA Browser Test  ", "Fallback") == "QA Browser Test"
     assert _project_name("\t\n", "Generated source") == "Generated source"

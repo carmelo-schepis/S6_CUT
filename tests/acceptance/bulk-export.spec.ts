@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { execFileSync } from "node:child_process";
-import { copyFileSync, mkdirSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 test.describe.configure({ mode: "serial" });
@@ -30,6 +30,15 @@ test("downloads only completed MP4s in a titled Unicode ZIP", async ({ page }, t
   const dataRoot = process.env.S6_DATA_PATH ? resolve(process.env.S6_DATA_PATH) : join(process.cwd(), "data");
   const sourcePath = join(dataRoot, "test-artifacts", "bulk-source.mp4");
   mkdirSync(join(dataRoot, "test-artifacts"), { recursive: true });
+  // Host-generated fixtures must remain writable to the non-root engine
+  // container when the isolated acceptance stack uses a host bind mount.
+  try {
+    chmodSync(join(dataRoot, "test-artifacts"), 0o777);
+  } catch (error) {
+    // The existing stack's fixture directory can be engine-owned. EPERM is
+    // harmless there; ffmpeg will verify the directory's actual writability.
+    if (!(error instanceof Error) || !("code" in error) || error.code !== "EPERM") throw error;
+  }
   const sourceInput = join(dataRoot, "test-artifacts", "bulk-input.mp4");
   copyFileSync(join(process.cwd(), "test-video.mp4"), sourceInput);
   const ffmpegArgs = ["-hide_banner", "-loglevel", "error", "-y", "-stream_loop", "3", "-i", sourceInput, "-t", "45", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", sourcePath];

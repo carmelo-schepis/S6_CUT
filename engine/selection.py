@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import re
+from bisect import bisect_right
 from dataclasses import dataclass
 from typing import Any
 
@@ -133,6 +134,154 @@ def select_candidates(words: list[dict[str, Any]], style: Style, count: int, min
         if len(selected) >= count:
             break
     return sorted(selected, key=lambda item: item.start)
+
+
+def _timed_words(words: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return usable words in timestamp order without changing the transcript objects."""
+    timed: list[tuple[float, float, int, dict[str, Any]]] = []
+    for index, word in enumerate(words):
+        try:
+            start = float(word["start"])
+            end = float(word["end"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not math.isfinite(start) or not math.isfinite(end) or start < 0 or end <= start:
+            continue
+        if not str(word.get("text", "")).strip():
+            continue
+        timed.append((start, end, index, word))
+    return [word for _, _, _, word in sorted(timed)]
+
+
+def group_music_lyric_lines(words: list[dict[str, Any]], *, pause_seconds: float = 0.85) -> list[list[dict[str, Any]]]:
+    """Group lyric words at deterministic timing pauses.
+
+    Punctuation is deliberately only a secondary boundary.  Whisper's lyric
+    punctuation is often absent or inconsistent; the elapsed time between word
+    timestamps is the reliable signal, including during sparse vocal passages
+    and instrumental breaks.
+    """
+    if pause_seconds < 0:
+        raise ValueError("pause_seconds must be non-negative")
+    lines: list[list[dict[str, Any]]] = []
+    current: list[dict[str, Any]] = []
+    for word in _timed_words(words):
+        if not current:
+            current.append(word)
+            continue
+        gap = float(word["start"]) - float(current[-1]["end"])
+        previous = str(current[-1]["text"])
+        if gap >= pause_seconds or SENTENCE_END.search(previous):
+            lines.append(current)
+            current = []
+        current.append(word)
+    if current:
+        lines.append(current)
+    return lines
+
+
+def _score_music(words: list[dict[str, Any]], style: Style, target: float) -> ScoreBreakdown:
+    """Score lyric windows without treating prose punctuation as completeness."""
+    text = " ".join(str(item["text"]) for item in words)
+    normalized = re.findall(r"[\w']+", text.casefold())
+    duration = max(.1, float(words[-1]["end"]) - float(words[0]["start"]))
+    unique = set(normalized)
+    first = set(normalized[:12])
+    gaps = [
+        float(right["start"]) - float(left["end"])
+        for left, right in zip(words, words[1:])
+    ]
+    line_breaks = sum(gap >= .85 for gap in gaps)
+    hook = min(100, 42 + 9 * len(first & HOOK_WORDS) + min(14, len(first)))
+    coherence = min(100, 55 + min(25, len(words) / 2) + min(15, line_breaks * 5))
+    # A lyric line does not need a full stop.  Keep these neutral rather than
+    # applying the speech scorer's sentence-ending penalty.
+    ending = 68
+    complete = 68
+    energy = min(100, 38 + 12 * len(unique & ENERGY_WORDS))
+    practical = min(100, 35 + 8 * len(unique & PRACTICAL_WORDS))
+    visual = min(100, 38 + min(25, len(unique) / 2))
+    filler = sum(token in {"um", "uh", "like", "basically", "actually"} for token in normalized)
+    penalties = min(40, filler * 3 + abs(duration - target) / max(target, 1) * 15)
+    values = {"hook": hook, "coherence": coherence, "ending": ending, "energy": energy, "practical": practical, "visual": visual, "complete": complete}
+    weights = STYLE_WEIGHTS[style]
+    total = sum(values[key] * weights[key] for key in values) / sum(weights.values()) - penalties
+    strongest = max(values, key=values.get)
+    reason_map = {"hook": "an immediate lyric opening", "coherence": "continuous lyric timing", "ending": "a natural musical ending", "energy": "a strong lyric energy signal", "practical": "clear lyrical content", "visual": "concrete visual potential", "complete": "a complete lyric passage"}
+    return ScoreBreakdown(hook=hook, coherence=coherence, ending=ending, energy=energy, practical_value=practical, visual_potential=visual, completeness=complete, penalties=penalties, total=max(0, min(100, total)), explanation=f"Selected for {reason_map[strongest]} with music {style} weighting.")
+
+
+def _music_units(lines: list[list[dict[str, Any]]], maximum: float) -> list[list[dict[str, Any]]]:
+    """Keep lyric lines intact, splitting only an overlong punctuation-free run."""
+    units: list[list[dict[str, Any]]] = []
+    for line in lines:
+        duration = float(line[-1]["end"]) - float(line[0]["start"])
+        if duration <= maximum:
+            units.append(line)
+        else:
+            # Without punctuation or a pause, word boundaries are the only
+            # honest fallback.  This still never invents silence or padding.
+            units.extend([word] for word in line)
+    return units
+
+
+def _better_music_selection(left: tuple[Candidate, ...] | None, right: tuple[Candidate, ...] | None) -> tuple[Candidate, ...] | None:
+    if left is None:
+        return right
+    if right is None:
+        return left
+    left_score = sum(item.score.total for item in left)
+    right_score = sum(item.score.total for item in right)
+    if len(left) != len(right):
+        return left if len(left) > len(right) else right
+    if not math.isclose(left_score, right_score):
+        return left if left_score > right_score else right
+    left_signature = tuple((item.start, item.end) for item in left)
+    right_signature = tuple((item.start, item.end) for item in right)
+    return left if left_signature <= right_signature else right
+
+
+def select_music_candidates(words: list[dict[str, Any]], style: Style, count: int, minimum: float, maximum: float) -> list[Candidate]:
+    """Select distinct, contiguous lyric windows inside the requested bounds."""
+    if count <= 0 or minimum < 0 or maximum < minimum:
+        return []
+    lines = _music_units(group_music_lyric_lines(words), maximum)
+    if not lines:
+        return []
+    target = (minimum + maximum) / 2
+    candidates: list[Candidate] = []
+    seen: set[tuple[float, float]] = set()
+    for start_index in range(len(lines)):
+        segment: list[dict[str, Any]] = []
+        for line in lines[start_index:]:
+            segment.extend(line)
+            duration = float(segment[-1]["end"]) - float(segment[0]["start"])
+            if duration > maximum:
+                break
+            if duration >= minimum:
+                key = (float(segment[0]["start"]), float(segment[-1]["end"]))
+                if key not in seen:
+                    seen.add(key)
+                    candidates.append(Candidate(float(segment[0]["start"]), float(segment[-1]["end"]), list(segment), _score_music(segment, style, target)))
+    if not candidates:
+        return []
+
+    # Weighted interval scheduling maximises the number of usable clips first,
+    # then their deterministic music score.  A score-first greedy pass can
+    # consume a long window and incorrectly hide several distinct windows.
+    candidates.sort(key=lambda item: (item.end, item.start, -item.score.total))
+    ends = [item.end for item in candidates]
+    states: list[dict[int, tuple[Candidate, ...]]] = [{0: ()}]
+    for index, candidate in enumerate(candidates, start=1):
+        previous = states[index - 1].copy()
+        compatible = bisect_right(ends, candidate.start, 0, index - 1)
+        for size, selection in states[compatible].items():
+            if size < count:
+                option = selection + (candidate,)
+                previous[size + 1] = _better_music_selection(previous.get(size + 1), option) or option
+        states.append(previous)
+    selected = states[-1].get(min(count, max(states[-1], default=0)), ())
+    return sorted(selected, key=lambda item: (item.start, item.end))
 
 
 def clip_from_candidate(candidate: Candidate, index: int) -> Clip:

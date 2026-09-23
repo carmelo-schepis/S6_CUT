@@ -89,7 +89,7 @@ DownloadCallback = Callable[[dict[str, Any]], None]
 
 
 # Stable faster-whisper model-name → Hugging Face repo ID mapping. Only used to
-# locate the on-disk cache; transcription itself keeps using settings.whisper_model.
+# locate the on-disk cache; transcription itself keeps using the selected profile model.
 _WHISPER_MODEL_REPOS: dict[str, str] = {
     "tiny.en": "Systran/faster-whisper-tiny.en",
     "tiny": "Systran/faster-whisper-tiny",
@@ -112,6 +112,12 @@ _WHISPER_MODEL_REPOS: dict[str, str] = {
     "turbo": "mobiuslabsgmbh/faster-whisper-large-v3-turbo",
 }
 
+_TRANSCRIPTION_CACHE_VERSION = "v3"
+_TRANSCRIPTION_AUDIO_CONDITIONING = {
+    "speech": "speech-unfiltered-v1",
+    "music": "music-unfiltered-v1",
+}
+
 
 def _whisper_repo_id(model: str) -> str:
     """Hugging Face repo ID for a faster-whisper model name or explicit repo ID."""
@@ -120,7 +126,100 @@ def _whisper_repo_id(model: str) -> str:
     return _WHISPER_MODEL_REPOS.get(model, model)
 
 
-def _whisper_model_cache_path(settings: Settings) -> Path | None:
+def whisper_model_for_profile(settings: Settings, profile: str = "speech"):
+    """Return the model selected for an explicit transcription profile."""
+    if profile not in _TRANSCRIPTION_AUDIO_CONDITIONING:
+        raise ValueError(f"Unknown transcription profile: {profile}")
+    return settings.music_whisper_model if profile == "music" else settings.whisper_model
+
+
+def transcription_options(
+    settings: Settings,
+    *,
+    profile: str = "speech",
+    language: str | None = None,
+    device: str | None = None,
+    compute_type: str | None = None,
+    beam_size: int | None = None,
+    word_timestamps: bool | None = None,
+):
+    """Resolve the deterministic Faster-Whisper options for a profile.
+
+    Music is deliberately opt-in: it selects its own model/beam defaults,
+    disables speech VAD, and cannot turn off word timestamps needed by lyric
+    clip boundaries and captions.  No vocal-isolation or other speculative
+    audio conditioning is applied here.
+    """
+    model = whisper_model_for_profile(settings, profile)
+    configured_beam = settings.music_whisper_beam_size if profile == "music" else settings.whisper_beam_size
+    if profile == "music":
+        resolved_words = True
+    elif word_timestamps is None:
+        resolved_words = settings.whisper_word_timestamps
+    else:
+        resolved_words = bool(word_timestamps)
+    return {
+        "profile": profile,
+        "model": model,
+        "language": language,
+        "device": device or settings.whisper_device,
+        "compute_type": compute_type or settings.whisper_compute_type,
+        "beam_size": max(1, min(int(configured_beam if beam_size is None else beam_size), 8)),
+        "word_timestamps": resolved_words,
+        "vad_filter": profile == "speech",
+        "audio_conditioning": _TRANSCRIPTION_AUDIO_CONDITIONING[profile],
+    }
+
+
+def transcription_cache_identity(
+    settings: Settings,
+    *,
+    profile: str = "speech",
+    language: str | None = None,
+    device: str | None = None,
+    compute_type: str | None = None,
+    beam_size: int | None = None,
+    word_timestamps: bool | None = True,
+):
+    """Return a stable identity for a transcript's decoding conditions."""
+    options = transcription_options(
+        settings,
+        profile=profile,
+        language=language,
+        device=device,
+        compute_type=compute_type,
+        beam_size=beam_size,
+        word_timestamps=word_timestamps,
+    )
+    digest = hashlib.sha256(json.dumps(options, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return f"transcript:{_TRANSCRIPTION_CACHE_VERSION}:{digest}"
+
+
+def transcription_cache_key(
+    source_hash: str,
+    settings: Settings,
+    *,
+    profile: str = "speech",
+    language: str | None = None,
+    device: str | None = None,
+    compute_type: str | None = None,
+    beam_size: int | None = None,
+    word_timestamps: bool | None = True,
+):
+    """Return a source-specific transcript cache key."""
+    identity = transcription_cache_identity(
+        settings,
+        profile=profile,
+        language=language,
+        device=device,
+        compute_type=compute_type,
+        beam_size=beam_size,
+        word_timestamps=word_timestamps,
+    )
+    return f"{identity}:{source_hash}"
+
+
+def _whisper_model_cache_path(settings: Settings, model: str | None = None) -> Path | None:
     """Resolve the downloaded model directory, or None when it is not cached yet.
 
     Faster-Whisper stores models in the Hugging Face cache layout under
@@ -128,10 +227,11 @@ def _whisper_model_cache_path(settings: Settings) -> Path | None:
     directory contains the CTranslate2 ``model.bin`` file. Local model paths
     (absolute or relative) are recognised directly.
     """
-    candidate = Path(settings.whisper_model)
+    model_name = model or settings.whisper_model
+    candidate = Path(model_name)
     if (candidate / "model.bin").is_file():
         return candidate
-    repo_id = _whisper_repo_id(settings.whisper_model)
+    repo_id = _whisper_repo_id(model_name)
     snapshots = settings.data_path / "models" / f"models--{repo_id.replace('/', '--')}" / "snapshots"
     if not snapshots.is_dir():
         return None
@@ -141,13 +241,9 @@ def _whisper_model_cache_path(settings: Settings) -> Path | None:
     return None
 
 
-def is_whisper_model_cached(settings: Settings) -> bool:
-    """True when the configured Whisper model is already downloaded on disk.
-
-    This is an observability helper: callers can skip the "model download"
-    stage (or show it as instant) without loading the model into memory.
-    """
-    return _whisper_model_cache_path(settings) is not None
+def is_whisper_model_cached(settings: Settings, *, profile: str = "speech") -> bool:
+    """True when the selected profile's Whisper model is already downloaded."""
+    return _whisper_model_cache_path(settings, whisper_model_for_profile(settings, profile)) is not None
 
 
 def _rational_to_float(value: str | None) -> float | None:
@@ -573,6 +669,8 @@ def transcribe(
     compute_type: str | None = None,
     beam_size: int | None = None,
     word_timestamps: bool | None = None,
+    profile: str = "speech",
+    language: str | None = None,
 ) -> dict[str, Any]:
     """Transcribe media with Faster-Whisper and return word-level timing.
 
@@ -600,6 +698,12 @@ def transcribe(
     word_timestamps : bool | None
         Override ``S6_WHISPER_WORD_TIMESTAMPS``; word timing is required for
         caption rendering, so callers disabling it must handle missing words.
+    profile : str
+        Explicitly select ``speech`` (the default) or ``music``. Music uses
+        the separate model/beam settings, disables speech VAD, and always
+        requests word timestamps.
+    language : str | None
+        Optional language hint forwarded to Faster-Whisper.
 
     Returns
     -------
@@ -608,6 +712,15 @@ def transcribe(
         with the ``S6_TEST_TRANSCRIPT_JSON`` fixture shape. ``words`` carry
         ``text/start/end/confidence``; ``segments`` carry ``start/end/text``.
     """
+    options = transcription_options(
+        settings,
+        profile=profile,
+        language=language,
+        device=device,
+        compute_type=compute_type,
+        beam_size=beam_size,
+        word_timestamps=word_timestamps,
+    )
     fixture = os.getenv("S6_TEST_TRANSCRIPT_JSON")
     if fixture:
         return json.loads(fixture)
@@ -620,11 +733,11 @@ def transcribe(
     except ImportError as exc:
         raise MediaError("Local Whisper is not installed in this engine runtime") from exc
 
-    run_device = device or settings.whisper_device
-    run_compute = compute_type or settings.whisper_compute_type
-    run_beam = settings.whisper_beam_size if beam_size is None else beam_size
-    run_beam = max(1, min(int(run_beam), 8))
-    run_words = settings.whisper_word_timestamps if word_timestamps is None else bool(word_timestamps)
+    run_device = options["device"]
+    run_compute = options["compute_type"]
+    run_beam = options["beam_size"]
+    run_words = options["word_timestamps"]
+    run_model = options["model"]
 
     total_duration = 0.0
     if progress_callback is not None:
@@ -633,13 +746,13 @@ def transcribe(
             raise TranscriptionCancelled("Transcription cancelled before model load")
 
     with _whisper_lock:
-        model_key = f"{settings.whisper_model}:{run_device}:{run_compute}"
+        model_key = f"{run_model}:{run_device}:{run_compute}"
         model = _whisper_models.get(model_key)
         if model is None:
             if cancellation_callback is not None and cancellation_callback():
                 raise TranscriptionCancelled("Transcription cancelled before model load")
             model = WhisperModel(
-                settings.whisper_model,
+                run_model,
                 device=run_device,
                 compute_type=run_compute,
                 download_root=str(settings.data_path / "models"),
@@ -649,12 +762,14 @@ def transcribe(
     if cancellation_callback is not None and cancellation_callback():
         raise TranscriptionCancelled("Transcription cancelled before decoding")
 
-    segments, info = model.transcribe(
-        str(path),
-        word_timestamps=run_words,
-        vad_filter=True,
-        beam_size=run_beam,
-    )
+    transcribe_kwargs = {
+        "word_timestamps": run_words,
+        "vad_filter": options["vad_filter"],
+        "beam_size": run_beam,
+    }
+    if options["language"] is not None:
+        transcribe_kwargs["language"] = options["language"]
+    segments, info = model.transcribe(str(path), **transcribe_kwargs)
     words: list[dict[str, Any]] = []
     segment_records: list[dict[str, Any]] = []
     for segment in segments:
@@ -669,6 +784,8 @@ def transcribe(
             fraction = min(1.0, max(0.0, float(segment.end) / total_duration))
             progress_callback(fraction, f"Transcribing: {segment.text.strip()[:60]}")
     if not words:
+        if profile == "music":
+            raise MediaError("No sung words with usable timestamps were detected. Instrumentals, buried vocals, and unclear mixes may not produce lyric clips; no audio was padded or duplicated.")
         raise MediaError("No speech was detected. Automatic clips require a readable speech track; the source remains available for manual editing.")
     return {"language": getattr(info, "language", "unknown"), "words": words, "segments": segment_records}
 

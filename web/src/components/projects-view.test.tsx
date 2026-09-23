@@ -183,6 +183,21 @@ describe("Projects create flow", () => {
     await waitFor(() => expect(mockCreateClipJob).toHaveBeenCalledWith(expect.objectContaining({ contentFormat: "long", aspectRatio: "16:9" })));
   });
 
+  it("opts into music transcription without changing the speech controls or subtitle choice", async () => {
+    mockCreateClipJob.mockResolvedValue({ project: { ...project, sourceProfile: "music" }, job: { ...undefinedJob, sourceProfile: "music", processingMode: "smart" } });
+    render(<ProjectsView projects={[]} health={health} onCreated={vi.fn()} onOpen={vi.fn()} onRefresh={vi.fn(async () => undefined)} />);
+    fireEvent.click(screen.getByRole("button", { name: "Music / sung vocals" }));
+    expect(screen.getByText(/always uses Smart transcription locally.*VAD disabled.*word timestamps retained/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Auto" })).not.toBeInTheDocument();
+    const subtitles = screen.getByRole("checkbox", { name: /Burn in subtitles/i });
+    expect(subtitles).toBeChecked();
+    fireEvent.click(subtitles);
+    fireEvent.click(screen.getByRole("tab", { name: "YouTube" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "YouTube URL" }), { target: { value: "https://www.youtube.com/watch?v=fixture" } });
+    fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
+    await waitFor(() => expect(mockCreateClipJob).toHaveBeenCalledWith(expect.objectContaining({ sourceProfile: "music", processingMode: "smart", burnSubtitles: false, count: 5 })));
+  });
+
   it("switches to exact-source Script mode without a setup gate", () => {
     render(<ProjectsView projects={[]} health={health} onCreated={vi.fn()} onOpen={vi.fn()} onRefresh={vi.fn(async () => undefined)} />);
     fireEvent.click(screen.getByRole("button", { name: /Script mode/i }));

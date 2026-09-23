@@ -20,6 +20,17 @@ def _successful_worker(run_id: str, path: str, settings: Settings, events: Any) 
     events.put({"type": "completed", "run_id": run_id, "result": {"language": "en", "words": [], "segments": []}})
 
 
+def _profile_worker(run_id: str, path: str, settings: Settings, events: Any, profile: str, language: str | None) -> None:
+    events.put({"type": "completed", "run_id": run_id, "result": {"profile": profile, "language": language}})
+
+
+def test_supervision_propagates_profile_and_language_through_spawn(tmp_path: Path) -> None:
+    source = tmp_path / "audio.wav"
+    source.write_bytes(b"test")
+    result = supervise(source, Settings.from_env(), worker=_profile_worker, profile="music", language="fr")
+    assert result == {"profile": "music", "language": "fr"}
+
+
 def test_supervision_uses_a_fresh_spawned_interpreter(monkeypatch, tmp_path: Path) -> None:
     """A threaded server must not fork native Whisper/OpenMP state."""
     requested: list[str] = []
