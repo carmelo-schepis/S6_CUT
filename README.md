@@ -159,6 +159,10 @@ Whisper job stages report real, incrementally observed progress: each fraction i
 
 The application remains operational when OpenRouter is the only configured API. Clip mode also works with no API key. Optional provider failure becomes a visible warning and local fallback, not a corrupt project.
 
+### Workspace clip-board filters
+
+In a clip-mode Workspace, the clip board provides **All clips**, **Selected clips**, and **Failed clips** filters. **All clips** shows every planned clip, **Selected clips** shows clips currently included in export, and **Failed clips** shows clips that can be retried. The active filter is exposed through the button state; Beat-mode Workspaces do not show clip filters.
+
 ## Data, backup, restore, and removal
 
 All server-side state is under `S6_DATA_PATH`:
