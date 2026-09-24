@@ -130,6 +130,15 @@ def test_script_job_preserves_exact_source_and_returns_durable_records() -> None
     assert client.get(f"/api/v1/projects/{body['project']['id']}").status_code == 200
 
 
+def test_tts_speed_accepts_documented_minimum_and_rejects_below() -> None:
+    accepted = client.post("/api/v1/profiles", json={"name": "Minimum TTS speed", "ttsSpeed": 0.25})
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["ttsSpeed"] == 0.25
+
+    rejected = client.post("/api/v1/profiles", json={"name": "Below minimum TTS speed", "ttsSpeed": 0.249})
+    assert rejected.status_code == 422
+
+
 def test_provider_secrets_are_masked_and_never_returned() -> None:
     key = "sk-or-v1-a-very-private-test-key"
     response = client.post("/api/v1/profiles", json={

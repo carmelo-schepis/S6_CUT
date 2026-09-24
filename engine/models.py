@@ -347,7 +347,7 @@ class ProfileInput(ApiModel):
     text_model_id: str = Field(default="openai/gpt-4.1-mini", max_length=200)
     tts_model_id: str | None = Field(default=None, max_length=200)
     tts_voice: str | None = Field(default=None, max_length=200)
-    tts_speed: float = Field(default=1.0, gt=0.25, le=4.0)
+    tts_speed: float = Field(default=1.0, ge=0.25, le=4.0)
     openrouter_key: str | None = Field(default=None, max_length=500)
     persistence: Literal["session", "encrypted"] = "encrypted"
     selected: bool = False
@@ -375,7 +375,7 @@ class ProviderProfile(ApiModel):
     text_model_id: str
     tts_model_id: str | None = None
     tts_voice: str | None = None
-    tts_speed: float = Field(default=1.0, gt=0.25, le=4.0)
+    tts_speed: float = Field(default=1.0, ge=0.25, le=4.0)
     selected: bool
     persistence: Literal["session", "encrypted"]
     openrouter_configured: bool
