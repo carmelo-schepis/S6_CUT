@@ -11,7 +11,10 @@ server-signed preview/download URLs.
 
 The workflow currently supports 9:16, 16:9, 1:1, and 4:5 output, optional script
 captions through the ASS pipeline, configured/local/silent narration selection,
-and authorised Library music with bounded volume. It deliberately does not
+and authorised Library music with bounded volume. Enabling burned-in or embedded
+subtitles selects the Smart processing pipeline so caption timing is generated;
+without either subtitle option, the editor uses the Fast pipeline.
+It deliberately does not
 include social scheduling, Pexels downloading, scraping-based TTS, a second
 media store, or a separate ShortsGenerator runtime.
 
