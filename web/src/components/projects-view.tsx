@@ -198,6 +198,7 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
     if (mode === "script" && script.trim().length < 10) return setError("Add at least 10 characters of script.");
     if (mode === "clip") {
       if (!Number.isFinite(minDuration) || minDuration < 8) return setError("Minimum seconds must be at least 8.");
+      if (minDuration > 120) return setError("Minimum seconds must be at most 120.");
       if (!Number.isFinite(maxDuration) || maxDuration <= minDuration) return setError("Maximum seconds must be greater than minimum seconds.");
       if (contentFormat === "short" && maxDuration > 180) return setError("Short-form clips can be at most 180 seconds.");
       if (musicConfigurationMessage) return setError(musicConfigurationMessage);
@@ -345,7 +346,7 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
           <button className="advanced-toggle" onClick={() => setAdvanced(!advanced)} aria-expanded={advanced}>Advanced controls <span aria-hidden="true">{advanced ? "−" : "+"}</span></button>
           {advanced && <div className="advanced-grid">
             <Field label="Aspect"><select value={aspectRatio} disabled={mode === "clip" && contentFormat === "long"} onChange={(event) => setAspectRatio(event.target.value)}><option>9:16</option><option>1:1</option><option>16:9</option><option>4:5</option></select></Field>
-            {mode === "clip" && <><Field label="Minimum seconds"><input type="number" min={8} max={contentFormat === "long" ? 600 : 120} value={minDuration} onChange={(event) => setMinDuration(Number(event.target.value))} /></Field><Field label="Maximum seconds"><input type="number" min={10} max={contentFormat === "long" ? 1800 : 180} value={maxDuration} onChange={(event) => setMaxDuration(Number(event.target.value))} /></Field></>}
+            {mode === "clip" && <><Field label="Minimum seconds"><input type="number" min={8} max={120} value={minDuration} onChange={(event) => setMinDuration(Number(event.target.value))} /></Field><Field label="Maximum seconds"><input type="number" min={10} max={contentFormat === "long" ? 1800 : 180} value={maxDuration} onChange={(event) => setMaxDuration(Number(event.target.value))} /></Field></>}
           </div>}
 
           <div className="create-actions">

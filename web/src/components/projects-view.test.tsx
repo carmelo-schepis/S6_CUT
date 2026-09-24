@@ -183,6 +183,19 @@ describe("Projects create flow", () => {
     await waitFor(() => expect(mockCreateClipJob).toHaveBeenCalledWith(expect.objectContaining({ contentFormat: "long", aspectRatio: "16:9" })));
   });
 
+  it("rejects a long-form minimum duration above the engine boundary before submitting", async () => {
+    render(<ProjectsView projects={[]} health={health} onCreated={vi.fn()} onOpen={vi.fn()} onRefresh={vi.fn(async () => undefined)} />);
+    fireEvent.click(screen.getByRole("tab", { name: "YouTube" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "YouTube URL" }), { target: { value: "https://www.youtube.com/watch?v=fixture" } });
+    fireEvent.click(screen.getByRole("button", { name: /Long form · 16:9/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Advanced controls/i }));
+    fireEvent.change(screen.getByLabelText("Minimum seconds"), { target: { value: "600" } });
+    fireEvent.change(screen.getByLabelText("Maximum seconds"), { target: { value: "700" } });
+    fireEvent.click(screen.getByRole("button", { name: /Create 5 landscape clips/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Minimum seconds must be at most 120.");
+    expect(mockCreateClipJob).not.toHaveBeenCalled();
+  });
+
   it("opts into music transcription without changing the speech controls or subtitle choice", async () => {
     mockCreateClipJob.mockResolvedValue({ project: { ...project, sourceProfile: "music" }, job: { ...undefinedJob, sourceProfile: "music", processingMode: "smart" } });
     render(<ProjectsView projects={[]} health={health} onCreated={vi.fn()} onOpen={vi.fn()} onRefresh={vi.fn(async () => undefined)} />);
