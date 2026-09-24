@@ -53,6 +53,32 @@ def test_music_clip_request_forces_smart_and_persists_source_profile(monkeypatch
     assert saved["private"]["use_openrouter"] is False
 
 
+def test_shorts_editor_caption_request_uses_smart_pipeline(monkeypatch) -> None:
+    from engine import app as app_module
+
+    saved: dict[str, object] = {}
+    monkeypatch.setattr(app_module, "validate_video_upload", lambda *args, **kwargs: {
+        "duration": 20.0, "width": 1920, "height": 1080, "audio": True,
+    })
+    monkeypatch.setattr(app_module.db, "save_project", lambda project: saved.update(project=project))
+    monkeypatch.setattr(app_module.db, "save_job", lambda job, private=None: saved.update(job=job, private=private))
+
+    async def enqueue(_: str) -> None:
+        return None
+
+    monkeypatch.setattr(app_module.manager, "enqueue", enqueue)
+    folder = app_module.db.list_folders()[0]
+    response = client.post("/api/v1/jobs/shorts/source", data={
+        "start": "2", "end": "8", "aspect_ratio": "4:5", "library_folder_id": folder.id,
+        "burn_subtitles": "true",
+    }, files={"file": ("source.mp4", b"fixture", "video/mp4")})
+    assert response.status_code == 202
+    body = response.json()
+    assert body["job"]["processingMode"] == "smart"
+    assert [step["id"] for step in body["job"]["steps"]][:4] == ["source", "probe", "audio", "transcribe"]
+    assert saved["private"]["processing_mode"] == "smart"
+
+
 def test_music_upload_rejects_impossible_non_overlapping_count(monkeypatch) -> None:
     from engine import app as app_module
 
