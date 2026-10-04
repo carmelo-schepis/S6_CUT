@@ -16,4 +16,23 @@ class TestIntersectionObserver {
 }
 window.IntersectionObserver = TestIntersectionObserver as unknown as typeof IntersectionObserver;
 
+// jsdom does not implement browser media playback or layout scrolling. Keep
+// those APIs deterministic in component tests instead of emitting virtual-console
+// "Not implemented" noise; tests that need playback behavior can still spy on them.
+Object.defineProperties(HTMLMediaElement.prototype, {
+  play: { configurable: true, writable: true, value: () => Promise.resolve() },
+  pause: { configurable: true, writable: true, value: () => undefined },
+  load: { configurable: true, writable: true, value: () => undefined },
+});
+Object.defineProperty(window, "scrollTo", {
+  configurable: true,
+  writable: true,
+  value: () => undefined,
+});
+Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+  configurable: true,
+  writable: true,
+  value: () => undefined,
+});
+
 afterEach(cleanup);
