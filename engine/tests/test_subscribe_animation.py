@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from engine.config import Settings
-from engine.media import _subscribe_animation_inputs, probe, render_fast_clip
+from engine.media import MediaError, _subscribe_animation_inputs, probe, render_fast_clip, render_script
 from engine.models import ScriptJobInput, ShortsJobInput, SubscribeAnimationConfig
 from engine.subscribe_animation import ANIMATION_ASSET, ANIMATION_DURATION_SECONDS, schedule_subscribe_animation
 
@@ -73,11 +73,58 @@ def test_bundled_animation_asset_is_present_and_scheduled_inputs_restart_indepen
     assert _subscribe_animation_inputs(["ffmpeg", "-i", "source.mp4"], None, 120, "long", 1920, 1080, 1) == []
 
 
-def test_missing_animation_asset_safely_falls_back_without_overlay(monkeypatch, tmp_path: Path) -> None:
+def test_missing_enabled_animation_asset_fails_clearly(monkeypatch, tmp_path: Path) -> None:
     import engine.media as media_module
 
     monkeypatch.setattr(media_module, "ANIMATION_ASSET", tmp_path / "not-installed.mov")
-    assert _subscribe_animation_inputs(["ffmpeg", "-i", "source.mp4"], ON, 40, "short", 1080, 1920, 1) == []
+    with pytest.raises(MediaError, match="Subscribe animation is enabled.*asset is unavailable"):
+        _subscribe_animation_inputs(["ffmpeg", "-i", "source.mp4"], ON, 40, "short", 1080, 1920, 1)
+
+
+def test_long_script_render_uses_long_caption_recipe_and_delivery_preset(monkeypatch, tmp_path: Path) -> None:
+    import engine.media as media_module
+
+    settings = Settings.from_env()
+    output = tmp_path / "long-script.mp4"
+    received_content_formats = []
+    commands = []
+    words = [
+        {"text": "A", "start": 0.1, "end": 0.3, "confidence": 0.9},
+        {"text": "verified", "start": 0.3, "end": 0.7, "confidence": 0.9},
+        {"text": "long", "start": 0.7, "end": 1.0, "confidence": 0.9},
+        {"text": "caption", "start": 1.0, "end": 1.4, "confidence": 0.9},
+    ]
+    write_ass = media_module.write_ass
+
+    def capture_write_ass(*args, **kwargs):
+        received_content_formats.append(kwargs.get("content_format"))
+        write_ass(*args, **kwargs)
+
+    def fake_run(command, *, cwd, timeout):
+        commands.append(command)
+        Path(command[-1]).write_bytes(b"rendered")
+
+    monkeypatch.setattr(media_module, "write_ass", capture_write_ass)
+    monkeypatch.setattr(media_module, "run", fake_run)
+    monkeypatch.setattr(media_module, "probe", lambda path, settings: {"width": 1920, "height": 1080, "audio": False})
+
+    render_script(
+        output, duration=60, aspect="16:9", narration=None, words=words, visuals=[], overlays=[],
+        settings=settings, style="serious", content_format="long",
+    )
+
+    actual_ass = output.with_suffix(".ass").read_text(encoding="utf-8")
+    expected_long_ass = tmp_path / "expected-long.ass"
+    write_ass(expected_long_ass, words, offset=0, duration=60, visuals=[], width=1920, height=1080, style="serious", content_format="long")
+    expected_short_ass = tmp_path / "expected-short.ass"
+    write_ass(expected_short_ass, words, offset=0, duration=60, visuals=[], width=1920, height=1080, style="serious", content_format="short")
+
+    assert received_content_formats == ["long"]
+    assert "A VERIFIED LONG" in actual_ass
+    assert actual_ass == expected_long_ass.read_text(encoding="utf-8")
+    assert actual_ass != expected_short_ass.read_text(encoding="utf-8")
+    assert commands[0][commands[0].index("-preset") + 1] == "medium"
+    assert output.read_bytes() == b"rendered"
 
 
 def _require_ffmpeg(settings: Settings) -> None:

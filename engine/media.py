@@ -1331,8 +1331,7 @@ def _subscribe_animation_inputs(
     if not schedule:
         return []
     if not ANIMATION_ASSET.is_file():
-        logger.warning("Skipping subscribe animation: the bundled asset is unavailable")
-        return []
+        raise MediaError("Subscribe animation is enabled, but the bundled animation asset is unavailable")
     landscape = width > height
     width_fraction = 0.18 if landscape else 0.28
     overlay_width = max(2, round(width * width_fraction / 2) * 2)
@@ -1780,7 +1779,7 @@ def render_script(output: Path, *, duration: float, aspect: str, narration: Path
     output.parent.mkdir(parents=True, exist_ok=True)
     ass = output.parent / f"{output.stem}.ass"
     width, height = dimensions(aspect)
-    write_ass(ass, words, offset=0, duration=duration, visuals=visuals, width=width, height=height, style=style)
+    write_ass(ass, words, offset=0, duration=duration, visuals=visuals, width=width, height=height, style=style, content_format=content_format)
     write_caption_sidecars(output, words, offset=0, duration=duration, style=style)
     temp = output.with_suffix(".partial.mp4")
     command = [settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", f"color=c=0x08080a:s={width}x{height}:r=30:d={duration:.3f}"]
@@ -1798,7 +1797,7 @@ def render_script(output: Path, *, duration: float, aspect: str, narration: Path
         command.extend(["-map", f"{audio_index}:a:0", "-c:a", DELIVERY_AUDIO_CODEC, "-b:a", DELIVERY_AUDIO_BITRATE, "-ar", DELIVERY_AUDIO_RATE])
     else:
         command.append("-an")
-    command.extend(["-c:v", DELIVERY_VIDEO_CODEC, "-preset", DELIVERY_PRESET, "-crf", DELIVERY_CRF, "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-t", f"{duration:.3f}", str(temp)])
+    command.extend(["-c:v", DELIVERY_VIDEO_CODEC, "-preset", delivery_preset(content_format), "-crf", DELIVERY_CRF, "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-t", f"{duration:.3f}", str(temp)])
     run(command, cwd=output.parent, timeout=7200)
     metadata = probe(temp, settings)
     if metadata["width"] != width or metadata["height"] != height or (narration and not metadata["audio"]):
