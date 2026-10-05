@@ -21,6 +21,20 @@ const artifacts = path.join(root, "test-artifacts/subscribe-animation");
 const expectedWidth = 1080;
 const expectedHeight = 1920;
 
+function requireDisposableTarget() {
+  const url = process.env.S6_ACCEPTANCE_URL;
+  const dataPath = process.env.S6_DATA_PATH;
+  if (!url || !dataPath) throw new Error("Set S6_ACCEPTANCE_URL and S6_DATA_PATH to an explicitly isolated, disposable S6 instance before running this spec.");
+  const parsed = new URL(url);
+  const hostname = parsed.hostname.replace(/^\[|\]$/g, "");
+  if (!["localhost", "127.0.0.1", "::1"].includes(hostname)) throw new Error("Refusing a non-local acceptance target.");
+  if (parsed.port === "8080") throw new Error("Refusing the default port 8080; use a dedicated disposable acceptance instance.");
+  const resolvedDataPath = path.resolve(dataPath);
+  if (!resolvedDataPath.startsWith("/tmp/")) throw new Error("Refusing data outside a unique disposable /tmp directory.");
+  if (resolvedDataPath === path.resolve(root, "data")) throw new Error("Refusing the repository's default data directory.");
+  return url;
+}
+
 type RenderResult = {
   projectName: string;
   jobId: string;
@@ -215,7 +229,7 @@ test("Subscribe animation controls persist and affect real rendered/exported med
   test.skip(process.env.S6_ACCEPTANCE_ISOLATED !== "1", "requires an explicitly isolated disposable S6_cut dataset");
   test.setTimeout(45 * 60_000);
   await fs.mkdir(artifacts, { recursive: true });
-  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.goto(requireDisposableTarget(), { waitUntil: "domcontentloaded" });
   await expect(page.getByText("Local engine ready")).toBeVisible({ timeout: 90_000 });
 
   const defaultControl = page.getByRole("group", { name: "Automatic Subscribe animation" });
@@ -291,7 +305,7 @@ test("long-form exported scene replays the animation at midpoint and 30 seconds 
   const longFixture = await makeLongFormFixture(testInfo);
   const tag = Date.now();
   const projectName = `Subscribe long ${tag}`;
-  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.goto(requireDisposableTarget(), { waitUntil: "domcontentloaded" });
   await expect(page.getByText("Local engine ready")).toBeVisible({ timeout: 90_000 });
   await page.getByRole("button", { name: "Projects", exact: true }).click();
   await page.getByLabel("Choose video file").setInputFiles(longFixture);
