@@ -44,6 +44,7 @@ def test_music_clip_request_forces_smart_and_persists_source_profile(monkeypatch
         "url": "https://www.youtube.com/watch?v=fixture", "source_profile": "music",
         "processing_mode": "fast", "count": "1", "min_duration": "8", "max_duration": "20",
         "library_folder_id": folder.id,
+        "subscribe_animation": '{"enabled":true,"version":1,"shortFormLeadSeconds":10}',
     })
     assert response.status_code == 202
     body = response.json()
@@ -51,6 +52,7 @@ def test_music_clip_request_forces_smart_and_persists_source_profile(monkeypatch
     assert body["job"]["sourceProfile"] == "music"
     assert body["job"]["processingMode"] == "smart"
     assert saved["private"]["use_openrouter"] is False
+    assert saved["private"]["subscribe_animation"] == {"version": 1, "enabled": True, "short_form_lead_seconds": 10}
 
 
 def test_shorts_editor_caption_request_uses_smart_pipeline(monkeypatch) -> None:
@@ -71,12 +73,43 @@ def test_shorts_editor_caption_request_uses_smart_pipeline(monkeypatch) -> None:
     response = client.post("/api/v1/jobs/shorts/source", data={
         "start": "2", "end": "8", "aspect_ratio": "4:5", "library_folder_id": folder.id,
         "burn_subtitles": "true",
+        "subscribe_animation": '{"enabled":true,"version":1,"shortFormLeadSeconds":10}',
     }, files={"file": ("source.mp4", b"fixture", "video/mp4")})
     assert response.status_code == 202
     body = response.json()
     assert body["job"]["processingMode"] == "smart"
     assert [step["id"] for step in body["job"]["steps"]][:4] == ["source", "probe", "audio", "transcribe"]
     assert saved["private"]["processing_mode"] == "smart"
+    assert saved["private"]["subscribe_animation"] == {"version": 1, "enabled": True, "short_form_lead_seconds": 10}
+
+
+def test_shorts_library_request_persists_animation_configuration(monkeypatch, tmp_path: Path) -> None:
+    from engine import app as app_module
+    from engine.models import Asset
+
+    saved: dict[str, object] = {}
+    source = tmp_path / "library-source.mp4"
+    asset = Asset(id="animation-source", title="Source", filename="source.mp4", media_type="video/mp4", content_hash="a" * 64)
+    monkeypatch.setattr(app_module.db, "get_asset", lambda asset_id: asset if asset_id == asset.id else None)
+    monkeypatch.setattr(app_module.db, "blob_relative_path", lambda _: "blobs/sha256/aa/source.mp4")
+    monkeypatch.setattr(app_module, "confined", lambda *_: source)
+    monkeypatch.setattr(app_module, "probe", lambda *_: {"duration": 20.0, "width": 1920, "height": 1080, "audio": True})
+    monkeypatch.setattr(app_module.db, "save_project", lambda project: saved.update(project=project))
+    monkeypatch.setattr(app_module.db, "save_job", lambda job, private=None: saved.update(job=job, private=private))
+
+    async def enqueue(_: str) -> None:
+        return None
+
+    monkeypatch.setattr(app_module.manager, "enqueue", enqueue)
+    folder = app_module.db.list_folders()[0]
+    response = client.post("/api/v1/jobs/shorts", json={
+        "assetId": asset.id, "start": 2, "end": 12, "aspectRatio": "1:1", "libraryFolderId": folder.id,
+        "subscribeAnimation": {"enabled": True, "version": 1, "shortFormLeadSeconds": 5},
+    })
+    assert response.status_code == 202, response.text
+    assert saved["private"]["trim_start"] == 2
+    assert saved["private"]["trim_end"] == 12
+    assert saved["private"]["subscribe_animation"] == {"version": 1, "enabled": True, "short_form_lead_seconds": 5}
 
 
 def test_music_upload_rejects_impossible_non_overlapping_count(monkeypatch) -> None:
@@ -152,8 +185,35 @@ def test_script_job_preserves_exact_source_and_returns_durable_records() -> None
     body = response.json()
     assert body["project"]["mode"] == "script"
     assert body["job"]["state"] == "queued"
-    assert db.get_job_private(body["job"]["id"])["script"] == script
+    private = db.get_job_private(body["job"]["id"])
+    assert private["script"] == script
+    assert private["subscribe_animation"]["enabled"] is False
+    assert body["job"]["contentFormat"] == "short"
     assert client.get(f"/api/v1/projects/{body['project']['id']}").status_code == 200
+
+
+def test_script_job_snapshots_versioned_animation_and_explicit_long_format(monkeypatch) -> None:
+    from engine import app as app_module
+
+    saved: dict[str, object] = {}
+    monkeypatch.setattr(app_module.db, "save_project", lambda project: saved.update(project=project))
+    monkeypatch.setattr(app_module.db, "save_job", lambda job, private=None: saved.update(job=job, private=private))
+
+    async def enqueue(_: str) -> None:
+        return None
+
+    monkeypatch.setattr(app_module.manager, "enqueue", enqueue)
+    response = client.post("/api/v1/jobs/script", json={
+        "script": "A sufficiently long script checks long form scheduling and persistence.",
+        "aspectRatio": "16:9", "contentFormat": "long", "narration": "silent",
+        "subscribeAnimation": {"enabled": True, "version": 1, "shortFormLeadSeconds": 10},
+    })
+    assert response.status_code == 202, response.text
+    body = response.json()
+    assert body["project"]["contentFormat"] == "long"
+    assert body["job"]["contentFormat"] == "long"
+    assert saved["private"]["content_format"] == "long"
+    assert saved["private"]["subscribe_animation"] == {"version": 1, "enabled": True, "short_form_lead_seconds": 10}
 
 
 def test_tts_speed_accepts_documented_minimum_and_rejects_below() -> None:

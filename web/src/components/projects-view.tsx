@@ -2,12 +2,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { FileText, Film, FolderOpen, Plus, Search, Sparkles, Trash2, Zap } from "lucide-react";
 import { createClipJob, createFolder, createScriptJob, deleteProjectEverywhere, listAssets, listFolders, readableError } from "../api";
 import { bindRevalidationOnFocus, createBoundedRevalidation, emitLibraryChanged, onLibraryChanged } from "../library-sync";
-import type { ContentFormat, Health, Job, LibraryAsset, LibraryFolder, ProcessingMode, Project, SourceProfile, Style } from "../types";
+import { DEFAULT_SUBSCRIBE_ANIMATION, type ContentFormat, type Health, type Job, type LibraryAsset, type LibraryFolder, type ProcessingMode, type Project, type SourceProfile, type Style, type SubscribeAnimationConfig } from "../types";
 import { authoritativeJob, projectStatus } from "../project-status";
 import { Button, Field, FieldGroup, Progress, Skeleton, StatusBadge, StepBadge, formatAge, resolveOutputAspectRatio, useSingleFlight } from "./common";
 import { LazyVideoThumbnail } from "./lazy-video-thumbnail";
 import { VideoPreviewDialog } from "./video-preview-dialog";
 import { VideoSourcePicker } from "./video-source-picker";
+import { SubscribeAnimationControl } from "./subscribe-animation-control";
 
 const RECENT_FOLDER_KEY = "s6-cut.recent-library-folder";
 const PROVIDER_CALLOUT_DISMISSED_KEY = "s6-cut.provider-callout-dismissed";
@@ -58,6 +59,7 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
   const [sourceProfile, setSourceProfile] = useState<SourceProfile>("speech");
   const [sourceDuration, setSourceDuration] = useState<{ file: File; seconds: number } | null>(null);
   const [burnSubtitles, setBurnSubtitles] = useState(true);
+  const [subscribeAnimation, setSubscribeAnimation] = useState<SubscribeAnimationConfig>(DEFAULT_SUBSCRIBE_ANIMATION);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [providerCalloutDismissed, setProviderCalloutDismissed] = useState(() => {
@@ -207,8 +209,8 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
     setSubmitting(true);
     try {
       const result = mode === "clip"
-        ? await createClipJob({ file: sourceType === "file" ? file || undefined : undefined, url: sourceType === "url" ? url.trim() : undefined, name: projectName.trim() || undefined, style, count, minDuration, maxDuration, aspectRatio: contentFormat === "long" ? "16:9" : aspectRatio, contentFormat, processingMode: sourceProfile === "music" ? "smart" : processingMode, sourceProfile, burnSubtitles: fastMode ? false : burnSubtitles, libraryFolderId: libraryFolderId || undefined })
-        : await createScriptJob({ script, name: projectName.trim() || undefined, style, aspectRatio, narration, libraryFolderId: libraryFolderId || undefined });
+        ? await createClipJob({ file: sourceType === "file" ? file || undefined : undefined, url: sourceType === "url" ? url.trim() : undefined, name: projectName.trim() || undefined, style, count, minDuration, maxDuration, aspectRatio: contentFormat === "long" ? "16:9" : aspectRatio, contentFormat, processingMode: sourceProfile === "music" ? "smart" : processingMode, sourceProfile, burnSubtitles: fastMode ? false : burnSubtitles, subscribeAnimation, libraryFolderId: libraryFolderId || undefined })
+        : await createScriptJob({ script, name: projectName.trim() || undefined, style, aspectRatio, contentFormat: aspectRatio === "16:9" ? "long" : "short", narration, subscribeAnimation, libraryFolderId: libraryFolderId || undefined });
       if (libraryFolderId) localStorage.setItem(RECENT_FOLDER_KEY, libraryFolderId);
       onCreated(result.project);
     } catch (cause) {
@@ -340,6 +342,8 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
             <Field label="Project name" hint="Optional. Leave blank for a generated name."><input id="project-name" aria-label="Project name" value={projectName} maxLength={160} onChange={(event) => setProjectName(event.target.value)} placeholder="e.g. Launch highlights" /></Field>
             <div className="folder-picker"><Field label="Business folder"><select aria-label="Business folder" value={libraryFolderId} onChange={(event) => setLibraryFolderId(event.target.value)}>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></Field><Button variant="ghost" onClick={addFolder}><Plus size={13} /> New folder</Button></div>
           </FieldGroup>
+
+          <SubscribeAnimationControl value={subscribeAnimation} onChange={setSubscribeAnimation} longForm={mode === "clip" ? contentFormat === "long" : aspectRatio === "16:9"} />
 
           {mode === "clip" && <label className="subtitle-toggle"><input type="checkbox" checked={fastMode ? false : burnSubtitles} disabled={fastMode} onChange={(event) => setBurnSubtitles(event.target.checked)} /> <span><strong>Burn in subtitles</strong><small>{fastMode ? "Fast mode skips transcription and captions. Choose Smart mode to enable them." : "Uses local word timing. Fast mode skips captions."}</small></span></label>}
 

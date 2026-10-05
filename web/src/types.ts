@@ -28,6 +28,19 @@ export type ContentFormat = z.infer<typeof contentFormatSchema>;
 export const sourceProfileSchema = z.enum(["speech", "music"]);
 export type SourceProfile = z.infer<typeof sourceProfileSchema>;
 
+export const subscribeAnimationSchema = z.object({
+  enabled: z.boolean(),
+  version: z.literal(1),
+  shortFormLeadSeconds: z.union([z.literal(5), z.literal(10)]),
+});
+export type SubscribeAnimationConfig = z.infer<typeof subscribeAnimationSchema>;
+
+export const DEFAULT_SUBSCRIBE_ANIMATION: SubscribeAnimationConfig = {
+  enabled: true,
+  version: 1,
+  shortFormLeadSeconds: 5,
+};
+
 export const downloadProgressSchema = z.object({
   downloadedBytes: z.number().nonnegative(),
   totalBytes: z.number().nonnegative().nullable().optional(),
