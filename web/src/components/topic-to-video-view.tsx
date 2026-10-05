@@ -1,7 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { createScriptJob, createTopicPlan, listOpenRouterModels, readableError } from "../api";
-import type { OpenRouterModel, ProviderProfile, TopicVideoPlan } from "../types";
+import { DEFAULT_SUBSCRIBE_ANIMATION, type OpenRouterModel, type ProviderProfile, type SubscribeAnimationConfig, type TopicVideoPlan } from "../types";
 import { Button, FieldGroup, useSingleFlight } from "./common";
+import { SubscribeAnimationControl } from "./subscribe-animation-control";
 
 export function TopicToVideoView({ profiles, profilesLoaded = true, onConfigureProviders, onJobCreated }: { profiles: ProviderProfile[]; profilesLoaded?: boolean; onConfigureProviders: () => void; onJobCreated: () => void }) {
   const [topic, setTopic] = useState("");
@@ -13,6 +14,7 @@ export function TopicToVideoView({ profiles, profilesLoaded = true, onConfigureP
   const [instructions, setInstructions] = useState("");
   const [duration, setDuration] = useState("45");
   const [aspect, setAspect] = useState<"9:16" | "16:9" | "1:1" | "4:5">("9:16");
+  const [subscribeAnimation, setSubscribeAnimation] = useState<SubscribeAnimationConfig>(DEFAULT_SUBSCRIBE_ANIMATION);
   const [variants, setVariants] = useState("1");
   const [plan, setPlan] = useState<TopicVideoPlan | null>(null);
   const [planProvider, setPlanProvider] = useState<string | null>(null);
@@ -89,7 +91,7 @@ export function TopicToVideoView({ profiles, profilesLoaded = true, onConfigureP
     try {
       for (let index = 0; index < Number(variants); index += 1) {
         setStatus(`Queueing variant ${index + 1} of ${variants}…`);
-        await createScriptJob({ script, name: `${plan.title} — Variant ${index + 1}`, style: "educational", aspectRatio: aspect, narration: "auto" });
+        await createScriptJob({ script, name: `${plan.title} — Variant ${index + 1}`, style: "educational", aspectRatio: aspect, contentFormat: aspect === "16:9" ? "long" : "short", narration: "auto", subscribeAnimation });
       }
       setStatus(`${variants} variant job${Number(variants) > 1 ? "s" : ""} queued.`);
       onJobCreated();
@@ -128,6 +130,7 @@ export function TopicToVideoView({ profiles, profilesLoaded = true, onConfigureP
           </FieldGroup>
         </div>
       </div>
+      <SubscribeAnimationControl value={subscribeAnimation} onChange={setSubscribeAnimation} longForm={aspect === "16:9"} />
       {plan && <section className="panel plan-review" aria-label="Reviewable script plan">{planProvider !== "local" && planProvider !== providerKey && <p className="form-error">Provider or model changed. Create a new plan for the selected model before generating.</p>}<strong>{plan.title}</strong><p>{plan.hook}</p><p>{plan.narration}</p><small>{plan.beats.length} visual beats · estimated {plan.estimatedDuration.toFixed(0)} seconds · {plan.hashtags.join(" ")}</small></section>}
       {error && <div className="form-error" role="alert">{error}</div>}
       {status && <div className="mode-note" role="status">{status}</div>}

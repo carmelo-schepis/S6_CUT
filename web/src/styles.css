@@ -879,6 +879,11 @@ main { min-width: 0; }
 .provider-callout.compact > svg { padding: 5px; }
 .provider-callout.compact .provider-callout-actions { grid-column: 1 / -1; width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-self: stretch; justify-content: stretch; }
 .provider-callout.compact .button { width: 100%; padding: var(--control-pad-y) var(--control-pad-x); }
+.subscribe-animation-control { display: grid; gap: .55rem; margin: 1rem 0; padding: .85rem 1rem; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text-primary); }
+.subscribe-animation-control legend { padding: 0 .3rem; font-weight: 700; }
+.subscribe-animation-control > label { display: flex; align-items: center; gap: .55rem; }
+.subscribe-animation-control .subscribe-animation-timing { justify-content: space-between; }
+.subscribe-animation-control small { color: var(--text-primary); line-height: 1.45; }
 .subtitle-toggle { display: flex; gap: var(--space-2); align-items: flex-start; min-width: 0; margin: 0; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); border: 1px solid var(--border-soft); background: var(--surface-2); color: var(--text-primary); cursor: pointer; }
 .subtitle-toggle input { margin: var(--checkbox-inset-y) 0 0 var(--checkbox-inset-x); }
 .subtitle-toggle span { display: grid; gap: var(--space-1); min-width: 0; }

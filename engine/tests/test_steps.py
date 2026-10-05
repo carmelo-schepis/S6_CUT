@@ -891,15 +891,22 @@ def test_switch_fast_initializes_checklist_and_skips_replaced(monkeypatch: pytes
     source.parent.mkdir(parents=True, exist_ok=True)
     source.write_bytes(b"source")
     old = Job(
-        id="sw-old", project_id="sw-proj", mode="clip", processing_mode="smart",
+        id="sw-old", project_id="sw-proj", mode="clip", processing_mode="smart", content_format="long",
         state="queued", stage="queued", stage_label="Queued", progress=0, style="educational",
         steps=test_manager._smart_steps(),
     )
     old.steps[0].status = "complete"
     old.steps[0].completed_at = "2026-01-01T00:00:00Z"
-    test_db.save_job(old, {"source_path": str(source), "processing_mode": "smart"})
+    test_db.save_job(old, {
+        "source_path": str(source), "processing_mode": "smart", "content_format": "long",
+        "subscribe_animation": {"version": 1, "enabled": True, "short_form_lead_seconds": 10},
+    })
 
     new_job = asyncio.run(test_manager.control("sw-old", "switch-fast"))
+    new_private = test_db.get_job_private(new_job.id)
+    assert new_job.content_format == "long"
+    assert new_private["content_format"] == "long"
+    assert new_private["subscribe_animation"] == {"version": 1, "enabled": True, "short_form_lead_seconds": 10}
     assert [step.id for step in new_job.steps] == FAST_IDS
     assert all(step.status == "pending" for step in new_job.steps)
 

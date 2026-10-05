@@ -263,13 +263,21 @@ class Health(ApiModel):
     fallbacks: dict[str, str]
 
 
+class SubscribeAnimationConfig(ApiModel):
+    version: Literal[1] = 1
+    enabled: bool = False
+    short_form_lead_seconds: Literal[5, 10] = 5
+
+
 class ScriptJobInput(ApiModel):
     script: str = Field(min_length=10, max_length=200_000)
+    content_format: ContentFormat = "short"
     name: str | None = Field(default=None, max_length=160)
     style: Style = "educational"
     aspect_ratio: Literal["9:16", "16:9", "1:1", "4:5"] = "9:16"
     narration: Literal["auto", "local", "silent"] = "auto"
     library_folder_id: str = UNSORTED_LIBRARY_FOLDER_ID
+    subscribe_animation: SubscribeAnimationConfig = Field(default_factory=SubscribeAnimationConfig)
 
 
 class SelectionInput(ApiModel):
@@ -290,6 +298,7 @@ class ShortsJobInput(ApiModel):
     end: float | None = Field(default=None, gt=0)
     aspect_ratio: Literal["9:16", "16:9", "1:1", "4:5"] = "9:16"
     library_folder_id: str = UNSORTED_LIBRARY_FOLDER_ID
+    subscribe_animation: SubscribeAnimationConfig = Field(default_factory=SubscribeAnimationConfig)
 
     @field_validator("start", "end")
     @classmethod

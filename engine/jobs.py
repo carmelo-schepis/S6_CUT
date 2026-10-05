@@ -227,6 +227,16 @@ def _creator_render_kwargs(render, credit: str | None) -> dict[str, str]:
     return {}
 
 
+def _subscribe_render_kwargs(render, config: dict[str, Any] | None) -> dict[str, Any]:
+    try:
+        parameters = inspect.signature(render).parameters.values()
+    except (TypeError, ValueError):
+        return {}
+    if any(parameter.name == "subscribe_animation" or parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters):
+        return {"subscribe_animation": config}
+    return {}
+
+
 def _format_render_kwargs(render, content_format: str) -> dict[str, str]:
     """Pass the content format only to renderers that accept it.
 
@@ -1074,6 +1084,8 @@ class JobManager:
                    has_audio=bool(metadata["audio"]), words=words, style=job.style,
                    subtitles_enabled=bool(private.get("burn_subtitles", job.burn_subtitles)),
                    embed_subtitles=bool(private.get("embed_subtitles", job.embed_subtitles)),
+                   **_subscribe_render_kwargs(render, private.get("subscribe_animation")),
+                   **_format_render_kwargs(render, job_content_format(job, private)),
                    **_creator_render_kwargs(render, youtube_creator_credit(job, private)))
             # publish_clip_output reuses the stable asset identity in its transaction.
             job, clip, _ = self._publish_output(job, clip, output, private)
@@ -1396,6 +1408,7 @@ class JobManager:
                     "words": clip_words if subtitles_enabled or bool(private.get("embed_subtitles", job.embed_subtitles)) else [],
                     "visuals": [], "overlays": overlays, "settings": self.settings, "style": job.style,
                     **({"embed_subtitles": True} if private.get("embed_subtitles", job.embed_subtitles) else {}),
+                    **_subscribe_render_kwargs(render_clip, private.get("subscribe_animation")),
                     **_creator_render_kwargs(render_clip, youtube_creator_credit(job, private)),
                     **_format_render_kwargs(render_clip, job_content_format(job, private)),
                 }
@@ -1581,7 +1594,7 @@ class JobManager:
                         else:
                             warning = f"Clip {clip.index}: Local captioning unavailable; exported without captions. ({detail})"
                         job.warnings.append(warning)
-                render_kwargs: dict[str, Any] = {"start": clip.start, "end": clip.end, "aspect": private["aspect_ratio"], "has_audio": has_audio, "settings": self.settings}
+                render_kwargs: dict[str, Any] = {"start": clip.start, "end": clip.end, "aspect": private["aspect_ratio"], "has_audio": has_audio, "settings": self.settings, **_subscribe_render_kwargs(render, private.get("subscribe_animation"))}
                 if embed_subtitles:
                     render_kwargs["embed_subtitles"] = True
                 if words:
@@ -1706,7 +1719,7 @@ class JobManager:
         output = work / "clips" / "01-script-video.mp4"
         try:
             try:
-                render_script(output, duration=duration, aspect=private["aspect_ratio"], narration=narration, words=words, visuals=visuals, overlays=overlays, settings=self.settings, style=job.style)
+                render_script(output, duration=duration, aspect=private["aspect_ratio"], narration=narration, words=words, visuals=visuals, overlays=overlays, settings=self.settings, style=job.style, **_format_render_kwargs(render_script, job_content_format(job, private)), **_subscribe_render_kwargs(render_script, private.get("subscribe_animation")))
             except TypeError as exc:
                 if "unexpected keyword argument 'style'" not in str(exc):
                     raise

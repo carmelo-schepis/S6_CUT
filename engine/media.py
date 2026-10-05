@@ -19,6 +19,7 @@ from typing import Any
 
 from .config import Settings
 from .recipes import CAPTION_REFERENCE_SHORT_EDGE, LookTreatment, caption_preset, known_styles, recipe_for
+from .subscribe_animation import ANIMATION_ASSET, ANIMATION_DURATION_SECONDS, schedule_subscribe_animation
 from .security import redact, validate_youtube_url
 
 ALLOWED_VIDEO_SUFFIXES = {".mp4", ".mov", ".webm", ".mkv", ".m4v", ".avi"}
@@ -1317,7 +1318,37 @@ def _credit_alignment(source: Path, *, start: float, end: float, width: int, hei
     return 1 if left + 0.05 < right else 3
 
 
-def _filters(width: int, height: int, overlays: list[tuple[Path, float, float]], asset_start_index: int, ass_name: str, source_dimensions: tuple[int, int] | None = None) -> tuple[str, str]:
+def _subscribe_animation_inputs(
+    command: list[str], config: dict[str, Any] | None, duration: float,
+    content_format: str | None, width: int, height: int, first_input: int,
+) -> list[tuple[int, float, float, float, float]]:
+    """Append one independent local animation input per scheduled occurrence.
+
+    Each QTRLE source contains straight alpha and exactly one four-second cycle.
+    Independent inputs plus reset PTS make every occurrence begin at frame zero.
+    """
+    schedule = schedule_subscribe_animation(duration, content_format=content_format or "short", config=config)
+    if not schedule:
+        return []
+    if not ANIMATION_ASSET.is_file():
+        logger.warning("Skipping subscribe animation: the bundled asset is unavailable")
+        return []
+    landscape = width > height
+    width_fraction = 0.18 if landscape else 0.28
+    overlay_width = max(2, round(width * width_fraction / 2) * 2)
+    overlay_height = max(2, round(overlay_width * 180 / 512 / 2) * 2)
+    result = []
+    for offset, (start, cycle_duration) in enumerate(schedule):
+        command.extend(["-i", str(ANIMATION_ASSET)])
+        result.append((first_input + offset, start, cycle_duration, overlay_width, overlay_height))
+    return result
+
+
+def _filters(
+    width: int, height: int, overlays: list[tuple[Path, float, float]], asset_start_index: int,
+    ass_name: str, source_dimensions: tuple[int, int] | None = None,
+    subscribe_animations: list[tuple[int, float, float, float, float]] | None = None,
+) -> tuple[str, str]:
     if source_dimensions:
         filters = [f"[0:v]{_source_layout_filter(*source_dimensions, width, height)}"]
     else:
@@ -1330,13 +1361,19 @@ def _filters(width: int, height: int, overlays: list[tuple[Path, float, float]],
         output = f"layer{number}"
         filters.append(f"[{current}][ov{number}]overlay=(W-w)/2:(H-h)/2:enable='between(t,{start:.3f},{end:.3f})':eof_action=pass[{output}]")
         current = output
+    for number, (input_index, start, cycle_duration, overlay_width, overlay_height) in enumerate(subscribe_animations or []):
+        output = f"subscribe{number}"
+        speed = cycle_duration / ANIMATION_DURATION_SECONDS
+        filters.append(f"[{input_index}:v]format=rgba,setpts=(PTS-STARTPTS)*{speed:.6f}+{start:.3f}/TB,scale={overlay_width}:{overlay_height}:flags=lanczos[subscribe_layer{number}]")
+        filters.append(f"[{current}][subscribe_layer{number}]overlay=x=(W-w)/2:y=H*0.08:format=auto:eof_action=pass:enable='between(t,{start:.3f},{start + cycle_duration:.3f})'[{output}]")
+        current = output
     filters.append(f"[{current}]subtitles={ass_name}[outv]")
     return ";".join(filters), "outv"
 
 
 # DO-NOT-CHANGE: atomic render (.partial.mp4 + os.replace) with structural output
 # validation (dimensions/audio) before the output is publishable
-def render_clip(source: Path, output: Path, *, start: float, end: float, aspect: str, words: list[dict[str, Any]], visuals: list[tuple[str, float, float]], overlays: list[tuple[Path, float, float]], settings: Settings, style: str = "educational", has_audio: bool = True, embed_subtitles: bool = False, subtitle_language: str = "und", creator_credit: str | None = None, content_format: str | None = None) -> None:
+def render_clip(source: Path, output: Path, *, start: float, end: float, aspect: str, words: list[dict[str, Any]], visuals: list[tuple[str, float, float]], overlays: list[tuple[Path, float, float]], settings: Settings, style: str = "educational", has_audio: bool = True, embed_subtitles: bool = False, subtitle_language: str = "und", creator_credit: str | None = None, content_format: str | None = None, subscribe_animation: dict[str, Any] | None = None) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     ass = output.parent / (f"{output.stem}.burn.ass" if creator_credit else f"{output.stem}.ass")
     duration = end - start
@@ -1353,21 +1390,22 @@ def render_clip(source: Path, output: Path, *, start: float, end: float, aspect:
         # never be applied a second time to an already credited MP4.
         write_ass(output.with_suffix(".ass"), words, offset=start, duration=duration, visuals=visuals, width=width, height=height, style=style, content_format=content_format)
     temp = output.with_suffix(".partial.mp4")
-    command = [settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{start:.3f}", "-i", str(source), "-t", f"{duration:.3f}"]
+    command = [settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{start:.3f}", "-i", str(source)]
     _overlay_inputs(command, overlays)
-    subtitle_index = 1 + len(overlays)
+    subscribe_animations = _subscribe_animation_inputs(command, subscribe_animation, duration, content_format, width, height, 1 + len(overlays))
+    subtitle_index = 1 + len(overlays) + len(subscribe_animations)
     if embed_subtitles:
         command.extend(["-i", str(output.with_suffix(".srt"))])
     source_dimensions = (src_width, src_height)
-    filters, mapped = _filters(width, height, overlays, 1, ass.name, source_dimensions)
-    command.extend(["-filter_complex", filters, "-map", f"[{mapped}]"])
+    filters, mapped = _filters(width, height, overlays, 1, ass.name, source_dimensions, subscribe_animations)
+    command.extend(["-t", f"{duration:.3f}", "-filter_complex", filters, "-map", f"[{mapped}]"])
     if has_audio:
         command.extend(["-map", "0:a:0", "-c:a", DELIVERY_AUDIO_CODEC, "-b:a", DELIVERY_AUDIO_BITRATE, "-ar", DELIVERY_AUDIO_RATE])
     else:
         command.append("-an")
     if embed_subtitles:
         command.extend(["-map", f"{subtitle_index}:0", "-c:s", "mov_text", "-metadata:s:s:0", f"language={subtitle_language}"])
-    command.extend(["-c:v", DELIVERY_VIDEO_CODEC, "-preset", DELIVERY_PRESET, "-crf", DELIVERY_CRF, "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-shortest", "-t", f"{duration:.3f}", str(temp)])
+    command.extend(["-c:v", DELIVERY_VIDEO_CODEC, "-preset", DELIVERY_PRESET, "-crf", DELIVERY_CRF, "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-t", f"{duration:.3f}", str(temp)])
     run(command, cwd=output.parent, timeout=7200)
     metadata = probe(temp, settings)
     if metadata["width"] != width or metadata["height"] != height or (has_audio and not metadata["audio"]):
@@ -1581,6 +1619,7 @@ def render_fast_clip(
     subtitle_language: str = "und",
     creator_credit: str | None = None,
     content_format: str | None = None,
+    subscribe_animation: dict[str, Any] | None = None,
 ) -> None:
     """Render a fast clip with optional captions and no overlays or visual beats.
 
@@ -1654,9 +1693,8 @@ def render_fast_clip(
         write_ass(ass, words or [], offset=0, duration=duration, visuals=[], width=width, height=height, style=style, creator_credit=creator_credit, credit_alignment=credit_alignment, content_format=content_format)
         if creator_credit:
             write_ass(output.with_suffix(".ass"), words or [], offset=0, duration=duration, visuals=[], width=width, height=height, style=style, content_format=content_format)
-        vf = f"{vf},subtitles={ass.name}"
     if look_before or look_after:
-        # Back to the delivery pixel format only after the captions are burned.
+        # Return to delivery format after grading and before alpha compositing.
         vf = f"{vf},format=yuv420p"
     command = [
         settings.ffmpeg,
@@ -1668,16 +1706,31 @@ def render_fast_clip(
         f"{start:.3f}",
         "-i",
         str(source),
-        "-t",
-        f"{duration:.3f}",
     ]
+    subscribe_animations = _subscribe_animation_inputs(command, subscribe_animation, duration, content_format, width, height, 1)
+    subtitle_index = 1 + len(subscribe_animations)
     if embed_subtitles:
         command.extend(["-i", str(output.with_suffix(".srt"))])
+    command.extend(["-t", f"{duration:.3f}"])
+    if subscribe_animations:
+        graph = [f"[0:v]{vf}[base]"]
+        current = "base"
+        for number, (input_index, at, cycle_duration, overlay_width, overlay_height) in enumerate(subscribe_animations):
+            speed = cycle_duration / ANIMATION_DURATION_SECONDS
+            graph.append(f"[{input_index}:v]format=rgba,setpts=(PTS-STARTPTS)*{speed:.6f}+{at:.3f}/TB,scale={overlay_width}:{overlay_height}:flags=lanczos[subscribe_layer{number}]")
+            output_label = f"subscribe{number}"
+            graph.append(f"[{current}][subscribe_layer{number}]overlay=x=(W-w)/2:y=H*0.08:format=auto:eof_action=pass:enable='between(t,{at:.3f},{at + cycle_duration:.3f})'[{output_label}]")
+            current = output_label
+        if ass:
+            graph.append(f"[{current}]subtitles={ass.name}[outv]")
+        else:
+            graph.append(f"[{current}]null[outv]")
+        command.extend(["-filter_complex", ";".join(graph), "-map", "[outv]"])
+    else:
+        if ass:
+            vf = f"{vf},subtitles={ass.name}"
+        command.extend(["-vf", vf, "-map", "0:v"])
     command.extend([
-        "-vf",
-        vf,
-        "-map",
-        "0:v",
         "-c:v",
         DELIVERY_VIDEO_CODEC,
         "-preset",
@@ -1703,7 +1756,7 @@ def render_fast_clip(
     else:
         command.append("-an")
     if embed_subtitles:
-        command.extend(["-map", "1:0", "-c:s", "mov_text", "-metadata:s:s:0", f"language={subtitle_language}"])
+        command.extend(["-map", f"{subtitle_index}:0", "-c:s", "mov_text", "-metadata:s:s:0", f"language={subtitle_language}"])
     command.append(str(temp))
 
     run(command, cwd=output.parent, timeout=7200)
@@ -1723,7 +1776,7 @@ def render_fast_clip(
 
 
 # DO-NOT-CHANGE: script render with atomic .partial + os.replace and output validation
-def render_script(output: Path, *, duration: float, aspect: str, narration: Path | None, words: list[dict[str, Any]], visuals: list[tuple[str, float, float]], overlays: list[tuple[Path, float, float]], settings: Settings, style: str = "educational") -> None:
+def render_script(output: Path, *, duration: float, aspect: str, narration: Path | None, words: list[dict[str, Any]], visuals: list[tuple[str, float, float]], overlays: list[tuple[Path, float, float]], settings: Settings, style: str = "educational", content_format: str = "short", subscribe_animation: dict[str, Any] | None = None) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     ass = output.parent / f"{output.stem}.ass"
     width, height = dimensions(aspect)
@@ -1737,7 +1790,9 @@ def render_script(output: Path, *, duration: float, aspect: str, narration: Path
         command.extend(["-i", str(narration)])
     asset_start = 2 if narration else 1
     _overlay_inputs(command, overlays)
-    filters, mapped = _filters(width, height, overlays, asset_start, ass.name)
+    animation_start = asset_start + len(overlays)
+    subscribe_animations = _subscribe_animation_inputs(command, subscribe_animation, duration, content_format, width, height, animation_start)
+    filters, mapped = _filters(width, height, overlays, asset_start, ass.name, subscribe_animations=subscribe_animations)
     command.extend(["-filter_complex", filters, "-map", f"[{mapped}]"])
     if audio_index is not None:
         command.extend(["-map", f"{audio_index}:a:0", "-c:a", DELIVERY_AUDIO_CODEC, "-b:a", DELIVERY_AUDIO_BITRATE, "-ar", DELIVERY_AUDIO_RATE])
