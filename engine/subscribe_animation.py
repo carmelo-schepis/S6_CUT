@@ -5,6 +5,9 @@ from math import isfinite
 from pathlib import Path
 
 ANIMATION_DURATION_SECONDS = 4.0
+ANIMATION_CANVAS_WIDTH = 1536
+ANIMATION_CANVAS_HEIGHT = 540
+ANIMATION_BUTTON_WIDTH = 1026
 SCHEDULE_VERSION = 1
 ANIMATION_ASSET = Path(__file__).parent / "assets" / "subscribe-click.mov"
 

@@ -19,7 +19,14 @@ from typing import Any
 
 from .config import Settings
 from .recipes import CAPTION_REFERENCE_SHORT_EDGE, LookTreatment, caption_preset, known_styles, recipe_for
-from .subscribe_animation import ANIMATION_ASSET, ANIMATION_DURATION_SECONDS, schedule_subscribe_animation
+from .subscribe_animation import (
+    ANIMATION_ASSET,
+    ANIMATION_BUTTON_WIDTH,
+    ANIMATION_CANVAS_HEIGHT,
+    ANIMATION_CANVAS_WIDTH,
+    ANIMATION_DURATION_SECONDS,
+    schedule_subscribe_animation,
+)
 from .security import redact, validate_youtube_url
 
 ALLOWED_VIDEO_SUFFIXES = {".mp4", ".mov", ".webm", ".mkv", ".m4v", ".avi"}
@@ -1333,14 +1340,28 @@ def _subscribe_animation_inputs(
     if not ANIMATION_ASSET.is_file():
         raise MediaError("Subscribe animation is enabled, but the bundled animation asset is unavailable")
     landscape = width > height
-    width_fraction = 0.18 if landscape else 0.28
-    overlay_width = max(2, round(width * width_fraction / 2) * 2)
-    overlay_height = max(2, round(overlay_width * 180 / 512 / 2) * 2)
+    visible_button_fraction = 0.45 if landscape else 0.60
+    overlay_width = max(2, round(width * visible_button_fraction * ANIMATION_CANVAS_WIDTH / ANIMATION_BUTTON_WIDTH / 2) * 2)
+    overlay_height = max(2, round(overlay_width * ANIMATION_CANVAS_HEIGHT / ANIMATION_CANVAS_WIDTH / 2) * 2)
     result = []
     for offset, (start, cycle_duration) in enumerate(schedule):
         command.extend(["-i", str(ANIMATION_ASSET)])
         result.append((first_input + offset, start, cycle_duration, overlay_width, overlay_height))
     return result
+
+
+def _composite_subscribe_animations(
+    filters: list[str], current: str,
+    subscribe_animations: list[tuple[int, float, float, float, float]] | None,
+) -> str:
+    """Append scheduled transparent animation layers to a render graph."""
+    for number, (input_index, start, cycle_duration, overlay_width, overlay_height) in enumerate(subscribe_animations or []):
+        output = f"subscribe{number}"
+        speed = cycle_duration / ANIMATION_DURATION_SECONDS
+        filters.append(f"[{input_index}:v]format=rgba,setpts=(PTS-STARTPTS)*{speed:.6f}+{start:.3f}/TB,scale={overlay_width}:{overlay_height}:flags=lanczos[subscribe_layer{number}]")
+        filters.append(f"[{current}][subscribe_layer{number}]overlay=x=(W-w)/2:y=H*0.08:format=auto:eof_action=pass:enable='between(t,{start:.3f},{start + cycle_duration:.3f})'[{output}]")
+        current = output
+    return current
 
 
 def _filters(
@@ -1360,12 +1381,7 @@ def _filters(
         output = f"layer{number}"
         filters.append(f"[{current}][ov{number}]overlay=(W-w)/2:(H-h)/2:enable='between(t,{start:.3f},{end:.3f})':eof_action=pass[{output}]")
         current = output
-    for number, (input_index, start, cycle_duration, overlay_width, overlay_height) in enumerate(subscribe_animations or []):
-        output = f"subscribe{number}"
-        speed = cycle_duration / ANIMATION_DURATION_SECONDS
-        filters.append(f"[{input_index}:v]format=rgba,setpts=(PTS-STARTPTS)*{speed:.6f}+{start:.3f}/TB,scale={overlay_width}:{overlay_height}:flags=lanczos[subscribe_layer{number}]")
-        filters.append(f"[{current}][subscribe_layer{number}]overlay=x=(W-w)/2:y=H*0.08:format=auto:eof_action=pass:enable='between(t,{start:.3f},{start + cycle_duration:.3f})'[{output}]")
-        current = output
+    current = _composite_subscribe_animations(filters, current, subscribe_animations)
     filters.append(f"[{current}]subtitles={ass_name}[outv]")
     return ";".join(filters), "outv"
 
@@ -1714,12 +1730,7 @@ def render_fast_clip(
     if subscribe_animations:
         graph = [f"[0:v]{vf}[base]"]
         current = "base"
-        for number, (input_index, at, cycle_duration, overlay_width, overlay_height) in enumerate(subscribe_animations):
-            speed = cycle_duration / ANIMATION_DURATION_SECONDS
-            graph.append(f"[{input_index}:v]format=rgba,setpts=(PTS-STARTPTS)*{speed:.6f}+{at:.3f}/TB,scale={overlay_width}:{overlay_height}:flags=lanczos[subscribe_layer{number}]")
-            output_label = f"subscribe{number}"
-            graph.append(f"[{current}][subscribe_layer{number}]overlay=x=(W-w)/2:y=H*0.08:format=auto:eof_action=pass:enable='between(t,{at:.3f},{at + cycle_duration:.3f})'[{output_label}]")
-            current = output_label
+        current = _composite_subscribe_animations(graph, current, subscribe_animations)
         if ass:
             graph.append(f"[{current}]subtitles={ass.name}[outv]")
         else:

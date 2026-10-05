@@ -9,7 +9,14 @@ import pytest
 from engine.config import Settings
 from engine.media import MediaError, _subscribe_animation_inputs, probe, render_fast_clip, render_script
 from engine.models import ScriptJobInput, ShortsJobInput, SubscribeAnimationConfig
-from engine.subscribe_animation import ANIMATION_ASSET, ANIMATION_DURATION_SECONDS, schedule_subscribe_animation
+from engine.subscribe_animation import (
+    ANIMATION_ASSET,
+    ANIMATION_BUTTON_WIDTH,
+    ANIMATION_CANVAS_HEIGHT,
+    ANIMATION_CANVAS_WIDTH,
+    ANIMATION_DURATION_SECONDS,
+    schedule_subscribe_animation,
+)
 
 
 ON = {"enabled": True, "version": 1, "short_form_lead_seconds": 5}
@@ -71,6 +78,18 @@ def test_bundled_animation_asset_is_present_and_scheduled_inputs_restart_indepen
     assert command.count("-i") == 3
     assert command[-1] == str(ANIMATION_ASSET)
     assert _subscribe_animation_inputs(["ffmpeg", "-i", "source.mp4"], None, 120, "long", 1920, 1080, 1) == []
+
+
+def test_bundled_animation_asset_keeps_high_resolution_alpha_video_contract() -> None:
+    settings = Settings.from_env()
+    _require_ffmpeg(settings)
+    metadata = probe(ANIMATION_ASSET, settings)
+    assert (metadata["width"], metadata["height"]) == (ANIMATION_CANVAS_WIDTH, ANIMATION_CANVAS_HEIGHT)
+    assert metadata["video_codec"] == "qtrle"
+    assert metadata["pixel_format"] == "argb"
+    assert metadata["frame_rate"] == 30
+    assert metadata["duration"] == pytest.approx(ANIMATION_DURATION_SECONDS, abs=.01)
+    assert ANIMATION_BUTTON_WIDTH / ANIMATION_CANVAS_WIDTH == pytest.approx(.66796875)
 
 
 def test_missing_enabled_animation_asset_fails_clearly(monkeypatch, tmp_path: Path) -> None:
@@ -135,7 +154,7 @@ def _require_ffmpeg(settings: Settings) -> None:
 def _frame_region(settings: Settings, path: Path, at: float) -> bytes:
     result = subprocess.run(
         [settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-ss", f"{at:.3f}", "-i", str(path),
-         "-frames:v", "1", "-vf", "crop=iw*0.18:ih*0.08:(iw-ow)/2+iw*0.06:ih*0.08,scale=288:160", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"],
+         "-frames:v", "1", "-vf", "crop=iw*0.60:ih*0.24:(iw-ow)/2:ih*0.06,scale=288:160", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"],
         check=True, capture_output=True,
     )
     return result.stdout
@@ -143,6 +162,28 @@ def _frame_region(settings: Settings, path: Path, at: float) -> bytes:
 
 def _mean_difference(first: bytes, second: bytes) -> float:
     return sum(abs(left - right) for left, right in zip(first, second, strict=True)) / len(first)
+
+
+def _full_frame(settings: Settings, path: Path, at: float, width: int, height: int) -> bytes:
+    result = subprocess.run(
+        [settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-ss", f"{at:.3f}", "-i", str(path),
+         "-frames:v", "1", "-pix_fmt", "rgb24", "-f", "rawvideo", "pipe:1"],
+        check=True, capture_output=True,
+    )
+    assert len(result.stdout) == width * height * 3
+    return result.stdout
+
+
+def _pixel_bounds(frame: bytes, width: int, height: int, matches) -> tuple[int, int, int, int]:
+    xs, ys = [], []
+    for y in range(height):
+        for x in range(width):
+            offset = (y * width + x) * 3
+            if matches(*frame[offset:offset + 3]):
+                xs.append(x)
+                ys.append(y)
+    assert xs, "expected visible animation pixels"
+    return min(xs), min(ys), max(xs) + 1, max(ys) + 1
 
 
 @pytest.mark.parametrize("aspect", ASPECTS)
@@ -159,7 +200,11 @@ def test_real_ffmpeg_animation_is_visible_motion_and_keeps_media_contracts(tmp_p
     )
     enabled = tmp_path / f"enabled-{aspect.replace(':', '-')}.mp4"
     disabled = tmp_path / f"disabled-{aspect.replace(':', '-')}.mp4"
-    args = dict(start=1, end=8, aspect=aspect, settings=settings, has_audio=True, subtitles_enabled=False)
+    args = dict(
+        start=1, end=8, aspect=aspect, settings=settings, has_audio=True,
+        words=[{"text": "A readable caption", "start": 2.2, "end": 4.8, "confidence": 0.9}],
+        creator_credit="Source: S6_CUT", subtitles_enabled=True,
+    )
     render_fast_clip(source, enabled, subscribe_animation=ON, **args)
     render_fast_clip(source, disabled, subscribe_animation={"version": 1, "enabled": False, "short_form_lead_seconds": 5}, **args)
 
@@ -170,6 +215,31 @@ def test_real_ffmpeg_animation_is_visible_motion_and_keeps_media_contracts(tmp_p
     assert on_meta["audio"] and off_meta["audio"]
     assert on_meta["duration"] == pytest.approx(7, abs=.25)
     assert off_meta["duration"] == pytest.approx(7, abs=.25)
+
+    width, height = dimensions(aspect)
+    early_on = _full_frame(settings, enabled, 2.45, width, height)
+    early_off = _full_frame(settings, disabled, 2.45, width, height)
+    left, top, right, bottom = _pixel_bounds(
+        early_on, width, height, lambda red, green, blue: red > green * 1.35 and red > blue * 1.35 and red > 80,
+    )
+    visible_width_fraction = (right - left) / width
+    expected_width = (0.40, 0.50) if aspect == "16:9" else (0.55, 0.65)
+    assert expected_width[0] <= visible_width_fraction <= expected_width[1]
+    assert abs((left + right) / 2 - width / 2) <= width * 0.02
+    assert 0 <= top < bottom <= height and top < height * 0.20
+
+    # Pointer travel/click, sparkle, and subscribed state all stay within the
+    # render canvas; disabled output remains unchanged at matching timestamps.
+    for at in (2.45, 3.10, 3.60):
+        on_frame = _full_frame(settings, enabled, at, width, height)
+        off_frame = early_off if at == 2.45 else _full_frame(settings, disabled, at, width, height)
+        difference = _pixel_bounds(
+            bytes(abs(left - right) for left, right in zip(on_frame, off_frame, strict=True)),
+            width, height, lambda red, green, blue: red + green + blue > 90,
+        )
+        diff_left, diff_top, diff_right, diff_bottom = difference
+        assert width * 0.02 < diff_left < diff_right < width * 0.98
+        assert height * 0.04 < diff_top < diff_bottom < height * 0.50
 
     # The source is trimmed from t=1 through t=8; output-relative timing starts
     # at t=2. Compare identical output timestamps and verify cursor travel,
