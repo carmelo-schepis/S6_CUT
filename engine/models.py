@@ -528,6 +528,14 @@ class AssetPage(ApiModel):
     has_more: bool
 
 
+class RecentClipsPage(ApiModel):
+    items: list[Asset]
+    page: int = Field(ge=1)
+    page_size: int = Field(ge=1, le=100)
+    has_more: bool
+    total: int = Field(ge=0)
+
+
 class MatchExplanation(ApiModel):
     query: str
     selected: Asset | None

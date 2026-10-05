@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Health, ProviderProfile } from "../types";
+import { onLibraryChanged } from "../library-sync";
 import { SettingsView } from "./settings-view";
 
 vi.mock("../api", () => {
@@ -15,6 +16,7 @@ const mockSaveProfile = vi.mocked(saveProfile);
 const mockTestProfile = vi.mocked(testProfile);
 const mockDeleteProfile = vi.mocked(deleteProfile);
 const mockPurgeLibraryContent = vi.mocked(purgeLibraryContent);
+let unsubscribeLibraryChange: ReturnType<typeof onLibraryChanged> = () => {};
 
 const health: Health = { status: "ready", version: "test", database: true, ffmpeg: true, ffprobe: true, whisper: true, ytdlp: true, localTts: true, dataPath: "Local mounted data directory", freeBytes: 1_000_000, activeWorkers: 0, queuedJobs: 0, fallbacks: { planning: "deterministic" } };
 const connectedProfile: ProviderProfile = {
@@ -25,6 +27,7 @@ const baseProfile: ProviderProfile = { id: "p2", name: "Minimal", textModelId: "
 function renderView() { return render(<SettingsView health={health} onHealthRefresh={vi.fn(async () => undefined)} onProfilesChanged={vi.fn()} />); }
 
 describe("SettingsView", () => {
+  afterEach(() => unsubscribeLibraryChange());
   beforeEach(() => { mockListProfiles.mockReset(); mockListModels.mockReset(); mockSaveProfile.mockReset(); mockTestProfile.mockReset(); mockDeleteProfile.mockReset(); mockPurgeLibraryContent.mockReset(); mockListModels.mockResolvedValue([]); });
   it("renders one OpenRouter section with separate capability states", async () => {
     mockListProfiles.mockResolvedValue([connectedProfile]); renderView();
@@ -61,7 +64,9 @@ describe("SettingsView", () => {
     renderView(); await screen.findByText("Work profile"); fireEvent.click(screen.getByRole("button", { name: "Edit Work profile" }));
     await waitFor(() => expect(mockListModels).toHaveBeenCalledWith("speech"));
   });
-  it("requires the exact destructive confirmation phrase and shows the empty summary", async () => {
+  it("requires the exact destructive confirmation phrase and signals Library revalidation after purge", async () => {
+    const libraryChanged = vi.fn();
+    unsubscribeLibraryChange = onLibraryChanged(libraryChanged);
     mockListProfiles.mockResolvedValue([baseProfile]);
     mockPurgeLibraryContent.mockResolvedValue({ assetsDeleted: 4, projectsDeleted: 1, blobsDeleted: 4, bytesReclaimed: 42, warnings: [] });
     renderView(); await screen.findByText("Minimal");
@@ -73,6 +78,7 @@ describe("SettingsView", () => {
     await waitFor(() => expect(mockPurgeLibraryContent).toHaveBeenCalledWith("DELETE ALL CONTENT"));
     expect(await screen.findByText("Library is empty")).toBeInTheDocument();
     expect(screen.getByText(/4 media items, 1 linked project, and 4 files removed/)).toBeInTheDocument();
+    expect(libraryChanged).toHaveBeenCalledTimes(1);
   });
   it("tests, deletes, and refreshes profiles", async () => {
     mockListProfiles.mockResolvedValue([baseProfile]); mockTestProfile.mockResolvedValue(baseProfile); mockDeleteProfile.mockResolvedValue(undefined); globalThis.confirm = vi.fn(() => true);

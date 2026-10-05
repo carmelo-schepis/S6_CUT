@@ -3,6 +3,7 @@
 
 import {
   assetPageSchema,
+  recentClipsPageSchema,
   assetSchema,
   assetDeleteResultSchema,
   healthSchema,
@@ -17,6 +18,7 @@ import {
   type AssetOrigin,
   type LibraryAsset,
   type LibraryFolder,
+  type RecentClipsPage,
   type MatchExplanation,
   type ContentFormat,
   type ProcessingMode,
@@ -341,6 +343,14 @@ export async function listAssetsPage(filters: AssetFilters & { page?: number; pa
   if (filters.includeArchived) query.set("include_archived", "true");
   query.set("page", String(filters.page ?? 1)); query.set("page_size", String(filters.pageSize ?? 40));
   return assetPageSchema.parse(await request(`/library/assets/page?${query}`));
+}
+
+export async function listRecentClips(options: { search?: string; page?: number; pageSize?: number } = {}): Promise<RecentClipsPage> {
+  const query = new URLSearchParams();
+  query.set("search", options.search?.trim() ?? "");
+  query.set("page", String(options.page ?? 1));
+  query.set("page_size", String(options.pageSize ?? 12));
+  return recentClipsPageSchema.parse(await request(`/library/recent-clips?${query}`, { timeoutMs: READ_TIMEOUT_MS }));
 }
 
 export async function listAssets(filters: AssetFilters = {}): Promise<LibraryAsset[]> {

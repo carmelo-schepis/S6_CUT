@@ -346,6 +346,9 @@ export type LibraryAsset = z.infer<typeof assetSchema>;
 export const assetPageSchema = z.object({ items: assetSchema.array(), page: z.number().int().positive(), pageSize: z.number().int().positive(), hasMore: z.boolean() });
 export type AssetPage = z.infer<typeof assetPageSchema>;
 
+export const recentClipsPageSchema = z.object({ items: assetSchema.array(), page: z.number().int().positive(), pageSize: z.number().int().positive(), hasMore: z.boolean(), total: z.number().int().nonnegative() });
+export type RecentClipsPage = z.infer<typeof recentClipsPageSchema>;
+
 export const assetDeleteResultSchema = z.object({ deleted: z.array(z.string()), failed: z.record(z.string()) });
 
 export const libraryPurgeResultSchema = z.object({

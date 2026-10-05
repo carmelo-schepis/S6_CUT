@@ -42,6 +42,7 @@ export function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [selectedLibraryAssetId, setSelectedLibraryAssetId] = useState<string | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
   const [healthChecked, setHealthChecked] = useState(false);
   const [profiles, setProfiles] = useState<ProviderProfile[]>([]);
@@ -127,6 +128,10 @@ export function App() {
   const openProject = (id: string) => {
     setSelectedProjectId(id);
     setPage("workspace");
+  };
+  const openLibraryAsset = (id: string) => {
+    setSelectedLibraryAssetId(id);
+    setPage("library");
   };
 
   const onCreated = (project: Project) => {
@@ -228,8 +233,8 @@ export function App() {
       {error && <div className="global-alert" role="alert"><strong>Engine unavailable.</strong> {error} <button onClick={() => refresh()}>Retry</button></div>}
 
       <main id="main-content" tabIndex={-1}>
-        {page === "projects" && <ProjectsView projects={projects} jobs={jobs} health={health} healthChecked={healthChecked} loaded={loaded} providersLoaded={profilesLoaded} hasSelectedProvider={hasSelectedProvider} onConfigureProviders={openProviders} onCreated={onCreated} onOpen={openProject} onDeleted={onDeleted} onRefresh={refresh} />}
-        {page === "library" && <LibraryView />}
+        {page === "projects" && <ProjectsView projects={projects} jobs={jobs} health={health} healthChecked={healthChecked} loaded={loaded} providersLoaded={profilesLoaded} hasSelectedProvider={hasSelectedProvider} onConfigureProviders={openProviders} onCreated={onCreated} onOpen={openProject} onDeleted={onDeleted} onRefresh={refresh} onSelectLibraryAsset={openLibraryAsset} />}
+        {page === "library" && <LibraryView selectedAssetId={selectedLibraryAssetId} />}
         {page === "workspace" && <WorkspaceView key={selected?.id || "none"} project={selected} health={health} providersLoaded={profilesLoaded} hasSelectedProvider={hasSelectedProvider} onConfigureProviders={openProviders} onProjectUpdated={refresh} onGoProjects={() => setPage("projects")} />}
         {page === "shorts-editor" && <ShortsEditorView onJobCreated={refresh} />}
         {page === "ai-video" && <TopicToVideoView profiles={profiles} profilesLoaded={profilesLoaded} onConfigureProviders={openProviders} onJobCreated={refresh} />}

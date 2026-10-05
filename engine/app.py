@@ -31,7 +31,7 @@ from .library import LibraryRules
 from .media import _SUBTITLE_PRESETS, MediaError, available, caption_font_mismatches, probe, validate_video_upload
 from .models import (
     Asset, AssetDelete, AssetDeleteResult, AssetMove, AssetOrigin, AssetUpdate, AssetPage, CaptionCue, CaptionDownload, CaptionReviewInput, Clip, FolderCreate, FolderMove, FolderUpdate, Health, Job, LibraryPurgeInput, LibraryPurgeResult,
-    LibraryFolder, MatchExplanation, ContentFormat, ProcessingMode, ProfileInput, Project, ProjectFolderUpdate,
+    LibraryFolder, MatchExplanation, RecentClipsPage, ContentFormat, ProcessingMode, ProfileInput, Project, ProjectFolderUpdate,
     OpenRouterModel, ProviderProfile, ScriptJobInput, SelectionInput, ShortsJobInput, SubscribeAnimationConfig, TopicBeat, TopicVideoInput, TopicVideoPlan, now_iso,
 )
 from .providers import ProfileService, ProviderError
@@ -1009,6 +1009,22 @@ async def list_assets_page(folder_id: str | None = None, media_type: str | None 
         raise _not_found("Folder")
     assets, has_more = db.list_assets_page(folder_id=folder_id, media_type=media_type, origin=origin, search=search, include_archived=include_archived, page=page, page_size=page_size)
     return AssetPage(items=[_public_asset(asset) for asset in assets], page=page, page_size=page_size, has_more=has_more)
+
+
+@app.get("/api/v1/library/recent-clips", response_model=RecentClipsPage)
+async def recent_clips(search: str | None = Query(default=None, max_length=500), page: int = Query(1, ge=1), page_size: int = Query(12, ge=1, le=100)) -> RecentClipsPage:
+    def playable_file(relative: str) -> bool:
+        try:
+            target = confined(settings.data_path, *relative.split("/"))
+        except (ValueError, OSError):
+            return False
+        return target.is_file()
+
+    assets, total = db.recent_clip_assets(search=search, page=page, page_size=page_size, file_exists=playable_file)
+    return RecentClipsPage(
+        items=[_public_asset(asset) for asset in assets], page=page, page_size=page_size,
+        has_more=page * page_size < total, total=total,
+    )
 
 
 @app.post("/api/v1/library/assets/move", response_model=dict[str, int])

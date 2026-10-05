@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, HEALTH_TIMEOUT_MS, TimeoutError, createClipJob, createFolder, createScriptJob, createShortsJob, createShortsSourceJob, getHealth, readableError, rerenderCaptions, saveCaptionCues, readableDetail } from "./api";
+import { ApiError, HEALTH_TIMEOUT_MS, TimeoutError, createClipJob, createFolder, createScriptJob, createShortsJob, createShortsSourceJob, getHealth, listRecentClips, readableError, rerenderCaptions, saveCaptionCues, readableDetail } from "./api";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -127,6 +127,21 @@ describe("engine API boundary", () => {
     await saveCaptionCues("j", "c", 2, [{ id: "c", start: 0, end: 1, text: "Reviewed" }]);
     await rerenderCaptions("j", "c", 2);
     expect(calls).toEqual(["/api/v1/jobs/j/clips/c/captions", "/api/v1/jobs/j/clips/c/captions/rerender?revision=2"]);
+  });
+
+  it("uses the bounded recent-clips endpoint contract and validates assets", async () => {
+    const asset = {
+      id: "asset-id", title: "Launch clip", description: "", mediaType: "video/mp4", filename: "launch.mp4", tags: [], triggers: [], aliases: [], negativeTriggers: [],
+      policy: "neutral", protected: false, minSpacingSeconds: 0, maxUsesPerProject: 1, licence: "User supplied", attribution: "", contentHash: "hash",
+      folderId: "folder-id", origin: "generated-clip", blobId: "blob-id", durationSeconds: 9.5, width: 1080, height: 1920, previewUrl: "/signed", brands: [], people: [], createdAt: "2026-01-01T00:00:00Z",
+    };
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toBe("/api/v1/library/recent-clips?search=launch+clip&page=2&page_size=12");
+      return new Response(JSON.stringify({ items: [asset], page: 2, pageSize: 12, hasMore: true, total: 25 }), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await listRecentClips({ search: " launch clip ", page: 2, pageSize: 12 });
+    expect(result).toMatchObject({ page: 2, pageSize: 12, hasMore: true, total: 25, items: [{ id: "asset-id", durationSeconds: 9.5 }] });
   });
 
   it("uses the typed folder endpoint", async () => {

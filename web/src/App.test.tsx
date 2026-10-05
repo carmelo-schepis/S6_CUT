@@ -14,6 +14,8 @@ vi.mock("./api", async (importOriginal) => {
     listProjects: (...args: unknown[]) => mockListProjects(...args),
     listJobs: (...args: unknown[]) => mockListJobs(...args),
     listProfiles: (...args: unknown[]) => mockListProfiles(...args),
+    listRecentClips: vi.fn(async () => ({ items: [], page: 1, pageSize: 12, hasMore: false, total: 0 })),
+    listFolders: vi.fn(async () => []),
   };
 });
 

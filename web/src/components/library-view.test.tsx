@@ -24,6 +24,15 @@ describe("LibraryView", () => {
     mockListAssets.mockResolvedValue(assets);
     mockListFolders.mockResolvedValue(folders);
   });
+  it("selects the exact requested Library asset ID, including archived-folder assets", async () => {
+    const archivedAsset = { ...assets[0], id: "archived-duplicate", title: assets[0].title, folderId: "archived-folder" };
+    mockListAssets.mockResolvedValueOnce([...assets, archivedAsset]);
+    render(<LibraryView selectedAssetId="archived-duplicate" />);
+    expect(await screen.findByDisplayValue("Acme launch")).toBeInTheDocument();
+    expect(mockListAssets).toHaveBeenCalledWith({ includeArchived: true });
+    expect(mockListFolders).toHaveBeenCalledWith({ includeArchived: true });
+  });
+
   it("combines folder, search, and media filters and shows origins", async () => {
     render(<LibraryView />);
     expect(await screen.findByText("Acme launch")).toBeInTheDocument();

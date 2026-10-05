@@ -9,6 +9,7 @@ import { LazyVideoThumbnail } from "./lazy-video-thumbnail";
 import { VideoPreviewDialog } from "./video-preview-dialog";
 import { VideoSourcePicker } from "./video-source-picker";
 import { SubscribeAnimationControl } from "./subscribe-animation-control";
+import { RecentClips } from "./recent-clips";
 
 const RECENT_FOLDER_KEY = "s6-cut.recent-library-folder";
 const PROVIDER_CALLOUT_DISMISSED_KEY = "s6-cut.provider-callout-dismissed";
@@ -25,7 +26,7 @@ const styles: { id: Style; label: string; note: string }[] = [
   { id: "hype", label: "Hype", note: "Hooks & high energy" },
 ];
 
-export function ProjectsView({ projects, jobs = [], health, healthChecked = true, loaded = true, providersLoaded = true, hasSelectedProvider = true, onConfigureProviders = () => undefined, onCreated, onOpen, onDeleted = () => undefined, onRefresh }: {
+export function ProjectsView({ projects, jobs = [], health, healthChecked = true, loaded = true, providersLoaded = true, hasSelectedProvider = true, onConfigureProviders = () => undefined, onCreated, onOpen, onDeleted = () => undefined, onRefresh, onSelectLibraryAsset }: {
   projects: Project[];
   jobs?: Job[];
   health: Health | null;
@@ -40,6 +41,7 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
   onOpen: (id: string) => void;
   onDeleted?: (id: string) => void;
   onRefresh: () => Promise<void>;
+  onSelectLibraryAsset?: (assetId: string) => void;
 }) {
   const [mode, setMode] = useState<"clip" | "script">("clip");
   const [sourceType, setSourceType] = useState<"file" | "url">("file");
@@ -366,6 +368,8 @@ export function ProjectsView({ projects, jobs = [], health, healthChecked = true
         <div className="create-note-row"><p className="rights-copy">Only process content you own or are authorised to use.</p></div>
       </div>
     </section>
+
+    <RecentClips onSelectAsset={(assetId) => onSelectLibraryAsset?.(assetId)} />
 
     <section className="recent-section">
       <div className="section-heading">

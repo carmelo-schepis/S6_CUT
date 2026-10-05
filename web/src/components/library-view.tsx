@@ -14,7 +14,7 @@ const sleep = (milliseconds: number) => new Promise((resolve) => window.setTimeo
 // <video> elements and a ~15,000px page. Render a page at a time instead.
 const ASSET_PAGE = 60;
 
-export function LibraryView() {
+export function LibraryView({ selectedAssetId }: { selectedAssetId?: string | null } = {}) {
   const [assets, setAssets] = useState<LibraryAsset[]>([]);
   const [folders, setFolders] = useState<LibraryFolder[]>([]);
   const [selected, setSelected] = useState<LibraryAsset | null>(null);
@@ -36,6 +36,7 @@ export function LibraryView() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteFeedback, setDeleteFeedback] = useState<string | null>(null);
+  const [assetLimit, setAssetLimit] = useState(ASSET_PAGE);
   const loadFlight = useRef<Promise<void> | null>(null);
   const initialLoadComplete = useRef(false);
 
@@ -45,7 +46,7 @@ export function LibraryView() {
       setLoading(true);
       for (let attempt = 0; attempt < (retry ? 3 : 1); attempt += 1) {
         try {
-          const [nextAssets, nextFolders] = await Promise.all([listAssets({ includeArchived: showArchived }), listFolders({ includeArchived: showArchived })]);
+          const [nextAssets, nextFolders] = await Promise.all([listAssets({ includeArchived: showArchived || Boolean(selectedAssetId) }), listFolders({ includeArchived: showArchived || Boolean(selectedAssetId) })]);
           // A refresh re-signs URLs. Retain an already working URL for the same
           // immutable blob so a harmless revalidation cannot restart media.
           setAssets((current) => {
@@ -56,7 +57,9 @@ export function LibraryView() {
             });
           });
           setFolders(nextFolders); setError(null);
-          setSelected((current) => nextAssets.find((asset) => asset.id === current?.id) || nextAssets[0] || null);
+          const selectedIndex = nextAssets.findIndex((asset) => asset.id === selectedAssetId);
+          if (selectedIndex >= 0) setAssetLimit((current) => Math.max(current, Math.ceil((selectedIndex + 1) / ASSET_PAGE) * ASSET_PAGE));
+          setSelected((current) => nextAssets.find((asset) => asset.id === selectedAssetId) || nextAssets.find((asset) => asset.id === current?.id) || nextAssets[0] || null);
           return;
         } catch {
           if (attempt < 2 && retry) await sleep(300 * 2 ** attempt);
@@ -69,7 +72,7 @@ export function LibraryView() {
     const flight = request().finally(() => { setLoading(false); initialLoadComplete.current = true; loadFlight.current = null; });
     loadFlight.current = flight;
     return flight;
-  }, [showArchived]);
+  }, [showArchived, selectedAssetId]);
 
   // Initial load on mount
   useEffect(() => {
@@ -94,7 +97,6 @@ export function LibraryView() {
     };
   }, [load]);
 
-  const [assetLimit, setAssetLimit] = useState(ASSET_PAGE);
   const visibleAssets = useMemo(() => assets.filter((asset) => {
     const terms = [asset.title, asset.filename, ...asset.tags, ...asset.brands, ...asset.people].join(" ").toLowerCase();
     return (!folderId || asset.folderId === folderId) && (!policy || asset.policy === policy) &&
@@ -108,9 +110,16 @@ export function LibraryView() {
   const pagedAssets = visibleAssets.slice(0, assetLimit);
   const remainingAssets = visibleAssets.length - pagedAssets.length;
 
+  useEffect(() => {
+    if (!selectedAssetId) return;
+    const card = [...document.querySelectorAll<HTMLElement>(".asset-card[data-asset-id]")]
+      .find((item) => item.dataset.assetId === selectedAssetId);
+    card?.scrollIntoView?.({ block: "center" });
+  }, [selectedAssetId, assets, assetLimit]);
+
   const saveSelected = async (patch: Record<string, unknown>) => {
     if (!selected) return;
-    try { const next = await updateAsset(selected.id, patch); setSelected(next); setAssets((current) => current.map((asset) => asset.id === next.id ? next : asset)); } catch (cause) { setError(readableError(cause)); }
+    try { const next = await updateAsset(selected.id, patch); setSelected(next); setAssets((current) => current.map((asset) => asset.id === next.id ? next : asset)); emitLibraryChanged(); } catch (cause) { setError(readableError(cause)); }
   };
   const removeSelectedAsset = async () => {
     const projectLinked = selected?.sourceProjectId;
@@ -129,27 +138,27 @@ export function LibraryView() {
   const addFolder = async (parentId?: string) => {
     const name = window.prompt(parentId ? "Subfolder name" : "Business folder name");
     if (!name?.trim()) return;
-    try { const next = await createFolder({ name: name.trim(), parentId }); setFolders((current) => [...current, next]); setFolderId(next.id); } catch (cause) { setError(readableError(cause)); }
+    try { const next = await createFolder({ name: name.trim(), parentId }); setFolders((current) => [...current, next]); setFolderId(next.id); emitLibraryChanged(); } catch (cause) { setError(readableError(cause)); }
   };
   const rename = async (folder: LibraryFolder) => {
     const name = window.prompt("Rename folder", folder.name);
     if (!name?.trim() || name === folder.name) return;
-    try { const next = await updateFolder(folder.id, { name: name.trim() }); setFolders((current) => current.map((item) => item.id === next.id ? next : item)); } catch (cause) { setError(readableError(cause)); }
+    try { const next = await updateFolder(folder.id, { name: name.trim() }); setFolders((current) => current.map((item) => item.id === next.id ? next : item)); emitLibraryChanged(); } catch (cause) { setError(readableError(cause)); }
   };
   const move = async (folder: LibraryFolder) => {
     const destinationName = window.prompt("Move into which folder? Leave blank for top level.", "");
     if (destinationName === null) return;
     const destination = destinationName.trim() ? folders.find((item) => item.name.localeCompare(destinationName.trim(), undefined, { sensitivity: "accent" }) === 0) : null;
     if (destinationName.trim() && !destination) return setError("Destination folder not found.");
-    try { const next = await moveFolder(folder.id, destination?.id || null); setFolders((current) => current.map((item) => item.id === next.id ? next : item)); } catch (cause) { setError(readableError(cause)); }
+    try { const next = await moveFolder(folder.id, destination?.id || null); setFolders((current) => current.map((item) => item.id === next.id ? next : item)); emitLibraryChanged(); } catch (cause) { setError(readableError(cause)); }
   };
   const archive = async (folder: LibraryFolder) => {
-    try { await archiveFolder(folder.id, !folder.archived); await load(false); } catch (cause) { setError(readableError(cause)); }
+    try { await archiveFolder(folder.id, !folder.archived); emitLibraryChanged(); await load(false); } catch (cause) { setError(readableError(cause)); }
   };
   const remove = async (folder: LibraryFolder) => {
     const destination = folders.find((item) => item.system || item.name === "Unsorted");
     if (!destination || !window.confirm(`Remove “${folder.name}”? Its assets and child folders will move to ${destination.name}; no media will be deleted.`)) return;
-    try { await removeFolder(folder.id, destination.id); setFolderId(destination.id); await load(false); } catch (cause) { setError(readableError(cause)); }
+    try { await removeFolder(folder.id, destination.id); setFolderId(destination.id); emitLibraryChanged(); await load(false); } catch (cause) { setError(readableError(cause)); }
   };
   const openPreview = (asset: LibraryAsset, opener: HTMLButtonElement) => {
     if (!asset.mediaType.startsWith("video/") || !asset.previewUrl) return;
@@ -160,7 +169,7 @@ export function LibraryView() {
   const clearFilters = () => { setFolderId(null); setPolicy(null); setOrigin("all"); setMediaType("all"); setQuery(""); };
   const moveSelected = async (destination: string) => {
     if (!selectedIds.length) return;
-    try { await moveAssets(selectedIds, destination); setAssets((current) => current.map((asset) => selectedIds.includes(asset.id) ? { ...asset, folderId: destination } : asset)); setSelectedIds([]); } catch (cause) { setError(readableError(cause)); }
+    try { await moveAssets(selectedIds, destination); setAssets((current) => current.map((asset) => selectedIds.includes(asset.id) ? { ...asset, folderId: destination } : asset)); setSelectedIds([]); emitLibraryChanged(); } catch (cause) { setError(readableError(cause)); }
   };
   const confirmDelete = async () => {
     if (deleting || !selectedIds.length) return;
@@ -187,7 +196,7 @@ export function LibraryView() {
   return <div className="page library-page">
     <PageHeader eyebrow="Tier 0 resolver" title="Personal Media Library" description="Organise reusable and project media in local business folders. Folders group content; they are not access boundaries." actions={<Button variant="primary" onClick={() => setShowImport(!showImport)}><ImagePlus size={15} /> Import asset</Button>} />
     {error && <div className="library-error" role="alert"><div><strong>{error}</strong><span>{health ? `Engine: ${health.status}` : "Engine status unavailable"}</span></div><Button onClick={() => void load(false)}><RefreshCw size={14} /> Retry</Button></div>}
-    {showImport && <ImportPanel folders={folders} defaultFolderId={folderId || undefined} onDone={() => { setShowImport(false); void load(false); }} />}
+    {showImport && <ImportPanel folders={folders} defaultFolderId={folderId || undefined} onDone={() => { setShowImport(false); emitLibraryChanged(); void load(false); }} />}
 
     <div className="library-layout">
       <aside className="library-sidebar panel" aria-label="Folders and policy filters"><strong>Folders</strong><button className={!folderId && !policy ? "active" : ""} onClick={() => { setFolderId(null); setPolicy(null); }}><Library size={15} /><span className="library-control-label">All media</span><span>{assets.length}</span></button>
@@ -281,7 +290,7 @@ function LibraryAssetCard({ asset, isSelected, isInspected, onPreview, onInspect
   };
   const details = <div className="asset-card-details-content" aria-hidden="true"><strong title={asset.title}>{asset.title}</strong><span>{asset.tags.slice(0, 3).join(" · ") || asset.filename}</span><span className="origin-badge">{originLabels[asset.origin]}</span><StatusBadge state={asset.policy === "never" ? "failed" : asset.policy === "required" ? "fallback" : "local"} label={asset.policy} /></div>;
 
-  return <article className={`asset-card ${isInspected ? "active" : ""}`}>
+  return <article className={`asset-card ${isInspected ? "active" : ""}`} data-asset-id={asset.id}>
     <label className="asset-select"><input aria-label={`Select ${asset.title}`} type="checkbox" checked={isSelected} onChange={handleToggleSelected} /></label>
     {canPreview ? <>
       <button className="asset-preview-trigger" aria-label={`Preview ${asset.title}`} type="button" onClick={handlePreview}><AssetPreview asset={asset} /></button>

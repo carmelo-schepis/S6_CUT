@@ -271,6 +271,18 @@ class Database:
                 ]
                 db.execute("UPDATE jobs SET payload=? WHERE id=?", (json.dumps(old_job, separators=(",", ":")), row["id"]))
             db.execute("INSERT OR IGNORE INTO schema_migrations VALUES(8,?)", (now_iso(),))
+        if version < 9 or 9 not in applied_versions:
+            db.executescript("""
+                CREATE TABLE IF NOT EXISTS deleted_output_assets (
+                    origin TEXT NOT NULL,
+                    source_project_id TEXT NOT NULL,
+                    source_job_id TEXT NOT NULL,
+                    source_clip_id TEXT NOT NULL,
+                    deleted_at TEXT NOT NULL,
+                    PRIMARY KEY(origin, source_project_id, source_job_id, source_clip_id)
+                );
+            """)
+            db.execute("INSERT OR IGNORE INTO schema_migrations VALUES(9,?)", (now_iso(),))
 
     @staticmethod
     def _json(model: BaseModel) -> str:
@@ -657,6 +669,13 @@ class Database:
             if clip.library_asset_id is not None:
                 continue
             origin = "script-output" if job.mode == "script" else "generated-clip"
+            with self._connect() as db:
+                deleted = db.execute(
+                    "SELECT 1 FROM deleted_output_assets WHERE origin=? AND source_project_id=? AND source_job_id=? AND source_clip_id=?",
+                    (origin, job.project_id, job.id, clip.id),
+                ).fetchone()
+            if deleted:
+                continue
             existing_asset = self.get_generated_asset(origin, job.project_id, job.id, clip.id)
             if existing_asset:
                 job.clips = [
@@ -730,6 +749,11 @@ class Database:
             asset = self._asset_from_row(row)
             if asset.protected:
                 raise ValueError("Protected assets cannot be removed")
+            if asset.origin in {"generated-clip", "script-output"} and asset.source_project_id and asset.source_job_id and asset.source_clip_id:
+                db.execute(
+                    "INSERT OR IGNORE INTO deleted_output_assets(origin,source_project_id,source_job_id,source_clip_id,deleted_at) VALUES(?,?,?,?,?)",
+                    (asset.origin, asset.source_project_id, asset.source_job_id, asset.source_clip_id, now_iso()),
+                )
             db.execute("DELETE FROM media_blob_refs WHERE ref_type='asset' AND ref_id=?", (asset_id,))
             db.execute("DELETE FROM assets WHERE id=?", (asset_id,))
             if asset.source_project_id and not db.execute("SELECT 1 FROM assets WHERE source_project_id=? LIMIT 1", (asset.source_project_id,)).fetchone():
@@ -737,6 +761,35 @@ class Database:
             blob = db.execute("SELECT relative_path FROM media_blobs WHERE id=?", (asset.blob_id,)).fetchone()
             count = db.execute("SELECT COUNT(*) FROM media_blob_refs WHERE blob_id=?", (asset.blob_id,)).fetchone()[0]
         return asset, str(blob["relative_path"]) if blob else None, bool(blob and count == 0)
+
+    def recent_clip_assets(self, *, search: str | None, page: int, page_size: int, file_exists) -> tuple[list[Asset], int]:
+        """Return playable published video outputs, filtered before count and pagination."""
+        if page < 1 or not 1 <= page_size <= 100:
+            raise ValueError("Invalid recent clips page")
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT a.*, b.relative_path FROM assets a "
+                "JOIN media_blobs b ON b.id=a.blob_id "
+                "JOIN media_blob_refs ar ON ar.blob_id=b.id AND ar.ref_type='asset' AND ar.ref_id=a.id "
+                "JOIN media_blob_refs cr ON cr.blob_id=b.id AND cr.ref_type='clip-output' AND cr.ref_id=a.source_clip_id "
+                "WHERE a.origin IN ('generated-clip','script-output')"
+            ).fetchall()
+        needle = search.casefold().strip() if search else ""
+        assets = []
+        for row in rows:
+            asset = self._asset_from_row(row)
+            if asset.media_type.casefold().split("/", 1)[0] != "video":
+                continue
+            if not asset.source_clip_id or not row["relative_path"] or not file_exists(row["relative_path"]):
+                continue
+            searchable = " ".join([asset.title, asset.filename, asset.description, *asset.tags, *asset.brands, *asset.people, *asset.aliases]).casefold()
+            if needle and needle not in searchable:
+                continue
+            assets.append(asset)
+        assets.sort(key=lambda asset: (asset.published_at, asset.id), reverse=True)
+        total = len(assets)
+        start = (page - 1) * page_size
+        return assets[start:start + page_size], total
 
     def list_assets(self, *, folder_id: str | None = None, media_type: str | None = None, origin: str | None = None, search: str | None = None, include_archived: bool = False) -> list[Asset]:
         clauses, values = [], []

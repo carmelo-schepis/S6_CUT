@@ -1,12 +1,15 @@
 import { defineConfig, devices } from "@playwright/test";
 
+const artifactRoot = process.env.S6_PLAYWRIGHT_ARTIFACTS || "test-artifacts";
+const testOutput = process.env.S6_PLAYWRIGHT_ARTIFACTS ? `${artifactRoot}/test-results` : "test-artifacts/test-results";
+
 export default defineConfig({
   testDir: "./tests/acceptance",
   timeout: 300_000,
   expect: { timeout: 15_000 },
   fullyParallel: false,
   workers: 1,
-  reporter: [["html", { outputFolder: "test-artifacts/playwright-report", open: "never" }], ["json", { outputFile: "test-artifacts/playwright-results.json" }]],
+  reporter: [["html", { outputFolder: `${artifactRoot}/playwright-report`, open: "never" }], ["json", { outputFile: `${artifactRoot}/playwright-results.json` }]],
   use: {
     baseURL: process.env.S6_ACCEPTANCE_URL || "http://127.0.0.1:8080",
     browserName: "chromium",
@@ -16,5 +19,5 @@ export default defineConfig({
     screenshot: "only-on-failure",
     ...devices["Desktop Chrome"],
   },
-  outputDir: "test-artifacts/test-results",
+  outputDir: testOutput,
 });

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowRight, Check, Copy, Cpu, Database, Eye, EyeOff, KeyRound, LockKeyhole, Network, Pencil, Plus, Server, ShieldAlert, Trash2, Wifi, X } from "lucide-react";
 import { deleteProfile, duplicateProfile, listOpenRouterModels, listProfiles, purgeLibraryContent, readableError, saveProfile, testProfile } from "../api";
+import { emitLibraryChanged } from "../library-sync";
 import type { Health, LibraryPurgeResult, OpenRouterModel, ProviderProfile } from "../types";
 import { Button, Field, PageHeader, StatusBadge } from "./common";
 
@@ -49,7 +50,7 @@ export function SettingsView({ health, onHealthRefresh, onProfilesChanged, onSki
   const purge = async () => {
     if (purgeConfirmation !== "DELETE ALL CONTENT") return;
     setPurging(true); setPurgeError(null);
-    try { setPurgeResult(await purgeLibraryContent(purgeConfirmation)); setPurgeDialogOpen(false); }
+    try { setPurgeResult(await purgeLibraryContent(purgeConfirmation)); emitLibraryChanged(); setPurgeDialogOpen(false); }
     catch (cause) { setPurgeError(readableError(cause)); }
     finally { setPurging(false); }
   };

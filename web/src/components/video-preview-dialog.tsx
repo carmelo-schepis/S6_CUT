@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { LibraryAsset } from "../types";
 
-export function VideoPreviewDialog({ asset, opener, onClose }: { asset: LibraryAsset; opener: HTMLButtonElement | null; onClose: () => void }) {
+export function VideoPreviewDialog({ asset, opener, onClose, onMediaError }: { asset: LibraryAsset; opener: HTMLButtonElement | null; onClose: () => void; onMediaError?: () => void }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const [playing, setPlaying] = useState(false);
@@ -93,7 +93,7 @@ export function VideoPreviewDialog({ asset, opener, onClose }: { asset: LibraryA
           onPlay={() => { setPlaying(true); setHasPlayed(true); }}
           onPause={() => setPlaying(false)}
           onEnded={() => { setPlaying(false); setHasPlayed(true); }}
-          onError={() => { setPlaying(false); setError("This video preview could not be loaded."); }}
+          onError={() => { setPlaying(false); setError("This video preview could not be loaded."); onMediaError?.(); }}
         />
         {!playing && <button className="video-preview-play" type="button" aria-label={hasPlayed ? "Replay video" : "Play video"} onClick={() => void play()}>{hasPlayed ? "Replay video" : "Play video"}</button>}
       </div>

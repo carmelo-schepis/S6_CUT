@@ -16,6 +16,7 @@
     "check:providers": "node scripts/check-retired-providers.mjs",
     "check:supported": "node scripts/check-supported.mjs",
     "test:acceptance": "playwright test --config playwright.config.ts",
+    "test:e2e:recent-clips": "node scripts/qa/recent-clips-acceptance.mjs",
     "test:e2e:openrouter-fallback": "node scripts/qa/openrouter-fallback.mjs",
     "test:e2e:content-authenticity": "node scripts/qa/content-authenticity.mjs",
     "test:e2e:youtube": "node scripts/qa/youtube-import.mjs",
