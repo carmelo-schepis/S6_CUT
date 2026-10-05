@@ -191,12 +191,9 @@ test.describe("responsive loading and creation controls", () => {
     for (const [name, width, height] of viewports) {
       await page.setViewportSize({ width, height });
       await page.goto("/", { waitUntil: "domcontentloaded" });
-      // A recent project card carries two buttons that name the project: the
-      // source preview added by b64f1a0 and the card itself. Name the one that
-      // opens the project rather than matching both.
-      const card = page.getByRole("button", { name: /^Open project .*deliberately long project name/i });
-      await expect(card).toBeVisible();
-      await card.click();
+      await page.getByRole("button", { name: "Jobs", exact: true }).click();
+      await page.locator('.job-card[data-job-id="responsive-fixture-job"]')
+        .getByRole("button", { name: "Open", exact: true }).click();
       await expect(page.locator(".processing-state")).toBeVisible();
       await expect(page.locator(".processing-state")).toContainText("Transcribing audio");
       await expect(page.locator(".processing-state")).toContainText("18%");

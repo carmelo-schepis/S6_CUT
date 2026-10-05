@@ -25,9 +25,36 @@ test("asset-backed Recent clips stay authoritative across selection, deletion, t
   const authoritative = new Map(apiAssets.map((asset) => [asset.id, asset]));
   await page.goto("/", { waitUntil: "networkidle" });
   await page.getByRole("button", { name: "Projects", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Recent projects", exact: true })).toHaveCount(0);
+  await expect(page.getByTestId("recent-project-count")).toHaveCount(0);
+  await expect(page.getByRole("searchbox", { name: "Search projects", exact: true })).toHaveCount(0);
+  await expect(page.locator(".recent-section, .project-search, .project-grid, .project-card, .project-card-delete, .project-source-preview, .project-pagination, .project-progress, .progress-wrap, [role=progressbar]")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /refresh projects/i })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Refresh", exact: true })).toHaveCount(1);
+  await expect(page.locator(".recent-clips-section").getByRole("button", { name: "Refresh", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /delete project/i })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^Show all \d+ projects$/ })).toHaveCount(0);
+
+  const assertNoHorizontalOverflow = async () => {
+    const dimensions = await page.evaluate(() => ({ viewport: window.innerWidth, document: document.documentElement.scrollWidth }));
+    expect(dimensions.document, `Projects page has horizontal overflow at ${dimensions.viewport}px`).toBeLessThanOrEqual(dimensions.viewport);
+  };
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await assertNoHorizontalOverflow();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await assertNoHorizontalOverflow();
+  await page.setViewportSize({ width: 1440, height: 2000 });
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({ path: testInfo.outputPath("projects-recent-clips-no-recent-projects.png") });
+  await page.setViewportSize({ width: 1440, height: 900 });
+
   const recent = page.locator(".recent-clips-section");
   const cards = page.locator(".recent-clip-card");
   await expect(cards).toHaveCount(initial.items.length);
+  await expect(page.locator(".projects-page .inline-empty, .projects-page .skeleton-card")).toHaveCount(0);
+  await recent.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect(cards).toHaveCount(initial.items.length);
+  await recent.screenshot({ path: testInfo.outputPath("recent-clips-projects-removed.png") });
   const renderedTitles: string[] = [];
   for (let index = 0; index < await cards.count(); index += 1) {
     const card = cards.nth(index);
@@ -69,7 +96,9 @@ test("asset-backed Recent clips stay authoritative across selection, deletion, t
   await page.getByRole("button", { name: "Projects", exact: true }).click();
   const firstCard = cards.first();
   await firstCard.getByRole("button", { name: /^Preview / }).click();
-  await assertPreviewAdvances(page.getByRole("dialog").locator("video"));
+  const previewVideo = page.getByRole("dialog").locator("video");
+  await assertPreviewAdvances(previewVideo);
+  await previewVideo.screenshot({ path: testInfo.outputPath("preview-playback-frame.png") });
   await page.keyboard.press("Escape");
 
   // Search/counts are server-authoritative. The held request is fetched from

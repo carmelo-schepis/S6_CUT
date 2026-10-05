@@ -20,7 +20,7 @@ export function JobsView({ onOpenProject, jobs, onRefresh }: { onOpenProject: (i
   const description = jobs.length === 0 ? "No job history yet. Create a Clip or Script project to start a durable local render." : running ? "Live stages and partial results stay available here while completed history remains below." : "No jobs are currently running. Completed history and recovery controls remain available here.";
   return <div className="page jobs-page"><PageHeader eyebrow="Durable queue" title="Jobs & recovery" description={description} actions={<><span className="section-count">{jobs.length} total</span><Button onClick={load}><RefreshCw size={14} /> Refresh</Button></>} />
     {error && <p className="form-error" role="alert">{error}</p>}
-    {jobs.length ? <><div className="jobs-list">{(showAll ? jobs : jobs.slice(0, JOB_LIMIT)).map((job) => <article className="job-card" key={job.id}><div className="job-mode">{job.mode === "clip" ? "CLIP" : "SCRIPT"}</div><div className="job-main">{(() => {
+    {jobs.length ? <><div className="jobs-list">{(showAll ? jobs : jobs.slice(0, JOB_LIMIT)).map((job) => <article className="job-card" key={job.id} data-job-id={job.id} data-project-id={job.projectId}><div className="job-mode">{job.mode === "clip" ? "CLIP" : "SCRIPT"}</div><div className="job-main">{(() => {
         const ready = job.clips.filter((clip) => clip.state === "complete").length;
         const download = job.downloadProgress ? downloadFacts(job.downloadProgress) : null;
         const facts = jobFacts(job);

@@ -12,7 +12,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { assertZipIntact, extractZip, zipNames } from "./support/workspace";
+import { assertZipIntact, extractZip, openWorkspaceForProject, zipNames } from "./support/workspace";
 import { verifyVideoOutput } from "../support/video-output";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -271,9 +271,7 @@ test("Subscribe animation controls persist and affect real rendered/exported med
   for (const result of [on, off, tenSeconds]) expect(assets.some((asset) => asset.id === result.assetId)).toBeTruthy();
 
   // Exercise ZIP creation through the workspace and validate archive integrity.
-  await page.getByRole("button", { name: "Projects", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
-  await page.locator(".project-card").filter({ hasText: `Subscribe default ${tag}` }).first().click();
+  await openWorkspaceForProject(page, `Subscribe default ${tag}`);
   await expect(page.getByRole("heading", { name: `Subscribe default ${tag}` })).toBeVisible();
   const zipWait = page.waitForEvent("download");
   await page.getByRole("button", { name: /Download ZIP/ }).click();
@@ -285,8 +283,7 @@ test("Subscribe animation controls persist and affect real rendered/exported med
 
   // Reload/reopen verifies the project and persisted media remain reachable.
   await page.reload({ waitUntil: "domcontentloaded" });
-  await expect(page.getByRole("button", { name: `Open project Subscribe default ${tag}`, exact: true })).toBeVisible();
-  await page.getByRole("button", { name: `Open project Subscribe default ${tag}`, exact: true }).click();
+  await openWorkspaceForProject(page, `Subscribe default ${tag}`);
   await expect(page.locator(".clip-tile.complete")).toHaveCount(1, { timeout: 60_000 });
   await page.locator(".clip-tile.complete").first().getByRole("button", { name: /Preview/ }).click();
   await expect(page.locator(".viewer-frame video")).toBeVisible();

@@ -1,6 +1,7 @@
 import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { openWorkspaceForProject } from "./support/workspace";
 
 const root = process.cwd();
 const gateway = process.env.S6_ACCEPTANCE_URL || "http://localhost:8080";
@@ -116,20 +117,8 @@ async function assertFocusedControlVisible(page: Page) {
   })).toBeTruthy();
 }
 
-// Recent projects shows a capped window with a search box; an older project is
-// reached by searching for it, which is the customer-facing flow.
 async function openProjectByName(page: Page, name: string) {
-  // Wait for the list to load before deciding whether the search box is needed:
-  // it only appears once the history exceeds the visible window.
-  await expect(page.locator(".project-card").first()).toBeVisible({ timeout: 30_000 });
-  const card = page.locator(".project-card").filter({ hasText: name });
-  if (await card.count() === 0) {
-    const search = page.getByLabel("Search projects");
-    await expect(search).toBeVisible({ timeout: 15_000 });
-    await search.fill(name);
-    await expect(card.first()).toBeVisible({ timeout: 15_000 });
-  }
-  await card.first().click();
+  await openWorkspaceForProject(page, name);
 }
 
 test("terminal exact viewport, screenshot, and ZIP evidence", async ({ browser, request }) => {

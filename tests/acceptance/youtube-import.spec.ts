@@ -13,8 +13,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  OVERALL_DEADLINE_MS, assertPlayback, checkPlayback, collectClips,
-  createClipProject, gateway, openProjects, waitForProjectReady,
+  assertPlayback, checkPlayback, collectClips,
+  createClipProject, gateway, openWorkspaceForProject, waitForProjectReady,
   writeManifest as writeManifestTo,
 } from "./support/workspace";
 
@@ -151,8 +151,7 @@ test.describe("S6_cut imports an authorised YouTube URL", () => {
 
     // --- Persistence -------------------------------------------------------
     await page.reload({ waitUntil: "domcontentloaded" });
-    await openProjects(page);
-    await page.locator(".project-card").filter({ hasText: projectName }).first().click();
+    await openWorkspaceForProject(page, projectName);
     await expect(page.getByRole("heading", { name: projectName })).toBeVisible({ timeout: 60_000 });
     await expect(page.locator(".clip-tile.complete")).toHaveCount(clips.length, { timeout: 60_000 });
     await page.locator(".clip-tile.complete").first().getByRole("button", { name: /Preview/ }).click();
@@ -262,8 +261,7 @@ test.describe("S6_cut imports an authorised YouTube URL", () => {
     await page.screenshot({ path: path.join(outputDir, "completed-project.png"), fullPage: true });
 
     await page.reload({ waitUntil: "domcontentloaded" });
-    await openProjects(page);
-    await page.locator(".project-card").filter({ hasText: projectName }).first().click();
+    await openWorkspaceForProject(page, projectName);
     await expect(page.locator(".clip-tile.complete")).toHaveCount(clips.length, { timeout: 60_000 });
     await page.locator(".clip-tile.complete").first().getByRole("button", { name: /Preview/ }).click();
     checkPlayback(await assertPlayback(page), "youtube fast after reload");

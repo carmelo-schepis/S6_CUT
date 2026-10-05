@@ -78,36 +78,25 @@ test.describe("customer controls", () => {
     await expect(create).toBeEnabled();
   });
 
-  test("a long project history stays bounded and every project remains reachable", async ({ page }) => {
+  test("project history controls are absent and Jobs keeps long history reachable", async ({ page }) => {
     const total = 40;
     await installLargeHistory(page, total);
     await page.goto("/", { waitUntil: "domcontentloaded" });
     await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
-    await expect(page.locator(".project-card").first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Recent projects" })).toHaveCount(0);
+    await expect(page.getByRole("searchbox", { name: "Search projects" })).toHaveCount(0);
+    await expect(page.locator(".project-card, .project-pagination")).toHaveCount(0);
 
-    // Bounded by default so a large history cannot produce an unusable page.
-    await expect(page.locator(".project-card")).toHaveCount(12);
-    const showAll = page.getByRole("button", { name: `Show all ${total} projects` });
-    await expect(showAll).toBeVisible();
-
-    // An older project, outside the visible window, is reachable by search.
-    const buried = "History project 037";
-    await expect(page.locator(".project-card").filter({ hasText: buried })).toHaveCount(0);
-    await page.getByLabel("Search projects").fill(buried);
-    await expect(page.locator(".project-card").filter({ hasText: buried })).toHaveCount(1);
-
-    // A search with no matches says so and offers a way back.
-    await page.getByLabel("Search projects").fill("no-such-project-xyz");
-    await expect(page.getByText(/No project matches/)).toBeVisible();
-    await page.getByRole("button", { name: "Clear search" }).click();
-    await expect(page.locator(".project-card")).toHaveCount(12);
-
-    // Show all reveals the complete history.
-    await showAll.click();
-    await expect(page.locator(".project-card")).toHaveCount(total);
+    await page.getByRole("button", { name: "Jobs", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Jobs & recovery" })).toBeVisible();
+    await expect(page.locator(".job-card")).toHaveCount(20);
+    await expect(page.getByText(`${total} total`)).toBeVisible();
+    await page.getByRole("button", { name: `Show all ${total} jobs` }).click();
+    await expect(page.locator(".job-card")).toHaveCount(total);
+    await expect(page.locator('.job-card[data-project-id="history-project-37"]')).toBeVisible();
   });
 
-  test("recent project source previews use fresh Library URLs without replacing the open control", async ({ page }) => {
+  test("Recent projects source preview controls are absent while Library remains available", async ({ page }) => {
     const [projectsResponse, jobsResponse] = await Promise.all([
       page.request.get("/api/v1/projects"),
       page.request.get("/api/v1/jobs"),
@@ -116,7 +105,6 @@ test.describe("customer controls", () => {
     const jobs = await jobsResponse.json() as Job[];
     const project = projects[0];
     if (!project) { test.skip("no project is available in this environment"); return; }
-    let sourceReads = 0;
     await page.route("**/api/v1/projects", async (route) => {
       if (route.request().method() !== "GET") return route.fallback();
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(projects) });
@@ -125,27 +113,11 @@ test.describe("customer controls", () => {
       if (route.request().method() !== "GET") return route.fallback();
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(jobs) });
     });
-    await page.route("**/api/v1/library/assets**", async (route) => {
-      sourceReads += 1;
-      const token = sourceReads > 1 ? "renewed" : "initial";
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([{
-        id: "recent-project-source", title: `${project.name} source`, description: "", mediaType: "video/mp4", filename: "source.mp4",
-        tags: [], triggers: [], aliases: [], negativeTriggers: [], policy: "neutral", protected: false,
-        minSpacingSeconds: 0, maxUsesPerProject: 1, licence: "User supplied", attribution: "", contentHash: "source-hash",
-        folderId: "00000000-0000-0000-0000-000000000001", origin: "project-source", blobId: "source-blob",
-        sourceProjectId: project.id, previewUrl: `/preview.mp4?token=${token}`, brands: [], people: [], createdAt: new Date().toISOString(),
-      }]) });
-    });
     await page.goto("/", { waitUntil: "domcontentloaded" });
-    const preview = page.getByRole("button", { name: `Preview source video for ${project.name}` });
-    await expect(preview).toBeVisible();
-    await expect(page.getByRole("button", { name: `Open project ${project.name}` })).toBeVisible();
-    await preview.click();
-    const dialog = page.getByRole("dialog", { name: `${project.name} source video preview` });
-    await expect(dialog).toBeVisible();
-    await expect(dialog.locator("video")).toHaveAttribute("src", /token=renewed/);
-    await page.getByRole("button", { name: "Close video preview" }).click();
-    await expect(preview).toBeFocused();
+    await expect(page.getByRole("heading", { name: "Recent projects" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: `Preview source video for ${project.name}` })).toHaveCount(0);
+    await page.getByRole("button", { name: "Library", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Personal Media Library" })).toBeVisible();
   });
 
   test("the jobs queue is bounded with the total kept visible", async ({ page }) => {

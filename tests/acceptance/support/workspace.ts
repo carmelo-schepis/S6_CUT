@@ -258,6 +258,18 @@ export async function openProjects(page: Page) {
   await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible({ timeout: 30_000 });
 }
 
+/** Reopen a project from its durable job record rather than Projects list UI. */
+export async function openWorkspaceForProject(page: Page, projectName: string) {
+  const { job } = await jobBoundaries(projectName);
+  await page.getByRole("button", { name: "Jobs", exact: true }).click();
+  const jobCard = page.locator(`.job-card[data-job-id="${job.id}"]`);
+  const showAll = page.getByRole("button", { name: /^Show all \d+ jobs$/ });
+  await expect.poll(async () => (await jobCard.count()) > 0 || (await showAll.count()) > 0, { timeout: 30_000 }).toBe(true);
+  if (await jobCard.count() === 0) await showAll.click();
+  await expect(jobCard).toBeVisible({ timeout: 30_000 });
+  await jobCard.getByRole("button", { name: "Open", exact: true }).click();
+}
+
 /** A project source chosen through the visible source picker. */
 export type ProjectSource =
   | { kind: "file"; path: string }

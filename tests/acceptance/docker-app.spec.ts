@@ -86,11 +86,14 @@ test("Docker-served studio acceptance workflow", async ({ page, request }) => {
   await expect(page.getByText(/ready|cut.*ready/i).first()).toBeVisible({ timeout: 150_000 });
   await capture(page, "workspace-complete");
 
-  // The project card must derive the same terminal state and percentage from the linked job.
-  await open(page, "Projects");
-  const completedProjectCard = page.locator(".project-card").filter({ hasText: browserProjectName });
-  await expect(completedProjectCard).toContainText(/ready/i);
-  await expect(completedProjectCard.locator(".progress-wrap")).toHaveAttribute("aria-label", /100%/);
+  // The durable Jobs queue retains terminal state and progress for the completed project.
+  const projects = await (await page.request.get("/api/v1/projects")).json() as { id: string; name: string }[];
+  const browserProject = projects.find((project) => project.name === browserProjectName);
+  expect(browserProject, "created project is persisted").toBeTruthy();
+  await open(page, "Jobs");
+  const completedJobCard = page.locator(`.job-card[data-project-id="${browserProject!.id}"]`);
+  await expect(completedJobCard).toContainText(/complete/i);
+  await expect(completedJobCard).toContainText(/5 outputs ready/);
   await open(page, "Workspace");
   await page.getByRole("tab", { name: "Media" }).click();
   await expect(page.getByRole("tabpanel", { name: "Media" })).toBeVisible();

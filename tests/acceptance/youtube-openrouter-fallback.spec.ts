@@ -21,7 +21,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   assertPlayback, checkPlayback, collectClips, createClipProject, gateway,
-  openProjects, waitForProjectReady, writeManifest as writeManifestTo,
+  openWorkspaceForProject, waitForProjectReady, writeManifest as writeManifestTo,
 } from "./support/workspace";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -131,8 +131,7 @@ test.describe("Smart planning survives an OpenRouter failure on a YouTube import
 
     // The outcome has to survive a reload like any other completed project.
     await page.reload({ waitUntil: "domcontentloaded" });
-    await openProjects(page);
-    await page.locator(".project-card").filter({ hasText: projectName }).first().click();
+    await openWorkspaceForProject(page, projectName);
     await expect(page.locator(".clip-tile.complete")).toHaveCount(clips.length, { timeout: 60_000 });
     await expect(notes.getByText(/OpenRouter API failed|API failed/i)).toHaveCount(1);
     await page.locator(".clip-tile.complete").first().getByRole("button", { name: /Preview/ }).click();

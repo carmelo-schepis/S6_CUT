@@ -124,7 +124,7 @@ export function LibraryView({ selectedAssetId }: { selectedAssetId?: string | nu
   const removeSelectedAsset = async () => {
     const projectLinked = selected?.sourceProjectId;
     const confirmation = projectLinked
-      ? `Remove “${selected?.title}” from the Library? This removes the Library item only. Its project and job history will remain. Use the Projects screen’s “Delete project everywhere” action for complete removal.`
+      ? `Remove “${selected?.title}” from the Library? This removes the Library item only. Its project and job history will remain.`
       : `Remove “${selected?.title}” from the Library? This removes the Library item only.`;
     if (!selected || selected.protected || !window.confirm(confirmation)) return;
     try {
@@ -265,7 +265,7 @@ function DeleteConfirmationDialog({ count, projectLinked, deleting, onCancel, on
   }, [deleting, onCancel]);
   const title = count === 1 ? "Delete selected media?" : `Delete ${count} media items?`;
   const message = count === 1 ? "This will permanently delete the selected media item. This action cannot be undone." : `This will permanently delete these ${count} media items. This action cannot be undone.`;
-  const projectHistoryNote = projectLinked ? " This removes the Library item only. Its project and job history will remain. Use the Projects screen’s “Delete project everywhere” action for complete removal." : "";
+  const projectHistoryNote = projectLinked ? " This removes the Library item only. Its project and job history will remain." : "";
   return <div className="dialog-backdrop"><div ref={dialogRef} className="confirmation-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-dialog-title" aria-describedby="delete-dialog-message">
     <h2 id="delete-dialog-title">{title}</h2><p id="delete-dialog-message">{message}{projectHistoryNote}</p>
     <div className="dialog-actions"><Button disabled={deleting} onClick={onCancel}>Cancel</Button><Button variant="danger" disabled={deleting} onClick={onConfirm}><Trash2 size={15} aria-hidden="true" />{deleting ? "Deleting…" : count === 1 ? "Delete media" : `Delete ${count} items`}</Button></div>

@@ -131,7 +131,9 @@ test("completed music jobs meet the requested minimum and expose timed caption a
   });
 
   await page.goto("/", { waitUntil: "domcontentloaded" });
-  await page.getByRole("button", { name: "Open project Completed music fixture", exact: true }).click();
+  await page.getByRole("button", { name: "Jobs", exact: true }).click();
+  await page.locator('.job-card[data-job-id="music-complete-job"]')
+    .getByRole("button", { name: "Open", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Completed music fixture" })).toBeVisible();
   await expect(page.locator(".workspace-secondary-meta")).toContainText(/Music \/ sung vocals/);
   await expect(page.locator(".clip-tile.complete")).toHaveCount(completedProject.requestedCount);

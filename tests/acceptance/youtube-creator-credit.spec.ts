@@ -106,10 +106,12 @@ async function installFixture(page: Page, sourceKind: "youtube" | "upload") {
   return { id, currentProject, currentJob, outputPath };
 }
 
-async function openWorkspace(page: Page, projectName: string) {
+async function openWorkspace(page: Page, projectName: string, jobId: string) {
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
-  await page.getByRole("button", { name: `Open project ${projectName}`, exact: true }).click();
+  await page.getByRole("button", { name: "Jobs", exact: true }).click();
+  await page.locator(`.job-card[data-job-id="${jobId}"]`)
+    .getByRole("button", { name: "Open", exact: true }).click();
   await expect(page.getByRole("heading", { name: projectName })).toBeVisible();
   await expect(page.getByRole("region", { name: "Output viewer" })).toBeVisible();
 }
@@ -219,7 +221,9 @@ test.describe("YouTube creator credit workflow", () => {
     expect((await secondDownloadPromise).suggestedFilename()).toBe("youtube-credit.zip");
 
     await page.reload({ waitUntil: "domcontentloaded" });
-    await page.getByRole("button", { name: "Open project Created YouTube short", exact: true }).click();
+    await page.getByRole("button", { name: "Jobs", exact: true }).click();
+    await page.locator(`.job-card[data-job-id="${projectId}-job"]`)
+      .getByRole("button", { name: "Open", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Created YouTube short" })).toBeVisible();
     await expect(page.getByRole("region", { name: "Output viewer" }).locator("video")).toBeVisible();
     await page.screenshot({ path: path.join(artifacts, "youtube-preview-after-refresh.png"), fullPage: true });
@@ -231,7 +235,7 @@ test.describe("YouTube creator credit workflow", () => {
   for (const [sourceKind, expectedProject] of [["youtube", "YouTube creator credit"], ["upload", "Local upload without credit"]] as const) {
     test(`keeps the final preview stable and ${sourceKind === "youtube" ? "eligible for" : "does not add"} a creator credit`, async ({ page }) => {
       await installFixture(page, sourceKind);
-      await openWorkspace(page, expectedProject);
+      await openWorkspace(page, expectedProject, `${sourceKind === "youtube" ? "youtube-credit-project" : "upload-no-credit-project"}-job`);
       const viewer = page.getByRole("region", { name: "Output viewer" });
       if (sourceKind === "youtube") {
         await expect(viewer).toContainText("Source: Fixture Creator");

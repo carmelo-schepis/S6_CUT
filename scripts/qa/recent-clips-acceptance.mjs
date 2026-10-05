@@ -110,7 +110,17 @@ try {
   const afterRestart = await fetch(`${url}/api/v1/library/recent-clips?search=&page=1&page_size=12`).then((response) => response.json());
   if (afterRestart.total !== 0 || afterRestart.items.length !== 0) throw new Error(`Recent clips were not empty after isolated engine restart: ${afterRestart.total} items`);
   await writeFile(join(artifacts, "restart-verification.json"), `${JSON.stringify({ url, project, dataPath, totalAfterRestart: afterRestart.total, checkedAt: new Date().toISOString() }, null, 2)}\n`);
-  console.log("Isolated browser suite passed; engine restart retained the empty Recent clips state.");
+
+  // Run only after the empty Recent clips restart assertion: this spec creates
+  // a disposable script job to prove Projects still opens its exact Workspace.
+  // Give Playwright a separate output directory so its second run cannot clear
+  // the clip screenshots/report produced by the first run.
+  const postRestartEnvironment = {
+    ...environment,
+    S6_PLAYWRIGHT_ARTIFACTS: join("test-artifacts", project, "post-restart"),
+  };
+  run("npx", ["playwright", "test", "--config", "playwright.config.ts", "tests/acceptance/recent-clips-projects.spec.ts"], postRestartEnvironment);
+  console.log("Isolated browser suites passed; engine restart retained the empty Recent clips state before the follow-up disposable job.");
   exitCode = 0;
 } finally {
   if (stackStarted) {

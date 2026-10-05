@@ -5,18 +5,19 @@ import { createClipProject, gateway, jobBoundaries, openProjects, root, waitForP
 
 const isExpectedBrowserWarning = (text: string) => /Cross-Origin-Opener-Policy header has been ignored.*untrustworthy/i.test(text);
 
-test.use({ storageState: { cookies: [], origins: [] } });
+ test.use({ storageState: { cookies: [], origins: [] } });
 
-// Both tests below assert absolute counts ("0" recent projects, then exactly
-// the two they create), so they only mean anything on a fresh installation.
-// Run them against an empty stack — point S6_DATA_PATH at a throwaway dataset
-// and S6_ACCEPTANCE_URL at it — rather than a working instance, whose real
-// projects would otherwise report these as failures. Skipping is the same
-// precondition gate the tool-gated smoke tests use; it is not an always-skip.
+// These tests need an empty installation; use a throwaway dataset rather than a working instance.
 test.beforeEach(async () => {
   const projects = await (await fetch(`${gateway}/api/v1/projects`)).json();
   test.skip(projects.length > 0, `needs an empty installation; this one has ${projects.length} projects (use an isolated stack)`);
 });
+
+async function expectProjectsListAbsent(page: import("@playwright/test").Page) {
+  await expect(page.getByRole("heading", { name: "Recent projects" })).toHaveCount(0);
+  await expect(page.getByRole("searchbox", { name: "Search projects" })).toHaveCount(0);
+  await expect(page.locator(".project-card, .project-pagination")).toHaveCount(0);
+}
 
 test("repaired installation has no orphaned Library projects", async ({ page }) => {
   const consoleErrors: string[] = [];
@@ -33,20 +34,11 @@ test("repaired installation has no orphaned Library projects", async ({ page }) 
   await expect(page.getByRole("heading", { name: "Build your private resolver" })).toBeVisible();
 
   await page.getByRole("button", { name: "Projects", exact: true }).click();
-  await expect(page.getByTestId("recent-project-count")).toHaveText("0");
-  await expect(page.locator(".project-card")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: /^Show all \d+ projects$/ })).toHaveCount(0);
-  for (const name of ["YouTube import", "Short — test-video", "Browser acceptance"]) {
-    await page.getByRole("searchbox", { name: "Search projects" }).fill(name);
-    await expect(page.getByRole("button", { name: new RegExp(`^Open project ${name}`) })).toHaveCount(0);
-    await expect(page.getByText(`No project matches “${name}”.`)).toBeVisible();
-  }
-  await page.getByRole("searchbox", { name: "Search projects" }).fill("");
-
+  await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
+  await expectProjectsListAbsent(page);
   await page.reload({ waitUntil: "networkidle" });
-  await expect(page.getByTestId("recent-project-count")).toHaveText("0");
-  await expect(page.locator(".project-card")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: /^Show all \d+ projects$/ })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
+  await expectProjectsListAbsent(page);
   expect(consoleErrors, consoleErrors.join("\n")).toEqual([]);
   expect(failedRequests, failedRequests.join("\n")).toEqual([]);
 });
@@ -74,10 +66,7 @@ test("deleting project source videos removes their projects and generated media"
     }
 
     await openProjects(page);
-    await expect(page.getByRole("button", { name: `Open project ${projectNames[0]}` })).toBeVisible();
-    await expect(page.getByRole("button", { name: `Open project ${projectNames[1]}` })).toBeVisible();
-    await expect(page.getByTestId("recent-project-count")).toHaveText("2");
-
+    await expectProjectsListAbsent(page);
     await page.getByRole("button", { name: "Library", exact: true }).click();
     for (const [index, name] of projectNames.entries()) {
       await page.getByLabel("Asset origin").selectOption("project-source");
@@ -88,15 +77,9 @@ test("deleting project source videos removes their projects and generated media"
       await page.getByRole("button", { name: "Delete media", exact: true }).click();
 
       await page.getByRole("button", { name: "Projects", exact: true }).click();
-      await expect(page.getByRole("button", { name: `Open project ${name}` })).toHaveCount(0);
-      const otherName = projectNames[1 - index];
-      if (index === 0) {
-        await expect(page.getByRole("button", { name: `Open project ${otherName}` })).toBeVisible();
-        await expect(page.getByTestId("recent-project-count")).toHaveText("1");
-      } else {
-        await expect(page.getByTestId("recent-project-count")).toHaveText("0");
-        await expect(page.locator(".project-card")).toHaveCount(0);
-      }
+      await expectProjectsListAbsent(page);
+      const persistedProjects = await (await page.request.get("/api/v1/projects")).json() as { id: string }[];
+      expect(persistedProjects.some((project) => project.id === projectIds[index])).toBe(false);
       if (index === 0) await page.getByRole("button", { name: "Library", exact: true }).click();
     }
 
@@ -106,13 +89,7 @@ test("deleting project source videos removes their projects and generated media"
     await page.getByRole("button", { name: "Library", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Build your private resolver" })).toBeVisible();
     await page.getByRole("button", { name: "Projects", exact: true }).click();
-    await expect(page.getByTestId("recent-project-count")).toHaveText("0");
-    await expect(page.locator(".project-card")).toHaveCount(0);
-    await expect(page.getByRole("button", { name: /^Show all \d+ projects$/ })).toHaveCount(0);
-    for (const name of projectNames) {
-      await page.getByRole("searchbox", { name: "Search projects" }).fill(name);
-      await expect(page.getByRole("button", { name: new RegExp(`^Open project ${name}`) })).toHaveCount(0);
-    }
+    await expectProjectsListAbsent(page);
     expect(consoleErrors, consoleErrors.join("\n")).toEqual([]);
     expect(failedRequests, failedRequests.join("\n")).toEqual([]);
   } finally {

@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { openWorkspaceForProject } from "./support/workspace";
 import type { Job, ProcessingStep, Project } from "../../web/src/types";
 
 const isExpectedBrowserWarning = (text: string) => /Cross-Origin-Opener-Policy header has been ignored.*untrustworthy/i.test(text);
@@ -216,8 +217,7 @@ test.describe("vertical creation progress", () => {
 
       phase = "active";
       await page.reload({ waitUntil: "domcontentloaded" });
-      await expect(page.getByRole("button", { name: new RegExp(`Open project ${projectName}`) })).toBeVisible({ timeout: 30_000 });
-      await page.getByRole("button", { name: new RegExp(`Open project ${projectName}`) }).click();
+      await openWorkspaceForProject(page, projectName);
       const restoredProgress = page.getByRole("region", { name: "Short creation progress" });
       await expect(restoredProgress).toBeVisible({ timeout: 30_000 });
       await expect(restoredProgress.locator("[aria-current=\"step\"]")).toContainText(expectedLabels[1] || expectedLabels[0]);
@@ -229,8 +229,7 @@ test.describe("vertical creation progress", () => {
 
       phase = "failed";
       await page.reload({ waitUntil: "domcontentloaded" });
-      await expect(page.getByRole("button", { name: new RegExp(`Open project ${projectName}`) })).toBeVisible({ timeout: 30_000 });
-      await page.getByRole("button", { name: new RegExp(`Open project ${projectName}`) }).click();
+      await openWorkspaceForProject(page, projectName);
       const failedProgress = page.getByRole("region", { name: "Short creation progress" });
       await expect(failedProgress).toBeVisible({ timeout: 30_000 });
       await expect.poll(() => failedProgress.locator(".checklist-step.status-failed").count(), { timeout: 15_000 }).toBe(1);

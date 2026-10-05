@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from engine.database import Database, UNSORTED_FOLDER_ID
 from engine.library import LibraryRules
-from engine.models import Clip, Job, LibraryFolder, Project
+from engine.models import Clip, DownloadProgress, Job, LibraryFolder, Project
 
 
 def main() -> None:
@@ -59,7 +59,8 @@ def main() -> None:
         project_id, job_id = str(uuid.uuid4()), str(uuid.uuid4())
         stamp = (now - timedelta(days=30 + index)).isoformat()
         project = Project(id=project_id, name=f"RC historical stopped {index + 1:02d}", mode="clip", style="educational", state="cancelled_kept", source_name="unavailable historical source.mp4", source_kind="upload", requested_count=1, latest_job_id=job_id, created_at=stamp, updated_at=stamp)
-        job = Job(id=job_id, project_id=project_id, mode="clip", state="cancelled_kept", stage="stopped", stage_label="Stopped before outputs", progress=0, style="educational", created_at=stamp, updated_at=stamp)
+        download_progress = DownloadProgress(downloaded_bytes=512, total_bytes=1024, percent=50, phase="stopped_partial", last_progress_at=stamp) if index == 0 else None
+        job = Job(id=job_id, project_id=project_id, mode="clip", state="cancelled_kept", stage="stopped", stage_label="Stopped before outputs", progress=0, style="educational", download_progress=download_progress, created_at=stamp, updated_at=stamp)
         db.save_project(project)
         db.save_job(job)
 

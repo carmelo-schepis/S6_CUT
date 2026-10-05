@@ -7,7 +7,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { assertZipIntact, extractZip, zipNames } from "./support/workspace";
+import { assertZipIntact, extractZip, openWorkspaceForProject, zipNames } from "./support/workspace";
 import { verifyVideoOutput } from "../support/video-output";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -183,8 +183,7 @@ test("Subscribe animation renders and exports at all supported aspect ratios", a
   // Capture decoded Subscribe, cursor/click, and Subscribed frames on desktop
   // and mobile. Each screenshot comes from playback/seeking the finished MP4.
   const desktop = rendered[0];
-  await page.getByRole("button", { name: "Projects", exact: true }).click();
-  await page.locator(".project-card").filter({ hasText: desktop.projectName }).first().click();
+  await openWorkspaceForProject(page, desktop.projectName);
   const tile = page.locator(".clip-tile.complete").first();
   await tile.getByRole("button", { name: /Preview/ }).click();
   const video = page.locator(".viewer-frame video");

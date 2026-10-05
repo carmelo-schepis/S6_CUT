@@ -96,7 +96,7 @@ describe("LibraryView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Select Acme launch for Rule Inspector" }));
     fireEvent.click(screen.getByRole("button", { name: "Remove Library record" }));
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining("This removes the Library item only. Its project and job history will remain."));
-    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("Delete project everywhere"));
+    expect(confirm).not.toHaveBeenCalledWith(expect.stringContaining("Delete project everywhere"));
     expect(mockDeleteAsset).not.toHaveBeenCalled();
     confirm.mockRestore();
   });
@@ -107,7 +107,7 @@ describe("LibraryView", () => {
     fireEvent.click(screen.getByLabelText("Select Acme launch"));
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     expect(screen.getByRole("dialog")).toHaveTextContent("This removes the Library item only. Its project and job history will remain.");
-    expect(screen.getByRole("dialog")).toHaveTextContent("Delete project everywhere");
+    expect(screen.getByRole("dialog")).not.toHaveTextContent("Delete project everywhere");
   });
 
   it("opens a preview without changing the existing Rule Inspector selection", async () => {

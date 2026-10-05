@@ -48,7 +48,6 @@ export function App() {
   const [profiles, setProfiles] = useState<ProviderProfile[]>([]);
   const [profilesLoaded, setProfilesLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [loaded, setLoaded] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const refreshRevision = useRef(0);
 
@@ -98,7 +97,7 @@ export function App() {
         setSelectedProjectId((current) => current || value[0]?.id || null);
       },
       () => undefined,
-    ).finally(() => { if (revision === refreshRevision.current) setLoaded(true); });
+    );
 
     // Health and jobs go through their polls so a manual Retry can never start
     // a second read alongside the one already in flight.
@@ -117,7 +116,6 @@ export function App() {
   }, [refresh]);
 
   useEffect(() => onLibraryChanged(() => {
-    setLoaded(false);
     void refresh();
   }), [refresh]);
 
@@ -153,12 +151,6 @@ export function App() {
     });
     openProject(project.id);
   };
-  const onDeleted = (projectId: string) => {
-    setProjects((current) => current.filter((project) => project.id !== projectId));
-    setJobs((current) => current.filter((job) => job.projectId !== projectId));
-    setSelectedProjectId((current) => current === projectId ? null : current);
-  };
-
   const selected = projects.find((project) => project.id === selectedProjectId) || null;
   const activity = workspaceActivity(projects, jobs);
   const activityDescription = activity
@@ -233,7 +225,7 @@ export function App() {
       {error && <div className="global-alert" role="alert"><strong>Engine unavailable.</strong> {error} <button onClick={() => refresh()}>Retry</button></div>}
 
       <main id="main-content" tabIndex={-1}>
-        {page === "projects" && <ProjectsView projects={projects} jobs={jobs} health={health} healthChecked={healthChecked} loaded={loaded} providersLoaded={profilesLoaded} hasSelectedProvider={hasSelectedProvider} onConfigureProviders={openProviders} onCreated={onCreated} onOpen={openProject} onDeleted={onDeleted} onRefresh={refresh} onSelectLibraryAsset={openLibraryAsset} />}
+        {page === "projects" && <ProjectsView health={health} healthChecked={healthChecked} providersLoaded={profilesLoaded} hasSelectedProvider={hasSelectedProvider} onConfigureProviders={openProviders} onCreated={onCreated} onSelectLibraryAsset={openLibraryAsset} />}
         {page === "library" && <LibraryView selectedAssetId={selectedLibraryAssetId} />}
         {page === "workspace" && <WorkspaceView key={selected?.id || "none"} project={selected} health={health} providersLoaded={profilesLoaded} hasSelectedProvider={hasSelectedProvider} onConfigureProviders={openProviders} onProjectUpdated={refresh} onGoProjects={() => setPage("projects")} />}
         {page === "shorts-editor" && <ShortsEditorView onJobCreated={refresh} />}

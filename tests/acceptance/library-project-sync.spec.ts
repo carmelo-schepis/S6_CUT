@@ -32,7 +32,7 @@ function makeJob(projectId: string) {
   };
 }
 
-test("Library deletion reconciles persisted Recent projects", async ({ page }) => {
+test("Library deletion preserves Library behavior without restoring Projects list UI", async ({ page }) => {
   const targetProjects = [
     makeProject("project-a", importedNames[0]),
     makeProject("project-b", importedNames[1]),
@@ -105,9 +105,10 @@ test("Library deletion reconciles persisted Recent projects", async ({ page }) =
   });
 
   await page.goto("/", { waitUntil: "domcontentloaded" });
-  await expect(page.getByRole("button", { name: `Open project ${importedNames[0]}` })).toBeVisible();
-  await expect(page.getByRole("button", { name: `Open project ${importedNames[1]}` })).toBeVisible();
-  await expect(page.getByTestId("recent-project-count")).toHaveText("12");
+  await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Recent projects" })).toHaveCount(0);
+  await expect(page.getByRole("searchbox", { name: "Search projects" })).toHaveCount(0);
+  await expect(page.locator(".project-card, .project-pagination")).toHaveCount(0);
 
   await page.getByRole("button", { name: "Library", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Personal Media Library" })).toBeVisible();
@@ -133,16 +134,13 @@ test("Library deletion reconciles persisted Recent projects", async ({ page }) =
   await expect(page.getByRole("button", { name: `Select ${importedNames[0]} for Rule Inspector` })).toHaveCount(0);
 
   await page.getByRole("button", { name: "Projects", exact: true }).click();
-  await expect(page.getByRole("button", { name: `Open project ${importedNames[0]}` })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: `Open project ${importedNames[1]}` })).toBeVisible();
-  await expect(page.getByTestId("recent-project-count")).toHaveText("12");
-  await page.getByRole("searchbox", { name: "Search projects" }).fill(importedNames[0]);
-  await expect(page.getByRole("button", { name: `Open project ${importedNames[0]}` })).toHaveCount(0);
-  await expect(page.getByText(`No project matches “${importedNames[0]}”.`)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Recent projects" })).toHaveCount(0);
+  await expect(page.getByRole("searchbox", { name: "Search projects" })).toHaveCount(0);
+  await expect(page.locator(".project-card, .project-pagination")).toHaveCount(0);
 
   await page.reload({ waitUntil: "domcontentloaded" });
-  await expect(page.getByRole("button", { name: `Open project ${importedNames[0]}` })).toHaveCount(0);
-  await expect(page.getByTestId("recent-project-count")).toHaveText("12");
+  await expect(page.getByRole("heading", { name: "Recent projects" })).toHaveCount(0);
+  await expect(page.locator(".project-card, .project-pagination")).toHaveCount(0);
   await page.getByRole("button", { name: "Library", exact: true }).click();
   await expect(page.getByRole("checkbox", { name: `Select ${importedNames[1]}` })).toBeVisible();
   await page.getByRole("checkbox", { name: `Select ${importedNames[1]}` }).check();
@@ -151,12 +149,11 @@ test("Library deletion reconciles persisted Recent projects", async ({ page }) =
   await expect(page.getByRole("heading", { name: "Build your private resolver" })).toBeVisible();
 
   await page.getByRole("button", { name: "Projects", exact: true }).click();
-  await expect(page.getByRole("button", { name: `Open project ${importedNames[0]}` })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: `Open project ${importedNames[1]}` })).toHaveCount(0);
-  await expect(page.getByTestId("recent-project-count")).toHaveText("12");
+  await expect(page.getByRole("heading", { name: "Recent projects" })).toHaveCount(0);
+  await expect(page.locator(".project-card, .project-pagination")).toHaveCount(0);
   await page.reload({ waitUntil: "domcontentloaded" });
-  await expect(page.getByRole("button", { name: `Open project ${importedNames[0]}` })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: `Open project ${importedNames[1]}` })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Recent projects" })).toHaveCount(0);
+  await expect(page.locator(".project-card, .project-pagination")).toHaveCount(0);
 
   expect(consoleErrors, "unexpected browser console errors").toEqual([]);
   expect(requestFailures, "unexpected failed network requests").toEqual([]);

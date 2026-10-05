@@ -66,20 +66,23 @@ describe("App shell", () => {
   });
   afterEach(() => vi.useRealTimers());
 
-  it("refreshes Recent projects when a Library deletion changes persisted records", async () => {
-    const recentProject = {
+  it("refreshes shared project state when a Library deletion changes persisted records", async () => {
+    const deletedProject = {
       schemaVersion: 1 as const, id: "deleted-project", name: "Deleted library project", mode: "clip" as const,
       style: "educational" as const, state: "complete" as const, sourceName: "source.mp4", sourceKind: "upload" as const,
       requestedCount: 1, createdAt: "2026-01-01", updatedAt: "2026-01-01",
     };
-    mockListProjects.mockResolvedValueOnce([recentProject]).mockResolvedValue([]);
+    mockListProjects.mockResolvedValueOnce([deletedProject]).mockResolvedValue([]);
     mockGetHealth.mockResolvedValue(health);
     render(<App />);
 
-    expect(await screen.findByRole("button", { name: "Open project Deleted library project" })).toBeInTheDocument();
+    await screen.findByRole("button", { name: "Workspace" });
+    fireEvent.click(screen.getByRole("button", { name: "Workspace" }));
+    expect(document.querySelector(".topbar-context")).toHaveTextContent(deletedProject.name);
     emitLibraryChanged();
     await waitFor(() => expect(mockListProjects).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(screen.queryByRole("button", { name: "Open project Deleted library project" })).not.toBeInTheDocument());
+    expect(await screen.findByText("No project selected")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: deletedProject.name })).not.toBeInTheDocument();
   });
 
   it("never moves the open Workspace to another project when the selected one leaves the listing", async () => {
@@ -94,10 +97,30 @@ describe("App shell", () => {
     };
     let listing = [stoppedImport, activityProject];
     mockListProjects.mockImplementation(() => Promise.resolve(listing));
+    mockListJobs.mockResolvedValue([{
+      ...activityJob,
+      id: "youtube-import-job",
+      projectId: stoppedImport.id,
+      state: "cancelled_kept",
+      stage: "stopped",
+      stageLabel: "Stopped during import",
+      progress: 0,
+      downloadProgress: {
+        downloadedBytes: 512,
+        totalBytes: 1024,
+        percent: 50,
+        phase: "stopped_partial",
+        lastProgressAt: "2026-01-01T00:00:00Z",
+        resumable: true,
+      },
+    }]);
     mockGetHealth.mockResolvedValue(health);
     render(<App />);
 
-    const openImport = await screen.findByRole("button", { name: "Open project YouTube import" }, { timeout: 5_000 });
+    fireEvent.click(await screen.findByRole("button", { name: "Jobs" }));
+    expect(await screen.findByRole("heading", { name: "Jobs & recovery" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Retry import" })).toBeVisible();
+    const openImport = screen.getByRole("button", { name: "Open" });
     await act(async () => { fireEvent.click(openImport); });
     expect(document.querySelector(".topbar-context")).toHaveTextContent("YouTube import");
 

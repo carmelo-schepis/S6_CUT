@@ -53,15 +53,29 @@ Before starting the app, create a unique new data directory and run the included
 seeder with `S6_DATA_PATH` and `S6_ACCEPTANCE_URL` set. It refuses non-empty data
 roots and non-`/tmp` paths and uses engine `Database`/`LibraryRules` plus ffmpeg
 to publish actual content-addressed media. It creates 15 stopped historical
-projects/jobs without output assets; three completed projects with five playable
+projects/jobs without output assets (one with a resumable partial import); three completed projects with five playable
 generated output assets each; one script-output; one linked project-source; a
 manual import; duplicate output titles across projects; a removable folder; and a
 protected asset. Do not clone/alter an existing live DB or media.
 
 The test intentionally fails (not skips) when the contract or fixture is
-absent. For the restart check, restart only the disposable Compose project after
-the browser test and verify the empty Recent clips API still returns zero; never
-restart or mutate a shared service.
+absent. It also verifies on the initial Projects view that the Recent projects
+heading/count, search, refresh, cards, deletion, progress, pagination, and its
+empty/loading states are absent, while checking the page has no horizontal
+overflow at desktop and mobile widths. Recent clips membership/search/count,
+real preview playback, and View in Library selection remain covered against the
+seeded output assets.
+
+For the restart check, restart only the disposable Compose project after the
+browser test and verify the empty Recent clips API still returns zero; never
+restart or mutate a shared service. Only after that empty-result persistence
+assertion passes, the runner invokes `recent-clips-projects.spec.ts`. This
+post-restart real-app test checks that Recent projects remains absent after a
+reload, the project-creation form and Settings remain available, Jobs & recovery
+and Workspace navigation work, and submitting a disposable script project opens
+that exact project's Workspace. Jobs & recovery access checks the seeded
+`Retry import` control remains available for stopped partial work; no
+retry/control mutation is issued against historical fixture jobs.
 
 ## Coverage status
 

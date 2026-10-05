@@ -5,7 +5,7 @@
  * rather than a wrong expectation.
  */
 import { test, expect, type Page } from "@playwright/test";
-import { gateway } from "./support/workspace";
+import { gateway, openWorkspaceForProject } from "./support/workspace";
 
 const BENIGN_CONSOLE = /Cross-Origin-Opener-Policy header has been ignored.*untrustworthy/i;
 
@@ -42,10 +42,7 @@ async function workspaceWithClips(page: Page) {
   const target = projects.find((project) => withClips.has(project.id));
   test.skip(!target, "no project with finished clips on this instance");
 
-  await rail(page, "Projects");
-  const open = page.getByRole("button", { name: `Open project ${target!.name}`, exact: true }).first();
-  await expect(open).toBeVisible({ timeout: 30_000 });
-  await open.click();
+  await openWorkspaceForProject(page, target!.name);
   await expect(page.locator(".clip-board .clip-tile").first()).toBeVisible({ timeout: 30_000 });
 }
 

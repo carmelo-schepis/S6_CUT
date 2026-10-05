@@ -8,7 +8,7 @@ import {
   collectClips,
   gateway,
   jobBoundaries,
-  openProjects,
+  openWorkspaceForProject,
   createClipProject,
   waitForProjectReady,
   zipEntry,
@@ -123,8 +123,7 @@ test("renders a clean Smart YouTube Short with a bottom-edge creator credit", as
 
     // Preview remains a playable burned MP4 after a full page reload.
     await page.reload({ waitUntil: "domcontentloaded" });
-    await openProjects(page);
-    await page.locator(".project-card").filter({ hasText: projectName }).first().click();
+    await openWorkspaceForProject(page, projectName);
     await expect(page.locator(".clip-tile.complete")).toHaveCount(1, { timeout: 60_000 });
     await page.locator(".clip-tile.complete").first().getByRole("button", { name: /Preview/ }).click();
     checkPlayback(await assertPlayback(page), "Smart YouTube output after reload");

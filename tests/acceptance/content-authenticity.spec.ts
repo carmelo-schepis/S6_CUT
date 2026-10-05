@@ -14,7 +14,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   OVERALL_DEADLINE_MS, assertPlayback, capturePlaybackStills, checkPlayback, collectClips,
-  createClipProject, extractZip, gateway, jobBoundaries, openProjects, waitForProjectReady,
+  createClipProject, extractZip, gateway, jobBoundaries, openProjects, openWorkspaceForProject, waitForProjectReady,
   writeManifest as writeManifestTo,
 } from "./support/workspace";
 
@@ -78,8 +78,7 @@ test.describe("S6_cut generates real playable video", () => {
 
     // --- Persistence across a full reload -----------------------------------
     await page.reload({ waitUntil: "domcontentloaded" });
-    await openProjects(page);
-    await page.locator(".project-card").filter({ hasText: projectName }).first().click();
+    await openWorkspaceForProject(page, projectName);
     await expect(page.getByRole("heading", { name: projectName })).toBeVisible({ timeout: 60_000 });
     await expect(page.locator(".clip-tile.complete")).toHaveCount(clips.length, { timeout: 60_000 });
     await expect(page.locator(".process-checklist li").filter({ hasText: "Project ready" })).toHaveClass(/status-complete/);
@@ -196,8 +195,7 @@ test.describe("S6_cut generates real playable video", () => {
     await page.screenshot({ path: path.join(outputDir, "completed-project.png"), fullPage: true });
 
     await page.reload({ waitUntil: "domcontentloaded" });
-    await openProjects(page);
-    await page.locator(".project-card").filter({ hasText: projectName }).first().click();
+    await openWorkspaceForProject(page, projectName);
     await expect(page.locator(".clip-tile.complete")).toHaveCount(clips.length, { timeout: 60_000 });
     await page.locator(".clip-tile.complete").first().getByRole("button", { name: /Preview/ }).click();
     checkPlayback(await assertPlayback(page), "fast after reload");
@@ -262,8 +260,7 @@ test.describe("S6_cut generates real playable video", () => {
     await page.screenshot({ path: path.join(outputDir, "completed-project.png"), fullPage: true });
 
     await page.reload({ waitUntil: "domcontentloaded" });
-    await openProjects(page);
-    await page.locator(".project-card").filter({ hasText: projectName }).first().click();
+    await openWorkspaceForProject(page, projectName);
     await expect(page.locator(".clip-tile.complete")).toHaveCount(clips.length, { timeout: 60_000 });
     await expect(page.getByRole("region", { name: "Processing notes" }).getByText(/OpenRouter API failed|API failed/i)).toHaveCount(1);
     await page.locator(".clip-tile.complete").first().getByRole("button", { name: /Preview/ }).click();
@@ -368,8 +365,7 @@ test.describe("S6_cut generates real playable video", () => {
 
     // Persistence across reload.
     await page.reload({ waitUntil: "domcontentloaded" });
-    await openProjects(page);
-    await page.locator(".project-card").filter({ hasText: projectName }).first().click();
+    await openWorkspaceForProject(page, projectName);
     await expect(page.getByRole("heading", { name: projectName })).toBeVisible({ timeout: 60_000 });
     await expect(page.locator(".beat-tile")).toHaveCount(beats, { timeout: 60_000 });
     checkPlayback(await assertPlayback(page), "script after reload");

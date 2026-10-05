@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { openWorkspaceForProject } from "./support/workspace";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -107,10 +108,7 @@ test.describe("OpenRouter Smart fallback", () => {
     await page.screenshot({ path: path.join(artifacts, "complete-fallback.png"), fullPage: true });
 
     await page.reload({ waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible({ timeout: 30_000 });
-    const projectCard = page.locator(".project-card").filter({ hasText: projectName }).first();
-    await expect(projectCard).toBeVisible({ timeout: 30_000 });
-    await projectCard.click();
+    await openWorkspaceForProject(page, projectName);
     await expect(page.getByRole("heading", { name: projectName })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByRole("region", { name: "Processing notes" }).getByText(/OpenRouter API failed|API failed/i)).toHaveCount(1);
     await expect(page.locator(".process-checklist li").filter({ hasText: "Project ready" })).toHaveClass(/status-complete/);

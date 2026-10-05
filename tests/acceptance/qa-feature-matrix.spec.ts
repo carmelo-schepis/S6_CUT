@@ -173,23 +173,15 @@ test.describe("§6.2 Projects", () => {
     await expect(page.getByText("Add at least 10 characters of script.")).toBeVisible();
   });
 
-  test("recent projects search filters and clears", async ({ page }) => {
+  test("removed Recent projects controls stay absent; Jobs history remains available", async ({ page }) => {
     await boot(page);
     await rail(page, "Projects");
-    const search = page.getByRole("searchbox", { name: "Search projects" });
-    await expect(search, "search appears once there are more than 12 projects").toBeVisible();
-    const cards = page.locator(".project-card");
-    // Search for a project this install actually has: a pinned fixture name
-    // rots as soon as the Library is purged or the data directory is replaced.
-    const existing = (await cards.first().locator(".project-card-title strong").innerText()).trim();
-    expect(existing, "a listed project supplies the search term").not.toBe("");
-    await search.fill(existing);
-    await page.waitForTimeout(1_000);
-    expect(await cards.count(), "search should match the listed project").toBeGreaterThan(0);
-    await expect(cards.first()).toContainText(existing);
-    await search.fill("zzz-no-such-project-zzz");
-    await page.waitForTimeout(1_000);
-    expect(await cards.count()).toBe(0);
+    await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Recent projects" })).toHaveCount(0);
+    await expect(page.getByRole("searchbox", { name: "Search projects" })).toHaveCount(0);
+    await expect(page.locator(".project-card, .project-pagination")).toHaveCount(0);
+    await rail(page, "Jobs");
+    await expect(page.getByRole("heading", { name: "Jobs & recovery" })).toBeVisible();
   });
 });
 

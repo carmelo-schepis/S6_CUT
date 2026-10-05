@@ -137,11 +137,11 @@ export function RecentClips({ onSelectAsset }: { onSelectAsset: (id: string) => 
 
   const folderName = (asset: LibraryAsset) => folders.find((folder) => folder.id === asset.folderId)?.name || "Folder unavailable";
 
-  return <section className="recent-section recent-clips-section" aria-labelledby="recent-clips-title">
+  return <section className="recent-clips-section" aria-labelledby="recent-clips-title">
     <div className="section-heading">
       <div><h2 id="recent-clips-title">Recent clips</h2><span className="section-count" aria-live="polite">{total}</span></div>
       <div className="section-tools">
-        <div className="project-search"><Search size={14} aria-hidden="true" /><input type="search" aria-label="Search recent clips" placeholder="Search clips…" value={search} onChange={(event) => { revision.current += 1; setSearch(event.target.value); }} /></div>
+        <div className="section-search"><Search size={14} aria-hidden="true" /><input type="search" aria-label="Search recent clips" placeholder="Search clips…" value={search} onChange={(event) => { revision.current += 1; setSearch(event.target.value); }} /></div>
         <button type="button" onClick={() => signalRefresh.current()} disabled={loading}>Refresh</button>
       </div>
     </div>

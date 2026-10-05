@@ -34,6 +34,7 @@
  * ledger rules (hairline rows, no gap) are what spend that budget.
  */
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { openWorkspaceForProject } from "./support/workspace";
 
 const gateway = process.env.S6_ACCEPTANCE_URL || "http://127.0.0.1:8080";
 
@@ -94,10 +95,7 @@ async function findCompletedProject(request: APIRequestContext): Promise<string 
 
 async function openWorkspace(page: Page, projectName: string) {
   await page.goto("/", { waitUntil: "domcontentloaded" });
-  await page.locator('.app-rail nav button[aria-label="Projects"]').click();
-  const open = page.getByRole("button", { name: `Open project ${projectName}`, exact: true }).first();
-  await expect(open).toBeVisible({ timeout: 60_000 });
-  await open.click();
+  await openWorkspaceForProject(page, projectName);
   await expect(page.locator(".workspace-page")).toBeVisible({ timeout: 60_000 });
   await expect(page.locator(".workspace-grid")).toBeVisible({ timeout: 60_000 });
   // The viewer resolves its source after the job read settles; measuring before

@@ -299,7 +299,7 @@ Walk all of these. Each row goes into `coverage.csv` with evidence. At **1440×1
 - Project name (160 char max), Business folder select, **New folder** (`window.prompt` — handle the dialog), last-used folder persisted in `localStorage` under `s6-cut.recent-library-folder`
 - Script mode: textarea, character counter, `.txt`/`.md` upload, rejection of other extensions, <10 char error, Narration select (auto / local / silent)
 - Create is disabled when `health.ffmpeg === false`
-- Recent projects: cards show style, count, format, age, `Authorised URL` vs `Local source`, live progress and status badge; **Refresh**; search box appears only above 12 projects and filters name + style; "Show all N projects" toggle; empty/no-match states and **Clear search**
+- Recent clips: verify asset-backed search, refresh, playable previews, pagination, and **View in Library** selection. The Recent projects section is intentionally absent; reopen existing work from **Jobs & recovery**.
 
 ### 6.3 Workspace
 - Breadcrumb shows `Workspace / <project name>`

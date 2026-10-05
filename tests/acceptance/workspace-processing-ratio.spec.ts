@@ -82,7 +82,9 @@ test("keeps queued YouTube processing inside the declared output ratio", async (
       await page.setViewportSize({ width, height });
       await page.emulateMedia({ reducedMotion: "reduce" });
       await page.goto("/", { waitUntil: "domcontentloaded" });
-      await page.getByRole("button", { name: `Open project ${output.contentFormat} ${output.aspect} processing ratio`, exact: true }).click();
+      await page.getByRole("button", { name: "Jobs", exact: true }).click();
+      await page.locator('.job-card[data-job-id="ratio-job"]')
+        .getByRole("button", { name: "Open", exact: true }).click();
       await expect(page.locator(".workspace-page")).toBeVisible();
       await expect(page.getByText(`Output · ${output.aspect}`, { exact: true })).toBeVisible();
       await expect(page.locator(".job-strip")).toContainText("Downloading");
@@ -127,7 +129,9 @@ test("keeps queued YouTube processing inside the declared output ratio", async (
   for (const [width, height] of [[1440, 900], [768, 1024], [390, 844]] as const) {
     await page.setViewportSize({ width, height });
     await page.goto("/", { waitUntil: "domcontentloaded" });
-    await page.getByRole("button", { name: `Open project ${fixture.contentFormat} ${fixture.aspect} processing ratio`, exact: true }).click();
+    await page.getByRole("button", { name: "Jobs", exact: true }).click();
+    await page.locator('.job-card[data-job-id="ratio-job"]')
+      .getByRole("button", { name: "Open", exact: true }).click();
     await expect(page.locator(".processing-state")).toBeVisible();
     await expect(page.getByRole("region", { name: "Download status" })).toBeHidden();
     const ordinary = await page.locator(".viewer-frame").evaluate((frame) => {

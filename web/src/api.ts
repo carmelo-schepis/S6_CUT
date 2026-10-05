@@ -155,11 +155,6 @@ export async function getProject(id: string): Promise<Project> {
   return projectSchema.parse(await request(`/projects/${encodeURIComponent(id)}`));
 }
 
-/** Permanently removes a project together with its project-created Library media. */
-export async function deleteProjectEverywhere(id: string): Promise<void> {
-  await request(`/projects/${encodeURIComponent(id)}?delete_assets=true`, { method: "DELETE" });
-}
-
 /** Permanently removes all Library media while preserving app configuration. */
 export async function purgeLibraryContent(confirmation: string) {
   return libraryPurgeResultSchema.parse(await request("/library/purge", {

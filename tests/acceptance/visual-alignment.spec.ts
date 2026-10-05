@@ -230,7 +230,7 @@ test.describe("visual alignment", () => {
       if (chipHeights.length) expect(spread(chipHeights), `${route}: status chip heights differ`).toBeLessThanOrEqual(0.5);
 
       // Cards of the same kind share their internal padding.
-      for (const selector of [".project-card", ".asset-card", ".job-card", ".clip-tile"]) {
+      for (const selector of [".asset-card", ".job-card", ".clip-tile"]) {
         const paddings = await page.locator(selector).evaluateAll((elements) => elements
           .filter((element) => element.getClientRects().length > 0)
           .map((element) => getComputedStyle(element).padding));
