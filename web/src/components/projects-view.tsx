@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { FileText, Film, FolderOpen, Plus, Sparkles, Zap } from "lucide-react";
 import { createClipJob, createFolder, createScriptJob, listFolders, readableError } from "../api";
-import { DEFAULT_SUBSCRIBE_ANIMATION, type ContentFormat, type Health, type LibraryFolder, type ProcessingMode, type Project, type SourceProfile, type Style, type SubscribeAnimationConfig } from "../types";
+import { DEFAULT_SUBSCRIBE_ANIMATION, type ContentFormat, type Health, type LibraryFolder, type ProcessingMode, type Project, type SourceProfile, type Style, type SubscribeAnimationConfig, type MusicTheme } from "../types";
 import { Button, Field, FieldGroup, StepBadge, useSingleFlight } from "./common";
 import { VideoSourcePicker } from "./video-source-picker";
 import { SubscribeAnimationControl } from "./subscribe-animation-control";
@@ -45,6 +45,8 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
   const [narration, setNarration] = useState<"auto" | "local" | "silent">("auto");
   const [processingMode, setProcessingMode] = useState<ProcessingMode>("auto");
   const [sourceProfile, setSourceProfile] = useState<SourceProfile>("speech");
+  const [musicTheme, setMusicTheme] = useState<MusicTheme>("clean");
+  const [musicTopText, setMusicTopText] = useState("");
   const [sourceDuration, setSourceDuration] = useState<{ file: File; seconds: number } | null>(null);
   const [burnSubtitles, setBurnSubtitles] = useState(true);
   const [subscribeAnimation, setSubscribeAnimation] = useState<SubscribeAnimationConfig>(DEFAULT_SUBSCRIBE_ANIMATION);
@@ -113,13 +115,14 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
       if (minDuration > 120) return setError("Minimum seconds must be at most 120.");
       if (!Number.isFinite(maxDuration) || maxDuration <= minDuration) return setError("Maximum seconds must be greater than minimum seconds.");
       if (contentFormat === "short" && maxDuration > 180) return setError("Short-form clips can be at most 180 seconds.");
+      if (sourceProfile === "music" && musicTopText.length > 100) return setError("Top text must be 100 characters or fewer.");
       if (musicConfigurationMessage) return setError(musicConfigurationMessage);
       if (musicFeasibilityMessage) return setError(musicFeasibilityMessage);
     }
     setSubmitting(true);
     try {
       const result = mode === "clip"
-        ? await createClipJob({ file: sourceType === "file" ? file || undefined : undefined, url: sourceType === "url" ? url.trim() : undefined, name: projectName.trim() || undefined, style, count, minDuration, maxDuration, aspectRatio: contentFormat === "long" ? "16:9" : aspectRatio, contentFormat, processingMode: sourceProfile === "music" ? "smart" : processingMode, sourceProfile, burnSubtitles: fastMode ? false : burnSubtitles, subscribeAnimation, libraryFolderId: libraryFolderId || undefined })
+        ? await createClipJob({ file: sourceType === "file" ? file || undefined : undefined, url: sourceType === "url" ? url.trim() : undefined, name: projectName.trim() || undefined, style, count, minDuration, maxDuration, aspectRatio: contentFormat === "long" ? "16:9" : aspectRatio, contentFormat, processingMode: sourceProfile === "music" ? "smart" : processingMode, sourceProfile, burnSubtitles: fastMode ? false : burnSubtitles, subscribeAnimation, libraryFolderId: libraryFolderId || undefined, ...(sourceProfile === "music" ? { musicPresentation: { version: 1 as const, subtitleTheme: musicTheme }, musicTopText } : {}) })
         : await createScriptJob({ script, name: projectName.trim() || undefined, style, aspectRatio, contentFormat: aspectRatio === "16:9" ? "long" : "short", narration, subscribeAnimation, libraryFolderId: libraryFolderId || undefined });
       if (libraryFolderId) localStorage.setItem(RECENT_FOLDER_KEY, libraryFolderId);
       onCreated(result.project);
@@ -169,9 +172,12 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
     <section className="create-panel" aria-labelledby="create-title">
       <div className="create-topline">
         <div><h2 id="create-title">Create a project</h2><p>Nothing leaves this machine unless you use a URL or an enabled provider.</p></div>
-        <div className="segmented" aria-label="Creation mode">
-          <button type="button" aria-pressed={mode === "clip"} className={mode === "clip" ? "active" : ""} onClick={() => { setError(null); setMode("clip"); }}><Film size={15} /> Clip mode</button>
-          <button type="button" aria-pressed={mode === "script"} className={mode === "script" ? "active" : ""} onClick={() => { setError(null); setMode("script"); }}><FileText size={15} /> Script mode</button>
+        <div className="create-mode-controls">
+          <div className="segmented" aria-label="Creation mode">
+            <button type="button" aria-pressed={mode === "clip" && sourceProfile === "speech"} className={mode === "clip" && sourceProfile === "speech" ? "active" : ""} onClick={() => { setError(null); setMode("clip"); setSourceProfile("speech"); }}><Film size={15} /> Clip mode</button>
+            <button type="button" aria-label="Music / sung vocals" aria-pressed={mode === "clip" && sourceProfile === "music"} className={mode === "clip" && sourceProfile === "music" ? "active" : ""} onClick={() => { setError(null); setMode("clip"); setSourceProfile("music"); setContentFormat("short"); setAspectRatio("9:16"); setBurnSubtitles(true); }}><span className="music-mode-icon" aria-hidden="true">♫</span> Music mode</button>
+          </div>
+          <button type="button" className={`script-mode-link${mode === "script" ? " active" : ""}`} aria-pressed={mode === "script"} onClick={() => { setError(null); setMode("script"); }}><FileText size={14} /> Script mode</button>
         </div>
       </div>
 
@@ -209,12 +215,13 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
           </FieldGroup>
 
           {mode === "clip" ? <>
-            <FieldGroup title="Source audio" hint={sourceProfile === "music" ? MUSIC_PROFILE_NOTE : "Choose speech for spoken content or music for sung vocals and lyrics."}>
-              <div className="segmented mode-tabs" aria-label="Source audio profile">
-                <button type="button" aria-pressed={sourceProfile === "speech"} className={sourceProfile === "speech" ? "active" : ""} onClick={() => setSourceProfile("speech")}>Speech</button>
-                <button type="button" aria-pressed={sourceProfile === "music"} className={sourceProfile === "music" ? "active" : ""} onClick={() => setSourceProfile("music")}>Music / sung vocals</button>
+            {sourceProfile === "music" && <FieldGroup title="Lyrics presentation" hint={MUSIC_PROFILE_NOTE}>
+              <div className="music-theme-options" role="group" aria-label="Lyrics subtitle theme">
+                <button type="button" aria-label="Clean sans" aria-pressed={musicTheme === "clean"} className={musicTheme === "clean" ? "active" : ""} onClick={() => setMusicTheme("clean")}><span className="theme-clean">Aa</span><strong>Clean sans</strong><small>White · compact</small></button>
+                <button type="button" aria-label="Warm highlight" aria-pressed={musicTheme === "warm"} className={musicTheme === "warm" ? "active" : ""} onClick={() => setMusicTheme("warm")}><span className="theme-warm">Aa</span><strong>Warm highlight</strong><small>Soft yellow accents</small></button>
+                <button type="button" aria-label="Soft serif" aria-pressed={musicTheme === "serif"} className={musicTheme === "serif" ? "active" : ""} onClick={() => setMusicTheme("serif")}><span className="theme-serif">Aa</span><strong>Soft serif</strong><small>Light editorial</small></button>
               </div>
-            </FieldGroup>
+            </FieldGroup>}
             <FieldGroup title="Format" hint={contentFormat === "long" ? "Landscape scenes are selected across the whole source." : "Vertical clips are selected for short-form viewing."}>
               <div className="segmented mode-tabs format-tabs" aria-label="Content format">
                 <button type="button" aria-pressed={contentFormat === "short"} className={contentFormat === "short" ? "active" : ""} onClick={() => { setContentFormat("short"); setAspectRatio("9:16"); }}>Short form · 9:16</button>
@@ -244,9 +251,13 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
             <div className="folder-picker"><Field label="Business folder"><select aria-label="Business folder" value={libraryFolderId} onChange={(event) => setLibraryFolderId(event.target.value)}>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></Field><Button variant="ghost" onClick={addFolder}><Plus size={13} /> New folder</Button></div>
           </FieldGroup>
 
+          {mode === "clip" && sourceProfile === "music" && <FieldGroup title="Top text" hint="Optional · displayed separately in the upper black area. Up to 100 characters.">
+            <Field label="Top text"><input value={musicTopText} maxLength={100} onChange={(event) => setMusicTopText(event.target.value)} placeholder="Leave blank to omit" /></Field>
+          </FieldGroup>}
+
           <SubscribeAnimationControl value={subscribeAnimation} onChange={setSubscribeAnimation} longForm={mode === "clip" ? contentFormat === "long" : aspectRatio === "16:9"} />
 
-          {mode === "clip" && <label className="subtitle-toggle"><input type="checkbox" checked={fastMode ? false : burnSubtitles} disabled={fastMode} onChange={(event) => setBurnSubtitles(event.target.checked)} /> <span><strong>Burn in subtitles</strong><small>{fastMode ? "Fast mode skips transcription and captions. Choose Smart mode to enable them." : "Uses local word timing. Fast mode skips captions."}</small></span></label>}
+          {mode === "clip" && sourceProfile === "speech" && <label className="subtitle-toggle"><input type="checkbox" checked={fastMode ? false : burnSubtitles} disabled={fastMode} onChange={(event) => setBurnSubtitles(event.target.checked)} /> <span><strong>Burn in subtitles</strong><small>{fastMode ? "Fast mode skips transcription and captions. Choose Smart mode to enable them." : "Uses local word timing. Fast mode skips captions."}</small></span></label>}
 
           <button className="advanced-toggle" onClick={() => setAdvanced(!advanced)} aria-expanded={advanced}>Advanced controls <span aria-hidden="true">{advanced ? "−" : "+"}</span></button>
           {advanced && <div className="advanced-grid">

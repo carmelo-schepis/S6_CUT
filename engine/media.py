@@ -997,6 +997,34 @@ def _wrap_caption_words(words: list[dict[str, Any]], max_chars: int) -> list[lis
     return lines
 
 
+def _music_caption_group(local: list[dict[str, Any]], index: int, max_chars: int) -> list[dict[str, Any]]:
+    """Build a lyric phrase at pauses, punctuation and safe visual width."""
+    start = index
+    while start > 0:
+        previous = local[start - 1]
+        current = local[start]
+        gap = float(current["start"]) - float(previous["end"])
+        prior_text = str(previous["text"])
+        if gap > 0.65 or prior_text.rstrip().endswith((".", "!", "?", ",", ";", ":")):
+            break
+        start -= 1
+    end = start
+    chars = 0
+    while end < len(local):
+        item = local[end]
+        text = str(item["text"])
+        proposed = chars + (1 if end > start else 0) + len(text)
+        if end > start and (proposed > max_chars * 2 or str(local[end - 1]["text"]).rstrip().endswith((".", "!", "?", ",", ";", ":"))):
+            break
+        if end > start and float(item["start"]) - float(local[end - 1]["end"]) > 0.65:
+            break
+        chars = proposed
+        end += 1
+        if text.rstrip().endswith((".", "!", "?", ",", ";", ":")):
+            break
+    return local[start:max(index + 1, end)]
+
+
 def _caption_group_for_index(local: list[dict[str, Any]], index: int, desired: int, max_chars: int) -> list[dict[str, Any]]:
     """Choose a timed word group that always fits a maximum two-line block."""
     start = index - index % desired
@@ -1018,7 +1046,8 @@ def _ass_time(seconds: float) -> str:
 
 
 def _ass_escape(value: str) -> str:
-    return value.replace("\\", r"\\").replace("{", r"\{").replace("}", r"\}").replace("\n", r"\N")
+    safe = "".join(char for char in value if char in "\n\r\t" or unicodedata.category(char) != "Cc")
+    return safe.replace("\\", r"\\").replace("{", r"\{").replace("}", r"\}").replace("\r\n", r"\N").replace("\r", r"\N").replace("\n", r"\N")
 
 
 def caption_words_for_clip(words: Iterable[dict[str, Any]], start: float, end: float) -> list[dict[str, Any]]:
@@ -1048,9 +1077,30 @@ def caption_words_for_clip(words: Iterable[dict[str, Any]], start: float, end: f
 # DO-NOT-CHANGE: PlayResX/Y must match the final render canvas; captions stay
 # bottom-centre (Alignment=2) with symmetric margins; word-by-word highlight
 # uses {\\c&H0077D6FF&}; wrapping at word boundaries via _wrap_caption_words
-def _caption_cues(words: list[dict[str, Any]], offset: float, duration: float, style: str = "educational") -> list[tuple[float, float, str]]:
+def music_caption_cues(words: list[dict[str, Any]], offset: float, duration: float) -> list[dict[str, Any]]:
+    """Expose accurate, clip-local Whisper words without speech-style embellishments."""
+    cues: list[dict[str, Any]] = []
+    for index, word in enumerate(caption_words_for_clip(words, offset, offset + duration), 1):
+        text = " ".join(str(word.get("text", "")).split())
+        if not text or len(text) > 500:
+            continue
+        confidence = word.get("confidence")
+        try:
+            confidence = float(confidence) if confidence is not None else None
+        except (TypeError, ValueError):
+            confidence = None
+        if confidence is not None and not math.isfinite(confidence):
+            confidence = None
+        if confidence is not None:
+            confidence = min(1.0, max(0.0, confidence))
+        cues.append({"id": f"music-word-{index}", "start": word["start"], "end": word["end"], "text": text, "confidence": confidence})
+    return cues
+
+
+def _caption_cues(words: list[dict[str, Any]], offset: float, duration: float, style: str = "educational", *, music_presentation: bool = False) -> list[tuple[float, float, str]]:
     cues: list[tuple[float, float, str]] = []
-    local = _caption_words_with_emojis(caption_words_for_clip(words, offset, offset + duration), style)
+    selected = caption_words_for_clip(words, offset, offset + duration)
+    local = selected if music_presentation else _caption_words_with_emojis(selected, style)
     for word in local:
         text = " ".join(str(word.get("text", "")).split())
         start = max(0.0, min(duration, float(word["start"])))
@@ -1068,8 +1118,8 @@ def _srt_time(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{seconds_value:02d},{millis:03d}"
 
 
-def write_caption_sidecars(path: Path, words: list[dict[str, Any]], *, offset: float, duration: float, style: str = "educational") -> None:
-    cues = _caption_cues(words, offset, duration, style)
+def write_caption_sidecars(path: Path, words: list[dict[str, Any]], *, offset: float, duration: float, style: str = "educational", music_theme: str | None = None) -> None:
+    cues = _caption_cues(words, offset, duration, style, music_presentation=music_theme is not None)
     srt = "\n\n".join(f"{index}\n{_srt_time(start)} --> {_srt_time(end)}\n{text}" for index, (start, end, text) in enumerate(cues, 1)) + ("\n" if cues else "")
     path.with_suffix(".srt").write_text(srt, encoding="utf-8")
     vtt = "WEBVTT\n\n" + "\n\n".join(f"{_srt_time(start).replace(',', '.')} --> {_srt_time(end).replace(',', '.')}\n{text}" for start, end, text in cues) + ("\n" if cues else "")
@@ -1148,8 +1198,11 @@ def _scrim_events(look: "LookTreatment", width: int, height: int, duration: floa
     return style, events
 
 
-def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duration: float, visuals: Iterable[tuple[str, float, float]], width: int, height: int, style: str = "educational", creator_credit: str | None = None, credit_alignment: int = 3, content_format: str | None = None) -> None:
+def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duration: float, visuals: Iterable[tuple[str, float, float]], width: int, height: int, style: str = "educational", creator_credit: str | None = None, credit_alignment: int = 3, content_format: str | None = None, music_theme: str | None = None, music_top_text: str | None = None) -> None:
     preset = _subtitle_preset(style, content_format)
+    if music_theme in {"clean", "warm", "serif"}:
+        preset = dict(preset)
+        preset.update({"fontname": "Barlow" if music_theme == "clean" else "Lora", "font": 56, "bold": 0, "italic": 0, "outline": 1, "shadow": 0, "group": 1, "highlight": "&H0000D7FF&" if music_theme == "warm" else "&H00FFFFFF&", "primary": "&H00FFFFFF&", "outline_color": "&H80000000&"})
     scrim_style, scrim_events = _scrim_events(recipe_for(style, content_format).look, width, height, duration)
     metrics = _ass_style_metrics(width, height)
     type_scale = min(width, height) / _CAPTION_REFERENCE_SHORT_EDGE
@@ -1159,6 +1212,9 @@ def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duratio
     shadow = max(1, round(preset["shadow"] * type_scale))
     margin_x = metrics["margin_x"]
     margin_v = max(60, round(int(preset["margin_v"]) * vertical_scale))
+    if music_theme:
+        band_height = min(height, round(width * 0.75 / 2) * 2)
+        margin_v = round((height - band_height) / 2 + band_height * 0.08)
     visual_scale = vertical_scale
     usable = max(1, width - 2 * margin_x)
     max_chars = max(8, int(usable * _CAPTION_WRAP_FRACTION / (_CHAR_WIDTH_FACTOR * fontsize)))
@@ -1172,6 +1228,8 @@ def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duratio
     # footage without competing with the much larger caption treatment.
     credit_alignment = 1 if credit_alignment == 1 else 3
     credit_style = f"Style: Credit,Arial,{credit_fontsize},&H22F1F2F4,&H22F1F2F4,&H3308080A,&H6608080A,0,0,0,0,100,100,0,0,3,{max(1, round(2 * visual_scale))},{max(1, round(1 * visual_scale))},{credit_alignment},{margin_x},{margin_x},{credit_margin},1\n" if credit_text else ""
+    visual_style = f"Style: Visual,Arial,{max(28, round(56 * visual_scale))},&H008FA8DD,&H000000FF,&H00110B0C,&HCC110B0C,-1,0,0,0,100,100,1,0,3,{max(1, round(2 * visual_scale))},0,8,{margin_x},{margin_x},{max(80, round(400 * visual_scale))},1" if not music_theme else ""
+    caption_alignment = 5 if music_theme else 2
     header = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {width}
@@ -1181,19 +1239,26 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding
-Style: Caption,{preset["fontname"]},{fontsize},{preset["primary"]},{preset["highlight"]},{preset["outline_color"]},{preset["back_color"]},{preset["bold"]},{preset["italic"]},0,0,100,100,{preset["spacing"]},0,{preset["border_style"]},{outline},{shadow},2,{margin_x},{margin_x},{margin_v},1
-Style: Visual,Arial,{max(28, round(56 * visual_scale))},&H008FA8DD,&H000000FF,&H00110B0C,&HCC110B0C,-1,0,0,0,100,100,1,0,3,{max(1, round(2 * visual_scale))},0,8,{margin_x},{margin_x},{max(80, round(400 * visual_scale))},1
+Style: Caption,{preset["fontname"]},{fontsize},{preset["primary"]},{preset["highlight"]},{preset["outline_color"]},{preset["back_color"]},{preset["bold"]},{preset["italic"]},0,0,100,100,{preset["spacing"]},0,{preset["border_style"]},{outline},{shadow},{caption_alignment},{margin_x},{margin_x},{margin_v},1
+{visual_style}
+Style: MusicTop,Barlow,{max(32, round(54 * visual_scale))},&H00FFFFFF,&H00FFFFFF,&H80000000,&H80000000,0,0,0,0,100,100,0,0,1,2,0,8,{margin_x},{margin_x},{max(100, round(170 * visual_scale))},1
 {credit_style}
 {scrim_style}
 [Events]
 Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
 """
     events: list[str] = list(scrim_events)
-    local = _caption_words_with_emojis(caption_words_for_clip(words, offset, offset + duration), style)
+    if music_theme and music_top_text:
+        events.append(f"Dialogue: 20,0,{_ass_time(duration)},MusicTop,,0,0,0,,{_ass_escape(music_top_text)}")
+    selected_words = caption_words_for_clip(words, offset, offset + duration)
+    local = selected_words if music_theme else _caption_words_with_emojis(selected_words, style)
     for index, word in enumerate(local):
-        group_size = int(preset["group"])
-        group = _caption_group_for_index(local, index, group_size, max_chars)
-        lines = _wrap_caption_words(group, max_chars)[:2]
+        if music_theme:
+            group = _music_caption_group(local, index, max_chars)
+        else:
+            group_size = int(preset["group"])
+            group = _caption_group_for_index(local, index, group_size, max_chars)
+        lines = _wrap_caption_words(group, max_chars) if music_theme else _wrap_caption_words(group, max_chars)[:2]
         line_bits = []
         for line in lines:
             bits = []
@@ -1217,6 +1282,20 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
         # The explicit wrap keeps long channel names inside the safe width.
         events.append(f"Dialogue: 2,0,{_ass_time(duration)},Credit,,0,0,0,,{_ass_escape(credit_text)}")
     path.write_text(header + "\n".join(events) + "\n", encoding="utf-8")
+
+
+def write_music_ass(
+    path: Path, words: list[dict[str, Any]], *, offset: float, duration: float,
+    width: int, height: int, top_text: str | None = None, subtitle_theme: str = "clean",
+) -> None:
+    if top_text is not None and len(top_text) > 100:
+        raise ValueError("Music top text must be 100 characters or fewer")
+    if subtitle_theme not in {"clean", "warm", "serif"}:
+        raise ValueError("Unknown music subtitle theme")
+    write_ass(
+        path, words, offset=offset, duration=duration, visuals=[], width=width, height=height,
+        style="educational", music_theme=subtitle_theme, music_top_text=top_text,
+    )
 
 
 def _overlay_inputs(command: list[str], overlays: list[tuple[Path, float, float]]) -> None:
@@ -1364,13 +1443,29 @@ def _composite_subscribe_animations(
     return current
 
 
+def _music_source_layout_filter(width: int, height: int, source_dimensions: tuple[int, int], grayscale: bool) -> str:
+    source_width, source_height = source_dimensions
+    band_height = min(height, round(width * 0.75 / 2) * 2)
+    scale = min(width / source_width, band_height / source_height)
+    scaled_height = round(source_height * scale)
+    pad_y = max(0, round((height - scaled_height) / 2 - height * 0.045))
+    pad_y -= pad_y % 2
+    treatment = ",format=gray,format=yuv420p" if grayscale else ""
+    return (
+        f"scale={width}:{band_height}:force_original_aspect_ratio=decrease:flags=lanczos,"
+        f"pad={width}:{height}:(ow-iw)/2:{pad_y}:color=black{treatment},setsar=1[base]"
+    )
+
+
 def _filters(
     width: int, height: int, overlays: list[tuple[Path, float, float]], asset_start_index: int,
     ass_name: str, source_dimensions: tuple[int, int] | None = None,
     subscribe_animations: list[tuple[int, float, float, float, float]] | None = None,
+    music_treatment: str | None = None,
 ) -> tuple[str, str]:
     if source_dimensions:
-        filters = [f"[0:v]{_source_layout_filter(*source_dimensions, width, height)}"]
+        layout = _music_source_layout_filter(width, height, source_dimensions, music_treatment == "grayscale") if music_treatment else _source_layout_filter(*source_dimensions, width, height)
+        filters = [f"[0:v]{layout}"]
     else:
         filters = [f"[0:v]scale={width}:{height}:flags=lanczos,setsar=1[base]"]
     current = "base"
@@ -1388,7 +1483,7 @@ def _filters(
 
 # DO-NOT-CHANGE: atomic render (.partial.mp4 + os.replace) with structural output
 # validation (dimensions/audio) before the output is publishable
-def render_clip(source: Path, output: Path, *, start: float, end: float, aspect: str, words: list[dict[str, Any]], visuals: list[tuple[str, float, float]], overlays: list[tuple[Path, float, float]], settings: Settings, style: str = "educational", has_audio: bool = True, embed_subtitles: bool = False, subtitle_language: str = "und", creator_credit: str | None = None, content_format: str | None = None, subscribe_animation: dict[str, Any] | None = None) -> None:
+def render_clip(source: Path, output: Path, *, start: float, end: float, aspect: str, words: list[dict[str, Any]], visuals: list[tuple[str, float, float]], overlays: list[tuple[Path, float, float]], settings: Settings, style: str = "educational", has_audio: bool = True, embed_subtitles: bool = False, subtitle_language: str = "und", creator_credit: str | None = None, content_format: str | None = None, subscribe_animation: dict[str, Any] | None = None, music_theme: str | None = None, music_top_text: str | None = None, music_treatment: str | None = None) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     ass = output.parent / (f"{output.stem}.burn.ass" if creator_credit else f"{output.stem}.ass")
     duration = end - start
@@ -1398,12 +1493,12 @@ def render_clip(source: Path, output: Path, *, start: float, end: float, aspect:
     if source_meta["rotation"] % 180:
         src_width, src_height = src_height, src_width
     credit_alignment = _credit_alignment(source, start=start, end=end, width=width, height=height, settings=settings) if creator_credit else 3
-    write_ass(ass, words, offset=start, duration=duration, visuals=visuals, width=width, height=height, style=style, creator_credit=creator_credit, credit_alignment=credit_alignment, content_format=content_format)
-    write_caption_sidecars(output, words, offset=start, duration=duration, style=style)
+    write_ass(ass, words, offset=start, duration=duration, visuals=visuals, width=width, height=height, style=style, creator_credit=creator_credit, credit_alignment=credit_alignment, content_format=content_format, music_theme=music_theme, music_top_text=music_top_text)
+    write_caption_sidecars(output, words, offset=start, duration=duration, style=style, music_theme=music_theme)
     if creator_credit:
         # The downloadable ASS is caption-only; the internal burn script must
         # never be applied a second time to an already credited MP4.
-        write_ass(output.with_suffix(".ass"), words, offset=start, duration=duration, visuals=visuals, width=width, height=height, style=style, content_format=content_format)
+        write_ass(output.with_suffix(".ass"), words, offset=start, duration=duration, visuals=visuals, width=width, height=height, style=style, content_format=content_format, music_theme=music_theme, music_top_text=music_top_text)
     temp = output.with_suffix(".partial.mp4")
     command = [settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{start:.3f}", "-i", str(source)]
     _overlay_inputs(command, overlays)
@@ -1412,7 +1507,7 @@ def render_clip(source: Path, output: Path, *, start: float, end: float, aspect:
     if embed_subtitles:
         command.extend(["-i", str(output.with_suffix(".srt"))])
     source_dimensions = (src_width, src_height)
-    filters, mapped = _filters(width, height, overlays, 1, ass.name, source_dimensions, subscribe_animations)
+    filters, mapped = _filters(width, height, overlays, 1, ass.name, source_dimensions, subscribe_animations, music_treatment)
     command.extend(["-t", f"{duration:.3f}", "-filter_complex", filters, "-map", f"[{mapped}]"])
     if has_audio:
         command.extend(["-map", "0:a:0", "-c:a", DELIVERY_AUDIO_CODEC, "-b:a", DELIVERY_AUDIO_BITRATE, "-ar", DELIVERY_AUDIO_RATE])
@@ -1635,6 +1730,9 @@ def render_fast_clip(
     creator_credit: str | None = None,
     content_format: str | None = None,
     subscribe_animation: dict[str, Any] | None = None,
+    music_theme: str | None = None,
+    music_top_text: str | None = None,
+    music_treatment: str | None = None,
 ) -> None:
     """Render a fast clip with optional captions and no overlays or visual beats.
 
@@ -1674,6 +1772,21 @@ def render_fast_clip(
     width, height = dimensions(aspect)
     duration = max(0.1, end - start)
     temp = output.with_suffix(".partial.mp4")
+
+    if music_theme:
+        source_timed_words = [
+            {**word, "start": start + float(word["start"]), "end": start + float(word["end"])}
+            for word in (words or [])
+        ]
+        render_clip(
+            source, output, start=start, end=end, aspect=aspect, words=source_timed_words,
+            visuals=[], overlays=[], settings=settings, style=style, has_audio=has_audio,
+            embed_subtitles=embed_subtitles, subtitle_language=subtitle_language,
+            creator_credit=creator_credit, content_format=content_format,
+            subscribe_animation=subscribe_animation, music_theme=music_theme,
+            music_top_text=music_top_text, music_treatment=music_treatment,
+        )
+        return
 
     meta = probe(source, settings)
     if has_audio and not meta["audio"]:

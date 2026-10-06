@@ -25,7 +25,7 @@ from .media import (
     _metadata_text, sha256_file, synthesize_local, transcribe, transcription_cache_key, youtube_import_metadata, youtube_import_title,
 )
 from .models import (
-    Asset, Clip, ContentFormat, Job, ProcessingMode, ProcessingStep, ProvenanceRecord, ScoreBreakdown, now_iso,
+    Asset, CaptionCue, Clip, ContentFormat, Job, ProcessingMode, ProcessingStep, ProvenanceRecord, ScoreBreakdown, now_iso,
 )
 from .providers import ProfileService, provider_runtime_message
 from .script import align_script_words, plan_beats
@@ -164,6 +164,31 @@ def job_uses_fast_pipeline(job: Job, private: dict[str, Any]) -> bool:
     return uses_fast_pipeline(job_processing_mode(job, private), job_content_format(job, private))
 
 
+def _assign_music_treatments(job: Job, private: dict[str, Any], save) -> None:
+    """Persist balanced clip-local treatment before the first Music render."""
+    assignments = private.setdefault("music_treatments", {})
+    if not isinstance(assignments, dict):
+        assignments = private["music_treatments"] = {}
+    ordered = sorted(job.clips, key=lambda clip: (clip.index, clip.id))
+    grayscale_count = len(ordered) // 2
+    changed = False
+    for position, clip in enumerate(ordered):
+        treatment = assignments.get(clip.id) or clip.music_treatment
+        if treatment not in {"color", "grayscale"}:
+            treatment = "grayscale" if position < grayscale_count else "color"
+            changed = True
+        if assignments.get(clip.id) != treatment or clip.music_treatment != treatment:
+            assignments[clip.id] = treatment
+            clip.music_treatment = treatment
+            changed = True
+        top_text = private.get("music_top_text") or None
+        if clip.music_top_text != top_text:
+            clip.music_top_text = top_text
+            changed = True
+    if changed or ordered:
+        save(job, private)
+
+
 def can_retry_import(job: Job, private: dict[str, Any]) -> bool:
     """Whether this job's source import can actually be re-run.
 
@@ -235,6 +260,17 @@ def _subscribe_render_kwargs(render, config: dict[str, Any] | None) -> dict[str,
     if any(parameter.name == "subscribe_animation" or parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters):
         return {"subscribe_animation": config}
     return {}
+
+
+def _music_render_kwargs(render, theme: str, top_text: str | None, treatment: str | None) -> dict[str, Any]:
+    try:
+        parameters = inspect.signature(render).parameters.values()
+    except (TypeError, ValueError):
+        return {}
+    accepts_any = any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters)
+    accepted = {parameter.name for parameter in parameters}
+    values = {"music_theme": theme, "music_top_text": top_text, "music_treatment": treatment}
+    return values if accepts_any else {name: value for name, value in values.items() if name in accepted}
 
 
 def _format_render_kwargs(render, content_format: str) -> dict[str, str]:
@@ -1080,13 +1116,21 @@ class JobManager:
         words = [{"text": cue["text"], "start": cue["start"], "end": cue["end"]} for cue in cues]
         try:
             render = _media_fn("render_fast_clip")
+            music_presentation = private.get("music_presentation")
+            music_treatments = private.get("music_treatments")
+            music_kwargs = _music_render_kwargs(
+                render,
+                music_presentation.get("subtitle_theme", "clean") if isinstance(music_presentation, dict) else "clean",
+                clip.music_top_text or private.get("music_top_text"),
+                clip.music_treatment or (music_treatments.get(clip.id) if isinstance(music_treatments, dict) else None),
+            ) if job.source_profile == "music" else {}
             render(source, output, start=clip.start, end=clip.end, aspect=private["aspect_ratio"], settings=self.settings,
                    has_audio=bool(metadata["audio"]), words=words, style=job.style,
                    subtitles_enabled=bool(private.get("burn_subtitles", job.burn_subtitles)),
                    embed_subtitles=bool(private.get("embed_subtitles", job.embed_subtitles)),
                    **_subscribe_render_kwargs(render, private.get("subscribe_animation")),
                    **_format_render_kwargs(render, job_content_format(job, private)),
-                   **_creator_render_kwargs(render, youtube_creator_credit(job, private)))
+                   **_creator_render_kwargs(render, youtube_creator_credit(job, private)), **music_kwargs)
             # publish_clip_output reuses the stable asset identity in its transaction.
             job, clip, _ = self._publish_output(job, clip, output, private)
             clip.caption_cues = [CaptionCue.model_validate(cue) for cue in cues]
@@ -1349,6 +1393,7 @@ class JobManager:
                     raise MediaError(f"Clip {clip.index} falls outside the source timeline")
             self.complete_step(job, "boundaries", detail=f"{len(clips)} boundaries verified", private=private)
         if profile == "music":
+            _assign_music_treatments(job, private, self._save)
             minimum = float(private["min_duration"])
             maximum = float(private["max_duration"])
             ordered = sorted(job.clips, key=lambda item: (item.start, item.end, item.index))
@@ -1394,6 +1439,8 @@ class JobManager:
                 {**word, "start": float(word["start"]) + clip.start, "end": float(word["end"]) + clip.start}
                 for word in clip_words
             ]
+            if profile == "music":
+                clip.caption_cues = [CaptionCue.model_validate(cue) for cue in media_module.music_caption_cues(clip_words, clip.start, clip.end)]
             visual = self.rules.resolve(" ".join(str(word["text"]) for word in clip_words))
             overlays, provenance = _source_clip_visual_metadata(visual, clip.duration)
             # Provenance describes media actually composited into this source
@@ -1411,6 +1458,11 @@ class JobManager:
                     **_subscribe_render_kwargs(render_clip, private.get("subscribe_animation")),
                     **_creator_render_kwargs(render_clip, youtube_creator_credit(job, private)),
                     **_format_render_kwargs(render_clip, job_content_format(job, private)),
+                    **(_music_render_kwargs(
+                        render_clip,
+                        (private.get("music_presentation") or {}).get("subtitle_theme", "clean"),
+                        clip.music_top_text, clip.music_treatment,
+                    ) if profile == "music" else {}),
                 }
                 try:
                     render_clip(source, output, **render_kwargs)
