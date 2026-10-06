@@ -15,6 +15,7 @@ PRACTICAL_WORDS = {"step", "first", "second", "because", "means", "example", "le
 ENERGY_WORDS = {"amazing", "incredible", "crazy", "shocking", "love", "hate", "wow", "huge", "always", "never"}
 CREDIT_WORDS = {"credits", "credit", "cast", "starring", "directed", "written", "copyright", "produced", "end", "fin"}
 TITLE_CARD_PHRASES = ("previously on", "coming soon", "the end", "a film by", "presented by")
+MUSIC_GAP_CREDIT_SECONDS = 0.85
 
 STYLE_WEIGHTS: dict[Style, dict[str, float]] = {
     "funny": {"hook": 1.25, "coherence": .9, "ending": 1.1, "energy": 1.4, "practical": .55, "visual": 1.15, "complete": .95},
@@ -241,9 +242,23 @@ def _better_music_selection(left: tuple[Candidate, ...] | None, right: tuple[Can
     return left if left_signature <= right_signature else right
 
 
+def _music_content_duration(words: list[dict[str, Any]]):
+    """Credit vocal intervals fully and each musical rest up to 0.85 seconds."""
+    content = 0.0
+    previous_end: float | None = None
+    for word in words:
+        start = float(word["start"])
+        end = float(word["end"])
+        if previous_end is not None:
+            content += min(max(0.0, start - previous_end), MUSIC_GAP_CREDIT_SECONDS)
+        content += max(0.0, end - max(start, previous_end or start))
+        previous_end = max(end, previous_end or end)
+    return content
+
+
 def select_music_candidates(words: list[dict[str, Any]], style: Style, count: int, minimum: float, maximum: float) -> list[Candidate]:
-    """Select distinct, contiguous lyric windows inside the requested bounds."""
-    if count <= 0 or minimum < 0 or maximum < minimum:
+    """Select distinct lyric windows meeting bounded vocal coverage and output bounds."""
+    if count <= 0 or minimum < 0 or maximum < minimum or maximum < 1.0:
         return []
     lines = _music_units(group_music_lyric_lines(words), maximum)
     if not lines:
@@ -258,7 +273,7 @@ def select_music_candidates(words: list[dict[str, Any]], style: Style, count: in
             duration = float(segment[-1]["end"]) - float(segment[0]["start"])
             if duration > maximum:
                 break
-            if duration >= minimum:
+            if duration >= max(minimum, 1.0) and _music_content_duration(segment) >= minimum:
                 key = (float(segment[0]["start"]), float(segment[-1]["end"]))
                 if key not in seen:
                     seen.add(key)

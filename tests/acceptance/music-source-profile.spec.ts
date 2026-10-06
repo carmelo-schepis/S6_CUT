@@ -35,6 +35,7 @@ test("Music / sung vocals opts into Smart and sends the durable music profile", 
 
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Speech" })).toHaveAttribute("aria-pressed", "true");
   const musicChoice = page.getByRole("button", { name: "Music / sung vocals" });
   await musicChoice.click();
   await expect(musicChoice).toHaveAttribute("aria-pressed", "true");

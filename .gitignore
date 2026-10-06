@@ -88,3 +88,6 @@ data/
 test-artifacts/
 .test-data-import/
 ntuser.ini
+
+# Local QA evidence, fixtures, generated media, transcripts, databases, and keys are never versioned.
+/.qa/

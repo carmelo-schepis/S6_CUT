@@ -61,6 +61,72 @@ def test_music_score_does_not_treat_missing_punctuation_as_a_penalty() -> None:
 
 def test_music_clip_candidates_do_not_pad_short_sources_or_duplicate_windows() -> None:
     assert select_music_candidates(_words(2), "serious", 1, 10, 12) == []
+    assert select_music_candidates([], "serious", 1, 1, 12) == []
     chosen = select_music_candidates(_words(8), "serious", 8, 8, 12)
     assert len({(item.start, item.end) for item in chosen}) == len(chosen)
     assert all(left.end <= right.start for left, right in zip(chosen, chosen[1:]))
+    assert all(8 <= item.end - item.start <= 12 for item in chosen)
+
+
+def test_music_long_instrumental_gap_does_not_satisfy_minimum_content() -> None:
+    words = [
+        {"text": "first", "start": 0.0, "end": 0.2},
+        {"text": "light", "start": 0.3, "end": 0.5},
+        {"text": "then", "start": 0.6, "end": 0.8},
+        {"text": "quiet", "start": 48.3, "end": 48.5},
+    ]
+    # 0.8s of vocal intervals and a 47.5s instrumental gap span 48.5s.
+    assert select_music_candidates(words, "serious", 1, 20, 60) == []
+
+
+def test_music_normal_rests_contribute_to_minimum_content() -> None:
+    words = [
+        {"text": f"word{index}", "start": index * 1.0, "end": index * 1.0 + 0.5}
+        for index in range(6)
+    ]
+    chosen = select_music_candidates(words, "serious", 1, 5, 6)
+    assert len(chosen) == 1
+    assert 5 <= chosen[0].end - chosen[0].start <= 6
+
+
+def test_music_punctuation_free_run_can_form_a_bounded_candidate() -> None:
+    words = [
+        {"text": f"word{index}", "start": index * 0.5, "end": index * 0.5 + 0.4}
+        for index in range(12)
+    ]
+    chosen = select_music_candidates(words, "serious", 1, 4, 6)
+    assert len(chosen) == 1
+    assert 4 <= chosen[0].end - chosen[0].start <= 6
+    assert len(chosen[0].words) > 1
+
+
+def test_music_invalid_timestamps_are_ignored() -> None:
+    words = [
+        {"text": "bad", "start": float("nan"), "end": 2.0},
+        {"text": "backwards", "start": 3.0, "end": 2.0},
+        {"text": "missing", "end": 4.0},
+        {"text": "good", "start": 0.0, "end": 0.5},
+    ]
+    assert select_music_candidates(words, "serious", 1, 1, 5) == []
+    assert group_music_lyric_lines(words) == [[words[-1]]]
+
+
+def test_music_repeated_chorus_selection_is_deterministic() -> None:
+    chorus = [
+        {"text": text, "start": start, "end": start + 0.4}
+        for start, text in zip((0.0, 0.5, 1.0, 10.0, 10.5, 11.0), ("we", "sing", "again", "we", "sing", "again"))
+    ]
+    first = select_music_candidates(chorus, "serious", 2, 1, 4)
+    assert len(first) == 2
+    assert first == select_music_candidates(chorus, "serious", 2, 1, 4)
+
+
+def test_music_candidates_never_return_subsecond_or_under_minimum_windows() -> None:
+    words = [
+        {"text": "one", "start": 0.0, "end": 0.2},
+        {"text": "two", "start": 0.3, "end": 0.5},
+        {"text": "three", "start": 0.6, "end": 0.8},
+    ]
+    assert select_music_candidates(words, "serious", 1, 0, 5) == []
+    selected = select_music_candidates(_words(4), "serious", 5, 3, 12)
+    assert all(item.end - item.start >= 3 for item in selected)

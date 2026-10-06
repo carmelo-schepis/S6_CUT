@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import tempfile
 import threading
 import time
 from dataclasses import replace
@@ -49,10 +48,6 @@ SAMPLE_WORDS = [
 FAST_IDS = ["source", "probe", "plan", "render", "verify", "ready"]
 SMART_IDS = ["source", "probe", "audio", "transcribe", "openrouter", "local_planning", "select", "boundaries", "render", "verify", "ready"]
 SCRIPT_IDS = ["validate", "planning", "script_generation", "narration", "tts", "local_voice", "align", "plan", "assets", "render", "verify", "ready"]
-
-
-def _tmpdir() -> Path:
-    return Path(tempfile.mkdtemp(prefix="s6-cut-steps-test-"))
 
 
 def _cluster(tmp_path: Path) -> tuple[Database, JobManager]:
@@ -184,7 +179,6 @@ def test_legacy_job_without_steps_loads_empty() -> None:
 
 
 def test_legacy_complete_job_keeps_empty_steps(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
     _project(test_db, "legacy-done-proj")
     job = Job(
@@ -198,7 +192,6 @@ def test_legacy_complete_job_keeps_empty_steps(monkeypatch: pytest.MonkeyPatch, 
 
 
 def test_legacy_active_smart_job_restores_only_proven_steps(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
     _project(test_db, "legacy-resume-proj")
     job_id = "legacy-resume"
@@ -240,7 +233,6 @@ def test_legacy_active_smart_job_restores_only_proven_steps(monkeypatch: pytest.
 
 
 def test_legacy_active_fast_job_restores_probe_and_plan_only(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
     _project(test_db, "legacy-fast-proj")
     job_id = "legacy-fast"
@@ -273,7 +265,6 @@ def test_legacy_active_fast_job_restores_probe_and_plan_only(monkeypatch: pytest
 
 
 def test_fast_checklist_exact_and_no_irrelevant_steps(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
     monkeypatch.setattr("engine.jobs.probe", _fake_probe)
     monkeypatch.setattr(media_module, "plan_fast_windows", _fake_plan)
@@ -306,7 +297,6 @@ def test_fast_checklist_exact_and_no_irrelevant_steps(monkeypatch: pytest.Monkey
 
 
 def test_render_item_increments_after_each_validated_output(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
     monkeypatch.setattr("engine.jobs.probe", _fake_probe)
     monkeypatch.setattr(media_module, "plan_fast_windows", _fake_plan)
@@ -336,7 +326,6 @@ def test_render_item_increments_after_each_validated_output(monkeypatch: pytest.
 
 
 def test_partial_checklist_keeps_successes_and_detail(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
     monkeypatch.setattr("engine.jobs.probe", _fake_probe)
     monkeypatch.setattr(media_module, "plan_fast_windows", _fake_plan)
@@ -380,7 +369,6 @@ def test_partial_checklist_keeps_successes_and_detail(monkeypatch: pytest.Monkey
 
 
 def test_smart_transcription_completes_only_after_persisted(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
     monkeypatch.setattr("engine.jobs.probe", _fake_probe)
     monkeypatch.setattr(media_module, "transcribe", _fake_transcribe)
@@ -423,7 +411,6 @@ def test_smart_transcription_completes_only_after_persisted(monkeypatch: pytest.
 
 
 def test_openrouter_failure_records_local_planning_fallback(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
     monkeypatch.setattr("engine.jobs.probe", _fake_probe)
     monkeypatch.setattr(media_module, "transcribe", _fake_transcribe)
@@ -455,7 +442,6 @@ def test_openrouter_failure_records_local_planning_fallback(monkeypatch: pytest.
 
 
 def test_music_downloaded_source_rejects_impossible_count_after_probe(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
     monkeypatch.setattr("engine.jobs.probe", _fake_probe)
     source = tmp_path / "downloaded-music.mp4"
@@ -476,7 +462,6 @@ def test_music_downloaded_source_rejects_impossible_count_after_probe(monkeypatc
 
 
 def test_music_smart_path_replaces_sparse_checkpoint_and_keeps_bounded_windows(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
     monkeypatch.setattr("engine.jobs.probe", _fake_probe)
     monkeypatch.setattr(media_module, "extract_audio_16k", _fake_extract)
@@ -523,7 +508,6 @@ def test_music_smart_path_replaces_sparse_checkpoint_and_keeps_bounded_windows(m
 
 
 def test_smart_transcription_reports_real_incremental_checkpoints(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
     monkeypatch.setattr("engine.jobs.probe", _fake_probe)
     monkeypatch.setattr(media_module, "extract_audio_16k", _fake_extract)
@@ -555,7 +539,6 @@ def test_smart_transcription_reports_real_incremental_checkpoints(monkeypatch: p
 
 
 def test_switch_fast_cancels_active_transcription_without_resurrecting_job(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
     monkeypatch.setattr("engine.jobs.probe", _fake_probe)
     monkeypatch.setattr(media_module, "extract_audio_16k", _fake_extract)
@@ -589,7 +572,6 @@ def test_switch_fast_cancels_active_transcription_without_resurrecting_job(monke
 
 
 def test_smart_failed_clip_partial_keeps_transcription_checks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
     monkeypatch.setattr("engine.jobs.probe", _fake_probe)
     monkeypatch.setattr(media_module, "transcribe", _fake_transcribe)
@@ -641,7 +623,6 @@ def _script_pipeline_fakes(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_script_tts_failure_local_fallback_records_both(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
 
     def fail_tts(self: ProfileService, text: str, output: Path, **kwargs: Any):
@@ -679,7 +660,6 @@ def test_script_tts_failure_local_fallback_records_both(monkeypatch: pytest.Monk
 
 
 def test_script_tts_success_records_only_that_provider(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
 
     def ok_tts(self: ProfileService, text: str, output: Path, **kwargs: Any):
@@ -705,7 +685,6 @@ def test_script_tts_success_records_only_that_provider(monkeypatch: pytest.Monke
 
 
 def test_script_reuses_completed_openrouter_narration_without_regenerating(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
     _script_pipeline_fakes(monkeypatch)
     candidate = tmp_path / "jobs" / "script-reuse" / "narration-openrouter.mp3"
@@ -721,7 +700,6 @@ def test_script_reuses_completed_openrouter_narration_without_regenerating(monke
 
 
 def test_script_silent_marks_narration_steps_skipped(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
     monkeypatch.setattr("engine.jobs.render_script", _fake_render_script)
 
@@ -763,7 +741,6 @@ def _control_job(test_db: Database, test_manager: JobManager, job_id: str, mode:
 
 
 def test_pause_preserves_active_step(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
     _control_job(test_db, test_manager, "pause-ck")
     job = test_db.get_job("pause-ck")
@@ -784,7 +761,6 @@ def test_pause_preserves_active_step(monkeypatch: pytest.MonkeyPatch, tmp_path: 
 
 
 def test_stop_keep_skips_pending_and_preserves_terminal(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
     _control_job(test_db, test_manager, "stop-keep-ck")
     job = test_db.get_job("stop-keep-ck")
@@ -809,7 +785,6 @@ def test_stop_keep_skips_pending_and_preserves_terminal(monkeypatch: pytest.Monk
 
 
 def test_retry_import_requeues_stopped_attempt_and_deduplicates(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
     _project(test_db, "youtube-retry-project")
     job = Job(
@@ -836,7 +811,6 @@ def test_retry_import_requeues_stopped_attempt_and_deduplicates(monkeypatch: pyt
 
 
 def test_retry_resets_only_render_verify_ready(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
     monkeypatch.setattr("engine.jobs.probe", _fake_probe)
     monkeypatch.setattr(media_module, "plan_fast_windows", _fake_plan)
@@ -884,7 +858,6 @@ def test_retry_resets_only_render_verify_ready(monkeypatch: pytest.MonkeyPatch, 
 
 
 def test_switch_fast_initializes_checklist_and_skips_replaced(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
     _project(test_db, "sw-proj")
     source = tmp_path / "jobs" / "sw-old" / "source" / "source.mp4"
@@ -919,7 +892,6 @@ def test_switch_fast_initializes_checklist_and_skips_replaced(monkeypatch: pytes
 
 
 def test_switch_fast_queue_full_leaves_original_untouched(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
     source = tmp_path / "queue-source.mp4"
     source.write_bytes(b"source")
@@ -937,7 +909,6 @@ def test_switch_fast_queue_full_leaves_original_untouched(monkeypatch: pytest.Mo
 
 
 def test_url_import_marks_source_step(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
 
     def fake_download(url: str, target_dir: Path, settings: Settings) -> Path:
@@ -975,7 +946,6 @@ def test_url_import_downloads_into_the_job_source_directory(monkeypatch: pytest.
     layout, so the directory handed to ``download_youtube`` is a contract, not
     an implementation detail.
     """
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
     seen: dict[str, Path] = {}
 
@@ -1013,7 +983,6 @@ def test_url_import_downloads_into_the_job_source_directory(monkeypatch: pytest.
 
 
 def test_start_step_enforces_single_active(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
     _control_job(test_db, test_manager, "enforce-ck")
     job = test_db.get_job("enforce-ck")
@@ -1029,7 +998,6 @@ def test_start_step_enforces_single_active(monkeypatch: pytest.MonkeyPatch, tmp_
 
 
 def test_ready_gate_never_complete_while_paused(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
     _control_job(test_db, test_manager, "gate-ck")
     job = test_db.get_job("gate-ck")
@@ -1044,7 +1012,6 @@ def test_ready_gate_never_complete_while_paused(monkeypatch: pytest.MonkeyPatch,
 
 
 def test_step_invariants_hold_for_all_modes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
 
     # fast complete
@@ -1076,7 +1043,6 @@ def test_step_invariants_hold_for_all_modes(monkeypatch: pytest.MonkeyPatch, tmp
 
 
 def test_completed_steps_never_revert_on_polling(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
     monkeypatch.setattr("engine.jobs.probe", _fake_probe)
     monkeypatch.setattr(media_module, "plan_fast_windows", _fake_plan)
