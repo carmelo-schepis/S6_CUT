@@ -12,7 +12,7 @@ vi.mock("../api", () => {
   return { readableError, getJob: vi.fn(), controlJob: vi.fn(), jobEventsUrl: vi.fn(() => ""), createZip: vi.fn(), retryClip: vi.fn(), setClipSelection: vi.fn(), listAssets: vi.fn(), listFolders: vi.fn().mockResolvedValue([]), changeProjectFolder: vi.fn() };
 });
 
-import { controlJob, getJob, listAssets, listFolders } from "../api";
+import { controlJob, createZip, getJob, listAssets, listFolders } from "../api";
 const mockGetJob = vi.mocked(getJob);
 const mockControlJob = vi.mocked(controlJob);
 const mockListAssets = vi.mocked(listAssets);
@@ -370,6 +370,32 @@ describe("WorkspaceView – publication metadata, Details rename, read-only capt
     mockListFolders.mockResolvedValue(folders);
     mockGetJob.mockResolvedValue(publishedJob);
   });
+
+  it("shows persisted batch counts and reduction explanation", async () => {
+    mockGetJob.mockResolvedValue({ ...publishedJob, batchMode: "high_volume", effectiveTarget: 300,
+      capExplanation: "Requested 500 outputs. This source is under 30 minutes, so this batch is limited to 300 outputs.",
+      plannedCount: 275, successfulCount: 264, clips: publishedJob.clips });
+    renderView({ project: { ...project, batchMode: "high_volume", requestedCount: 500, effectiveTarget: 300 } });
+    const summary = await screen.findByRole("region", { name: "High-volume batch counts" });
+    expect(summary).toHaveTextContent("500 requested · 300 effective · 275 planned · 264 successful");
+    expect(summary).toHaveTextContent("limited to 300 outputs");
+  });
+
+  it("exports all 500 selected completed outputs by their real clip ids", async () => {
+    const clips = Array.from({ length: 500 }, (_, index) => ({
+      ...publishedJob.clips[0], id: `high-volume-${index + 1}`, index: index + 1,
+      title: `Output ${index + 1}`, libraryAssetId: null, downloadUrl: undefined,
+    }));
+    mockGetJob.mockResolvedValue({ ...publishedJob, batchMode: "high_volume", effectiveTarget: 500,
+      plannedCount: 500, successfulCount: 500, clips });
+    vi.mocked(createZip).mockResolvedValue({ downloadUrl: "/api/v1/exports/batch.zip", filename: "batch.zip" });
+    renderView({ project: { ...project, batchMode: "high_volume", requestedCount: 500, effectiveTarget: 500 } });
+
+    const exportButton = await screen.findByRole("button", { name: /Download ZIP 500/ });
+    fireEvent.click(exportButton);
+    await waitFor(() => expect(createZip).toHaveBeenCalledWith("j1", clips.map((clip) => clip.id)));
+    expect(vi.mocked(createZip).mock.calls[0][1]).toHaveLength(500);
+  }, 60_000);
 
   it("shows Saved to Library only for server-confirmed linked clips", async () => {
     renderView();

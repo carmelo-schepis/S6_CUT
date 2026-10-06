@@ -1596,6 +1596,45 @@ def plan_fast_windows(
     return windows, warning
 
 
+def plan_high_volume_windows(
+    duration: float,
+    count: int,
+    min_duration: float,
+    max_duration: float,
+) -> tuple[list[tuple[float, float]], str]:
+    """Plan deterministic overlapping windows with distinct starts.
+
+    Unlike the Standard planners, starts may overlap. Every output remains fully
+    within the source and within the requested duration bounds.
+    """
+    if not all(math.isfinite(value) for value in (duration, min_duration, max_duration)):
+        return [], ""
+    if duration <= 0 or count < 1 or min_duration <= 0 or max_duration < min_duration:
+        return [], ""
+    if duration < min_duration:
+        return [], "The source contains no window within the requested duration range."
+    window_duration = min(max_duration, max(min_duration, duration / count))
+    last_start = duration - window_duration
+    possible_starts = math.floor((last_start + 1e-9) * 10) + 1
+    actual_count = min(count, possible_starts)
+    if actual_count == 1:
+        start_indexes = [0]
+    else:
+        start_indexes = [round(index * (possible_starts - 1) / (actual_count - 1)) for index in range(actual_count)]
+    starts = [index / 10 for index in start_indexes]
+    windows = [(start, round(start + window_duration, 6)) for start in starts]
+    warning = "" if len(windows) == count else f"Target: {count}. Planned: {len(windows)}. Source duration cannot provide more distinct valid window starts."
+    return windows, warning
+
+
+def plan_fast_high_volume_windows(duration: float, count: int, min_duration: float, max_duration: float, guard_seconds: float = 0) -> tuple[list[tuple[float, float]], str]:
+    return plan_high_volume_windows(duration, count, min_duration, max_duration)
+
+
+def plan_long_form_high_volume_windows(duration: float, count: int, min_duration: float, max_duration: float, guard_seconds: float = 0) -> tuple[list[tuple[float, float]], str]:
+    return plan_high_volume_windows(duration, count, min_duration, max_duration)
+
+
 def plan_long_form_windows(
     duration: float,
     count: int,

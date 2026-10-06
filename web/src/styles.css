@@ -547,6 +547,11 @@ select { line-height: var(--type-text-line); }
 .save-state { display: flex; align-items: center; gap: 5px; color: var(--text-primary); }
 .mobile-brand { display: none; }
 main { min-width: 0; }
+.count-control input { width: 100%; min-width: 0; min-height: var(--control-height); border: 0; background: var(--surface-2); color: var(--text-primary); text-align: center; font-variant-numeric: tabular-nums; }
+.count-control button:disabled { opacity: .5; }
+.form-hint { margin: 0; color: var(--text-primary); overflow-wrap: anywhere; }
+.batch-summary { display: grid; gap: var(--space-1); margin: 0 0 var(--space-3); padding: var(--space-3) var(--space-4); border: 1px solid var(--border); border-left: 3px solid var(--theme-primary); border-radius: var(--radius-md); background: var(--surface-2); color: var(--text-primary); }
+.batch-summary p { margin: 0; overflow-wrap: anywhere; }
 .page { max-width: 1540px; margin: 0 auto; padding: var(--space-8) var(--page-inset); }
 .page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
 .page-header p { max-width: 650px; margin-bottom: 0; }

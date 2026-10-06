@@ -417,6 +417,9 @@ export function WorkspaceView({ project, health, providersLoaded = true, hasSele
   };
   const selectedIds = job?.clips.filter((clip) => clip.selected && clip.state === "complete").map((clip) => clip.id) || [];
   const savedCount = job?.clips.filter((clip) => clip.state === "complete" && clip.libraryAssetId).length || 0;
+  const batchEffective = job?.effectiveTarget ?? project?.effectiveTarget;
+  const batchPlanned = job?.plannedCount ?? job?.clips.length ?? 0;
+  const batchSuccessful = job?.successfulCount ?? job?.clips.filter((clip) => clip.state === "complete").length ?? 0;
   const providerRelatedFailure = Boolean(job?.error && /openrouter|provider|credential|api key|model|voice/i.test(job.error));
   const providerCouldHelp = providerRelatedFailure || Boolean(job?.state === "failed" && project?.mode === "script" && !hasSelectedProvider);
   const canContinueLocally = providerRelatedFailure && Boolean(project?.mode === "clip" || health?.localTts);
@@ -495,6 +498,10 @@ export function WorkspaceView({ project, health, providersLoaded = true, hasSele
   if (!project) return <div className="page"><EmptyState headingLevel={1} icon={<SlidersHorizontal size={30} />} title="No project selected" action={<Button variant="primary" onClick={onGoProjects}>Choose a project</Button>}>Open a project to review its clips, score decisions, storyboard, and export state.</EmptyState></div>;
 
   return <div className="workspace-page">
+    {project.batchMode === "high_volume" && <section className="batch-summary" aria-label="High-volume batch counts">
+      <p>{project.requestedCount} requested · {batchEffective === null || batchEffective === undefined ? "effective target pending FFprobe" : `${batchEffective} effective`} · {batchPlanned} planned · {batchSuccessful} successful</p>
+      {(job?.capExplanation || project.capExplanation) && <p>{job?.capExplanation || project.capExplanation}</p>}
+    </section>}
     <div className="workspace-commandbar">
       <div className="workspace-project-context"><span className="mode-chip">{project.mode === "clip" ? <Film size={13} /> : <FileText size={13} />} {project.mode === "clip" ? "Clip mode" : "Script mode"}</span><div className="workspace-project-meta"><h1 className="workspace-project-name" title={project.name}>{project.name}</h1><span className="workspace-source-meta" title={project.sourceName}>{project.sourceName}</span><span className="workspace-secondary-meta">{project.style}{project.sourceProfile === "music" ? " · Music / sung vocals" : ""}{project.mode === "clip" && project.contentFormat === "long" ? " · 16:9 landscape" : ""}{job ? ` · ${job.processingMode} processing` : ""}</span></div></div>
       <div className="workspace-controls">{folders.length > 0 && <div className="workspace-folder-field"><label htmlFor="workspace-business-folder">Business folder</label><select id="workspace-business-folder" value={project.libraryFolderId || folders.find((folder) => folder.system)?.id || ""} disabled={busy} onChange={(event) => void changeFolder(event.target.value)}>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></div>}
