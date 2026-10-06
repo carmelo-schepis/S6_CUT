@@ -121,7 +121,7 @@
       "licence": "SIL Open Font License 1.1",
       "source": "https://github.com/google/fonts/tree/7085eb89a950e85db5b166b7a58d414544b4140c/ofl/bodonimoda",
       "sha256": "550f5e34ee0a828d7941b1fe9bc58b34e5260d3f33a61532e6d0a0114e79a5cf",
-      "use": "Reference white serif preset; bundled variable face default axes (opsz 14, wght 400) were confirmed by production libass selecting BodoniModa-Regular",
+      "use": "Selected visual-fit candidate for the reference white serif preset, not a claim to recover the screenshot's source font; bundled variable face default axes (opsz 14, wght 400) were confirmed by production libass selecting BodoniModa-Regular",
       "vendoredAt": "engine/fonts/bodoni_moda/BodoniModa-Variable.ttf; web/public/fonts/bodoni_moda/BodoniModa-Variable.ttf",
       "licenceFile": "engine/fonts/bodoni_moda/OFL.txt"
     }
