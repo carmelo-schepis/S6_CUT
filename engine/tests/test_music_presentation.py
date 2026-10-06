@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 import pytest
 from fastapi.testclient import TestClient
@@ -26,7 +27,7 @@ def test_legacy_project_and_job_payloads_keep_music_defaults() -> None:
 
 
 def test_music_presentation_config_accepts_only_version_one_and_named_themes() -> None:
-    for theme in ("clean", "warm", "serif"):
+    for theme in ("clean", "warm", "serif", "reference_white_sans", "reference_yellow_sans", "reference_white_serif"):
         assert MusicPresentationConfig.model_validate({"version": 1, "subtitleTheme": theme}).subtitle_theme == theme
     assert MusicPresentationConfig().subtitle_theme == "clean"
     for payload in ({"version": 2, "subtitleTheme": "clean"}, {"version": 1, "subtitleTheme": "neon"}, {"version": 1, "unexpected": True}):
@@ -59,11 +60,15 @@ def test_music_upload_api_preserves_100_char_title_and_rejects_101(monkeypatch) 
     folder = app_module.db.list_folders()[0]
     fields = {
         "source_profile": "music", "processing_mode": "smart", "count": "1", "min_duration": "8", "max_duration": "20",
-        "library_folder_id": folder.id, "music_presentation": '{"version":1,"subtitleTheme":"warm"}', "music_top_text": exact,
+        "library_folder_id": folder.id, "music_presentation": '{"version":1,"subtitleTheme":"reference_yellow_sans"}', "music_top_text": exact,
     }
     accepted = client.post("/api/v1/jobs/clip", data=fields, files={"file": ("song.mp4", b"fixture", "video/mp4")})
     assert accepted.status_code == 202, accepted.text
-    assert accepted.json()["job"].get("musicPresentation") == {"version": 1, "subtitleTheme": "warm"}
+    assert accepted.json()["job"].get("musicPresentation") == {"version": 1, "subtitleTheme": "reference_yellow_sans"}
+    persisted = app_module.db.get_job(accepted.json()["job"]["id"])
+    assert persisted is not None
+    assert persisted.music_presentation is not None
+    assert persisted.music_presentation.subtitle_theme == "reference_yellow_sans"
     assert accepted.json()["job"]["mode"] == "clip"
     assert accepted.json()["job"]["sourceProfile"] == "music"
     assert accepted.json()["job"]["processingMode"] == "smart"
@@ -94,7 +99,7 @@ def test_music_renderer_contract_and_ass_boundaries(tmp_path: Path) -> None:
     exact_title = "  A {title} \\\\ line\n{\\c&H00000000&}\x01  "
     escaped_title = exact_title.replace("\\", "\\\\").replace("{", r"\{").replace("}", r"\}").replace("\x01", "").replace("\n", r"\N")
     assert len(exact_title) <= 100
-    for theme in ("clean", "warm", "serif"):
+    for theme in ("clean", "warm", "serif", "reference_white_sans", "reference_yellow_sans", "reference_white_serif"):
         path = tmp_path / f"{theme}.ass"
         write_music_ass(path, lyrics, offset=10, duration=2, width=1080, height=1920, top_text=exact_title, subtitle_theme=theme)
         assert path.exists()
@@ -104,7 +109,10 @@ def test_music_renderer_contract_and_ass_boundaries(tmp_path: Path) -> None:
         assert len(events) >= 3
         lyric_events = [line for line in events if ",Caption," in line]
         assert all(word in " ".join(lyric_events) for word in ("phrase", "boundary", "middle", *(f"line{index}" for index in range(8))))
-        assert any(r"\N" in line for line in lyric_events)  # long lyric phrase deliberately wraps on word boundaries
+        if theme in {"clean", "warm", "serif"}:
+            assert any(r"\N" in line for line in lyric_events)  # legacy presets deliberately wrap on word boundaries
+        else:
+            assert not any(r"\N" in line for line in lyric_events)  # reference rows use independent positions
         caption_style = next(line for line in content.splitlines() if line.startswith("Style: Caption,"))
         assert caption_style.split(",")[18] == "5"  # Music lyrics occupy the source band, not the lower black margin
         title_event = next(line for line in events if ",MusicTop," in line)
@@ -123,6 +131,11 @@ def test_music_renderer_contract_and_ass_boundaries(tmp_path: Path) -> None:
             assert 0 <= seconds(fields[2]) <= 2
         if theme == "warm":
             assert r"{\c&H0000D7FF&}" in content
+        elif theme == "reference_yellow_sans":
+            assert caption_style.split(",")[3:5] == ["&H00AAE8F5&", "&H00AAE8F5&"]
+            assert all(r"{\k" in line for line in lyric_events)
+        elif theme in {"reference_white_sans", "reference_white_serif"}:
+            assert caption_style.split(",")[3:5] == ["&H00FFFFFF&", "&H00FFFFFF&"]
         else:
             assert r"{\c&H00FFFFFF&}" in content
     outputs = []
@@ -136,6 +149,87 @@ def test_music_renderer_contract_and_ass_boundaries(tmp_path: Path) -> None:
     assert "Style: Caption,Lora," in outputs[2]
     assert all("Style: MusicTop,Barlow," in output for output in outputs)
     assert r"{\c&H0000D7FF&}" in outputs[1]
+
+
+def test_reference_music_layout_preserves_every_word_and_phrase_timing(tmp_path: Path) -> None:
+    from engine.media import write_music_ass
+
+    words = [
+        {"text": "do", "start": 1.0, "end": 1.2},
+        {"text": "you", "start": 1.2, "end": 1.5},
+        {"text": "think", "start": 1.5, "end": 1.8},
+        {"text": "that", "start": 1.8, "end": 2.0},
+        {"text": "i've", "start": 2.0, "end": 2.2},
+        {"text": "forgotten", "start": 2.2, "end": 2.7},
+        {"text": "about", "start": 2.7, "end": 3.0},
+    ]
+    for theme, face, color in (
+        ("reference_white_sans", "Roboto Condensed", "&H00FFFFFF&"),
+        ("reference_yellow_sans", "Roboto Condensed", "&H00AAE8F5&"),
+        ("reference_white_serif", "Bodoni Moda", "&H00FFFFFF&"),
+    ):
+        path = tmp_path / f"{theme}.ass"
+        write_music_ass(path, words, offset=0, duration=4, width=1080, height=1920, subtitle_theme=theme)
+        content = path.read_text(encoding="utf-8")
+        style = next(line for line in content.splitlines() if line.startswith("Style: Caption,"))
+        assert style.split(",")[1] == face
+        assert style.split(",")[2] in {"122", "135", "150"}
+        assert style.split(",")[3] == color
+        assert style.split(",")[16] == "1" and style.split(",")[17] == "0"
+        events = [line for line in content.splitlines() if line.startswith("Dialogue: 10,")]
+        assert len(events) == (7 if theme == "reference_white_sans" else 3)
+        event = " ".join(events)
+        for word in ("do", "you", "think", "that", "i've", "forgotten", "about"):
+            assert word in event
+        assert len(re.findall(r"\{\\k\d+\}", event)) == len(words)
+        assert event.count(r"{\kt") == len(words)
+        if theme != "reference_white_sans":
+            assert r"{\kt170}" in event
+        assert all(r"\pos(" in row for row in events)
+        if theme == "reference_white_serif":
+            assert r"{\an7\pos(135,1009)}" in events[-1]  # the isolated final word sits back at the left edge
+        assert all(r"\N" not in row for row in events)
+        assert events[0].startswith("Dialogue: 10,0:00:01.00,")
+        assert events[-1].split(",", 3)[2] == "0:00:03.00"
+
+
+def test_reference_layout_keeps_long_words_apostrophes_accents_and_fallback_glyphs(tmp_path: Path) -> None:
+    from engine.media import write_music_ass
+
+    words = [
+        {"text": "extraordinaryuncharacteristicallylongword", "start": 0.0, "end": 0.5},
+        {"text": "don't", "start": 0.5, "end": 0.8},
+        {"text": "café", "start": 0.8, "end": 1.1},
+        {"text": "雪", "start": 1.1, "end": 1.4},
+    ]
+    path = tmp_path / "reference-glyphs.ass"
+    write_music_ass(path, words, offset=0, duration=2, width=1080, height=1920, subtitle_theme="reference_yellow_sans")
+    content = path.read_text(encoding="utf-8")
+    events = [line for line in content.splitlines() if line.startswith("Dialogue: 10,")]
+    event = " ".join(events)
+    assert all(text in event for text in ("extraordinaryuncharacteristicallylongword", "don't", "café", "雪"))
+    assert len(re.findall(r"\{\\k\d+\}", event)) == len(words)
+    size_tags = [int(size) for size in re.findall(r"\{\\fs(\d+)\}", event)]
+    assert size_tags and max(size_tags) < 60  # the long token is reduced enough to fit the lyric band
+
+
+def test_reference_layout_scales_font_metrics_and_overrides_with_canvas_size(tmp_path: Path) -> None:
+    from engine.media import write_music_ass
+
+    long_word = [{"text": "extraordinaryuncharacteristicallylongword", "start": 0.0, "end": 0.5}]
+    for theme, expected_font in (
+        ("reference_white_sans", 90),
+        ("reference_yellow_sans", 81),
+        ("reference_white_serif", 100),
+    ):
+        path = tmp_path / f"scaled-{theme}.ass"
+        write_music_ass(path, long_word, offset=0, duration=1, width=720, height=1280, subtitle_theme=theme)
+        content = path.read_text(encoding="utf-8")
+        style = next(line for line in content.splitlines() if line.startswith("Style: Caption,"))
+        event = next(line for line in content.splitlines() if line.startswith("Dialogue: 10,"))
+        assert style.split(",")[2] == str(expected_font)
+        size_tag = re.search(r"\{\\fs(\d+)\}", event)
+        assert size_tag and 1 <= int(size_tag.group(1)) <= expected_font
 
 
 def test_music_caption_cues_are_word_timed_local_and_not_decorated_like_speech(tmp_path: Path) -> None:

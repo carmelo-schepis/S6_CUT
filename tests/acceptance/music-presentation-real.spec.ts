@@ -79,26 +79,67 @@ test("real authorized sung-vocal Music presentation: all themes, render, playbac
   testInfo.setTimeout(60 * 60_000);
   await fs.mkdir(artifacts, { recursive: true });
   const browserErrors: string[] = [];
+  const externalRequests: string[] = [];
+  const fontRequests: string[] = [];
   const results: Array<{ theme: string; jobId: string; clipIds: string[]; downloadHashes: string[]; audioCorrelations: number[] }> = [];
   const context = await browser.newContext({ acceptDownloads: true, baseURL: base });
   context.on("page", (page) => {
     page.on("pageerror", (error) => browserErrors.push(`pageerror: ${error.message}`));
     page.on("console", (message) => { if (message.type() === "error") browserErrors.push(`console: ${message.text()}`); });
+    page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (url.origin !== new URL(base).origin) externalRequests.push(`${request.method()} ${request.url()}`);
+      if (/\.(?:ttf|woff2?)(?:\?|$)/i.test(url.pathname)) fontRequests.push(url.href);
+    });
     page.on("requestfailed", (request) => {
       const error = request.failure()?.errorText;
       if (error !== "net::ERR_ABORTED") browserErrors.push(`request failed: ${request.method()} ${request.url()} ${error}`);
     });
     page.on("response", (response) => { if (response.status() >= 400) browserErrors.push(`HTTP ${response.status()} ${response.url()}`); });
   });
-  const themes = ["clean", "warm", "serif"] as const;
-  for (const theme of themes) {
+  const themes = [
+    { id: "clean", label: "Clean sans" },
+    { id: "warm", label: "Warm highlight" },
+    { id: "serif", label: "Soft serif" },
+    { id: "reference_white_sans", label: "Reference white sans" },
+    { id: "reference_yellow_sans", label: "Reference yellow sans" },
+    { id: "reference_white_serif", label: "Reference white serif" },
+  ] as const;
+  for (const [{ id: theme, label }, themeIndex] of themes.map((item, index) => [item, index] as const)) {
     const page = await context.newPage();
+    await page.setViewportSize({ width: 390, height: 844 });
     const created = page.waitForResponse((response) => response.url().includes("/api/v1/jobs/clip") && response.request().method() === "POST");
     await page.goto("/", { waitUntil: "domcontentloaded" });
     await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
     await page.getByRole("button", { name: /Music.*sung vocals/i }).click();
     await page.getByLabel("Choose video file").setInputFiles(fixture);
-    await page.getByRole("button", { name: new RegExp(theme, "i") }).click();
+    const themeButton = page.getByRole("button", { name: new RegExp(label, "i") });
+    await expect(themeButton).toBeVisible();
+    const keyboardChoice = themes[(themeIndex + 1) % themes.length];
+    const keyboardButton = page.getByRole("button", { name: new RegExp(keyboardChoice.label, "i") });
+    await keyboardButton.focus();
+    await keyboardButton.press("Space");
+    await expect(keyboardButton).toHaveAttribute("aria-pressed", "true");
+    await themeButton.click();
+    await expect(themeButton).toHaveAttribute("aria-pressed", "true");
+    await expect(themeButton).toHaveClass(/active/);
+    const referenceSans = theme === "reference_white_sans" || theme === "reference_yellow_sans";
+    const referenceSerif = theme === "reference_white_serif";
+    if (referenceSans || referenceSerif) {
+      const sample = themeButton.locator("span").first();
+      await expect.poll(() => sample.evaluate((node) => getComputedStyle(node).fontFamily)).toContain(referenceSans ? "Reference Roboto Condensed" : "Reference Bodoni Moda");
+      const fontLoaded = await page.evaluate(async (isSans: boolean) => {
+        const descriptor = isSans ? '300 15px "Reference Roboto Condensed"' : '400 15px "Reference Bodoni Moda"';
+        return (await document.fonts.load(descriptor)).length > 0 && document.fonts.check(descriptor);
+      }, referenceSans);
+      expect(fontLoaded, "the selected locally bundled browser font is loaded").toBe(true);
+    }
+    const dimensions = await page.evaluate(() => ({ width: document.documentElement.scrollWidth, viewport: window.innerWidth }));
+    expect(dimensions.width, "Music controls fit the mobile viewport").toBeLessThanOrEqual(dimensions.viewport);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    const desktopDimensions = await page.evaluate(() => ({ width: document.documentElement.scrollWidth, viewport: window.innerWidth }));
+    expect(desktopDimensions.width, "Music controls fit the desktop viewport").toBeLessThanOrEqual(desktopDimensions.viewport);
+    await page.setViewportSize({ width: 390, height: 844 });
     await page.getByRole("textbox", { name: /top text/i }).fill(`Authorized vocals — ${theme}`);
     const count = page.locator(".count-control strong");
     await expect(count).toHaveText("5");
@@ -108,13 +149,14 @@ test("real authorized sung-vocal Music presentation: all themes, render, playbac
     const createdResponse = await created;
     expect(createdResponse.status()).toBe(202);
     const createdBody = await createdResponse.json();
-    const projectId = createdBody.project.id as string;
     const jobId = createdBody.job.id as string;
     expect(createdBody.project).toMatchObject({ mode: "clip", sourceProfile: "music", contentFormat: "short", requestedCount: 2 });
     expect(createdBody.job).toMatchObject({ sourceProfile: "music", processingMode: "smart", musicPresentation: { version: 1, subtitleTheme: theme }, musicTopText: `Authorized vocals — ${theme}` });
+    expect(createdBody.job.musicPresentation.subtitleTheme).toBe(theme);
     await expect.poll(async () => (await (await fetch(endpoint(`/jobs/${jobId}`))).json()).state, { timeout: 50 * 60_000, intervals: [1000, 3000, 8000] }).toBe("complete");
-    let job = await json(`/jobs/${jobId}`);
+    const job = await json(`/jobs/${jobId}`);
     expect(job).toMatchObject({ mode: "clip", processingMode: "smart", sourceProfile: "music", musicPresentation: { version: 1, subtitleTheme: theme } });
+    expect(job.musicPresentation.subtitleTheme).toBe(theme);
     expect(job.clips).toHaveLength(2);
     expect(job.clips.map((clip: { musicTreatment: string }) => clip.musicTreatment).sort()).toEqual(["color", "grayscale"]);
     expect(job.clips.every((clip: { musicTopText: string }) => clip.musicTopText === `Authorized vocals — ${theme}`)).toBeTruthy();
@@ -218,8 +260,10 @@ test("real authorized sung-vocal Music presentation: all themes, render, playbac
       const captionStyle = assResponse.text.split("\n").find((line: string) => line.startsWith("Style: Caption,"));
       const topStyle = assResponse.text.split("\n").find((line: string) => line.startsWith("Style: MusicTop,"));
       if (!captionStyle || !topStyle) throw new Error("Music ASS sidecar is missing its caption or top-text style");
-      expect(captionStyle.split(",")[1]).toBe(theme === "clean" ? "Barlow" : "Lora");
-      expect(captionStyle.split(",")[4]).toBe(theme === "warm" ? "&H0000D7FF&" : "&H00FFFFFF&");
+      const expectedFont = theme === "clean" ? "Barlow" : theme === "warm" || theme === "serif" ? "Lora" : referenceSans ? "Roboto Condensed" : "Bodoni Moda";
+      expect(captionStyle.split(",")[1]).toBe(expectedFont);
+      const expectedColor = theme === "warm" ? "&H0000D7FF&" : theme === "reference_yellow_sans" ? "&H00AAE8F5&" : "&H00FFFFFF&";
+      expect(captionStyle.split(",")[4]).toBe(expectedColor);
       expect(topStyle.split(",")[1], "top text stays clean sans across subtitle themes").toBe("Barlow");
       expect(captionStyle.split(",")[18], "lyric alignment remains centered after lifting the source band").toBe("5");
       if (theme === "warm") expect(assResponse.text).toContain("&H0000D7FF&");
@@ -254,8 +298,12 @@ test("real authorized sung-vocal Music presentation: all themes, render, playbac
     results.push(result);
     await page.close();
   }
-  expect(results).toHaveLength(3);
+  expect(results).toHaveLength(6);
+  expect(results.map((result) => result.theme).sort()).toEqual(themes.map(({ id }) => id).sort());
   expect(results.every((result) => result.clipIds.length === 2)).toBeTruthy();
+  expect(fontRequests.some((url) => url.includes("RobotoCondensed-Light.ttf"))).toBeTruthy();
+  expect(fontRequests.some((url) => url.includes("BodoniModa-Variable.ttf"))).toBeTruthy();
+  expect(externalRequests, "browser must not contact external origins").toEqual([]);
   expect(browserErrors, "browser console/page/request/server errors").toEqual([]);
   await fs.writeFile(path.join(artifacts, "music-acceptance-evidence.json"), JSON.stringify(results, null, 2));
   await context.close();

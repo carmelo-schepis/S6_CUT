@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { beatSchema, clipSchema, jobSchema, processingModeSchema, processingStepSchema, sourceProfileSchema } from "./types";
+import { beatSchema, clipSchema, jobSchema, musicPresentationSchema, processingModeSchema, processingStepSchema, sourceProfileSchema } from "./types";
 
 const score = {
   hook: 80, coherence: 82, ending: 79, energy: 70, practicalValue: 75,
@@ -8,6 +8,13 @@ const score = {
 };
 
 describe("versioned UI contracts", () => {
+  it("accepts the three additive reference Music themes without changing version 1", () => {
+    for (const subtitleTheme of ["reference_white_sans", "reference_yellow_sans", "reference_white_serif"]) {
+      expect(musicPresentationSchema.parse({ version: 1, subtitleTheme })).toEqual({ version: 1, subtitleTheme });
+    }
+    expect(musicPresentationSchema.parse({ version: 1, subtitleTheme: "clean" })).toEqual({ version: 1, subtitleTheme: "clean" });
+    expect(() => musicPresentationSchema.parse({ version: 1, subtitleTheme: "unsupported" })).toThrow();
+  });
   it("rejects malformed clip ranges and scores", () => {
     expect(() => clipSchema.parse({ id: "one", index: 1, state: "complete", start: -1, end: 5, duration: 6, openingLine: "Hello", score, selected: true, fallbackUsed: false, provenance: [] })).toThrow();
     expect(() => clipSchema.parse({ id: "one", index: 1, state: "complete", start: 0, end: 5, duration: 5, openingLine: "Hello", score: { ...score, total: 102 }, selected: true, fallbackUsed: false, provenance: [] })).toThrow();
