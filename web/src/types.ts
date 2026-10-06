@@ -29,6 +29,10 @@ export const batchModeSchema = z.enum(["standard", "high_volume"]);
 export type BatchMode = z.infer<typeof batchModeSchema>;
 export const sourceProfileSchema = z.enum(["speech", "music"]);
 export type SourceProfile = z.infer<typeof sourceProfileSchema>;
+export const musicThemeSchema = z.enum(["clean", "warm", "serif"]);
+export type MusicTheme = z.infer<typeof musicThemeSchema>;
+export const musicPresentationSchema = z.object({ version: z.literal(1), subtitleTheme: musicThemeSchema });
+export type MusicPresentationConfig = z.infer<typeof musicPresentationSchema>;
 
 export const subscribeAnimationSchema = z.object({
   enabled: z.boolean(),
@@ -108,6 +112,8 @@ export const clipSchema = z.object({
   outputName: z.string().nullable().optional(),
   blobId: z.string().nullable().optional(),
   creatorCredit: z.string().nullable().optional(),
+  musicTopText: z.string().max(100).nullable().optional(),
+  musicTreatment: z.enum(["color", "grayscale"]).nullable().optional(),
   downloadUrl: z.string().nullable().optional(),
   error: z.string().nullable().optional(),
   fallbackUsed: z.boolean().default(false),
@@ -191,6 +197,8 @@ export const jobSchema = z.object({
   capExplanation: z.string().nullable().optional(),
   plannedCount: z.number().int().min(0).max(500).optional(),
   successfulCount: z.number().int().min(0).max(500).optional(),
+  musicPresentation: musicPresentationSchema.nullable().optional(),
+  musicTopText: z.string().max(100).nullable().optional(),
   burnSubtitles: z.boolean().optional(),
   embedSubtitles: z.boolean().optional(),
   warnings: z.array(z.string()).default([]),

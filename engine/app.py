@@ -32,7 +32,7 @@ from .media import _SUBTITLE_PRESETS, MediaError, available, caption_font_mismat
 from .models import (
     Asset, AssetDelete, AssetDeleteResult, AssetMove, AssetOrigin, AssetUpdate, AssetPage, CaptionCue, CaptionDownload, CaptionReviewInput, Clip, FolderCreate, FolderMove, FolderUpdate, Health, Job, LibraryPurgeInput, LibraryPurgeResult,
     LibraryFolder, MatchExplanation, RecentClipsPage, ContentFormat, ProcessingMode, ProfileInput, Project, ProjectFolderUpdate,
-    OpenRouterModel, ProviderProfile, ScriptJobInput, SelectionInput, ShortsJobInput, SubscribeAnimationConfig, TopicBeat, TopicVideoInput, TopicVideoPlan, now_iso,
+    OpenRouterModel, ProviderProfile, ScriptJobInput, SelectionInput, ShortsJobInput, SubscribeAnimationConfig, MusicPresentationConfig, TopicBeat, TopicVideoInput, TopicVideoPlan, now_iso,
 )
 from .providers import ProfileService, ProviderError
 from .security import MediaSigner, SecretVault, confined, safe_filename, validate_youtube_url
@@ -48,6 +48,13 @@ def _subscribe_animation_request(raw: str) -> SubscribeAnimationConfig:
         return SubscribeAnimationConfig.model_validate(value)
     except (json.JSONDecodeError, TypeError, ValueError) as exc:
         raise HTTPException(422, "Subscribe animation config is invalid") from exc
+
+
+def _music_presentation_request(raw: str) -> MusicPresentationConfig:
+    try:
+        return MusicPresentationConfig.model_validate(json.loads(raw))
+    except (json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise HTTPException(422, "Music presentation config is invalid") from exc
 
 
 def _project_name(value: str | None, fallback: str) -> str:
@@ -380,6 +387,8 @@ async def create_clip_job(
     embed_subtitles: Annotated[bool, Form()] = False,
     library_folder_id: Annotated[str, Form()] = UNSORTED_FOLDER_ID,
     subscribe_animation: Annotated[str, Form()] = "{}",
+    music_presentation: Annotated[str, Form()] = "{}",
+    music_top_text: Annotated[str, Form()] = "",
 ) -> dict[str, object]:
     _rate_limit(request)
     selected_folder = db.get_folder(library_folder_id)
@@ -395,6 +404,11 @@ async def create_clip_job(
         raise HTTPException(422, "Standard batches support at most 30 outputs. Choose High-volume mode for up to 500.")
     if min_duration >= max_duration:
         raise HTTPException(422, "Minimum duration must be shorter than maximum duration")
+    if len(music_top_text) > 100:
+        raise HTTPException(422, "Music top text must be 100 characters or fewer")
+    music_config = _music_presentation_request(music_presentation)
+    if source_profile != "music" and (music_top_text or music_presentation != "{}" or music_config.subtitle_theme != "clean"):
+        raise HTTPException(422, "Music presentation options are only available for Music / sung vocals")
     if source_profile == "music" and batch_mode == "high_volume":
         raise HTTPException(422, "High-volume batches are available for Speech sources; Music keeps its existing non-overlapping planner.")
     if source_profile == "music" and content_format != "short":
@@ -412,11 +426,14 @@ async def create_clip_job(
     private: dict[str, object] = {
         "count": count, "batch_mode": batch_mode, "min_duration": min_duration, "max_duration": max_duration,
         "aspect_ratio": aspect_ratio, "content_format": content_format, "processing_mode": mode,
-        "burn_subtitles": burn_subtitles, "embed_subtitles": embed_subtitles,
+        "burn_subtitles": True if source_profile == "music" else burn_subtitles, "embed_subtitles": embed_subtitles,
         "use_openrouter": mode == "smart" and smart_available and source_profile == "speech" and batch_mode == "standard",
         "library_folder_id": library_folder_id,
         "subscribe_animation": _subscribe_animation_request(subscribe_animation).model_dump(),
     }
+    if source_profile == "music":
+        private["music_presentation"] = music_config.model_dump()
+        private["music_top_text"] = music_top_text if music_top_text.strip() else None
     if file:
         original = safe_filename(file.filename or "source.mp4", "source.mp4")
         suffix = Path(original).suffix.casefold()
@@ -468,7 +485,7 @@ async def create_clip_job(
             steps[1].status = "complete"
             steps[1].detail = f"Source validated - {float(source_metadata['duration']):.1f}s"
             steps[1].started_at = steps[1].completed_at = checkpoint_time
-    job = Job(id=job_id, project_id=project_id, library_folder_id=library_folder_id, mode="clip", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style=style, processing_mode=mode, content_format=content_format, source_profile=source_profile, requested_count=count, batch_mode=batch_mode, effective_target=effective_target, cap_explanation=cap_explanation, burn_subtitles=burn_subtitles, embed_subtitles=embed_subtitles, steps=steps)
+    job = Job(id=job_id, project_id=project_id, library_folder_id=library_folder_id, mode="clip", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style=style, processing_mode=mode, content_format=content_format, source_profile=source_profile, music_presentation=music_config if source_profile == "music" else None, music_top_text=(music_top_text if music_top_text.strip() else None) if source_profile == "music" else None, requested_count=count, batch_mode=batch_mode, effective_target=effective_target, cap_explanation=cap_explanation, burn_subtitles=True if source_profile == "music" else burn_subtitles, embed_subtitles=embed_subtitles, steps=steps)
     db.save_project(project)
     db.save_job(job, private)
     try:
