@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import subprocess
+import struct
 import selectors
 import threading
 import time
@@ -1025,6 +1026,178 @@ def _music_caption_group(local: list[dict[str, Any]], index: int, max_chars: int
     return local[start:max(index + 1, end)]
 
 
+def _reference_music_groups(words: list[dict[str, Any]], max_words: int = 7) -> list[list[dict[str, Any]]]:
+    """Split reference lyrics at natural boundaries into stable, bounded phrases."""
+    groups: list[list[dict[str, Any]]] = []
+    current: list[dict[str, Any]] = []
+    for word in words:
+        text = str(word["text"])
+        if current and (
+            float(word["start"]) - float(current[-1]["end"]) > 0.65
+            or str(current[-1]["text"]).rstrip().endswith((".", "!", "?", ",", ";", ":"))
+            or len(current) >= max_words
+        ):
+            groups.append(current)
+            current = []
+        current.append(word)
+        if text.rstrip().endswith((".", "!", "?", ",", ";", ":")):
+            groups.append(current)
+            current = []
+    if current:
+        groups.append(current)
+    return groups
+
+
+@lru_cache(maxsize=4)
+def _font_advance_metrics(font_path: str) -> tuple[int, dict[int, int]]:
+    """Read cmap and horizontal advance widths from a pinned TrueType face."""
+    font = Path(font_path).read_bytes()
+    table_count = struct.unpack_from(">H", font, 4)[0]
+    tables = {}
+    for index in range(table_count):
+        record = 12 + index * 16
+        tag = font[record:record + 4].decode("ascii")
+        tables[tag] = struct.unpack_from(">II", font, record + 8)
+    head = tables["head"][0]
+    units_per_em = struct.unpack_from(">H", font, head + 18)[0]
+    hhea = tables["hhea"][0]
+    metric_count = struct.unpack_from(">H", font, hhea + 34)[0]
+    glyph_count = struct.unpack_from(">H", font, tables["maxp"][0] + 4)[0]
+    hmtx = tables["hmtx"][0]
+    advances = [struct.unpack_from(">H", font, hmtx + index * 4)[0] for index in range(metric_count)]
+    advances.extend([advances[-1]] * (glyph_count - metric_count))
+    cmap_offset = tables["cmap"][0]
+    cmap_count = struct.unpack_from(">H", font, cmap_offset + 2)[0]
+    subtables = [cmap_offset + struct.unpack_from(">I", font, cmap_offset + 8 + index * 8)[0] for index in range(cmap_count)]
+    glyph_map: dict[int, int] = {}
+    for subtable in sorted(subtables, key=lambda offset: struct.unpack_from(">H", font, offset)[0], reverse=True):
+        fmt = struct.unpack_from(">H", font, subtable)[0]
+        if fmt == 12:
+            groups = struct.unpack_from(">I", font, subtable + 12)[0]
+            for index in range(groups):
+                start, end, first_glyph = struct.unpack_from(">III", font, subtable + 16 + index * 12)
+                for codepoint in range(start, end + 1):
+                    glyph_map[codepoint] = first_glyph + codepoint - start
+            break
+        if fmt == 4:
+            segments = struct.unpack_from(">H", font, subtable + 6)[0] // 2
+            end_offset = subtable + 14
+            start_offset = end_offset + segments * 2 + 2
+            delta_offset = start_offset + segments * 2
+            range_offset = delta_offset + segments * 2
+            for index in range(segments):
+                start = struct.unpack_from(">H", font, start_offset + index * 2)[0]
+                end = struct.unpack_from(">H", font, end_offset + index * 2)[0]
+                delta = struct.unpack_from(">h", font, delta_offset + index * 2)[0]
+                range_position = range_offset + index * 2
+                range_value = struct.unpack_from(">H", font, range_position)[0]
+                for codepoint in range(start, min(end, 0xFFFE) + 1):
+                    glyph = (codepoint + delta) & 0xFFFF if range_value == 0 else 0
+                    if range_value:
+                        glyph_position = range_position + range_value + (codepoint - start) * 2
+                        glyph = struct.unpack_from(">H", font, glyph_position)[0]
+                        if glyph:
+                            glyph = (glyph + delta) & 0xFFFF
+                    glyph_map[codepoint] = glyph
+            break
+    return units_per_em, {codepoint: advances[glyph] for codepoint, glyph in glyph_map.items() if glyph < len(advances)}
+
+
+def _reference_music_events(group: list[dict[str, Any]], theme: str, *, width: int, height: int, duration: float) -> list[str]:
+    """Render independently positioned phrase rows with shared karaoke timing."""
+    words = [str(word["text"]) for word in group]
+    fonts = {
+        "reference_white_sans": ("roboto_condensed/RobotoCondensed-Light.ttf", 135, 0.90),
+        "reference_yellow_sans": ("roboto_condensed/RobotoCondensed-Light.ttf", 122, 1.15),
+        "reference_white_serif": ("bodoni_moda/BodoniModa-Variable.ttf", 150, 0.85),
+    }
+    relative_font, design_size, scale_x = fonts[theme]
+    type_scale = min(width, height) / _CAPTION_REFERENCE_SHORT_EDGE
+    rendered_design_size = max(28, round(design_size * type_scale))
+    font_scale = rendered_design_size / design_size
+    units_per_em, glyph_advances = _font_advance_metrics(str(Path(__file__).parent / "fonts" / relative_font))
+    line_limit = width * 0.82
+    lines: list[list[str]] = []
+    space_advance = glyph_advances.get(ord(" "), units_per_em * 0.25)
+
+    def measured_px(value: str) -> float:
+        advance = sum(glyph_advances.get(ord(char), units_per_em * 0.55) for char in value)
+        return advance * design_size * font_scale * scale_x / units_per_em
+
+    if theme == "reference_white_sans":
+        lines = [[word] for word in words]
+    elif theme == "reference_white_serif":
+        remaining = list(words)
+        for row_limit in (4, 2, 1):
+            if not remaining:
+                break
+            line = []
+            while remaining and len(line) < row_limit:
+                line.append(remaining.pop(0))
+            lines.append(line)
+        while remaining:
+            lines.append([remaining.pop(0)])
+    else:
+        remaining = list(words)
+        for row_limit in (3, 3, 1):
+            if not remaining:
+                break
+            lines.append(remaining[:row_limit])
+            remaining = remaining[row_limit:]
+
+    def line_spacing(line: list[str], row_index: int) -> int:
+        if len(line) < 2:
+            return 0
+        natural_width = sum(measured_px(word) for word in line) + space_advance * design_size * font_scale * scale_x / units_per_em * (len(line) - 1)
+        space_px = space_advance * design_size * font_scale * scale_x / units_per_em
+        if theme == "reference_white_serif":
+            spacing_scale = (1, 6.5, 1)[min(row_index, 2)]
+            minimum_spacing = (4, 1, 0)[min(row_index, 2)]
+        else:
+            spacing_scale = 1.8
+            minimum_spacing = 1
+        return max(minimum_spacing, 1, min(64, round((line_limit - natural_width) / (space_px * (len(line) - 1)) * spacing_scale)))
+
+    start = max(0.0, float(group[0]["start"]))
+    end = min(duration, max(start + 0.05, float(group[-1]["end"])))
+    reference_left = theme == "reference_white_sans"
+    if reference_left:
+        x = round(width * 0.225)
+        y0 = round(height * 0.3875)
+        line_gap = round(height * 0.0833)
+        position_tags = [f"{{\\an7\\pos({x},{y0 + index * line_gap})}}" for index in range(len(lines))]
+    else:
+        center_y = round(height * (0.5078 if theme == "reference_yellow_sans" else 0.492))
+        line_gap = round(height * (0.0844 if theme == "reference_yellow_sans" else 0.0833))
+        first_y = center_y - (len(lines) - 1) * line_gap // 2
+        position_tags = []
+        for index in range(len(lines)):
+            if theme == "reference_white_serif" and index == 2:
+                position_tags.append(f"{{\\an7\\pos({round(width * 0.125)},{round(height * 0.5255)})}}")
+            else:
+                position_tags.append(f"{{\\an5\\pos({width // 2},{first_y + index * line_gap})}}")
+
+    # Row-level events allow libass to honor each independently measured position.
+    # Karaoke colours match, so word timing remains in ASS without visible color jumps.
+    events = []
+    cursor = 0
+    for line, position in zip(lines, position_tags):
+        timed_line = []
+        line_width = sum(measured_px(word) for word in line) + space_advance * rendered_design_size * scale_x / units_per_em * max(0, len(line) - 1)
+        sizing_limit = line_limit * (1.25 if theme == "reference_white_serif" and len(line) > 1 else 1.0)
+        size_ratio = min(1.0, sizing_limit / max(sizing_limit, line_width))
+        for word_index, word in enumerate(line):
+            item = group[cursor]
+            karaoke = max(1, round(max(0.05, float(item["end"]) - float(item["start"])) * 100))
+            word_offset = max(0, round((float(item["start"]) - float(group[0]["start"])) * 100))
+            size_tag = f"{{\\fs{max(1, round(rendered_design_size * size_ratio))}}}" if word_index == 0 and size_ratio < 1 else ""
+            timed_line.append(f"{size_tag}{{\\kt{word_offset}}}{{\\k{karaoke}}}{_ass_escape(word)}")
+            cursor += 1
+        text = position + (r"\h" * line_spacing(line, len(events))).join(timed_line)
+        events.append(f"Dialogue: 10,{_ass_time(start)},{_ass_time(end)},Caption,,0,0,0,,{text}")
+    return events
+
+
 def _caption_group_for_index(local: list[dict[str, Any]], index: int, desired: int, max_chars: int) -> list[dict[str, Any]]:
     """Choose a timed word group that always fits a maximum two-line block."""
     start = index - index % desired
@@ -1203,13 +1376,27 @@ def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duratio
     if music_theme in {"clean", "warm", "serif"}:
         preset = dict(preset)
         preset.update({"fontname": "Barlow" if music_theme == "clean" else "Lora", "font": 56, "bold": 0, "italic": 0, "outline": 1, "shadow": 0, "group": 1, "highlight": "&H0000D7FF&" if music_theme == "warm" else "&H00FFFFFF&", "primary": "&H00FFFFFF&", "outline_color": "&H80000000&"})
+    reference_presets = {
+        "reference_white_sans": {"fontname": "Roboto Condensed", "font": 135, "primary": "&H00FFFFFF&", "outline_color": "&H99000000&", "outline": 1, "shadow": 0, "spacing": 0, "scale_x": 90},
+        "reference_yellow_sans": {"fontname": "Roboto Condensed", "font": 122, "primary": "&H00AAE8F5&", "outline_color": "&H99000000&", "outline": 1, "shadow": 0, "spacing": 1, "scale_x": 115},
+        "reference_white_serif": {"fontname": "Bodoni Moda", "font": 150, "primary": "&H00FFFFFF&", "outline_color": "&H99000000&", "outline": 1, "shadow": 0, "spacing": 0, "scale_x": 85},
+    }
+    if music_theme in reference_presets:
+        preset = dict(preset)
+        preset.update({**reference_presets[music_theme], "bold": 0, "italic": 0, "group": 1, "highlight": reference_presets[music_theme]["primary"]})
     scrim_style, scrim_events = _scrim_events(recipe_for(style, content_format).look, width, height, duration)
+    if music_theme in reference_presets:
+        scrim_style, scrim_events = "", []
     metrics = _ass_style_metrics(width, height)
     type_scale = min(width, height) / _CAPTION_REFERENCE_SHORT_EDGE
     vertical_scale = height / _CAPTION_REFERENCE_HEIGHT
     fontsize = max(28, round(preset["font"] * type_scale))
-    outline = max(2, round(preset["outline"] * type_scale))
-    shadow = max(1, round(preset["shadow"] * type_scale))
+    if music_theme in reference_presets:
+        outline = round(preset["outline"] * type_scale)
+        shadow = round(preset["shadow"] * type_scale)
+    else:
+        outline = max(2, round(preset["outline"] * type_scale))
+        shadow = max(1, round(preset["shadow"] * type_scale))
     margin_x = metrics["margin_x"]
     margin_v = max(60, round(int(preset["margin_v"]) * vertical_scale))
     if music_theme:
@@ -1239,7 +1426,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding
-Style: Caption,{preset["fontname"]},{fontsize},{preset["primary"]},{preset["highlight"]},{preset["outline_color"]},{preset["back_color"]},{preset["bold"]},{preset["italic"]},0,0,100,100,{preset["spacing"]},0,{preset["border_style"]},{outline},{shadow},{caption_alignment},{margin_x},{margin_x},{margin_v},1
+Style: Caption,{preset["fontname"]},{fontsize},{preset["primary"]},{preset["highlight"]},{preset["outline_color"]},{preset["back_color"]},{preset["bold"]},{preset["italic"]},0,0,{preset.get("scale_x", 100)},100,{preset["spacing"]},0,{preset["border_style"]},{outline},{shadow},{caption_alignment},{margin_x},{margin_x},{margin_v},1
 {visual_style}
 Style: MusicTop,Barlow,{max(32, round(54 * visual_scale))},&H00FFFFFF,&H00FFFFFF,&H80000000,&H80000000,0,0,0,0,100,100,0,0,1,2,0,8,{margin_x},{margin_x},{max(100, round(170 * visual_scale))},1
 {credit_style}
@@ -1252,7 +1439,12 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
         events.append(f"Dialogue: 20,0,{_ass_time(duration)},MusicTop,,0,0,0,,{_ass_escape(music_top_text)}")
     selected_words = caption_words_for_clip(words, offset, offset + duration)
     local = selected_words if music_theme else _caption_words_with_emojis(selected_words, style)
+    if music_theme in reference_presets:
+        for group in _reference_music_groups(local, max_words=3 if music_theme == "reference_white_sans" else 7):
+            events.extend(_reference_music_events(group, music_theme, width=width, height=height, duration=duration))
     for index, word in enumerate(local):
+        if music_theme in reference_presets:
+            continue
         if music_theme:
             group = _music_caption_group(local, index, max_chars)
         else:
@@ -1290,7 +1482,7 @@ def write_music_ass(
 ) -> None:
     if top_text is not None and len(top_text) > 100:
         raise ValueError("Music top text must be 100 characters or fewer")
-    if subtitle_theme not in {"clean", "warm", "serif"}:
+    if subtitle_theme not in {"clean", "warm", "serif", "reference_white_sans", "reference_yellow_sans", "reference_white_serif"}:
         raise ValueError("Unknown music subtitle theme")
     write_ass(
         path, words, offset=offset, duration=duration, visuals=[], width=width, height=height,

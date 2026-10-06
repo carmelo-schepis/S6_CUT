@@ -104,6 +104,26 @@
       "use": "Music presentation serif subtitle theme",
       "vendoredAt": "engine/fonts/lora",
       "licenceFile": "engine/fonts/lora/OFL.txt"
+    },
+    {
+      "name": "Roboto Condensed Light",
+      "version": "Roboto Condensed Light static TTF at andreasf/Roboto commit 199ca7fcf1f0606106f8a93d13e42245729f9fcb",
+      "licence": "Apache License 2.0",
+      "source": "https://github.com/andreasf/Roboto/tree/199ca7fcf1f0606106f8a93d13e42245729f9fcb/RobotoCondensed-Light.ttf",
+      "sha256": "f7b90fe89a2195202a3a159d91b6a34ccb245498d5b1f4a05c69fb77d8239e8f",
+      "use": "Reference white and pale-yellow sans lyric presets; static Light (300) avoids variable-font axis ambiguity",
+      "vendoredAt": "engine/fonts/roboto_condensed/RobotoCondensed-Light.ttf; web/public/fonts/roboto_condensed/RobotoCondensed-Light.ttf",
+      "licenceFile": "engine/fonts/roboto_condensed/Apache-2.0.txt"
+    },
+    {
+      "name": "Bodoni Moda",
+      "version": "Google Fonts BodoniModa[opsz,wght] at repository commit 7085eb89a950e85db5b166b7a58d414544b4140c",
+      "licence": "SIL Open Font License 1.1",
+      "source": "https://github.com/google/fonts/tree/7085eb89a950e85db5b166b7a58d414544b4140c/ofl/bodonimoda",
+      "sha256": "550f5e34ee0a828d7941b1fe9bc58b34e5260d3f33a61532e6d0a0114e79a5cf",
+      "use": "Reference white serif preset; bundled variable face default axes (opsz 14, wght 400) were confirmed by production libass selecting BodoniModa-Regular",
+      "vendoredAt": "engine/fonts/bodoni_moda/BodoniModa-Variable.ttf; web/public/fonts/bodoni_moda/BodoniModa-Variable.ttf",
+      "licenceFile": "engine/fonts/bodoni_moda/OFL.txt"
     }
   ]
 }

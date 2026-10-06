@@ -87,7 +87,7 @@ class CaptionCue(ApiModel):
 
 class MusicPresentationConfig(ApiModel):
     version: Literal[1] = 1
-    subtitle_theme: Literal["clean", "warm", "serif"] = "clean"
+    subtitle_theme: Literal["clean", "warm", "serif", "reference_white_sans", "reference_yellow_sans", "reference_white_serif"] = "clean"
 
 
 class Clip(ApiModel):

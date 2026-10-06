@@ -230,10 +230,19 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
 
           {mode === "clip" ? <>
             {sourceProfile === "music" && <FieldGroup title="Lyrics presentation" hint={MUSIC_PROFILE_NOTE}>
-              <div className="music-theme-options" role="group" aria-label="Lyrics subtitle theme">
-                <button type="button" aria-label="Clean sans" aria-pressed={musicTheme === "clean"} className={musicTheme === "clean" ? "active" : ""} onClick={() => setMusicTheme("clean")}><span className="theme-clean">Aa</span><strong>Clean sans</strong><small>White · compact</small></button>
-                <button type="button" aria-label="Warm highlight" aria-pressed={musicTheme === "warm"} className={musicTheme === "warm" ? "active" : ""} onClick={() => setMusicTheme("warm")}><span className="theme-warm">Aa</span><strong>Warm highlight</strong><small>Soft yellow accents</small></button>
-                <button type="button" aria-label="Soft serif" aria-pressed={musicTheme === "serif"} className={musicTheme === "serif" ? "active" : ""} onClick={() => setMusicTheme("serif")}><span className="theme-serif">Aa</span><strong>Soft serif</strong><small>Light editorial</small></button>
+              <div role="group" aria-label="Lyrics subtitle theme">
+              <p className="music-theme-group-label">Current styles</p>
+              <div className="music-theme-options">
+                <button type="button" aria-label="Clean sans" aria-pressed={musicTheme === "clean"} className={musicTheme === "clean" ? "active" : ""} onClick={() => setMusicTheme("clean")}><span className="theme-clean">i’ve<br />forgotten<br />about</span><strong>Clean sans</strong><small>White · compact</small></button>
+                <button type="button" aria-label="Warm highlight" aria-pressed={musicTheme === "warm"} className={musicTheme === "warm" ? "active" : ""} onClick={() => setMusicTheme("warm")}><span className="theme-warm">do you think<br />that i’ve forgotten<br />about</span><strong>Warm highlight</strong><small>Soft yellow accents</small></button>
+                <button type="button" aria-label="Soft serif" aria-pressed={musicTheme === "serif"} className={musicTheme === "serif" ? "active" : ""} onClick={() => setMusicTheme("serif")}><span className="theme-serif">do you think<br />that i’ve forgotten<br />about</span><strong>Soft serif</strong><small>Light editorial</small></button>
+              </div>
+              <p className="music-theme-group-label">Reference styles</p>
+              <div className="music-theme-options">
+                <button type="button" aria-label="Reference white sans" aria-pressed={musicTheme === "reference_white_sans"} className={musicTheme === "reference_white_sans" ? "active" : ""} onClick={() => setMusicTheme("reference_white_sans")}><span className="theme-reference-white-sans">i’ve<br />forgotten<br />about</span><strong>Reference white sans</strong><small>Light · stacked</small></button>
+                <button type="button" aria-label="Reference yellow sans" aria-pressed={musicTheme === "reference_yellow_sans"} className={musicTheme === "reference_yellow_sans" ? "active" : ""} onClick={() => setMusicTheme("reference_yellow_sans")}><span className="theme-reference-yellow-sans">do you think<br />that i’ve forgotten<br />about</span><strong>Reference yellow sans</strong><small>Pale yellow · spaced</small></button>
+                <button type="button" aria-label="Reference white serif" aria-pressed={musicTheme === "reference_white_serif"} className={musicTheme === "reference_white_serif" ? "active" : ""} onClick={() => setMusicTheme("reference_white_serif")}><span className="theme-reference-white-serif">do you think<br />that i’ve forgotten<br />about</span><strong>Reference white serif</strong><small>White · editorial</small></button>
+              </div>
               </div>
             </FieldGroup>}
             <FieldGroup title="Format" hint={contentFormat === "long" ? "Landscape scenes are selected across the whole source." : "Vertical clips are selected for short-form viewing."}>

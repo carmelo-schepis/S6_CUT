@@ -1,3 +1,8 @@
+/* Local preview faces mirror the bundled render faces; no external font requests. */
+@font-face { font-family: "Music Barlow"; src: url("/fonts/barlow/Barlow-Regular.ttf") format("truetype"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Music Lora"; src: url("/fonts/lora/Lora.ttf") format("truetype"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Reference Roboto Condensed"; src: url("/fonts/roboto_condensed/RobotoCondensed-Light.ttf") format("truetype"); font-weight: 300; font-display: swap; }
+@font-face { font-family: "Reference Bodoni Moda"; src: url("/fonts/bodoni_moda/BodoniModa-Variable.ttf") format("truetype"); font-weight: 100 900; font-display: swap; }
 /* DO-NOT-CHANGE: see DO-NOT-CHANGE/AGENTS.md — design tokens; extend them, don't bypass */
 :root {
   color-scheme: dark;
@@ -725,15 +730,21 @@ main { min-width: 0; }
 .script-meta { display: flex; justify-content: space-between; align-items: center; color: var(--text-primary); margin-top: var(--space-2); }
 .script-meta button { display: flex; align-items: center; gap: var(--space-1); min-height: var(--control-height-small); border: 0; background: transparent; color: var(--text-primary); }
 .style-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); margin: 0; }
+.music-theme-group-label { margin: var(--space-2) 0 var(--space-1); color: var(--text-primary); font-size: var(--type-small-size); font-weight: var(--type-emphasis-weight); }
 .music-theme-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2); }
-.music-theme-options button { display: grid; justify-items: start; gap: 3px; min-width: 0; padding: 8px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-2); color: var(--text-primary); text-align: left; }
+.music-theme-options button { display: grid; justify-items: start; align-content: start; gap: 3px; min-width: 0; min-height: 104px; padding: 8px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-2); color: var(--text-primary); text-align: left; }
+.music-theme-options button:focus-visible { outline: 2px solid var(--selector-highlight); outline-offset: 2px; }
 .music-theme-options button.active { border-color: var(--selector-highlight); background: var(--surface-3); }
-.music-theme-options span { font-size: 21px; line-height: 1.1; }
-.music-theme-options .theme-clean { font-family: var(--font-sans); }
-.music-theme-options .theme-warm { color: #e3bd61; font-family: var(--font-sans); }
-.music-theme-options .theme-serif { font-family: Georgia, serif; }
+.music-theme-options span { font-size: 12px; line-height: 1.12; }
+.music-theme-options .theme-clean { font-family: "Music Barlow", sans-serif; }
+.music-theme-options .theme-warm, .music-theme-options .theme-serif { font-family: "Music Lora", serif; }
+.music-theme-options .theme-warm { color: #e3bd61; }
+.music-theme-options .theme-reference-white-sans, .music-theme-options .theme-reference-yellow-sans { font-family: "Reference Roboto Condensed", sans-serif; font-weight: 300; font-size: 15px; }
+.music-theme-options .theme-reference-yellow-sans { color: #f5e8aa; }
+.music-theme-options .theme-reference-white-serif { font-family: "Reference Bodoni Moda", serif; font-weight: 400; font-size: 15px; }
 .music-theme-options strong { color: var(--text); font-size: var(--type-small-size); line-height: 1.2; }
 .music-theme-options small { font-size: 11px; line-height: 1.25; }
+@media (max-width: 520px) { .music-theme-options { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .style-card { min-height: 56px; display: grid; grid-template-columns: var(--space-2) minmax(0, 1fr); align-content: center; gap: var(--space-1) var(--space-2); padding: var(--space-2); text-align: left; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-primary); }
 .style-card:hover { background: var(--surface-3); }
 .style-card:hover, .style-card.active { border-color: var(--selector-highlight); }
