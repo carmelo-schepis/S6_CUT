@@ -79,7 +79,9 @@ test.describe("high-volume batch controls (mocked UI/API)", () => {
 
     await page.goto("/");
     await page.getByRole("button", { name: /High-volume/ }).click();
-    await page.getByRole("spinbutton", { name: "Clips requested" }).fill("500");
+    const requestedCount = page.getByLabel("Clips requested");
+    await requestedCount.fill("501");
+    await expect(requestedCount).toHaveValue("500");
     await page.getByRole("tab", { name: "YouTube" }).click();
     await page.getByRole("textbox", { name: "YouTube URL" }).fill("https://www.youtube.com/watch?v=mock-source");
     await page.getByRole("button", { name: /Create 500 short clips/i }).click();
@@ -120,5 +122,85 @@ test.describe("high-volume batch controls (mocked UI/API)", () => {
     await page.getByRole("button", { name: /Download ZIP 500/ }).click();
     await expect.poll(() => exportedIds.length).toBe(500);
     expect(exportedIds).toEqual(ids);
+  });
+
+  test("keeps the high-volume input usable across desktop and mobile layouts", async ({ page }, testInfo) => {
+    test.info().annotations.push({
+      type: "scope",
+      description: "Responsive UI/input check only. No video rendering; API requests are mocked and this scenario does not submit a batch.",
+    });
+    await page.route("**/api/v1/**", async (route) => {
+      const path = new URL(route.request().url()).pathname;
+      if (path.endsWith("/health")) {
+        await route.fulfill({ json: {
+          status: "ready", version: "acceptance-mock", database: true, ffmpeg: true, ffprobe: true,
+          whisper: true, ytdlp: true, localTts: true, dataPath: "Container data directory", freeBytes: 1_000_000,
+          activeWorkers: 0, queuedJobs: 0, fallbacks: { planning: "deterministic" },
+        } });
+      } else if (path.endsWith("/profiles")) await route.fulfill({ json: [] });
+      else await route.fulfill({ status: 404, json: { detail: "No API used by this input-only check" } });
+    });
+
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.goto("/");
+    await page.getByRole("button", { name: /High-volume/ }).click();
+    const count = page.getByLabel("Clips requested");
+    for (const [value, label] of [["1", /Create 1 short clip/i], ["37", /Create 37 short clips/i], ["500", /Create 500 short clips/i]] as const) {
+      await count.fill(value);
+      await expect(count).toHaveValue(value);
+      await expect(page.getByRole("button", { name: label })).toBeVisible();
+    }
+    for (const value of ["501", "9999"]) {
+      await count.fill(value);
+      await expect(count).toHaveValue("500");
+    }
+    await page.screenshot({ path: testInfo.outputPath("high-volume-desktop.png"), fullPage: true });
+    await expect(page.getByRole("button", { name: /Create 500 short clips/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: "More clips" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Fewer clips" })).toHaveCount(0);
+    await expect(count).toHaveAttribute("type", "text");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1440);
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(count).toBeVisible();
+    await expect(count).toHaveAttribute("type", "text");
+    await expect(page.getByRole("button", { name: "More clips" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Fewer clips" })).toHaveCount(0);
+    await expect(count).toHaveValue("500");
+    await count.focus();
+    await count.press("Control+A");
+    await count.pressSequentially("250");
+    await expect(count).toHaveValue("250");
+    await expect(count).toBeFocused();
+    await expect(page.getByRole("button", { name: /Create 250 short clips/i })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    await count.fill("500");
+    await count.evaluate((input) => input.scrollIntoView({ block: "center", inline: "nearest" }));
+    await expect(count).toBeInViewport();
+    const mobileCountBounds = await count.evaluate((input) => {
+      const rect = input.getBoundingClientRect();
+      return { left: rect.left, right: rect.right, bottom: rect.bottom, width: rect.width };
+    });
+    expect(mobileCountBounds.left).toBeGreaterThanOrEqual(0);
+    expect(mobileCountBounds.right).toBeLessThanOrEqual(390);
+    expect(mobileCountBounds.width).toBeGreaterThanOrEqual(100);
+    expect(mobileCountBounds.bottom).toBeLessThan(760);
+    await page.screenshot({ path: testInfo.outputPath("high-volume-mobile.png") });
+
+    await page.getByRole("button", { name: "Standard · up to 30" }).click();
+    await expect(page.getByText("30", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Create 30 short clips/i })).toBeVisible();
+    await page.getByRole("button", { name: /High-volume/ }).click();
+    await count.fill("500");
+    await page.getByRole("button", { name: "Music / sung vocals" }).click();
+    await expect(page.getByText("30", { exact: true })).toBeVisible();
+
+    await page.getByRole("button", { name: "Clip mode", exact: true }).click();
+    await page.getByRole("button", { name: "Long form · 16:9", exact: true }).click();
+    await page.getByRole("button", { name: /High-volume/ }).click();
+    const scenes = page.getByLabel("Scenes requested");
+    await scenes.fill("501");
+    await expect(scenes).toHaveValue("500");
+    await expect(page.getByRole("button", { name: /Create 500 landscape clips/i })).toBeVisible();
   });
 });
