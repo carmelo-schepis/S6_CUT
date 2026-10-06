@@ -49,6 +49,7 @@ describe("engine API boundary", () => {
       const body = init?.body as FormData;
       expect(body.get("processing_mode")).toBe("fast");
       expect(body.get("source_profile")).toBe("speech");
+      expect(body.get("batch_mode")).toBe("high_volume");
       expect(body.get("style")).toBe("serious");
       expect(body.get("library_folder_id")).toBe("business-1");
       return new Response(JSON.stringify({
@@ -66,7 +67,7 @@ describe("engine API boundary", () => {
     }));
     const result = await createClipJob({
       style: "serious", count: 3, minDuration: 20, maxDuration: 60, aspectRatio: "9:16",
-      processingMode: "fast", libraryFolderId: "business-1",
+      batchMode: "high_volume", processingMode: "fast", libraryFolderId: "business-1",
     });
     expect(result.project.id).toBe("p");
     expect(result.job.processingMode).toBe("smart"); // legacy backend omission defaults to Smart

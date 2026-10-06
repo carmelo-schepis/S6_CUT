@@ -4,12 +4,20 @@ from dataclasses import replace
 from pathlib import Path
 import sqlite3
 
+import pytest
 from fastapi.testclient import TestClient
 
 from engine.app import _project_name, app, db, profiles, settings, signer
 
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def reset_creation_rate_limit() -> None:
+    from engine import app as app_module
+
+    app_module.creation_times.clear()
 
 
 def test_topic_plan_reports_storage_pressure_without_internal_error(monkeypatch) -> None:
@@ -24,6 +32,117 @@ def test_topic_plan_reports_storage_pressure_without_internal_error(monkeypatch)
     })
     assert response.status_code == 503
     assert response.json()["detail"] == "Local project storage is temporarily unavailable. Free disk space and try again."
+
+
+@pytest.mark.parametrize(
+    ("batch_mode", "count"),
+    [("standard", "31"), ("standard", "0"), ("high_volume", "0"), ("high_volume", "501"), ("high_volume", "1.5"), ("high_volume", "not-an-integer")],
+)
+def test_clip_api_rejects_count_outside_opted_in_integer_limits(batch_mode, count) -> None:
+    response = client.post("/api/v1/jobs/clip", data={
+        "url": "https://www.youtube.com/watch?v=fixture", "batch_mode": batch_mode, "count": count,
+    })
+    assert response.status_code == 422
+
+
+def test_high_volume_clip_api_persists_requested_count_separately(monkeypatch) -> None:
+    from engine import app as app_module
+
+    saved: dict[str, object] = {}
+    monkeypatch.setattr(app_module, "validate_youtube_url", lambda value: value)
+    monkeypatch.setattr(app_module.profiles, "smart_available", lambda: True)
+    monkeypatch.setattr(app_module.db, "save_project", lambda project: saved.update(project=project))
+    monkeypatch.setattr(app_module.db, "save_job", lambda job, private=None: saved.update(job=job, private=private))
+
+    async def enqueue(_: str) -> None:
+        return None
+
+    monkeypatch.setattr(app_module.manager, "enqueue", enqueue)
+    response = client.post("/api/v1/jobs/clip", data={
+        "url": "https://www.youtube.com/watch?v=fixture", "batch_mode": "high_volume", "count": "500",
+        "processing_mode": "smart",
+    })
+    assert response.status_code == 202, response.text
+    body = response.json()
+    assert body["project"]["requestedCount"] == 500
+    assert body["project"]["batchMode"] == "high_volume"
+    assert body["project"]["effectiveTarget"] is None
+    assert body["job"]["requestedCount"] == 500
+    assert body["job"]["batchMode"] == "high_volume"
+    assert body["job"]["processingMode"] == "smart"
+    assert body["job"]["plannedCount"] == body["job"]["successfulCount"] == 0
+    assert saved["private"]["count"] == 500
+    assert saved["private"]["batch_mode"] == "high_volume"
+    assert saved["private"]["use_openrouter"] is False
+
+
+def test_api_persists_a_500_clip_selection() -> None:
+    import uuid
+
+    from engine.models import Clip, Job, Project
+
+    project_id, job_id = str(uuid.uuid4()), str(uuid.uuid4())
+    project = Project(
+        id=project_id, name="500 selection", mode="clip", style="serious", state="complete",
+        source_name="YouTube import", source_kind="youtube", requested_count=500,
+        batch_mode="high_volume", effective_target=500, latest_job_id=job_id,
+    )
+    clips = [Clip(
+        id=f"clip-{index}", index=index, state="complete", start=index / 10, end=index / 10 + 8,
+        duration=8, opening_line=f"Window {index}", library_asset_id=f"asset-{index}", selected=False,
+    ) for index in range(1, 501)]
+    job = Job(
+        id=job_id, project_id=project_id, mode="clip", state="complete", stage="complete",
+        stage_label="Complete", progress=100, style="serious", requested_count=500,
+        batch_mode="high_volume", effective_target=500, planned_count=500, clips=clips,
+    )
+    db.save_project(project)
+    db.save_job(job, {})
+
+    response = client.put(f"/api/v1/jobs/{job_id}/selection", json={"clipIds": [clip.id for clip in clips]})
+    assert response.status_code == 200, response.text
+    assert len(response.json()["clips"]) == 500
+    assert all(clip["selected"] for clip in response.json()["clips"])
+    assert db.get_job(job_id).clips[0].selected is True
+
+
+def test_high_volume_smart_landscape_uses_transcript_pipeline_and_skips_provider_ordering(monkeypatch) -> None:
+    from engine import app as app_module
+
+    saved: dict[str, object] = {}
+    monkeypatch.setattr(app_module, "validate_youtube_url", lambda value: value)
+    monkeypatch.setattr(app_module.profiles, "smart_available", lambda: True)
+    monkeypatch.setattr(app_module.db, "save_project", lambda project: saved.update(project=project))
+    monkeypatch.setattr(app_module.db, "save_job", lambda job, private=None: saved.update(job=job, private=private))
+
+    async def enqueue(_: str) -> None:
+        return None
+
+    monkeypatch.setattr(app_module.manager, "enqueue", enqueue)
+    response = client.post("/api/v1/jobs/clip", data={
+        "url": "https://www.youtube.com/watch?v=fixture", "batch_mode": "high_volume", "count": "500",
+        "processing_mode": "smart", "content_format": "long",
+    })
+    assert response.status_code == 202, response.text
+    body = response.json()
+    assert body["project"]["contentFormat"] == body["job"]["contentFormat"] == "long"
+    assert saved["private"]["aspect_ratio"] == "16:9"
+    assert body["job"]["processingMode"] == "smart"
+    assert [step["id"] for step in body["job"]["steps"]][:6] == [
+        "source", "probe", "audio", "transcribe", "openrouter", "local_planning",
+    ]
+    assert saved["private"]["use_openrouter"] is False
+
+
+def test_high_volume_music_request_is_rejected_without_changing_music_planning(monkeypatch) -> None:
+    from engine import app as app_module
+
+    monkeypatch.setattr(app_module, "validate_youtube_url", lambda value: value)
+    response = client.post("/api/v1/jobs/clip", data={
+        "url": "https://www.youtube.com/watch?v=fixture", "batch_mode": "high_volume", "source_profile": "music",
+    })
+    assert response.status_code == 422
+    assert "Music keeps its existing non-overlapping planner" in response.json()["detail"]
 
 
 def test_music_clip_request_forces_smart_and_persists_source_profile(monkeypatch) -> None:

@@ -62,6 +62,12 @@ Requirements: Git, curl, Docker Engine with Compose v2, with 8 GB RAM recommende
 
 No-provider Auto jobs use Fast local cut and do not download Whisper. The first explicit Smart clips job downloads the configured Faster-Whisper model into the mounted data path.
 
+### High-volume batches
+
+Clip projects default to **Standard** (up to 30 outputs, using the existing planners). **High-volume** is an explicit Speech-mode option for 1–500 requested outputs and supports both vertical Shorts and landscape sources with Fast, Auto, or Smart processing. Its deterministic planners can overlap cuts but use distinct starts, real source/transcript timing, and duration-valid windows. Smart high-volume planning stays local rather than sending large candidate sets to a provider. Music retains its existing non-overlapping planner and Standard limit.
+
+The requested count is preserved. The effective target is confirmed against FFprobe and, for Smart, the available timed transcript. Under 30 minutes the engine attempts the full request; if valid windows are short, the effective target falls back to at most 300 and never exceeds the number of valid windows. At or above 30 minutes it supports up to 500 where valid. The Workspace shows requested, effective, planned, and successful counts plus the reason for any reduction; YouTube sources show that FFprobe confirmation is pending until download completes. Export selection supports up to 500 clips and manifests/credits describe only files actually included in the archive.
+
 ## Manual installation (Docker Compose)
 
 Prefer to run the commands yourself, or want to pin a specific revision? Clone and start S6_cut manually:

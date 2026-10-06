@@ -21,6 +21,7 @@ import {
   type RecentClipsPage,
   type MatchExplanation,
   type ContentFormat,
+  type BatchMode,
   type ProcessingMode,
   type SourceProfile,
   type Project,
@@ -182,6 +183,7 @@ type ClipJobInput = {
   maxDuration: number;
   aspectRatio: string;
   contentFormat?: ContentFormat;
+  batchMode?: BatchMode;
   processingMode?: ProcessingMode;
   /** Serialized as the engine's snake_case multipart field; responses use sourceProfile. */
   sourceProfile?: SourceProfile;
@@ -202,6 +204,7 @@ export async function createClipJob(input: ClipJobInput): Promise<{ project: Pro
   form.set("max_duration", String(input.maxDuration));
   form.set("aspect_ratio", input.aspectRatio);
   form.set("content_format", input.contentFormat ?? "short");
+  form.set("batch_mode", input.batchMode ?? "standard");
   if (input.processingMode) form.set("processing_mode", input.processingMode);
   form.set("source_profile", input.sourceProfile ?? "speech");
   form.set("burn_subtitles", String(input.burnSubtitles ?? true));

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { FileText, Film, FolderOpen, Plus, Sparkles, Zap } from "lucide-react";
 import { createClipJob, createFolder, createScriptJob, listFolders, readableError } from "../api";
-import { DEFAULT_SUBSCRIBE_ANIMATION, type ContentFormat, type Health, type LibraryFolder, type ProcessingMode, type Project, type SourceProfile, type Style, type SubscribeAnimationConfig } from "../types";
+import { DEFAULT_SUBSCRIBE_ANIMATION, type BatchMode, type ContentFormat, type Health, type LibraryFolder, type ProcessingMode, type Project, type SourceProfile, type Style, type SubscribeAnimationConfig } from "../types";
 import { Button, Field, FieldGroup, StepBadge, useSingleFlight } from "./common";
 import { VideoSourcePicker } from "./video-source-picker";
 import { SubscribeAnimationControl } from "./subscribe-animation-control";
@@ -37,6 +37,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
   const [script, setScript] = useState("");
   const [style, setStyle] = useState<Style>("educational");
   const [count, setCount] = useState(5);
+  const [batchMode, setBatchMode] = useState<BatchMode>("standard");
   const [contentFormat, setContentFormat] = useState<ContentFormat>("short");
   const [advanced, setAdvanced] = useState(false);
   const [minDuration, setMinDuration] = useState(20);
@@ -109,6 +110,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
     }
     if (mode === "script" && script.trim().length < 10) return setError("Add at least 10 characters of script.");
     if (mode === "clip") {
+      if (!Number.isInteger(count) || count < 1 || count > (batchMode === "high_volume" ? 500 : 30)) return setError(batchMode === "high_volume" ? "High-volume batches support 1–500 requested outputs." : "Standard batches support 1–30 requested outputs.");
       if (!Number.isFinite(minDuration) || minDuration < 8) return setError("Minimum seconds must be at least 8.");
       if (minDuration > 120) return setError("Minimum seconds must be at most 120.");
       if (!Number.isFinite(maxDuration) || maxDuration <= minDuration) return setError("Maximum seconds must be greater than minimum seconds.");
@@ -119,7 +121,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
     setSubmitting(true);
     try {
       const result = mode === "clip"
-        ? await createClipJob({ file: sourceType === "file" ? file || undefined : undefined, url: sourceType === "url" ? url.trim() : undefined, name: projectName.trim() || undefined, style, count, minDuration, maxDuration, aspectRatio: contentFormat === "long" ? "16:9" : aspectRatio, contentFormat, processingMode: sourceProfile === "music" ? "smart" : processingMode, sourceProfile, burnSubtitles: fastMode ? false : burnSubtitles, subscribeAnimation, libraryFolderId: libraryFolderId || undefined })
+        ? await createClipJob({ file: sourceType === "file" ? file || undefined : undefined, url: sourceType === "url" ? url.trim() : undefined, name: projectName.trim() || undefined, style, count, minDuration, maxDuration, aspectRatio: contentFormat === "long" ? "16:9" : aspectRatio, contentFormat, batchMode, processingMode: sourceProfile === "music" ? "smart" : processingMode, sourceProfile, burnSubtitles: fastMode ? false : burnSubtitles, subscribeAnimation, libraryFolderId: libraryFolderId || undefined })
         : await createScriptJob({ script, name: projectName.trim() || undefined, style, aspectRatio, contentFormat: aspectRatio === "16:9" ? "long" : "short", narration, subscribeAnimation, libraryFolderId: libraryFolderId || undefined });
       if (libraryFolderId) localStorage.setItem(RECENT_FOLDER_KEY, libraryFolderId);
       onCreated(result.project);
@@ -148,8 +150,10 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
   const musicFeasibilityMessage = sourceProfile === "music" && knownSourceDuration !== null && Number.isFinite(minDuration) && minDuration > 0 && count > Math.floor((knownSourceDuration + 1e-9) / minDuration)
     ? `This ${knownSourceDuration.toFixed(1)}s source can fit at most ${Math.floor(knownSourceDuration / minDuration)} non-overlapping clips of at least ${minDuration}s. Reduce the count or minimum duration; the requested count will not be changed automatically.`
     : null;
-  const modeNote = sourceProfile === "music"
-    ? MUSIC_PROFILE_NOTE
+  const modeNote = batchMode === "high_volume"
+    ? "Fast and Smart remain available. Smart searches the full local word-timed transcript deterministically; provider ordering is bypassed for this larger batch."
+    : sourceProfile === "music"
+      ? MUSIC_PROFILE_NOTE
     : processingMode === "fast"
     ? "Fast runs deterministically on this machine. It skips transcription and captions."
     : processingMode === "smart"
@@ -212,7 +216,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
             <FieldGroup title="Source audio" hint={sourceProfile === "music" ? MUSIC_PROFILE_NOTE : "Choose speech for spoken content or music for sung vocals and lyrics."}>
               <div className="segmented mode-tabs" aria-label="Source audio profile">
                 <button type="button" aria-pressed={sourceProfile === "speech"} className={sourceProfile === "speech" ? "active" : ""} onClick={() => setSourceProfile("speech")}>Speech</button>
-                <button type="button" aria-pressed={sourceProfile === "music"} className={sourceProfile === "music" ? "active" : ""} onClick={() => setSourceProfile("music")}>Music / sung vocals</button>
+                <button type="button" aria-pressed={sourceProfile === "music"} className={sourceProfile === "music" ? "active" : ""} onClick={() => { setSourceProfile("music"); setBatchMode("standard"); setCount(Math.min(count, 30)); }}>Music / sung vocals</button>
               </div>
             </FieldGroup>
             <FieldGroup title="Format" hint={contentFormat === "long" ? "Landscape scenes are selected across the whole source." : "Vertical clips are selected for short-form viewing."}>
@@ -221,8 +225,17 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
                 <button type="button" aria-pressed={contentFormat === "long"} className={contentFormat === "long" ? "active" : ""} disabled={sourceProfile === "music"} onClick={() => { setContentFormat("long"); setAspectRatio("16:9"); }}>Long form · 16:9</button>
               </div>
               <Field label={contentFormat === "long" ? "Scenes requested" : "Clips requested"}>
-                <div className="count-control"><button onClick={() => setCount(Math.max(1, count - 1))} aria-label="Fewer clips">−</button><strong aria-live="polite">{count}</strong><button onClick={() => setCount(Math.min(30, count + 1))} aria-label="More clips">+</button></div>
+                <div className="count-control"><button type="button" disabled={count <= 1} onClick={() => setCount(Math.max(1, count - 1))} aria-label="Fewer clips">−</button>{batchMode === "standard" ? <strong aria-live="polite">{count}</strong> : <input aria-label={contentFormat === "long" ? "Scenes requested" : "Clips requested"} type="number" min={1} max={500} step={1} value={count} onChange={(event) => setCount(Number(event.target.value))} />}<button type="button" disabled={count >= (batchMode === "standard" ? 30 : 500)} onClick={() => setCount(Math.min(batchMode === "standard" ? 30 : 500, count + 1))} aria-label="More clips">+</button></div>
               </Field>
+            </FieldGroup>
+            <FieldGroup title="Batch size" hint={batchMode === "standard" ? "Standard keeps the existing planning behavior and limit of 30." : "High-volume allows up to 500 requested cuts. If the source cannot satisfy the request, the engine explains its effective target."}>
+              <div className="segmented mode-tabs" aria-label="Batch size">
+                <button type="button" aria-pressed={batchMode === "standard"} className={batchMode === "standard" ? "active" : ""} onClick={() => { setBatchMode("standard"); setCount(Math.min(count, 30)); }}>Standard · up to 30</button>
+                <button type="button" aria-pressed={batchMode === "high_volume"} className={batchMode === "high_volume" ? "active" : ""} disabled={sourceProfile === "music"} onClick={() => setBatchMode("high_volume")}>High-volume · up to 500</button>
+              </div>
+              {sourceProfile === "music" && <p className="form-hint">Music keeps its existing non-overlapping planner and Standard batch limit.</p>}
+              {batchMode === "high_volume" && sourceType === "url" && <p className="form-hint" role="status">The effective target is pending YouTube download and server-side FFprobe validation.</p>}
+              {batchMode === "high_volume" && sourceType === "file" && knownSourceDuration === null && <p className="form-hint">Choose a local source to check its duration; FFprobe remains authoritative.</p>}
             </FieldGroup>
 
             {sourceProfile === "speech" && <FieldGroup title="Processing mode" hint={modeNote}>

@@ -27,6 +27,7 @@ Style = Literal["funny", "serious", "educational", "hype"]
 JobState = Literal["queued", "active", "paused", "stalled", "partial", "failed", "recovered", "cancelled_kept", "complete"]
 ProcessingMode = Literal["fast", "smart"]
 ContentFormat = Literal["short", "long"]
+BatchMode = Literal["standard", "high_volume"]
 DownloadPhase = Literal["queued", "connecting", "downloading", "stalled", "retrying", "stopped_partial", "failed", "complete"]
 
 
@@ -184,6 +185,12 @@ class Job(ApiModel):
     processing_mode: ProcessingMode = "smart"
     content_format: ContentFormat = "short"
     source_profile: Literal["speech", "music"] = "speech"
+    requested_count: int = Field(default=1, ge=1, le=500)
+    batch_mode: BatchMode = "standard"
+    effective_target: int | None = Field(default=None, ge=0, le=500)
+    cap_explanation: str | None = Field(default=None, max_length=500)
+    planned_count: int = Field(default=0, ge=0, le=500)
+    successful_count: int = Field(default=0, ge=0, le=500)
     # Snapshot of the user's caption choice; legacy payloads default safely on.
     burn_subtitles: bool = True
     embed_subtitles: bool = False
@@ -235,7 +242,10 @@ class Project(ApiModel):
     # Extracted from the immutable YouTube import sidecar and persisted with
     # the project so the preview remains truthful after refresh/restart.
     source_creator: str | None = Field(default=None, max_length=120)
-    requested_count: int = Field(ge=1, le=60)
+    requested_count: int = Field(ge=1, le=500)
+    batch_mode: BatchMode = "standard"
+    effective_target: int | None = Field(default=None, ge=0, le=500)
+    cap_explanation: str | None = Field(default=None, max_length=500)
     content_format: ContentFormat = "short"
     source_profile: Literal["speech", "music"] = "speech"
     latest_job_id: str | None = None
@@ -281,7 +291,7 @@ class ScriptJobInput(ApiModel):
 
 
 class SelectionInput(ApiModel):
-    clip_ids: list[str] = Field(max_length=60)
+    clip_ids: list[str] = Field(max_length=500)
 
 
 class CaptionReviewInput(ApiModel):

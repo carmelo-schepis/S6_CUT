@@ -25,6 +25,8 @@ export type ProcessingMode = z.infer<typeof processingModeSchema>;
 
 export const contentFormatSchema = z.enum(["short", "long"]);
 export type ContentFormat = z.infer<typeof contentFormatSchema>;
+export const batchModeSchema = z.enum(["standard", "high_volume"]);
+export type BatchMode = z.infer<typeof batchModeSchema>;
 export const sourceProfileSchema = z.enum(["speech", "music"]);
 export type SourceProfile = z.infer<typeof sourceProfileSchema>;
 
@@ -183,6 +185,12 @@ export const jobSchema = z.object({
   processingMode: processingModeSchema.default("smart"),
   contentFormat: contentFormatSchema.default("short"),
   sourceProfile: sourceProfileSchema.optional(),
+  requestedCount: z.number().int().min(1).max(500).optional(),
+  batchMode: batchModeSchema.optional(),
+  effectiveTarget: z.number().int().min(0).max(500).nullable().optional(),
+  capExplanation: z.string().nullable().optional(),
+  plannedCount: z.number().int().min(0).max(500).optional(),
+  successfulCount: z.number().int().min(0).max(500).optional(),
   burnSubtitles: z.boolean().optional(),
   embedSubtitles: z.boolean().optional(),
   warnings: z.array(z.string()).default([]),
@@ -222,7 +230,10 @@ export const projectSchema = z.object({
   sourceName: z.string(),
   sourceKind: z.enum(["upload", "youtube", "script"]),
   sourceCreator: z.string().nullable().optional(),
-  requestedCount: z.number(),
+  requestedCount: z.number().int().min(1).max(500),
+  batchMode: batchModeSchema.optional(),
+  effectiveTarget: z.number().int().min(0).max(500).nullable().optional(),
+  capExplanation: z.string().nullable().optional(),
   contentFormat: contentFormatSchema.default("short"),
   sourceProfile: sourceProfileSchema.optional(),
   latestJobId: z.string().nullable().optional(),

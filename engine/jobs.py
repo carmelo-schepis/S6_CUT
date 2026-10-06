@@ -30,7 +30,7 @@ from .models import (
 from .providers import ProfileService, provider_runtime_message
 from .script import align_script_words, plan_beats
 from .security import confined, redact, safe_archive_title, safe_filename
-from .selection import Candidate, clip_from_candidate, select_candidates, select_music_candidates
+from .selection import Candidate, _score, _timed_words, candidate_quality, clip_from_candidate, select_candidates, select_music_candidates
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +108,114 @@ def _openrouter_fallback_warning(error: Exception) -> str:
     return f"OpenRouter API failed: {reason}. Continuing with deterministic local planning."
 
 
+def resolve_batch_target(requested: int, batch_mode: str, source_duration: float) -> tuple[int, str | None]:
+    """Keep the requested count; actual shortage is determined by the planner."""
+    if not math.isfinite(source_duration) or source_duration <= 0:
+        raise MediaError("A valid FFprobe source duration is required to resolve the batch target")
+    return requested, None
+
+
+def _spread_temporal_items(items, requested: int):
+    if requested <= 0:
+        return []
+    if len(items) <= requested:
+        return items
+    if requested == 1:
+        return [items[len(items) // 2]]
+    indexes = [round(index * (len(items) - 1) / (requested - 1)) for index in range(requested)]
+    return [items[index] for index in indexes]
+
+
+def _high_volume_smart_candidates(words: list[dict[str, Any]], style: str, requested: int, minimum: float, maximum: float, source_duration: float):
+    """Search timed transcript windows, allowing overlap and spreading selections across them."""
+    if (
+        requested < 1 or not all(math.isfinite(value) for value in (minimum, maximum, source_duration))
+        or minimum <= 0 or maximum < minimum or source_duration <= 0
+    ):
+        return []
+    timed = [
+        word for word in _timed_words(words)
+        if float(word["start"]) < source_duration and float(word["end"]) <= source_duration
+    ]
+    if not timed:
+        return []
+    target = (minimum + maximum) / 2
+    candidates_by_start: dict[float, tuple[float, float, list[dict[str, Any]]]] = {}
+    for start_index in range(len(timed)):
+        word_start = float(timed[start_index]["start"])
+        # Floor to the supported tenth-second boundary: this preserves the full
+        # first word and guarantees selected starts are actually >=0.1s apart.
+        start_bucket = math.floor((word_start + 1e-9) * 10) / 10
+        if start_bucket in candidates_by_start:
+            continue
+        start = start_bucket
+        # Gather time-only endpoints first. Quality-gate the closest endpoint to
+        # the target before trying alternatives; rescanning/tokenizing every
+        # growing transcript segment made long Smart sources needlessly costly.
+        endpoints: list[int] = []
+        target_position = None
+        for end_index in range(start_index, len(timed)):
+            end = float(timed[end_index]["end"])
+            duration = end - start
+            if duration > maximum:
+                break
+            if duration >= minimum:
+                if target_position is None and duration >= target:
+                    target_position = len(endpoints)
+                endpoints.append(end_index)
+        if not endpoints:
+            continue
+
+        left = target_position - 1 if target_position is not None else len(endpoints) - 1
+        right = target_position if target_position is not None else len(endpoints)
+        while left >= 0 or right < len(endpoints):
+            if left < 0:
+                end_index = endpoints[right]
+                right += 1
+            elif right >= len(endpoints):
+                end_index = endpoints[left]
+                left -= 1
+            else:
+                left_end = float(timed[endpoints[left]]["end"])
+                right_end = float(timed[endpoints[right]]["end"])
+                if abs(left_end - start - target) <= abs(right_end - start - target):
+                    end_index = endpoints[left]
+                    left -= 1
+                else:
+                    end_index = endpoints[right]
+                    right += 1
+            end = float(timed[end_index]["end"])
+            segment = timed[start_index:end_index + 1]
+            eligible, _, _ = candidate_quality(segment)
+            if eligible:
+                candidates_by_start[start_bucket] = (start, end, segment)
+                break
+
+    candidates = sorted(candidates_by_start.values(), key=lambda candidate: (candidate[0], candidate[1]))
+    # Score only the temporally sampled outputs; scores do not affect high-volume
+    # selection, so scoring every capacity candidate is wasted work on long sources.
+    candidates = _spread_temporal_items(candidates, requested)
+    return [Candidate(start, end, segment, _score(segment, style, target)) for start, end, segment in candidates]
+
+
+def _high_volume_shortfall(requested: int, valid_windows: int, source_duration: float, window_kind: str):
+    """Apply the under-30-minute fallback only after a planner proves a shortage."""
+    if source_duration < 1800:
+        effective = min(requested, 300, valid_windows)
+        reason = (
+            f"Requested {requested}; FFprobe validated a {source_duration:.1f}s source under 30 minutes and "
+            f"the {window_kind} planner found {valid_windows} valid windows. The short-source fallback "
+            f"uses min(requested, 300, valid windows), so the effective target is {effective}."
+        )
+    else:
+        effective = min(requested, valid_windows)
+        reason = (
+            f"Requested {requested}; FFprobe validated a {source_duration:.1f}s source and the {window_kind} "
+            f"planner found only {valid_windows} valid windows, so the effective target is {effective}."
+        )
+    return effective, reason
+
+
 class QueueFullError(RuntimeError):
     pass
 
@@ -161,7 +269,12 @@ def uses_fast_pipeline(processing_mode: str | None, content_format: str | None) 
 def job_uses_fast_pipeline(job: Job, private: dict[str, Any]) -> bool:
     if job.source_profile == "music":
         return False
-    return uses_fast_pipeline(job_processing_mode(job, private), job_content_format(job, private))
+    high_volume_smart_landscape = (
+        private.get("batch_mode", job.batch_mode) == "high_volume"
+        and job_content_format(job, private) == "long"
+        and job_processing_mode(job, private) == "smart"
+    )
+    return uses_fast_pipeline(job_processing_mode(job, private), job_content_format(job, private)) and not high_volume_smart_landscape
 
 
 def can_retry_import(job: Job, private: dict[str, Any]) -> bool:
@@ -729,6 +842,8 @@ class JobManager:
 
     def _finish_render_steps(self, job: Job, private: dict[str, Any], successful: list[Clip], failed: list[Clip], output_dir: Path, noun: str, ready_label: str) -> None:
         total = len(job.clips)
+        job.planned_count = total
+        job.successful_count = len(successful)
         if failed and not successful:
             self.fail_step(job, "render", detail=f"All {len(failed)} {noun} failed", private=private)
             render_step = self._step_by_id(job, "render")
@@ -846,6 +961,28 @@ class JobManager:
             project.updated_at = now_iso()
             self.db.save_project(project)
 
+    def _resolve_batch_target(self, job: Job, private: dict[str, Any], source_duration: float) -> int:
+        existing = private.get("effective_target", job.effective_target)
+        if isinstance(existing, int) and 0 <= existing <= 500:
+            return existing
+        project = self.db.get_project(job.project_id)
+        requested = int(private.get("count", project.requested_count if project else 1))
+        mode = str(private.get("batch_mode", job.batch_mode))
+        target, explanation = resolve_batch_target(requested, mode, source_duration)
+        private["effective_target"] = target
+        private["cap_explanation"] = explanation
+        job.batch_mode = mode if mode in {"standard", "high_volume"} else "standard"
+        job.effective_target = target
+        job.cap_explanation = explanation
+        if project:
+            project.batch_mode = job.batch_mode
+            project.effective_target = target
+            project.cap_explanation = explanation
+            project.updated_at = now_iso()
+            self.db.save_project(project)
+        self._save(job, private)
+        return target
+
     def _publication_folder(self, job: Job) -> tuple[str, str | None]:
         """Resolve the folder for the next output publication.
 
@@ -909,6 +1046,8 @@ class JobManager:
             "published_at": published_at, "selected": True, "error": None,
         })
         published = sum(1 for item in job.clips if item.state == "complete" and item.id != clip.id) + 1
+        job.planned_count = len(job.clips)
+        job.successful_count = published
         render_step = next((step for step in job.steps if step.id == "render"), None)
         if render_step:
             self._apply_step(job, render_step, status="active", detail=f"{published} of {len(job.clips)} rendered and saved", current=published, total=len(job.clips))
@@ -1185,14 +1324,19 @@ class JobManager:
         return chosen
 
     def _plan_smart_candidates(self, job: Job, private: dict[str, Any], words: list[dict[str, Any]]):
-        requested = int(private["count"])
-        pool = select_candidates(
-            words, job.style, min(30, max(requested, requested * 3)),
-            float(private["min_duration"]), float(private["max_duration"]),
-        )
+        requested = int(private.get("effective_target", private["count"]))
+        high_volume = private.get("batch_mode", job.batch_mode) == "high_volume"
+        if high_volume:
+            source_duration = float((private.get("source_metadata") or {}).get("duration", 0))
+            pool = _high_volume_smart_candidates(words, job.style, requested, float(private["min_duration"]), float(private["max_duration"]), source_duration)
+        else:
+            pool = select_candidates(
+                words, job.style, min(30, max(requested, requested * 3)),
+                float(private["min_duration"]), float(private["max_duration"]),
+            )
         if not pool:
             return []
-        if not private.get("use_openrouter"):
+        if high_volume or not private.get("use_openrouter"):
             self.start_step(job, "local_planning", detail="Using deterministic local planning", label="Planning clips locally", progress=33, private=private)
             chosen = pool[:requested]
             self.complete_step(job, "local_planning", detail=f"{len(chosen)} candidates planned locally", private=private)
@@ -1253,6 +1397,7 @@ class JobManager:
             requirement = "readable sung vocals" if job.source_profile == "music" else "speech"
             raise MediaError(f"This video has no readable audio track. Automatic clips require {requirement}; retain it as a source for manual editing.")
         source_duration = float(metadata["duration"])
+        target = self._resolve_batch_target(job, private, source_duration)
         if job.source_profile == "music":
             feasible_count = math.floor((source_duration + 1e-9) / float(private["min_duration"]))
             if feasible_count < int(private["count"]):
@@ -1303,16 +1448,31 @@ class JobManager:
             if not self._cooperate(job):
                 self._save(job)
                 return
-            candidates = select_music_candidates(words, job.style, int(private["count"]), float(private["min_duration"]), float(private["max_duration"])) if profile == "music" else self._plan_smart_candidates(job, private, words)
+            candidates = select_music_candidates(words, job.style, target, float(private["min_duration"]), float(private["max_duration"])) if profile == "music" else self._plan_smart_candidates(job, private, words)
             if profile == "music":
                 self.start_step(job, "local_planning", detail="Grouping timed words into lyric lines", label="Grouping lyric lines locally", progress=33, private=private)
                 self.complete_step(job, "local_planning", detail=f"{len(candidates)} duration-bounded lyric windows planned", private=private)
             self.start_step(job, "select", detail="Selecting complete moments", label="Finding coherent, complete moments", progress=34, private=private)
-            if not candidates:
+            if not candidates and private.get("batch_mode", job.batch_mode) != "high_volume":
                 if profile == "music":
                     raise MediaError("The lyric transcript did not contain a timed, non-overlapping line group inside the requested duration range")
                 raise MediaError("The transcript did not contain a valid complete moment inside the requested duration range")
-            if len(candidates) < int(private["count"]):
+            if len(candidates) < target and private.get("batch_mode", job.batch_mode) == "high_volume":
+                requested_count = int(private.get("count", target))
+                final_target, reason = _high_volume_shortfall(requested_count, len(candidates), source_duration, "timed-transcript")
+                job.effective_target = final_target
+                private["effective_target"] = final_target
+                job.cap_explanation = reason
+                private["cap_explanation"] = reason
+                project = self.db.get_project(job.project_id)
+                if project:
+                    project.effective_target = final_target
+                    project.cap_explanation = reason
+                    self.db.save_project(project)
+                candidates = _spread_temporal_items(candidates, final_target)
+                job.warnings.append(reason)
+                self._save(job, private)
+            elif len(candidates) < int(private["count"]):
                 if profile == "music":
                     job.warnings.append(f"Found {len(candidates)} duration-bounded lyric windows instead of {private['count']}; no clips were padded or duplicated, and sparse or unclear vocals may reduce the count.")
                 else:
@@ -1341,6 +1501,7 @@ class JobManager:
                 clips.append(clip)
             job.clips = clips
             job.total_items = len(clips)
+            job.planned_count = len(clips)
             self._save(job, private)
             self.complete_step(job, "select", detail=f"{len(clips)} moments selected", private=private)
             self.start_step(job, "boundaries", detail="Verifying clip boundaries against the source timeline", label="Verifying clip boundaries", progress=36, private=private)
@@ -1494,6 +1655,7 @@ class JobManager:
             metadata = probe(source, self.settings)
             private["source_metadata"] = metadata
             self.complete_step(job, "probe", detail=_probe_detail(metadata), private=private)
+        target = self._resolve_batch_target(job, private, float(metadata["duration"]))
         for warning in _source_quality_warnings(metadata):
             if warning not in job.warnings:
                 job.warnings.append(warning)
@@ -1501,23 +1663,30 @@ class JobManager:
             self._save(job)
             return
         if job.clips:
-            requested_start = float(private.get("trim_start", job.clips[0].start))
-            requested_end = private.get("trim_end")
-            if requested_start < 0 or requested_start >= float(metadata["duration"]):
-                raise MediaError(f"Start trim must fall within the {float(metadata['duration']):.2f}-second source")
-            resolved_end = float(metadata["duration"]) if requested_end is None else float(requested_end)
-            if resolved_end <= requested_start or resolved_end > float(metadata["duration"]):
-                raise MediaError(f"End trim must be greater than start and within the {float(metadata['duration']):.2f}-second source")
-            job.clips = [clip.model_copy(update={"start": requested_start, "end": resolved_end, "duration": resolved_end - requested_start}) for clip in job.clips]
+            if "trim_start" in private:
+                requested_start = float(private["trim_start"])
+                requested_end = private.get("trim_end")
+                if requested_start < 0 or requested_start >= float(metadata["duration"]):
+                    raise MediaError(f"Start trim must fall within the {float(metadata['duration']):.2f}-second source")
+                resolved_end = float(metadata["duration"]) if requested_end is None else float(requested_end)
+                if resolved_end <= requested_start or resolved_end > float(metadata["duration"]):
+                    raise MediaError(f"End trim must be greater than start and within the {float(metadata['duration']):.2f}-second source")
+                if len(job.clips) != 1:
+                    raise MediaError("A source trim can only be applied to its single editor clip")
+                job.clips[0] = job.clips[0].model_copy(update={"start": requested_start, "end": resolved_end, "duration": resolved_end - requested_start})
+            elif any(clip.start < 0 or clip.end <= clip.start or clip.end > float(metadata["duration"]) for clip in job.clips):
+                raise MediaError("A persisted fast-cut window falls outside the validated source timeline")
             job.total_items = len(job.clips)
             self._save(job, private)
         if not job.clips:
             is_long_form = job_content_format(job, private) == "long"
             plan_label = "Planning deterministic landscape scenes" if is_long_form else "Planning neutral fast-cut windows"
             self.start_step(job, "plan", detail=plan_label, label=plan_label, progress=28, private=private)
-            plan = _media_fn("plan_long_form_windows" if is_long_form else "plan_fast_windows")
+            high_volume = private.get("batch_mode", job.batch_mode) == "high_volume"
+            plan_name = ("plan_long_form_high_volume_windows" if is_long_form else "plan_fast_high_volume_windows") if high_volume else ("plan_long_form_windows" if is_long_form else "plan_fast_windows")
+            plan = _media_fn(plan_name)
             windows, warning = plan(
-                metadata["duration"], int(private["count"]), float(private["min_duration"]),
+                metadata["duration"], target, float(private["min_duration"]),
                 float(private["max_duration"]), self.settings.fast_guard_seconds,
             )
             if warning:
@@ -1525,6 +1694,21 @@ class JobManager:
                     job.warnings.append(warning)
                 else:
                     job.warnings.extend(str(item) for item in warning)
+            if high_volume and len(windows) < target:
+                requested_count = int(private.get("count", target))
+                effective, reason = _high_volume_shortfall(requested_count, len(windows), float(metadata["duration"]), "source-timeline")
+                job.effective_target = effective
+                job.cap_explanation = reason
+                private["effective_target"] = effective
+                private["cap_explanation"] = reason
+                project = self.db.get_project(job.project_id)
+                if project:
+                    project.effective_target = effective
+                    project.cap_explanation = reason
+                    self.db.save_project(project)
+                job.warnings.append(reason)
+                windows = windows[:effective]
+                self._save(job, private)
             if not windows:
                 raise MediaError("The source did not contain a window long enough for a fast cut")
             job.clips = [
@@ -1535,6 +1719,7 @@ class JobManager:
                 for index, (start, end) in enumerate(windows, 1)
             ]
             job.total_items = len(job.clips)
+            job.planned_count = len(job.clips)
             self._save(job, private)
             self.complete_step(job, "plan", detail=f"{len(job.clips)} {'landscape scenes' if is_long_form else 'windows'} planned across the source", private=private)
         output_dir = self.settings.data_path / "jobs" / job.id / "clips"
@@ -2018,7 +2203,8 @@ class JobManager:
         new_job = Job(
             id=new_id, project_id=job.project_id, library_folder_id=job.library_folder_id,
             source_blob_id=job.source_blob_id, mode="clip", content_format=job.content_format, processing_mode="fast",
-            state="queued", stage="queued", stage_label="Queued on this machine",
+            requested_count=job.requested_count, batch_mode=job.batch_mode, effective_target=job.effective_target,
+            cap_explanation=job.cap_explanation, state="queued", stage="queued", stage_label="Queued on this machine",
             progress=0, style=job.style, burn_subtitles=bool(new_private.get("burn_subtitles", job.burn_subtitles)), steps=self._fast_steps(),
         )
         self.db.save_job(new_job, new_private)

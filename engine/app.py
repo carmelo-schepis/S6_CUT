@@ -26,7 +26,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from . import __version__
 from .config import settings
 from .database import Database, MAX_FOLDER_DEPTH, UNSORTED_FOLDER_ID
-from .jobs import JobManager, ProjectDeletingError, QueueFullError, SwitchFastError, can_retry_import, uses_fast_pipeline
+from .jobs import JobManager, ProjectDeletingError, QueueFullError, SwitchFastError, can_retry_import, resolve_batch_target, uses_fast_pipeline
 from .library import LibraryRules
 from .media import _SUBTITLE_PRESETS, MediaError, available, caption_font_mismatches, probe, validate_video_upload
 from .models import (
@@ -370,7 +370,8 @@ async def create_clip_job(
     style: Annotated[Literal["funny", "serious", "educational", "hype"], Form()] = "educational",
     processing_mode: Annotated[Literal["fast", "smart", "auto"], Form()] = "auto",
     source_profile: Annotated[Literal["speech", "music"], Form()] = "speech",
-    count: Annotated[int, Form(ge=1, le=30)] = 5,
+    count: Annotated[int, Form(ge=1, le=500)] = 5,
+    batch_mode: Annotated[Literal["standard", "high_volume"], Form()] = "standard",
     min_duration: Annotated[float, Form(ge=8, le=120)] = 20,
     max_duration: Annotated[float, Form(ge=10, le=1800)] = 60,
     content_format: Annotated[ContentFormat, Form()] = "short",
@@ -390,8 +391,12 @@ async def create_clip_job(
         raise HTTPException(429, "The local processing queue is full. Try again after an active job completes.")
     if bool(file) == bool(url and url.strip()):
         raise HTTPException(422, "Provide exactly one local video or supported YouTube URL")
+    if batch_mode == "standard" and count > 30:
+        raise HTTPException(422, "Standard batches support at most 30 outputs. Choose High-volume mode for up to 500.")
     if min_duration >= max_duration:
         raise HTTPException(422, "Minimum duration must be shorter than maximum duration")
+    if source_profile == "music" and batch_mode == "high_volume":
+        raise HTTPException(422, "High-volume batches are available for Speech sources; Music keeps its existing non-overlapping planner.")
     if source_profile == "music" and content_format != "short":
         raise HTTPException(422, "Music / sung vocals is currently available for short clips only")
     if content_format == "short" and max_duration > 180:
@@ -400,13 +405,15 @@ async def create_clip_job(
         aspect_ratio = "16:9"
     source_limit = settings.max_long_source_seconds if content_format == "long" else settings.max_source_seconds
     project_id, job_id = str(uuid.uuid4()), str(uuid.uuid4())
+    effective_target: int | None = None
+    cap_explanation: str | None = None
     smart_available = profiles.smart_available()
     mode = "smart" if source_profile == "music" else resolve_processing_mode(processing_mode, smart_available)
     private: dict[str, object] = {
-        "count": count, "min_duration": min_duration, "max_duration": max_duration,
+        "count": count, "batch_mode": batch_mode, "min_duration": min_duration, "max_duration": max_duration,
         "aspect_ratio": aspect_ratio, "content_format": content_format, "processing_mode": mode,
         "burn_subtitles": burn_subtitles, "embed_subtitles": embed_subtitles,
-        "use_openrouter": mode == "smart" and smart_available and source_profile == "speech",
+        "use_openrouter": mode == "smart" and smart_available and source_profile == "speech" and batch_mode == "standard",
         "library_folder_id": library_folder_id,
         "subscribe_animation": _subscribe_animation_request(subscribe_animation).model_dump(),
     }
@@ -439,8 +446,20 @@ async def create_clip_job(
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         source_name, source_kind = "YouTube import", "youtube"
-    project = Project(id=project_id, name=_project_name(name, Path(source_name).stem), mode="clip", style=style, state="queued", source_name=source_name, source_kind=source_kind, requested_count=count, content_format=content_format, source_profile=source_profile, latest_job_id=job_id, library_folder_id=library_folder_id)
-    steps = manager._fast_steps() if uses_fast_pipeline(mode, content_format) else manager._smart_steps(bool(private["use_openrouter"]), source_profile)
+    if isinstance(private.get("source_metadata"), dict):
+        effective_target, cap_explanation = resolve_batch_target(count, batch_mode, float(private["source_metadata"]["duration"]))
+        private["effective_target"] = effective_target
+        private["cap_explanation"] = cap_explanation
+    elif batch_mode == "high_volume":
+        cap_explanation = "Effective target will be confirmed after YouTube download and FFprobe validation."
+    project = Project(id=project_id, name=_project_name(name, Path(source_name).stem), mode="clip", style=style, state="queued", source_name=source_name, source_kind=source_kind, requested_count=count, batch_mode=batch_mode, effective_target=effective_target, cap_explanation=cap_explanation, content_format=content_format, source_profile=source_profile, latest_job_id=job_id, library_folder_id=library_folder_id)
+    high_volume_smart_landscape = batch_mode == "high_volume" and content_format == "long" and mode == "smart"
+    steps = manager._fast_steps() if uses_fast_pipeline(mode, content_format) and not high_volume_smart_landscape else manager._smart_steps(bool(private["use_openrouter"]), source_profile)
+    if batch_mode == "high_volume" and mode == "smart":
+        provider_step = next((step for step in steps if step.id == "openrouter"), None)
+        if provider_step:
+            provider_step.label = "Provider bypassed for high-volume planning"
+            provider_step.detail = "Large candidate searches are resolved locally from timed transcript windows"
     if source_kind == "upload":
         checkpoint_time = now_iso()
         steps[0].status, steps[0].detail = "complete", "Upload atomically stored"
@@ -449,7 +468,7 @@ async def create_clip_job(
             steps[1].status = "complete"
             steps[1].detail = f"Source validated - {float(source_metadata['duration']):.1f}s"
             steps[1].started_at = steps[1].completed_at = checkpoint_time
-    job = Job(id=job_id, project_id=project_id, library_folder_id=library_folder_id, mode="clip", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style=style, processing_mode=mode, content_format=content_format, source_profile=source_profile, burn_subtitles=burn_subtitles, embed_subtitles=embed_subtitles, steps=steps)
+    job = Job(id=job_id, project_id=project_id, library_folder_id=library_folder_id, mode="clip", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style=style, processing_mode=mode, content_format=content_format, source_profile=source_profile, requested_count=count, batch_mode=batch_mode, effective_target=effective_target, cap_explanation=cap_explanation, burn_subtitles=burn_subtitles, embed_subtitles=embed_subtitles, steps=steps)
     db.save_project(project)
     db.save_job(job, private)
     try:

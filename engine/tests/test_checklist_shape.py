@@ -18,7 +18,7 @@ import pytest
 from engine.app import settings
 from engine.config import Settings
 from engine.database import Database
-from engine.jobs import ChecklistShapeError, JobManager, uses_fast_pipeline
+from engine.jobs import ChecklistShapeError, JobManager, job_uses_fast_pipeline, uses_fast_pipeline
 from engine.library import LibraryRules
 from engine.models import Job, Project
 from engine.providers import ProfileService
@@ -59,6 +59,21 @@ def _long_smart_job(db: Database, manager: JobManager, *, state: str = "failed")
 def test_long_form_smart_job_is_routed_to_the_fast_pipeline() -> None:
     assert uses_fast_pipeline("smart", "long") is True
     assert uses_fast_pipeline("smart", "short") is False
+
+
+def test_high_volume_long_form_smart_job_uses_transcript_planning_checklist(tmp_path_local: Path) -> None:
+    db, manager = _cluster(tmp_path_local)
+    smart_ids = {step.id for step in manager._smart_steps(False)}
+    job = Job(
+        id="j-high-volume-long-smart", project_id="p", mode="clip", state="queued", stage="queued",
+        stage_label="Queued", progress=0, style="funny", processing_mode="smart", content_format="long",
+        batch_mode="high_volume", requested_count=500, steps=manager._smart_steps(False),
+    )
+    private = {
+        "batch_mode": "high_volume", "content_format": "long", "processing_mode": "smart", "count": 500,
+    }
+    assert job_uses_fast_pipeline(job, private) is False
+    assert manager._required_step_ids(job, private) == smart_ids
 
 
 def test_persisted_smart_checklist_on_a_long_form_job_is_rebuilt_before_processing(tmp_path_local: Path) -> None:

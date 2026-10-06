@@ -80,6 +80,32 @@ describe("Projects create flow", () => {
     await waitFor(() => expect(mockCreateClipJob).toHaveBeenCalledWith(expect.objectContaining({ contentFormat: "long", aspectRatio: "16:9" })));
   });
 
+  it("accepts direct 500 entry only in High-volume mode and submits that mode", async () => {
+    mockCreateClipJob.mockResolvedValue({ project: { ...project, requestedCount: 500, batchMode: "high_volume" }, job: undefinedJob });
+    render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /High-volume/ }));
+    const count = screen.getByRole("spinbutton", { name: "Clips requested" });
+
+    fireEvent.change(count, { target: { value: "500" } });
+    expect(count).toHaveValue(500);
+
+    fireEvent.click(screen.getByRole("tab", { name: "YouTube" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "YouTube URL" }), { target: { value: "https://www.youtube.com/watch?v=fixture" } });
+    fireEvent.click(screen.getByRole("button", { name: /Create 500 short clips/i }));
+    await waitFor(() => expect(mockCreateClipJob).toHaveBeenCalledWith(expect.objectContaining({ batchMode: "high_volume", count: 500 })));
+  });
+
+  it.each(["0", "501", "1.5"]) ("rejects invalid High-volume count %s before submission", (value) => {
+    render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /High-volume/ }));
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Clips requested" }), { target: { value } });
+    fireEvent.click(screen.getByRole("tab", { name: "YouTube" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "YouTube URL" }), { target: { value: "https://www.youtube.com/watch?v=fixture" } });
+    fireEvent.click(screen.getByRole("button", { name: /Create .* short clips/i }));
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(mockCreateClipJob).not.toHaveBeenCalled();
+  });
+
   it("rejects a long-form minimum duration above the engine boundary before submitting", async () => {
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
     fireEvent.click(screen.getByRole("tab", { name: "YouTube" }));
