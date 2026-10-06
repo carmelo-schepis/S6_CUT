@@ -23,6 +23,7 @@ import {
   type ContentFormat,
   type ProcessingMode,
   type SourceProfile,
+  type MusicPresentationConfig,
   type Project,
   type ProviderProfile,
   type OpenRouterModel,
@@ -189,6 +190,8 @@ type ClipJobInput = {
   embedSubtitles?: boolean;
   subscribeAnimation?: SubscribeAnimationConfig;
   libraryFolderId?: string;
+  musicPresentation?: MusicPresentationConfig;
+  musicTopText?: string;
 };
 
 export async function createClipJob(input: ClipJobInput): Promise<{ project: Project; job: Job }> {
@@ -208,6 +211,10 @@ export async function createClipJob(input: ClipJobInput): Promise<{ project: Pro
   form.set("embed_subtitles", String(input.embedSubtitles ?? false));
   if (input.libraryFolderId) form.set("library_folder_id", input.libraryFolderId);
   if (input.subscribeAnimation) form.set("subscribe_animation", JSON.stringify(input.subscribeAnimation));
+  if (input.sourceProfile === "music") {
+    form.set("music_presentation", JSON.stringify(input.musicPresentation ?? { version: 1, subtitleTheme: "clean" }));
+    if (input.musicTopText !== undefined) form.set("music_top_text", input.musicTopText);
+  }
   const value = await request<{ project: unknown; job: unknown }>("/jobs/clip", { method: "POST", body: form });
   return { project: projectSchema.parse(value.project), job: jobSchema.parse(value.job) };
 }

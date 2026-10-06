@@ -84,6 +84,11 @@ class CaptionCue(ApiModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class MusicPresentationConfig(ApiModel):
+    version: Literal[1] = 1
+    subtitle_theme: Literal["clean", "warm", "serif"] = "clean"
+
+
 class Clip(ApiModel):
     id: str
     index: int = Field(ge=1)
@@ -106,6 +111,8 @@ class Clip(ApiModel):
     blob_id: str | None = None
     # Exact attribution passed to the renderer and recorded only on publication.
     creator_credit: str | None = Field(default=None, max_length=140)
+    music_top_text: str | None = Field(default=None, max_length=100)
+    music_treatment: Literal["color", "grayscale"] | None = None
     # DO-NOT-CHANGE: engine-set only, after the publication transaction commits —
     # the UI never displays this from optimistic state
     library_asset_id: str | None = None
@@ -184,6 +191,8 @@ class Job(ApiModel):
     processing_mode: ProcessingMode = "smart"
     content_format: ContentFormat = "short"
     source_profile: Literal["speech", "music"] = "speech"
+    music_presentation: MusicPresentationConfig | None = None
+    music_top_text: str | None = Field(default=None, max_length=100)
     # Snapshot of the user's caption choice; legacy payloads default safely on.
     burn_subtitles: bool = True
     embed_subtitles: bool = False

@@ -95,6 +95,15 @@
       "use": "Burned-in caption text face (clean neutral sans with real heavy weights)",
       "vendoredAt": "engine/fonts/barlow",
       "licenceFile": "engine/fonts/barlow/OFL.txt"
+    },
+    {
+      "name": "Lora",
+      "version": "3.007 (google/fonts ofl/lora; repository commit 7085eb89a950e85db5b166b7a58d414544b4140c)",
+      "licence": "SIL Open Font License 1.1",
+      "source": "https://github.com/google/fonts/tree/7085eb89a950e85db5b166b7a58d414544b4140c/ofl/lora",
+      "use": "Music presentation serif subtitle theme",
+      "vendoredAt": "engine/fonts/lora",
+      "licenceFile": "engine/fonts/lora/OFL.txt"
     }
   ]
 }
