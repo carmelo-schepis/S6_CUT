@@ -80,30 +80,109 @@ describe("Projects create flow", () => {
     await waitFor(() => expect(mockCreateClipJob).toHaveBeenCalledWith(expect.objectContaining({ contentFormat: "long", aspectRatio: "16:9" })));
   });
 
-  it("accepts direct 500 entry only in High-volume mode and submits that mode", async () => {
+  it.each([1, 37, 500])("shows %i as the requested high-volume count and in Create", (value) => {
+    render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /High-volume/ }));
+    const count = screen.getByLabelText("Clips requested");
+    fireEvent.change(count, { target: { value: String(value) } });
+    expect(count).toHaveValue(String(value));
+    expect(screen.getByRole("button", { name: new RegExp(`Create ${value} short clips?`, "i") })).toBeEnabled();
+  });
+
+  it.each(["501", "9999"])("corrects pasted/entered high-volume count %s to 500 immediately", (value) => {
+    render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /High-volume/ }));
+    const count = screen.getByLabelText("Clips requested");
+    fireEvent.change(count, { target: { value } });
+    expect(count).toHaveValue("500");
+    expect(screen.getByRole("button", { name: /Create 500 short clips/i })).toBeEnabled();
+  });
+
+  it("allows clearing then typing 250 without forcing zero or losing input focus", () => {
+    render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /High-volume/ }));
+    const count = screen.getByLabelText("Clips requested");
+    count.focus();
+    fireEvent.change(count, { target: { value: "" } });
+    expect(count).toHaveValue("");
+    expect(count).toHaveFocus();
+    for (const digit of ["2", "5", "0"]) {
+      fireEvent.change(count, { target: { value: `${(count as HTMLInputElement).value}${digit}` } });
+      expect(count).toHaveFocus();
+    }
+    expect(count).toHaveValue("250");
+    expect(screen.getByRole("button", { name: /Create 250 short clips/i })).toBeEnabled();
+  });
+
+  it.each(["", "0", "-1"])("normalizes blank or non-positive count %s on blur and Create", async (value) => {
+    render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /High-volume/ }));
+    const count = screen.getByLabelText("Clips requested");
+    fireEvent.change(count, { target: { value } });
+    fireEvent.blur(count);
+    expect(count).toHaveValue("1");
+    fireEvent.click(screen.getByRole("tab", { name: "YouTube" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "YouTube URL" }), { target: { value: "https://www.youtube.com/watch?v=fixture" } });
+    fireEvent.click(screen.getByRole("button", { name: /Create 1 short clip/i }));
+    await waitFor(() => expect(mockCreateClipJob).toHaveBeenCalledWith(expect.objectContaining({ count: 1 })));
+  });
+
+  it.each(["", "0", "-1"])("normalizes a blank or non-positive high-volume count on Create (%s)", async (value) => {
+    mockCreateClipJob.mockResolvedValue({ project, job: undefinedJob });
+    render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    fireEvent.click(screen.getByRole("tab", { name: "YouTube" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "YouTube URL" }), { target: { value: "https://www.youtube.com/watch?v=fixture" } });
+    fireEvent.click(screen.getByRole("button", { name: /High-volume/ }));
+    const count = screen.getByRole("textbox", { name: "Clips requested" });
+    fireEvent.change(count, { target: { value } });
+    fireEvent.click(screen.getByRole("button", { name: /Create 1 short clip/i }));
+    await waitFor(() => expect(mockCreateClipJob).toHaveBeenCalledWith(expect.objectContaining({ count: 1 })));
+    expect(count).toHaveValue("1");
+  });
+
+  it.each(["1.5", "abc"])("does not submit malformed high-volume count %s", (value) => {
+    render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /High-volume/ }));
+    const count = screen.getByLabelText("Clips requested");
+    fireEvent.change(count, { target: { value } });
+    fireEvent.click(screen.getByRole("tab", { name: "YouTube" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "YouTube URL" }), { target: { value: "https://www.youtube.com/watch?v=fixture" } });
+    fireEvent.click(screen.getByRole("button", { name: /Create .* short clips?/i }));
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(mockCreateClipJob).not.toHaveBeenCalled();
+  });
+
+  it("submits a corrected 500 high-volume count and mode", async () => {
     mockCreateClipJob.mockResolvedValue({ project: { ...project, requestedCount: 500, batchMode: "high_volume" }, job: undefinedJob });
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: /High-volume/ }));
-    const count = screen.getByRole("spinbutton", { name: "Clips requested" });
-
-    fireEvent.change(count, { target: { value: "500" } });
-    expect(count).toHaveValue(500);
-
+    const count = screen.getByLabelText("Clips requested");
+    fireEvent.change(count, { target: { value: "501" } });
+    expect(count).toHaveValue("500");
     fireEvent.click(screen.getByRole("tab", { name: "YouTube" }));
     fireEvent.change(screen.getByRole("textbox", { name: "YouTube URL" }), { target: { value: "https://www.youtube.com/watch?v=fixture" } });
     fireEvent.click(screen.getByRole("button", { name: /Create 500 short clips/i }));
     await waitFor(() => expect(mockCreateClipJob).toHaveBeenCalledWith(expect.objectContaining({ batchMode: "high_volume", count: 500 })));
   });
 
-  it.each(["0", "501", "1.5"]) ("rejects invalid High-volume count %s before submission", (value) => {
+  it.each(["Standard · up to 30", "Music / sung vocals"])("caps a 500 count at 30 when switching to %s", (mode) => {
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: /High-volume/ }));
-    fireEvent.change(screen.getByRole("spinbutton", { name: "Clips requested" }), { target: { value } });
-    fireEvent.click(screen.getByRole("tab", { name: "YouTube" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "YouTube URL" }), { target: { value: "https://www.youtube.com/watch?v=fixture" } });
-    fireEvent.click(screen.getByRole("button", { name: /Create .* short clips/i }));
-    expect(screen.getByRole("alert")).toBeInTheDocument();
-    expect(mockCreateClipJob).not.toHaveBeenCalled();
+    const count = screen.getByLabelText("Clips requested");
+    fireEvent.change(count, { target: { value: "500" } });
+    fireEvent.click(screen.getByRole("button", { name: mode === "Standard · up to 30" ? /Standard · up to 30/ : "Music / sung vocals" }));
+    expect(screen.getByText("30")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Create 30 short clips/i })).toBeInTheDocument();
+  });
+
+  it("uses the Scenes requested label and same high-volume count behavior for Long form", () => {
+    render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Long form · 16:9/i }));
+    fireEvent.click(screen.getByRole("button", { name: /High-volume/ }));
+    const count = screen.getByLabelText("Scenes requested");
+    fireEvent.change(count, { target: { value: "501" } });
+    expect(count).toHaveValue("500");
+    expect(screen.getByRole("button", { name: /Create 500 landscape clips/i })).toBeEnabled();
   });
 
   it("rejects a long-form minimum duration above the engine boundary before submitting", async () => {

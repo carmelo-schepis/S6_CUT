@@ -554,6 +554,11 @@ select { line-height: var(--type-text-line); }
 main { min-width: 0; }
 .count-control input { width: 100%; min-width: 0; min-height: var(--control-height); border: 0; background: var(--surface-2); color: var(--text-primary); text-align: center; font-variant-numeric: tabular-nums; }
 .count-control button:disabled { opacity: .5; }
+.high-volume-count-field { display: grid; gap: var(--space-1); width: min(100%, 14rem); }
+.high-volume-count-input { width: 100%; min-height: var(--control-height-large); padding: var(--control-pad-y) var(--space-3); border: 1px solid var(--control-border); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text-primary); font: inherit; font-variant-numeric: tabular-nums; }
+.high-volume-count-input:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.high-volume-count-input[aria-invalid="true"] { border-color: var(--error); }
+.high-volume-count-input::-webkit-inner-spin-button, .high-volume-count-input::-webkit-outer-spin-button { appearance: none; margin: 0; }
 .form-hint { margin: 0; color: var(--text-primary); overflow-wrap: anywhere; }
 .batch-summary { display: grid; gap: var(--space-1); margin: 0 0 var(--space-3); padding: var(--space-3) var(--space-4); border: 1px solid var(--border); border-left: 3px solid var(--theme-primary); border-radius: var(--radius-md); background: var(--surface-2); color: var(--text-primary); }
 .batch-summary p { margin: 0; overflow-wrap: anywhere; }

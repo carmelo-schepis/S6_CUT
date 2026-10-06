@@ -37,6 +37,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
   const [script, setScript] = useState("");
   const [style, setStyle] = useState<Style>("educational");
   const [count, setCount] = useState(5);
+  const [highVolumeCount, setHighVolumeCount] = useState("5");
   const [batchMode, setBatchMode] = useState<BatchMode>("standard");
   const [contentFormat, setContentFormat] = useState<ContentFormat>("short");
   const [advanced, setAdvanced] = useState(false);
@@ -97,6 +98,14 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
 
   const submit = () => singleFlight(async () => {
     setError(null);
+    const rawHighVolumeCount = highVolumeCount.trim();
+    const highVolumeCountValue = rawHighVolumeCount === "" ? 1 : Number(rawHighVolumeCount);
+    if (mode === "clip" && batchMode === "high_volume" && rawHighVolumeCount !== "" && !/^-?[0-9]+$/.test(rawHighVolumeCount)) {
+      return setError("Requested count must be a whole number from 1 to 500.");
+    }
+    const requestedCount = mode === "clip" && batchMode === "high_volume"
+      ? Math.min(500, Math.max(1, highVolumeCountValue))
+      : count;
     if (mode === "clip" && sourceType === "file" && !file) return setError("Choose a local video first.");
     if (mode === "clip" && sourceType === "url") {
       if (!url.trim()) return setError("Paste a supported YouTube URL first.");
@@ -112,7 +121,9 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
     }
     if (mode === "script" && script.trim().length < 10) return setError("Add at least 10 characters of script.");
     if (mode === "clip") {
-      if (!Number.isInteger(count) || count < 1 || count > (batchMode === "high_volume" ? 500 : 30)) return setError(batchMode === "high_volume" ? "High-volume batches support 1–500 requested outputs." : "Standard batches support 1–30 requested outputs.");
+      if (!Number.isFinite(requestedCount) || !Number.isInteger(requestedCount) || requestedCount < 1 || requestedCount > (batchMode === "high_volume" ? 500 : 30)) return setError(batchMode === "high_volume" ? "High-volume batches support 1–500 requested outputs." : "Standard batches support 1–30 requested outputs.");
+      setCount(requestedCount);
+      if (batchMode === "high_volume") setHighVolumeCount(String(requestedCount));
       if (!Number.isFinite(minDuration) || minDuration < 8) return setError("Minimum seconds must be at least 8.");
       if (minDuration > 120) return setError("Minimum seconds must be at most 120.");
       if (!Number.isFinite(maxDuration) || maxDuration <= minDuration) return setError("Maximum seconds must be greater than minimum seconds.");
@@ -127,7 +138,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
         ? await createClipJob({
           file: sourceType === "file" ? file || undefined : undefined,
           url: sourceType === "url" ? url.trim() : undefined,
-          name: projectName.trim() || undefined, style, count, minDuration, maxDuration,
+          name: projectName.trim() || undefined, style, count: requestedCount, minDuration, maxDuration,
           aspectRatio: contentFormat === "long" ? "16:9" : aspectRatio,
           contentFormat, batchMode,
           processingMode: sourceProfile === "music" ? "smart" : processingMode,
@@ -160,7 +171,13 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
   const musicConfigurationMessage = sourceProfile === "music" && contentFormat !== "short"
     ? "Music / sung vocals is currently available for short clips only. Choose Short form to continue."
     : null;
-  const musicFeasibilityMessage = sourceProfile === "music" && knownSourceDuration !== null && Number.isFinite(minDuration) && minDuration > 0 && count > Math.floor((knownSourceDuration + 1e-9) / minDuration)
+  const rawActiveCount = highVolumeCount.trim();
+  const activeCount = batchMode === "high_volume"
+    ? rawActiveCount === "" || !/^-?[0-9]+$/.test(rawActiveCount)
+      ? 1
+      : Math.min(500, Math.max(1, Number(rawActiveCount)))
+    : count;
+  const musicFeasibilityMessage = sourceProfile === "music" && knownSourceDuration !== null && Number.isFinite(minDuration) && minDuration > 0 && activeCount > Math.floor((knownSourceDuration + 1e-9) / minDuration)
     ? `This ${knownSourceDuration.toFixed(1)}s source can fit at most ${Math.floor(knownSourceDuration / minDuration)} non-overlapping clips of at least ${minDuration}s. Reduce the count or minimum duration; the requested count will not be changed automatically.`
     : null;
   const modeNote = batchMode === "high_volume"
@@ -189,7 +206,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
         <div className="create-mode-controls">
           <div className="segmented" aria-label="Creation mode">
             <button type="button" aria-pressed={mode === "clip" && sourceProfile === "speech"} className={mode === "clip" && sourceProfile === "speech" ? "active" : ""} onClick={() => { setError(null); setMode("clip"); setSourceProfile("speech"); }}><Film size={15} /> Clip mode</button>
-            <button type="button" aria-label="Music / sung vocals" aria-pressed={mode === "clip" && sourceProfile === "music"} className={mode === "clip" && sourceProfile === "music" ? "active" : ""} onClick={() => { setError(null); setMode("clip"); setSourceProfile("music"); setBatchMode("standard"); setCount(Math.min(count, 30)); setContentFormat("short"); setAspectRatio("9:16"); setBurnSubtitles(true); }}><span className="music-mode-icon" aria-hidden="true">♫</span> Music mode</button>
+            <button type="button" aria-label="Music / sung vocals" aria-pressed={mode === "clip" && sourceProfile === "music"} className={mode === "clip" && sourceProfile === "music" ? "active" : ""} onClick={() => { setError(null); setMode("clip"); setSourceProfile("music"); setBatchMode("standard"); setCount(Math.min(30, batchMode === "high_volume" ? Math.min(500, Math.max(1, Number(highVolumeCount) || 1)) : count)); setContentFormat("short"); setAspectRatio("9:16"); setBurnSubtitles(true); }}><span className="music-mode-icon" aria-hidden="true">♫</span> Music mode</button>
           </div>
           <button type="button" className={`script-mode-link${mode === "script" ? " active" : ""}`} aria-pressed={mode === "script"} onClick={() => { setError(null); setMode("script"); }}><FileText size={14} /> Script mode</button>
         </div>
@@ -250,14 +267,22 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
                 <button type="button" aria-pressed={contentFormat === "short"} className={contentFormat === "short" ? "active" : ""} onClick={() => { setContentFormat("short"); setAspectRatio("9:16"); }}>Short form · 9:16</button>
                 <button type="button" aria-pressed={contentFormat === "long"} className={contentFormat === "long" ? "active" : ""} disabled={sourceProfile === "music"} onClick={() => { setContentFormat("long"); setAspectRatio("16:9"); }}>Long form · 16:9</button>
               </div>
-              <Field label={contentFormat === "long" ? "Scenes requested" : "Clips requested"}>
-                <div className="count-control"><button type="button" disabled={count <= 1} onClick={() => setCount(Math.max(1, count - 1))} aria-label="Fewer clips">−</button>{batchMode === "standard" ? <strong aria-live="polite">{count}</strong> : <input aria-label={contentFormat === "long" ? "Scenes requested" : "Clips requested"} type="number" min={1} max={500} step={1} value={count} onChange={(event) => setCount(Number(event.target.value))} />}<button type="button" disabled={count >= (batchMode === "standard" ? 30 : 500)} onClick={() => setCount(Math.min(batchMode === "standard" ? 30 : 500, count + 1))} aria-label="More clips">+</button></div>
+              <Field label={contentFormat === "long" ? "Scenes requested" : "Clips requested"} hint={batchMode === "high_volume" ? "1–500" : undefined}>
+                {batchMode === "standard" ? <div className="count-control"><button type="button" disabled={count <= 1} onClick={() => setCount(Math.max(1, count - 1))} aria-label="Fewer clips">−</button><strong aria-live="polite">{count}</strong><button type="button" disabled={count >= 30} onClick={() => setCount(Math.min(30, count + 1))} aria-label="More clips">+</button></div> : <div className="high-volume-count-field"><input className="high-volume-count-input" aria-label={contentFormat === "long" ? "Scenes requested" : "Clips requested"} type="text" inputMode="numeric" value={highVolumeCount} aria-invalid={highVolumeCount.trim() !== "" && !/^-?[0-9]+$/.test(highVolumeCount.trim())} onChange={(event) => {
+                  const value = event.target.value;
+                  if (/^-?[0-9]+$/.test(value) && Number(value) > 500) setHighVolumeCount("500");
+                  else setHighVolumeCount(value);
+                }} onBlur={() => {
+                  const value = highVolumeCount.trim();
+                  if (value === "") setHighVolumeCount("1");
+                  else if (/^-?[0-9]+$/.test(value) && Number(value) < 1) setHighVolumeCount("1");
+                }} />{highVolumeCount.trim() !== "" && !/^-?[0-9]+$/.test(highVolumeCount.trim()) && <span className="form-hint" aria-live="polite">Enter a whole number from 1 to 500.</span>}</div>}
               </Field>
             </FieldGroup>
             <FieldGroup title="Batch size" hint={batchMode === "standard" ? "Standard keeps the existing planning behavior and limit of 30." : "High-volume allows up to 500 requested cuts. If the source cannot satisfy the request, the engine explains its effective target."}>
               <div className="segmented mode-tabs" aria-label="Batch size">
-                <button type="button" aria-pressed={batchMode === "standard"} className={batchMode === "standard" ? "active" : ""} onClick={() => { setBatchMode("standard"); setCount(Math.min(count, 30)); }}>Standard · up to 30</button>
-                <button type="button" aria-pressed={batchMode === "high_volume"} className={batchMode === "high_volume" ? "active" : ""} disabled={sourceProfile === "music"} onClick={() => setBatchMode("high_volume")}>High-volume · up to 500</button>
+                <button type="button" aria-pressed={batchMode === "standard"} className={batchMode === "standard" ? "active" : ""} onClick={() => { const value = highVolumeCount.trim(); const next = value !== "" && /^[0-9]+$/.test(value) ? Number(value) : count; setCount(Math.min(30, Math.max(1, next))); setBatchMode("standard"); }}>Standard · up to 30</button>
+                <button type="button" aria-pressed={batchMode === "high_volume"} className={batchMode === "high_volume" ? "active" : ""} disabled={sourceProfile === "music"} onClick={() => { setHighVolumeCount(String(count)); setBatchMode("high_volume"); }}>High-volume · up to 500</button>
               </div>
               {sourceProfile === "music" && <p className="form-hint">Music keeps its existing non-overlapping planner and Standard batch limit.</p>}
               {batchMode === "high_volume" && sourceType === "url" && <p className="form-hint" role="status">The effective target is pending YouTube download and server-side FFprobe validation.</p>}
@@ -300,7 +325,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
           <div className="create-actions">
             {(musicConfigurationMessage || musicFeasibilityMessage) && <p className="form-error" role="status">{musicConfigurationMessage || musicFeasibilityMessage}</p>}
             {error && <p className="form-error" role="alert">{error}</p>}
-            <Button variant="primary" className="create-button" disabled={submitting || health?.ffmpeg === false || Boolean(musicConfigurationMessage || musicFeasibilityMessage)} onClick={submit}>{submitting ? "Creating…" : <><Plus size={16} /> {mode === "clip" ? `Create ${count} ${contentFormat === "long" ? "landscape clip" : "short clip"}${count === 1 ? "" : "s"}` : "Create script video"}</>}</Button>
+            <Button variant="primary" className="create-button" disabled={submitting || health?.ffmpeg === false || Boolean(musicConfigurationMessage || musicFeasibilityMessage)} onClick={submit}>{submitting ? "Creating…" : <><Plus size={16} /> {mode === "clip" ? `Create ${activeCount} ${contentFormat === "long" ? "landscape clip" : "short clip"}${activeCount === 1 ? "" : "s"}` : "Create script video"}</>}</Button>
           </div>
         </div>
 
