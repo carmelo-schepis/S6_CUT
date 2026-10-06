@@ -260,7 +260,7 @@ test("real authorized sung-vocal Music presentation: all themes, render, playbac
       const captionStyle = assResponse.text.split("\n").find((line: string) => line.startsWith("Style: Caption,"));
       const topStyle = assResponse.text.split("\n").find((line: string) => line.startsWith("Style: MusicTop,"));
       if (!captionStyle || !topStyle) throw new Error("Music ASS sidecar is missing its caption or top-text style");
-      const expectedFont = theme === "clean" || theme === "warm" ? "Barlow" : theme === "serif" ? "Lora" : referenceSans ? "Roboto Condensed" : "Bodoni Moda";
+      const expectedFont = theme === "clean" ? "Barlow" : theme === "warm" || theme === "serif" ? "Lora" : referenceSans ? "Roboto Condensed" : "Bodoni Moda";
       expect(captionStyle.split(",")[1]).toBe(expectedFont);
       const expectedColor = theme === "warm" ? "&H0000D7FF&" : theme === "reference_yellow_sans" ? "&H00AAE8F5&" : "&H00FFFFFF&";
       expect(captionStyle.split(",")[4]).toBe(expectedColor);
