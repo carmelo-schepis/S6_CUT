@@ -12,7 +12,7 @@ const folder = { id: "folder-1", name: "Unsorted", description: "", color: null,
 
 const health = {
   status: "ready", version: "test", database: true, ffmpeg: true, ffprobe: true, whisper: true,
-  ytdlp: true, localTts: true, dataPath: "Mounted local data directory", freeBytes: 10_000_000,
+  ytdlp: true, localTts: false, dataPath: "Mounted local data directory", freeBytes: 10_000_000,
   configuredWorkers: 1, activeWorkers: 0, queuedJobs: 0, fallbacks: {},
 };
 

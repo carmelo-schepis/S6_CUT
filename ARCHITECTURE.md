@@ -27,17 +27,19 @@ FastAPI media engine :8001
 
 For local debugging the engine API is also reachable on the host loopback only (http://127.0.0.1:8001, e.g. `/api/docs`); it is never bound to a network-visible interface.
 
+Script mode and AI Video creation are retired. Historical Script jobs remain readable and completed outputs remain downloadable/exportable, but interrupted work is terminalized and cannot be resumed.
+
 The browser owns interaction state. The engine is authoritative for projects, jobs, timed transcripts, Library metadata/rules, profiles, provenance, and produced artifacts. Every UI update is derived from a durable record; server-sent events accelerate updates and the workspace falls back to polling after disconnect.
 
 ## Durable job sequence
 
 1. Stream an upload into a `.uploading` file with a hard byte limit, then atomically promote it.
 2. Validate the source with FFprobe before creating processing work.
-3. Create the project and immutable job settings snapshot in SQLite. Clip jobs record a resolved `processing_mode`: `auto` becomes `smart` only when the selected OpenRouter profile is configured and connected, otherwise `fast` (legacy jobs default to `smart`).
+3. Create the project and immutable job settings snapshot in SQLite. Clip jobs record a resolved `processing_mode`: `auto` becomes `smart` only when the selected OpenRouter profile is configured and connected, otherwise `fast`. Legacy defaults remain for reading old records only.
 4. Before announcing each stage/result, save the SQLite job and atomically replace `jobs/<uuid>/state.json`.
 5. Smart mode transcribes with visible Whisper model stages; fast mode skips transcription, providers, selection, Library resolution, and captions entirely — it probes, plans neutral windows with `plan_fast_windows`, and renders each cut independently with `render_fast_clip` (silent sources allowed).
 6. Generate sentence-aware, duration-bounded, deterministic candidates and score components.
-7. For Clip mode, resolve an eligible personal Library asset only as an optional overlay; the imported source remains the video. Script-mode visual beats may use an explicit relevant text card when no eligible asset matches.
+7. For Clip mode, resolve an eligible personal Library asset only as an optional overlay; the imported source remains the video. Historical visual metadata remains attached to old records but is not used to create or rerender work.
 8. Render each clip independently to a partial filename, probe its structure, then atomically publish.
 9. Hash each validated source/output into `blobs/sha256`, using a same-filesystem hard link when possible and an atomic copy fallback otherwise. In one SQLite transaction, bind the blob, project/job/clip reference, idempotent Library asset, typed origin, and immutable business-folder snapshot. Temporary or failed files never cross this boundary.
 10. Keep successful clips if another render fails; failed clips remain scoped and retryable. Recovery repeats publication safely using stable source/clip identities.
@@ -53,9 +55,8 @@ The canonical job/clip/beat records are the first versioned EDL. FFmpeg consumes
 
 1. centre/subject-safe source crop;
 2. Library visual overlay where a valid matched file exists;
-3. for Script mode only, a relevant text-card visual beat when no eligible asset matches;
 4. word-by-word ASS captions with current-word highlight;
-5. source speech or generated narration.
+5. source speech.
 
 The source file and Library sources are immutable. Manual editing can create later EDL versions without transcoding over originals. Business folders are metadata-only organizational containers, never filesystem or security boundaries. Physical blobs are eligible for retention cleanup only after their durable reference count reaches zero. The Settings Library purge is an explicit destructive operation: after exact confirmation and a queued/active-job safety check, it removes all Library assets, cascades linked projects and generated media, bypasses protected-item safeguards only for that operation, and preserves profiles, secrets, settings, the database, and folder records.
 

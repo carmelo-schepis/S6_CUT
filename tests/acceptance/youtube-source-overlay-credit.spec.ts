@@ -63,7 +63,7 @@ test("renders a clean Smart YouTube Short with a bottom-edge creator credit", as
     projectId = created.project.id;
     expect(created.project.sourceKind).toBe("youtube");
     expect(created.job.processingMode).toBe("smart");
-    await waitForProjectReady(page, new Set(), "clip", deadlineMs);
+    await waitForProjectReady(page, new Set(), deadlineMs);
     const outputDir = path.join(artifacts, "output");
     const clips = await collectClips(page, projectName, outputDir);
     expect(clips).toHaveLength(1);

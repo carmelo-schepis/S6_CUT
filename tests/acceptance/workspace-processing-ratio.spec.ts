@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 const health = {
   status: "ready", version: "test", database: true, ffmpeg: true, ffprobe: true,
-  whisper: true, ytdlp: true, localTts: true, dataPath: "/app/data", freeBytes: 1_000_000,
+  whisper: true, ytdlp: true, localTts: false, dataPath: "/app/data", freeBytes: 1_000_000,
   configuredWorkers: 1, activeWorkers: 1, queuedJobs: 0, fallbacks: {},
 };
 

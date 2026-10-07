@@ -12,7 +12,7 @@ for (const [w, h] of VPS) {
   const notes = [];
 
   // Every nav destination must be reachable by click at this size.
-  for (const s of ["Library", "Jobs", "Settings", "Shorts Editor", "AI Video", "Projects"]) {
+  for (const s of ["Library", "Jobs", "Settings", "Shorts Editor", "Projects"]) {
     try {
       await page.getByRole("button", { name: s, exact: true }).first().click({ timeout: 5000 });
       await page.waitForTimeout(700);

@@ -106,7 +106,7 @@ class SourcePolicy:
     third-party permission has somewhere to say so later.
     """
 
-    kinds: frozenset[str] = frozenset({"upload", "youtube", "script"})
+    kinds: frozenset[str] = frozenset({"upload", "youtube"})
 
     def accepts(self, source_kind: str) -> bool:
         return source_kind in self.kinds

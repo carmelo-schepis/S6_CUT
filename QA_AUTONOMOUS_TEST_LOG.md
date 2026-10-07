@@ -1,3 +1,5 @@
+> Historical QA record: Script mode and AI Video described below have since been retired. These entries document past behavior, not supported current workflows.
+
 # Autonomous Playwright QA log
 
 Started: 2026-09-12  

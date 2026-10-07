@@ -30,8 +30,6 @@ import {
   type OpenRouterModel,
   type Style,
   type SubscribeAnimationConfig,
-  topicVideoPlanSchema,
-  type TopicVideoPlan,
 } from "./types";
 
 const API = "/api/v1";
@@ -54,7 +52,6 @@ const fieldLabels: Record<string, string> = {
   name: "Project name",
   url: "YouTube URL",
   file: "Video file",
-  script: "Script",
   start: "Start seconds",
   end: "End seconds",
 };
@@ -222,24 +219,6 @@ export async function createClipJob(input: ClipJobInput): Promise<{ project: Pro
   return { project: projectSchema.parse(value.project), job: jobSchema.parse(value.job) };
 }
 
-export async function createScriptJob(input: {
-  script: string;
-  name?: string;
-  style: Style;
-  aspectRatio: string;
-  contentFormat?: ContentFormat;
-  narration: "auto" | "local" | "silent";
-  subscribeAnimation?: SubscribeAnimationConfig;
-  libraryFolderId?: string;
-}): Promise<{ project: Project; job: Job }> {
-  const value = await request<{ project: unknown; job: unknown }>("/jobs/script", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...input, contentFormat: input.contentFormat ?? "short" }),
-  });
-  return { project: projectSchema.parse(value.project), job: jobSchema.parse(value.job) };
-}
-
 export async function createShortsJob(input: { assetId: string; name?: string; burnSubtitles?: boolean; embedSubtitles?: boolean; subscribeAnimation?: SubscribeAnimationConfig; start: number; end?: number; aspectRatio: "9:16" | "16:9" | "1:1" | "4:5"; libraryFolderId?: string }): Promise<{ project: Project; job: Job }> {
   const value = await request<{ project: unknown; job: unknown }>("/jobs/shorts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...input, embedSubtitles: input.embedSubtitles ?? false }) });
   return { project: projectSchema.parse(value.project), job: jobSchema.parse(value.job) };
@@ -263,10 +242,6 @@ export async function createShortsSourceJob(input: { file?: File; url?: string; 
 export async function listOpenRouterModels(outputModalities?: "text" | "speech"): Promise<OpenRouterModel[]> {
   const query = outputModalities ? `?outputModalities=${encodeURIComponent(outputModalities)}` : "";
   return openRouterModelSchema.array().parse(await request(`/openrouter/models${query}`));
-}
-
-export async function createTopicPlan(input: { topic: string; audience: string; tone: string; language: string; callToAction: string; instructions: string; durationSeconds: number; aspectRatio: string; variants: number; customScript: string; modelId?: string }): Promise<TopicVideoPlan> {
-  return topicVideoPlanSchema.parse(await request("/ai/topic-plan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) }));
 }
 
 export async function listJobs(): Promise<Job[]> {

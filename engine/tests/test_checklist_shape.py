@@ -104,7 +104,6 @@ def test_repair_preserves_proven_render_counters_and_leaves_complete_jobs_alone(
 def test_every_pipeline_gets_the_checklist_its_processor_asks_for(tmp_path_local: Path) -> None:
     db, manager = _cluster(tmp_path_local)
     smart_ids = {step.id for step in manager._smart_steps(False)}
-    script_ids = {step.id for step in manager._script_steps()}
     for content_format in ("short", "long"):
         for processing_mode in ("fast", "smart"):
             job = Job(
@@ -116,12 +115,6 @@ def test_every_pipeline_gets_the_checklist_its_processor_asks_for(tmp_path_local
             private = {"content_format": content_format, "processing_mode": processing_mode}
             expected = FAST_IDS if uses_fast_pipeline(processing_mode, content_format) else smart_ids
             assert manager._required_step_ids(job, private) == expected, (content_format, processing_mode)
-
-    script = Job(
-        id="j-script", project_id="p", mode="script", state="queued", stage="queued",
-        stage_label="Queued", progress=0, style="funny", steps=[], clips=[], beats=[], warnings=[],
-    )
-    assert manager._required_step_ids(script, {}) == script_ids
 
 
 def test_missing_step_reports_a_customer_safe_message(tmp_path_local: Path) -> None:

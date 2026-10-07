@@ -329,7 +329,6 @@ class TestWhisperModelCached:
             ffmpeg="ffmpeg",
             ffprobe="ffprobe",
             ytdlp="yt-dlp",
-            local_tts="espeak-ng",
         )
         assert is_whisper_model_cached(s) is False
         assert _whisper_model_cache_path(s) is None
@@ -647,5 +646,4 @@ def _settings_with(existing: Settings, data_path: Path, **overrides: Any) -> Set
         ffmpeg=existing.ffmpeg,
         ffprobe=existing.ffprobe,
         ytdlp=existing.ytdlp,
-        local_tts=existing.local_tts,
     )

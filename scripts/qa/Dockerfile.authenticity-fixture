@@ -1,0 +1,8 @@
+ARG BASE_IMAGE=s6-cut-engine
+FROM ${BASE_IMAGE}
+
+USER root
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends espeak-ng \
+    && rm -rf /var/lib/apt/lists/*
+USER 10001:10001

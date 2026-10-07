@@ -84,11 +84,10 @@ export async function checklist(page: Page) {
 /**
  * Poll the workspace until the job reaches a terminal, ready state.
  *
- * Clip projects publish one tile per output; Script projects publish a single
- * rendered video that the viewer auto-selects and a storyboard of beats, with
- * no clip tiles at all — so readiness is mode-aware.
+ * Clip projects publish one tile per output, so readiness requires a completed
+ * Clip tile as well as the terminal project checklist state.
  */
-export async function waitForProjectReady(page: Page, observed: Set<string>, mode: "clip" | "script" = "clip", deadlineMs = OVERALL_DEADLINE_MS) {
+export async function waitForProjectReady(page: Page, observed: Set<string>, deadlineMs = OVERALL_DEADLINE_MS) {
   const deadline = Date.now() + deadlineMs;
   let lastLog = 0;
   while (Date.now() < deadline) {
@@ -97,9 +96,7 @@ export async function waitForProjectReady(page: Page, observed: Set<string>, mod
     }
     const ready = await page.locator(".process-checklist li").filter({ hasText: "Project ready" })
       .evaluateAll((rows) => rows.some((row) => /status-complete/.test(row.className)));
-    const complete = mode === "clip"
-      ? await page.locator(".clip-tile.complete").count()
-      : await page.locator(".viewer-frame video").count();
+    const complete = await page.locator(".clip-tile.complete").count();
     const failedBanner = await page.getByText("Project failed", { exact: true }).count();
     if (failedBanner) throw new Error("The project reported a global failure while waiting for outputs");
     if (ready && complete > 0) {

@@ -1,5 +1,7 @@
 # Implementation status
 
+> Historical implementation snapshot. Script mode, AI Video, Script rendering, and speech narration were subsequently retired. Existing Script records remain readable and completed outputs retain download/export/deletion compatibility; interrupted jobs are terminalized rather than resumed. OpenRouter text planning remains supported.
+
 Updated: 2026-09-11
 
 ## Implemented and wired to the UI

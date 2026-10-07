@@ -36,7 +36,7 @@ Do not rediscover these; confirm them and move on.
 | Playwright browsers | already installed (`~/Library/Caches/ms-playwright`: chromium-1234, chromium-1243, chromium_headless_shell-1234, ffmpeg-1011) |
 | Python venv | `.venv/bin/python` is 3.12.14 |
 | Docker | Docker Desktop installed; **daemon was NOT running** — you must start it |
-| **ffmpeg / ffprobe / yt-dlp / espeak-ng are NOT on the host** | they exist only inside the `engine` container — run them with `docker compose exec -T engine …` |
+| **ffmpeg / ffprobe / yt-dlp are NOT on the host** | they exist only inside the `engine` container — run them with `docker compose exec -T engine …` |
 
 **A non-interactive shell does not load the user's PATH.** Begin every shell block with:
 
@@ -51,7 +51,7 @@ cd /Users/dummy/Documents/S6_CUT
 - `web` (nginx) publishes **http://127.0.0.1:8080** — the only LAN-facing port. All browser work goes here.
 - `engine` (FastAPI) binds loopback **http://127.0.0.1:8001**, API docs at `/api/docs`. Use for corroboration only, never as a substitute for the UI.
 - `pot-provider` (`brainicism/bgutil-ytdlp-pot-provider`) supplies YouTube PO tokens; `engine` will not start until it is healthy. **If YouTube imports fail, check this container first.**
-- UI is React 19 + Vite, seven rail destinations: Projects, Library, Workspace, Shorts Editor, AI Video, Jobs, Settings, plus a Help dialog.
+- UI is React 19 + Vite, six rail destinations: Projects, Library, Workspace, Shorts Editor, Jobs, Settings, plus a Help dialog. Script mode and AI Video are retired.
 - **There are no `data-testid` attributes.** Select by `getByRole`, `getByLabel`, and the stable class names listed in §6.
 
 ### Timing reality
@@ -89,7 +89,7 @@ curl -fsS http://127.0.0.1:8080/api/health | tee test-artifacts/"$RUN"/logs/gate
 curl -fsS http://127.0.0.1:8001/api/health | tee test-artifacts/"$RUN"/logs/engine-health.json
 ```
 
-**Gate:** `/api/health` must report `status: ready` with `ffmpeg`, `ffprobe`, `whisper`, `ytdlp`, `localTts`, and `database` all true. If `ytdlp` is false, stop and fix that before touching the UI — every YouTube case depends on it.
+**Gate:** `/api/health` must report `status: ready` with `ffmpeg`, `ffprobe`, `whisper`, `ytdlp`, and `database` all true. If `ytdlp` is false, stop and fix that before touching the UI — every YouTube case depends on it.
 
 Record image IDs, container start times, and `docker compose config` output into `logs/deployment.txt`.
 
@@ -286,7 +286,7 @@ Walk all of these. Each row goes into `coverage.csv` with evidence. At **1440×1
 - Zero uncaught page errors; zero console errors other than the known benign COOP notice; zero HTTP ≥400 (record every one)
 
 ### 6.2 Projects
-- `Clip mode` / `Script mode` segmented control, `aria-pressed` correct
+- Clip and Music / sung vocals creation options
 - Source tabs `Local file` / `YouTube` (roles are `tab`)
 - Drop zone: Browse button, Enter/Space activation, drag-enter styling, multi-file drop rejected with "Choose one video file at a time.", unsupported extension rejected with the MP4/MOV/WebM/MKV/M4V/AVI message
 - YouTube field rejects `http://`, non-YouTube hosts, and malformed URLs with "Only public HTTPS YouTube URLs are supported."; accepts `youtube.com`, `m.youtube.com`, `youtu.be`, and URLs carrying extra query params
@@ -297,7 +297,6 @@ Walk all of these. Each row goes into `coverage.csv` with evidence. At **1440×1
 - Burn-in subtitles checkbox
 - Advanced controls: expands, aspect 9:16 / 1:1 / 16:9 / 4:5, min seconds (≥8), max seconds (>min; ≤180 for short form). Verify each error string fires.
 - Project name (160 char max), Business folder select, **New folder** (`window.prompt` — handle the dialog), last-used folder persisted in `localStorage` under `s6-cut.recent-library-folder`
-- Script mode: textarea, character counter, `.txt`/`.md` upload, rejection of other extensions, <10 char error, Narration select (auto / local / silent)
 - Create is disabled when `health.ffmpeg === false`
 - Recent clips: verify asset-backed search, refresh, playable previews, pagination, and **View in Library** selection. The Recent projects section is intentionally absent; reopen existing work from **Jobs & recovery**.
 
@@ -330,15 +329,8 @@ Walk all of these. Each row goes into `coverage.csv` with evidence. At **1440×1
 - AI editing assistant: duration ("make it 20 seconds"), start/end, aspect ("use 1:1"), subtitles ("add captions"); proposal intent ("propose …") must **not** apply until `Apply proposal`, and `Reject` must discard; unsupported requests ("centre the speaker") must return the honest refusal
 - ⚠ Pressing **Enter** in the assistant input (see §9.4)
 
-### 6.5 AI Video (Topic to Video)
-- Provider status row: `Checking connected providers…` → connected/not configured
-- With no provider: `Configure OpenRouter` button routes to Settings; the custom-script path still plans locally
-- With a provider: model picker populates, `Refresh models`, the charge warning names the chosen model, and the models-error state offers Retry
-- Brief fields; Target seconds 10–180; Aspect select; Variants clamped 1–3
-- `Create / refresh plan` → plan review panel shows title, hook, narration, beat count, estimated duration, hashtags
-- Changing provider or model after planning must show "Create a new plan for the selected model" and disable Generate
-- `Generate reviewed video(s)` queues exactly `variants` script jobs, named `<title> — Variant N`
-- **If no OpenRouter key is available for this run**, cover the entire custom-script (local planning) path fully and mark the provider-backed rows `BLOCKED`, not `PASS`.
+### Retired workflows
+Script mode and AI Video creation are no longer available. Existing Script records are read-only; verify download/export/deletion compatibility only.
 
 ### 6.6 Jobs
 - Card per job, CLIP/SCRIPT tag, stage label, state badge, style, age, "N outputs ready"
@@ -351,7 +343,7 @@ Walk all of these. Each row goes into `coverage.csv` with evidence. At **1440×1
 
 ### 6.7 Settings
 - `New profile` / `Add profile` opens the form; auto-opens when no profile exists
-- Fields: name, secret storage (encrypted / session), OpenRouter key with show/hide toggle, text model, TTS model (datalist + `Refresh speech models`), TTS voice datalist, TTS speed 0.25–4
+- Fields: name, secret storage (encrypted / session), OpenRouter key with show/hide toggle, text model, legacy speech metadata is preserved when editing/saving a profile, but speech controls are not exposed
 - `Save and test connection` runs a real test; connection results show per-service status, message, and last-checked time
 - `Use profile`, `Test`, `Edit`, `Duplicate`, `Delete` (with confirm)
 - **Saved secrets are never returned** — assert the key field is empty on reopen and that `GET /api/v1/profiles` contains only the mask

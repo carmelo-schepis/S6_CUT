@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { requireIsolatedTarget, watchErrors } from "./support/recent-clips";
+import { createClipProject, waitForProjectReady } from "./support/workspace";
 
 test("Projects stays free of Recent projects after restart while creation and navigation still work", async ({ page }) => {
   const isolated = requireIsolatedTarget();
@@ -41,23 +42,15 @@ test("Projects stays free of Recent projects after restart while creation and na
   await expect(page.getByRole("button", { name: "Workspace", exact: true })).toHaveAttribute("aria-current", "page");
   await expect(page.locator("main h1")).toBeVisible();
 
-  const projectName = `RC disposable script ${Date.now()}`;
-  await page.getByRole("button", { name: "Projects", exact: true }).click();
-  await expect(page.getByRole("region", { name: "Create a project" })).toBeVisible();
-  await page.getByRole("button", { name: "Script mode", exact: true }).click();
-  await page.locator(".script-input-wrap textarea").fill(
-    "A small disposable script acceptance project checks that the Projects creation flow still opens its own Workspace. " +
-    "It exists only in the isolated recent clips stack and is removed with that stack after the test.",
-  );
-  await page.getByLabel("Project name").fill(projectName);
-  await page.getByLabel("Narration source").selectOption("local");
-  await page.getByRole("button", { name: "Create script video", exact: true }).click();
-
+  const projectName = `RC disposable clip ${Date.now()}`;
+  const source = process.env.S6_SCRIPT_REMOVAL_MP4 || process.env.S6_AUTHENTICITY_FIXTURE || "tests/fixtures/openrouter-fallback.mp4";
+  await createClipProject(page, { name: projectName, count: 1, mode: "Fast", aspect: "9:16", min: 8, max: 20, captions: false, source: { kind: "file", path: source } });
+  await waitForProjectReady(page, new Set());
   await expect(page.getByRole("heading", { name: projectName, exact: true })).toBeVisible({ timeout: 60_000 });
   await expect(page.getByRole("button", { name: "Workspace", exact: true })).toHaveAttribute("aria-current", "page");
   const projects = await page.request.get(`${isolated.base}/api/v1/projects`).then((response) => response.json()) as { id: string; name: string }[];
   const created = projects.filter((project) => project.name === projectName);
-  expect(created, "the exact submitted script project exists in the isolated engine").toHaveLength(1);
+  expect(created, "the exact submitted clip project exists in the isolated engine").toHaveLength(1);
   await expect(page.getByRole("heading", { name: projectName, exact: true })).toBeVisible();
 
   expect(browserErrors, browserErrors.join("\n")).toEqual([]);

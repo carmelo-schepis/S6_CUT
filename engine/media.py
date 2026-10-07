@@ -799,13 +799,6 @@ def transcribe(
     return {"language": getattr(info, "language", "unknown"), "words": words, "segments": segment_records}
 
 
-def synthesize_local(text: str, output: Path, settings: Settings) -> Path:
-    run([settings.local_tts, "-v", "en", "-s", "165", "-w", str(output), "--", text], timeout=900)
-    if not output.exists() or output.stat().st_size < 1000:
-        raise MediaError("The local narration engine did not produce playable audio")
-    return output
-
-
 def dimensions(aspect: str) -> tuple[int, int]:
     return {"1:1": (1080, 1080), "16:9": (1920, 1080), "4:5": (1080, 1350), "9:16": (1080, 1920)}.get(aspect, (1080, 1920))
 
@@ -1979,8 +1972,8 @@ def render_fast_clip(
     * Atomic publish via a temporary ``.partial.mp4`` then ``os.replace``.
 
     The output canvas always matches the canonical ``dimensions(aspect)``.
-    When ``words`` are supplied, the same ASS renderer used by Smart and Script
-    burns accurate, clip-relative captions into the output.
+    When ``words`` are supplied, the shared ASS renderer burns accurate,
+    clip-relative captions into the output.
 
     Parameters
     ----------
@@ -2126,35 +2119,4 @@ def render_fast_clip(
     if abs(float(result["duration"]) - duration) > max(0.75, duration * 0.05):
         raise MediaError("Fast clip failed duration validation")
 
-    os.replace(temp, output)
-
-
-# DO-NOT-CHANGE: script render with atomic .partial + os.replace and output validation
-def render_script(output: Path, *, duration: float, aspect: str, narration: Path | None, words: list[dict[str, Any]], visuals: list[tuple[str, float, float]], overlays: list[tuple[Path, float, float]], settings: Settings, style: str = "educational", content_format: str = "short", subscribe_animation: dict[str, Any] | None = None) -> None:
-    output.parent.mkdir(parents=True, exist_ok=True)
-    ass = output.parent / f"{output.stem}.ass"
-    width, height = dimensions(aspect)
-    write_ass(ass, words, offset=0, duration=duration, visuals=visuals, width=width, height=height, style=style, content_format=content_format)
-    write_caption_sidecars(output, words, offset=0, duration=duration, style=style)
-    temp = output.with_suffix(".partial.mp4")
-    command = [settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", f"color=c=0x08080a:s={width}x{height}:r=30:d={duration:.3f}"]
-    audio_index: int | None = None
-    if narration:
-        audio_index = 1
-        command.extend(["-i", str(narration)])
-    asset_start = 2 if narration else 1
-    _overlay_inputs(command, overlays)
-    animation_start = asset_start + len(overlays)
-    subscribe_animations = _subscribe_animation_inputs(command, subscribe_animation, duration, content_format, width, height, animation_start)
-    filters, mapped = _filters(width, height, overlays, asset_start, ass.name, subscribe_animations=subscribe_animations)
-    command.extend(["-filter_complex", filters, "-map", f"[{mapped}]"])
-    if audio_index is not None:
-        command.extend(["-map", f"{audio_index}:a:0", "-c:a", DELIVERY_AUDIO_CODEC, "-b:a", DELIVERY_AUDIO_BITRATE, "-ar", DELIVERY_AUDIO_RATE])
-    else:
-        command.append("-an")
-    command.extend(["-c:v", DELIVERY_VIDEO_CODEC, "-preset", delivery_preset(content_format), "-crf", DELIVERY_CRF, "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-t", f"{duration:.3f}", str(temp)])
-    run(command, cwd=output.parent, timeout=7200)
-    metadata = probe(temp, settings)
-    if metadata["width"] != width or metadata["height"] != height or (narration and not metadata["audio"]):
-        raise MediaError("Rendered script video failed structural output validation")
     os.replace(temp, output)

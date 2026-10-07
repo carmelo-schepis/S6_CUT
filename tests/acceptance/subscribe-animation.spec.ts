@@ -239,12 +239,9 @@ test("Subscribe animation controls persist and affect real rendered/exported med
   const editorControl = page.getByRole("group", { name: "Automatic Subscribe animation" });
   await expect(editorControl.getByRole("checkbox", { name: "Enable Subscribe animation" })).toBeChecked();
   await expect(editorControl.getByRole("combobox", { name: "Subscribe animation timing" })).toBeEnabled();
-  await page.getByRole("button", { name: "AI Video", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Topic to Video" })).toBeVisible();
-  await page.getByLabel("Aspect ratio").selectOption("16:9");
-  await expect(page.getByText(/midpoint and again starting 30 seconds before the end/)).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole("button", { name: "Projects", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
   await expect(page.getByRole("group", { name: "Automatic Subscribe animation" })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("subscribe-controls-mobile.png"), fullPage: true });
   await page.setViewportSize({ width: 1280, height: 900 });

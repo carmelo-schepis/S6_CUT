@@ -260,7 +260,6 @@ export const healthSchema = z.object({
   ffprobe: z.boolean(),
   whisper: z.boolean(),
   ytdlp: z.boolean(),
-  localTts: z.boolean(),
   dataPath: z.string(),
   freeBytes: z.number(),
   configuredWorkers: z.number().int().positive().optional(),
@@ -276,13 +275,12 @@ export const openRouterModelSchema = z.object({
   contextLength: z.number().int().positive().nullable().optional(),
   outputModalities: z.array(z.string()).optional(),
   free: z.boolean().optional(),
-  voices: z.array(z.string()).optional(),
 });
 export type OpenRouterModel = z.infer<typeof openRouterModelSchema>;
 
 export const providerConnectionStatusSchema = z.enum([
   "not_configured", "configured", "connected", "invalid_credentials", "insufficient_balance",
-  "unsupported_model_or_voice", "rate_limited", "timeout_offline", "unavailable",
+  "rate_limited", "timeout_offline", "unavailable",
   "malformed_response", "provider_service_failure",
 ]);
 
@@ -290,19 +288,13 @@ export const profileSchema = z.object({
   id: z.string(),
   name: z.string(),
   textModelId: z.string(),
-  ttsModelId: z.string().nullable().optional(),
-  ttsVoice: z.string().nullable().optional(),
-  ttsSpeed: z.number().positive().default(1),
   selected: z.boolean(),
   persistence: z.enum(["session", "encrypted"]),
   openrouterConfigured: z.boolean(),
   openrouterMasked: z.string().nullable().optional(),
   textStatus: providerConnectionStatusSchema.default("not_configured"),
-  ttsStatus: providerConnectionStatusSchema.default("not_configured"),
   textMessage: z.string().nullable().optional(),
   textLastCheckedAt: z.string().nullable().optional(),
-  ttsMessage: z.string().nullable().optional(),
-  ttsLastCheckedAt: z.string().nullable().optional(),
   status: z.string(),
   capabilities: z.array(z.string()),
   fallbacks: z.record(z.string()),
@@ -389,7 +381,4 @@ export type MatchExplanation = {
   rejected: { assetId: string; title: string; reason: string }[];
 };
 
-export const topicBeatSchema = z.object({ narration: z.string(), seconds: z.number().positive(), keywords: z.array(z.string()), visualAssetId: z.string().nullable().optional() });
-export const topicVideoPlanSchema = z.object({ title: z.string(), hook: z.string(), narration: z.string(), beats: z.array(topicBeatSchema), estimatedDuration: z.number().positive(), description: z.string(), hashtags: z.array(z.string()) });
-export type TopicVideoPlan = z.infer<typeof topicVideoPlanSchema>;
 export const SCHEMA_VERSION = 1 as const;

@@ -25,15 +25,15 @@ import { emitLibraryChanged } from "./library-sync";
 
 const health = {
   status: "ready" as const, version: "0.1.0", database: true, ffmpeg: true, ffprobe: true,
-  whisper: true, ytdlp: true, localTts: true, dataPath: "/app/data", freeBytes: 1,
+  whisper: true, ytdlp: true, dataPath: "/app/data", freeBytes: 1,
   configuredWorkers: 1, activeWorkers: 1, queuedJobs: 0, fallbacks: { media: "text card" },
 };
 
 const profile = {
-  id: "p1", name: "Studio", textModelId: "openai/gpt-4o-mini", ttsModelId: "free/speech", ttsVoice: "alloy", ttsSpeed: 1, selected: true,
+  id: "p1", name: "Studio", textModelId: "openai/gpt-4o-mini", selected: true,
   persistence: "encrypted", openrouterConfigured: true, openrouterMasked: "••••1234", textStatus: "connected" as const,
-  ttsStatus: "connected" as const, textMessage: "Connected", ttsMessage: "Connected", textLastCheckedAt: null, ttsLastCheckedAt: null,
-  status: "connected", capabilities: ["OpenRouter text generation", "OpenRouter TTS"], fallbacks: { planning: "Deterministic planner" },
+  textMessage: "Connected", textLastCheckedAt: null,
+  status: "connected", capabilities: ["OpenRouter text generation"], fallbacks: { planning: "Deterministic planner" },
 };
 
 const activityProject = {

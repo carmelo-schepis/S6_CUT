@@ -273,7 +273,6 @@ class Health(ApiModel):
     ffprobe: bool
     whisper: bool
     ytdlp: bool
-    local_tts: bool
     data_path: str
     free_bytes: int
     configured_workers: int = Field(ge=1)
@@ -286,17 +285,6 @@ class SubscribeAnimationConfig(ApiModel):
     version: Literal[1] = 1
     enabled: bool = False
     short_form_lead_seconds: Literal[5, 10] = 5
-
-
-class ScriptJobInput(ApiModel):
-    script: str = Field(min_length=10, max_length=200_000)
-    content_format: ContentFormat = "short"
-    name: str | None = Field(default=None, max_length=160)
-    style: Style = "educational"
-    aspect_ratio: Literal["9:16", "16:9", "1:1", "4:5"] = "9:16"
-    narration: Literal["auto", "local", "silent"] = "auto"
-    library_folder_id: str = UNSORTED_LIBRARY_FOLDER_ID
-    subscribe_animation: SubscribeAnimationConfig = Field(default_factory=SubscribeAnimationConfig)
 
 
 class SelectionInput(ApiModel):
@@ -334,37 +322,6 @@ class ShortsJobInput(ApiModel):
         return self
 
 
-class TopicVideoInput(ApiModel):
-    topic: str = Field(min_length=1, max_length=500)
-    audience: str = Field(default="", max_length=200)
-    tone: str = Field(default="educational", max_length=100)
-    language: str = Field(default="English", max_length=80)
-    call_to_action: str = Field(default="", max_length=300)
-    instructions: str = Field(default="", max_length=2_000)
-    duration_seconds: int = Field(default=45, ge=10, le=180)
-    aspect_ratio: Literal["9:16", "16:9", "1:1", "4:5"] = "9:16"
-    variants: int = Field(default=1, ge=1, le=3)
-    custom_script: str = Field(default="", max_length=200_000)
-    model_id: str | None = Field(default=None, max_length=200)
-
-
-class TopicBeat(ApiModel):
-    narration: str = Field(min_length=1, max_length=2_000)
-    seconds: float = Field(gt=0, le=60)
-    keywords: list[str] = Field(max_length=10)
-    visual_asset_id: str | None = None
-
-
-class TopicVideoPlan(ApiModel):
-    title: str = Field(min_length=1, max_length=200)
-    hook: str = Field(min_length=1, max_length=500)
-    narration: str = Field(min_length=1, max_length=200_000)
-    beats: list[TopicBeat] = Field(min_length=1, max_length=30)
-    estimated_duration: float = Field(gt=0, le=600)
-    description: str = Field(default="", max_length=2_000)
-    hashtags: list[str] = Field(default_factory=list, max_length=30)
-
-
 class ProjectFolderUpdate(ApiModel):
     folder_id: str
     move_existing_assets: bool = False
@@ -373,9 +330,6 @@ class ProjectFolderUpdate(ApiModel):
 class ProfileInput(ApiModel):
     name: str = Field(min_length=1, max_length=100)
     text_model_id: str = Field(default="openai/gpt-4.1-mini", max_length=200)
-    tts_model_id: str | None = Field(default=None, max_length=200)
-    tts_voice: str | None = Field(default=None, max_length=200)
-    tts_speed: float = Field(default=1.0, ge=0.25, le=4.0)
     openrouter_key: str | None = Field(default=None, max_length=500)
     persistence: Literal["session", "encrypted"] = "encrypted"
     selected: bool = False
@@ -383,7 +337,7 @@ class ProfileInput(ApiModel):
 
 ProviderConnectionStatus = Literal[
     "not_configured", "configured", "connected", "invalid_credentials", "insufficient_balance",
-    "unsupported_model_or_voice", "rate_limited", "timeout_offline", "unavailable",
+    "rate_limited", "timeout_offline", "unavailable",
     "malformed_response", "provider_service_failure",
 ]
 
@@ -394,26 +348,19 @@ class OpenRouterModel(ApiModel):
     context_length: int | None = Field(default=None, ge=1)
     output_modalities: list[str] = Field(default_factory=list, max_length=10)
     free: bool = False
-    voices: list[str] = Field(default_factory=list, max_length=100)
 
 
 class ProviderProfile(ApiModel):
     id: str
     name: str
     text_model_id: str
-    tts_model_id: str | None = None
-    tts_voice: str | None = None
-    tts_speed: float = Field(default=1.0, ge=0.25, le=4.0)
     selected: bool
     persistence: Literal["session", "encrypted"]
     openrouter_configured: bool
     openrouter_masked: str | None = None
     text_status: ProviderConnectionStatus = "not_configured"
-    tts_status: ProviderConnectionStatus = "not_configured"
     text_message: str | None = None
     text_last_checked_at: str | None = None
-    tts_message: str | None = None
-    tts_last_checked_at: str | None = None
     status: str
     capabilities: list[str]
     fallbacks: dict[str, str]

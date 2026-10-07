@@ -1,3 +1,5 @@
+> Historical QA checklist: Script mode and AI Video described below have since been retired. These entries document past behavior, not supported current workflows.
+
 # S6_CUT Autonomous Playwright Test Checklist
 
 ## Run: 2026-09-19/20 (live Docker Playwright sweep)

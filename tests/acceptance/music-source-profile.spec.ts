@@ -3,7 +3,7 @@ import path from "node:path";
 
 const now = "2026-01-01T00:00:00Z";
 const folder = { id: "unsorted", name: "Unsorted", description: "", color: null, parentId: null, archived: false, system: true, createdAt: now, updatedAt: now };
-const health = { status: "ready", version: "fixture", database: true, ffmpeg: true, ffprobe: true, whisper: true, ytdlp: true, localTts: true, dataPath: "Local mounted data directory", freeBytes: 10000000, configuredWorkers: 1, activeWorkers: 0, queuedJobs: 0, fallbacks: {} };
+const health = { status: "ready", version: "fixture", database: true, ffmpeg: true, ffprobe: true, whisper: true, ytdlp: true, localTts: false, dataPath: "Local mounted data directory", freeBytes: 10000000, configuredWorkers: 1, activeWorkers: 0, queuedJobs: 0, fallbacks: {} };
 
 test("Music / sung vocals opts into Smart and sends the durable music profile", async ({ page }) => {
   const project = {
@@ -35,7 +35,7 @@ test("Music / sung vocals opts into Smart and sends the durable music profile", 
 
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Speech" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Clip mode" })).toHaveAttribute("aria-pressed", "true");
   const musicChoice = page.getByRole("button", { name: "Music / sung vocals" });
   await musicChoice.click();
   await expect(musicChoice).toHaveAttribute("aria-pressed", "true");

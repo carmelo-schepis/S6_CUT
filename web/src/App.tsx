@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CircleHelp, BriefcaseBusiness, Film, FolderKanban, HardDrive, Library, LoaderCircle, Scissors, Settings, SlidersHorizontal, Sparkles } from "lucide-react";
+import { CircleHelp, BriefcaseBusiness, Film, FolderKanban, HardDrive, Library, LoaderCircle, Scissors, Settings, SlidersHorizontal } from "lucide-react";
 import { getHealth, listJobs, listProfiles, listProjects, readableError } from "./api";
 import { JobsView } from "./components/jobs-view";
 import { LibraryView } from "./components/library-view";
@@ -9,7 +9,6 @@ import { StatusBadge } from "./components/common";
 import { WorkspaceView } from "./components/workspace-view";
 import { WorkspaceProgressIndicator } from "./components/workspace-progress-indicator";
 import { ShortsEditorView } from "./components/shorts-editor-view";
-import { TopicToVideoView } from "./components/topic-to-video-view";
 import { HelpDialog } from "./components/help-dialog";
 import { PwaStatus } from "./components/pwa-status";
 import { hasLiveWork, jobPollInterval, workspaceActivity } from "./project-status";
@@ -17,7 +16,7 @@ import { onLibraryChanged } from "./library-sync";
 import { usePoll } from "./use-poll";
 import type { Health, Job, Project, ProviderProfile } from "./types";
 
-type Page = "projects" | "library" | "workspace" | "shorts-editor" | "ai-video" | "jobs" | "settings";
+type Page = "projects" | "library" | "workspace" | "shorts-editor" | "jobs" | "settings";
 
 /**
  * Liveness cadence. The poll is self-scheduling, so this is the gap *after* a
@@ -32,7 +31,6 @@ const nav: { id: Page; label: string; name: string; icon: typeof Film }[] = [
   { id: "library", label: "Library", name: "Library", icon: Library },
   { id: "workspace", label: "Workspace", name: "Workspace", icon: SlidersHorizontal },
   { id: "shorts-editor", label: "Editor", name: "Shorts Editor", icon: Scissors },
-  { id: "ai-video", label: "AI Video", name: "AI Video", icon: Sparkles },
   { id: "jobs", label: "Jobs", name: "Jobs", icon: BriefcaseBusiness },
   { id: "settings", label: "Settings", name: "Settings", icon: Settings },
 ];
@@ -227,9 +225,8 @@ export function App() {
       <main id="main-content" tabIndex={-1}>
         {page === "projects" && <ProjectsView health={health} healthChecked={healthChecked} providersLoaded={profilesLoaded} hasSelectedProvider={hasSelectedProvider} onConfigureProviders={openProviders} onCreated={onCreated} onSelectLibraryAsset={openLibraryAsset} />}
         {page === "library" && <LibraryView selectedAssetId={selectedLibraryAssetId} />}
-        {page === "workspace" && <WorkspaceView key={selected?.id || "none"} project={selected} health={health} providersLoaded={profilesLoaded} hasSelectedProvider={hasSelectedProvider} onConfigureProviders={openProviders} onProjectUpdated={refresh} onGoProjects={() => setPage("projects")} />}
+        {page === "workspace" && <WorkspaceView key={selected?.id || "none"} project={selected} providersLoaded={profilesLoaded} hasSelectedProvider={hasSelectedProvider} onConfigureProviders={openProviders} onProjectUpdated={refresh} onGoProjects={() => setPage("projects")} />}
         {page === "shorts-editor" && <ShortsEditorView onJobCreated={refresh} />}
-        {page === "ai-video" && <TopicToVideoView profiles={profiles} profilesLoaded={profilesLoaded} onConfigureProviders={openProviders} onJobCreated={refresh} />}
         {page === "jobs" && <JobsView jobs={jobs} onRefresh={runJobs} onOpenProject={openProject} />}
         {page === "settings" && <SettingsView health={health} onHealthRefresh={refresh} onProfilesChanged={setProfiles} onSkipSetup={() => setPage("projects")} />}
       </main>

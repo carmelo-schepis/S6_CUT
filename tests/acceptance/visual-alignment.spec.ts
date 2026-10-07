@@ -23,7 +23,7 @@ const viewports = [
 ] as const;
 
 /** Every primary destination, by the accessible name on its rail button. */
-const routes = ["Projects", "Library", "Workspace", "Shorts Editor", "AI Video", "Jobs", "Settings"] as const;
+const routes = ["Projects", "Library", "Workspace", "Shorts Editor", "Jobs", "Settings"] as const;
 
 const spread = (values: number[]) => Math.max(...values) - Math.min(...values);
 

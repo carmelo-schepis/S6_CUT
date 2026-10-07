@@ -197,20 +197,16 @@ class Database:
                     continue
                 openrouter_configured = bool(old.get("openrouterConfigured"))
                 text_status = old.get("openrouterStatus", "configured" if openrouter_configured else "not_configured")
-                if text_status == "unavailable_model_or_voice":
+                if text_status in {"unavailable_model_or_voice", "unsupported_model_or_voice"}:
                     text_status = "unavailable"
-                tts_status = "not_configured"
                 new = {
                     "id": old.get("id", row["id"]), "name": old.get("name", "Provider profile"),
-                    "textModelId": old.get("modelId", "openai/gpt-4.1-mini"), "ttsModelId": None,
-                    "ttsVoice": None, "ttsSpeed": 1.0, "selected": bool(old.get("selected")),
+                    "textModelId": old.get("modelId", "openai/gpt-4.1-mini"), "selected": bool(old.get("selected")),
                     "persistence": old.get("persistence", "encrypted"),
                     "openrouterConfigured": openrouter_configured,
                     "openrouterMasked": old.get("openrouterMasked"), "textStatus": text_status,
-                    "ttsStatus": tts_status, "textMessage": old.get("openrouterMessage"),
+                    "textMessage": old.get("openrouterMessage"),
                     "textLastCheckedAt": old.get("openrouterLastCheckedAt"),
-                    "ttsMessage": "Select an OpenRouter speech model to enable narration.",
-                    "ttsLastCheckedAt": None,
                     "status": "partial" if text_status == "connected" else ("configured" if openrouter_configured else "local only"),
                     "capabilities": [item for item in old.get("capabilities", []) if "eleven" not in str(item).casefold()],
                     "fallbacks": old.get("fallbacks", {}),
@@ -224,10 +220,10 @@ class Database:
                 changed = False
                 for step in old_job.get("steps", []) if isinstance(old_job, dict) else []:
                     if isinstance(step, dict) and step.get("id") == "elevenlabs":
-                        step["id"] = "tts"
-                        step["label"] = "Generated narration"
+                        step["id"] = "legacy-media"
+                        step["label"] = "Legacy media step"
                         if isinstance(step.get("detail"), str):
-                            step["detail"] = "Generated narration"
+                            step["detail"] = "Legacy media step"
                         changed = True
                 if changed:
                     db.execute("UPDATE jobs SET payload=? WHERE id=?", (json.dumps(old_job, separators=(",", ":")), row["id"]))
@@ -291,6 +287,45 @@ class Database:
                 );
             """)
             db.execute("INSERT OR IGNORE INTO schema_migrations VALUES(9,?)", (now_iso(),))
+        if version < 10 or 10 not in applied_versions:
+            stamp = now_iso()
+            for row in db.execute("SELECT id, payload FROM profiles").fetchall():
+                try:
+                    profile = json.loads(row["payload"])
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    continue
+                if isinstance(profile, dict) and profile.get("ttsMessage") is not None:
+                    profile["ttsMessage"] = None
+                    db.execute("UPDATE profiles SET payload=? WHERE id=?", (json.dumps(profile, separators=(",", ":")), row["id"]))
+            for row in db.execute("SELECT id, payload FROM jobs").fetchall():
+                try:
+                    job = json.loads(row["payload"])
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    continue
+                changed = False
+                for step in job.get("steps", []) if isinstance(job, dict) else []:
+                    if isinstance(step, dict) and str(step.get("id", "")).casefold() in {"tts", "elevenlabs", "local_voice"}:
+                        step["id"] = "legacy-media"
+                        step["label"] = "Legacy media step"
+                        if isinstance(step.get("detail"), str):
+                            step["detail"] = "Legacy media step"
+                        changed = True
+                if changed:
+                    db.execute("UPDATE jobs SET payload=? WHERE id=?", (json.dumps(job, separators=(",", ":")), row["id"]))
+            db.execute("INSERT OR IGNORE INTO schema_migrations VALUES(10,?)", (stamp,))
+        if version < 11 or 11 not in applied_versions:
+            stamp = now_iso()
+            retired_profile_fields = {"ttsModelId", "ttsVoice", "ttsSpeed", "ttsStatus", "ttsMessage", "ttsLastCheckedAt"}
+            for row in db.execute("SELECT id, payload FROM profiles").fetchall():
+                try:
+                    profile = json.loads(row["payload"])
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    continue
+                if isinstance(profile, dict) and retired_profile_fields.intersection(profile):
+                    for field in retired_profile_fields:
+                        profile.pop(field, None)
+                    db.execute("UPDATE profiles SET payload=? WHERE id=?", (json.dumps(profile, separators=(",", ":")), row["id"]))
+            db.execute("INSERT OR IGNORE INTO schema_migrations VALUES(11,?)", (stamp,))
 
     @staticmethod
     def _json(model: BaseModel) -> str:

@@ -166,22 +166,6 @@ test("Docker-served studio acceptance workflow", async ({ page, request }) => {
   await expect(page.getByText("Short queued successfully.")).toBeVisible();
   await capture(page, "shorts-editor");
 
-  // AI assistant / Topic to Video local custom-script path (no provider or mock involved).
-  await open(page, "AI Video");
-  await expect(page.getByRole("heading", { name: "Topic to Video" })).toBeVisible();
-  await expect(page.getByText(/Turn a topic — or your own script — into a reviewable plan/)).toBeVisible();
-  await page.getByLabel("Topic or keyword").fill("Browser acceptance local plan");
-  await page.getByLabel(/Custom script/).fill("This is a short, exact local script for browser acceptance and review.");
-  await page.getByRole("button", { name: "Create / refresh plan" }).click();
-  await expect(page.getByRole("region", { name: "Reviewable script plan" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Generate reviewed video" })).toBeEnabled();
-  await page.getByLabel("Variants (1–3)").fill("2");
-  const scriptResponses = Promise.all([1, 2].map(() => page.waitForResponse((response) => response.request().method() === "POST" && new URL(response.url()).pathname === "/api/v1/jobs/script")));
-  await page.getByRole("button", { name: "Generate reviewed videos" }).click();
-  expect((await scriptResponses).map((response) => response.status())).toEqual([202, 202]);
-  await expect(page.getByText("2 variant jobs queued.")).toBeVisible();
-  await capture(page, "ai-video-plan");
-
   // Settings: inspect capabilities and verify secret fields are password inputs and masked text is used.
   await open(page, "Settings");
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();

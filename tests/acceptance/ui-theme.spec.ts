@@ -33,7 +33,7 @@ const viewports = [
   ["mobile", 390, 844],
 ] as const;
 
-const routes = ["Projects", "Library", "Workspace", "Shorts Editor", "AI Video", "Jobs", "Settings"] as const;
+const routes = ["Projects", "Library", "Workspace", "Shorts Editor", "Jobs", "Settings"] as const;
 
 /**
  * The chromatic paint this UI is allowed to show. The brand accent is white and
