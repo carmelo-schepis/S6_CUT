@@ -73,12 +73,11 @@ test.describe("responsive layout regressions", () => {
       width: rail.getBoundingClientRect().width,
       navGap: getComputedStyle(rail.querySelector("nav")!).columnGap,
     }));
-    expect(desktop.width, "desktop rail width matches the common control width").toBe(144);
+    expect(desktop.width, "desktop rail width").toBe(108);
     expect(desktop.navGap, "desktop navigation gap").toBe("5px");
   });
 
   test("keeps completed Workspace clip boards contained at narrow widths", async ({ page }) => {
-    test.setTimeout(90_000);
     const now = new Date().toISOString();
     const project = {
       schemaVersion: 1 as const,
@@ -169,9 +168,7 @@ test.describe("responsive layout regressions", () => {
     for (const [width, height] of [[320, 844], [360, 800], [375, 812], [390, 844], [768, 1024], [1280, 720], [1440, 900]]) {
       await page.setViewportSize({ width, height });
       await page.goto("/", { waitUntil: "domcontentloaded" });
-      await page.getByRole("button", { name: "Workspace", exact: true }).first().click();
-      const projectButton = page.getByRole("button").filter({ hasText: "Responsive Workspace fixture" });
-      if (await projectButton.count()) await projectButton.first().click();
+      await page.getByRole("button").filter({ hasText: "Responsive Workspace fixture" }).click();
       await expect(page.locator(".clip-board")).toBeVisible();
       const measurement = await page.locator(".clip-board").evaluate((board) => {
         const boardRect = board.getBoundingClientRect();
@@ -182,13 +179,12 @@ test.describe("responsive layout regressions", () => {
         });
         return {
           document: { scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth },
-          overflow: [...document.querySelectorAll<HTMLElement>("body *")].map((element) => { const rect = element.getBoundingClientRect(); return { tag: element.tagName, className: typeof element.className === "string" ? element.className : "", text: (element.textContent || "").trim().slice(0, 40), left: rect.left, right: rect.right, width: rect.width }; }).filter((item) => item.right > document.documentElement.clientWidth + 0.5 && item.left < document.documentElement.clientWidth),
           board: { left: boardRect.left, right: boardRect.right, scrollWidth: board.scrollWidth, clientWidth: board.clientWidth, display: getComputedStyle(board).display },
           tiles: tileRects,
           actionsVisible: tiles.every((tile) => Boolean(tile.querySelector<HTMLElement>(".clip-actions")?.getBoundingClientRect().height)),
         };
       });
-      expect(measurement.document.scrollWidth, `${width}px document overflow: ${JSON.stringify(measurement.overflow)}`).toBeLessThanOrEqual(measurement.document.clientWidth);
+      expect(measurement.document.scrollWidth, `${width}px document overflow`).toBeLessThanOrEqual(measurement.document.clientWidth);
       expect(measurement.board.right, `${width}px board right edge`).toBeLessThanOrEqual(width + 0.5);
       expect(measurement.actionsVisible, `${width}px clip actions`).toBe(true);
       expect(measurement.tiles.every((tile) => tile.scrollWidth <= tile.clientWidth), `${width}px card content containment`).toBe(true);

@@ -288,14 +288,14 @@ function LibraryAssetCard({ asset, isSelected, isInspected, onPreview, onInspect
     event.stopPropagation();
     onToggleSelected(asset.id, event.currentTarget.checked);
   };
-  const details = <div className="asset-card-details-content" aria-hidden="true"><span>{asset.tags.slice(0, 3).join(" · ") || asset.filename}</span><StatusBadge state={asset.policy === "never" ? "failed" : asset.policy === "required" ? "fallback" : "local"} label={asset.policy} /></div>;
+  const details = <div className="asset-card-details-content" aria-hidden="true"><strong title={asset.title}>{asset.title}</strong><span>{asset.tags.slice(0, 3).join(" · ") || asset.filename}</span><span className="origin-badge">{originLabels[asset.origin]}</span><StatusBadge state={asset.policy === "never" ? "failed" : asset.policy === "required" ? "fallback" : "local"} label={asset.policy} /></div>;
 
   return <article className={`asset-card ${isInspected ? "active" : ""}`} data-asset-id={asset.id}>
     <label className="asset-select"><input aria-label={`Select ${asset.title}`} type="checkbox" checked={isSelected} onChange={handleToggleSelected} /></label>
-    <div className="asset-card-surface">
-      <div className="asset-card-media"><AssetPreview asset={asset} />{canPreview && <button className="asset-card-action" aria-label={`Preview ${asset.title}`} type="button" onClick={handlePreview}>Preview</button>}</div>
-      <div className="asset-card-details">{details}<button className="asset-card-action" aria-label={`Select ${asset.title} for Rule Inspector`} type="button" onClick={handleInspect}><strong>{asset.title}</strong><span className="sr-only">{asset.tags.slice(0, 3).map((tag) => <span key={tag}>{tag}</span>)}<span>{originLabels[asset.origin]}</span><span>{asset.policy}</span></span><span>{isInspected ? "Selected" : "Inspect"}</span></button></div>
-    </div>
+    {canPreview ? <>
+      <button className="asset-preview-trigger" aria-label={`Preview ${asset.title}`} type="button" onClick={handlePreview}><AssetPreview asset={asset} /></button>
+      <button className="asset-card-details" aria-label={`Select ${asset.title} for Rule Inspector`} type="button" onClick={handleInspect}>{details}</button>
+    </> : <button className="asset-card-details asset-card-details-full" aria-label={`Select ${asset.title} for Rule Inspector`} type="button" onClick={handleInspect}><AssetPreview asset={asset} />{details}</button>}
   </article>;
 }
 

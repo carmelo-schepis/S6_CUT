@@ -239,10 +239,9 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
           <div className="step-label"><StepBadge step={2} /><span className="step-label-text">Choose the output</span></div>
           <FieldGroup title="Editorial style">
             <div className="style-grid">
-              {styles.map((item) => <article key={item.id} className={`style-card ${style === item.id ? "active" : ""}`}>
-                <span className={`style-swatch ${item.id}`} /><div className="style-card-copy"><strong>{item.label}</strong><small>{item.note}</small></div>
-                <button type="button" className="style-card-action" onClick={() => setStyle(item.id)} aria-pressed={style === item.id}>{style === item.id ? `${item.label} selected` : `Select ${item.label}`}</button>
-              </article>)}
+              {styles.map((item) => <button key={item.id} className={style === item.id ? "style-card active" : "style-card"} onClick={() => setStyle(item.id)} aria-pressed={style === item.id}>
+                <span className={`style-swatch ${item.id}`} /><strong>{item.label}</strong><small>{item.note}</small>
+              </button>)}
             </div>
           </FieldGroup>
 
@@ -251,15 +250,15 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
               <div role="group" aria-label="Lyrics subtitle theme">
               <p className="music-theme-group-label">Current styles</p>
               <div className="music-theme-options">
-                <article className={`music-theme-card ${musicTheme === "clean" ? "active" : ""}`}><span className="theme-clean">i’ve<br />forgotten<br />about</span><strong>Clean sans</strong><small>White · compact</small><button type="button" aria-label="Clean sans" aria-pressed={musicTheme === "clean"} onClick={() => setMusicTheme("clean")}>{musicTheme === "clean" ? "Selected" : "Select"}</button></article>
-                <article className={`music-theme-card ${musicTheme === "warm" ? "active" : ""}`}><span className="theme-warm">do you think<br />that i’ve forgotten<br />about</span><strong>Warm highlight</strong><small>Soft yellow accents</small><button type="button" aria-label="Warm highlight" aria-pressed={musicTheme === "warm"} onClick={() => setMusicTheme("warm")}>{musicTheme === "warm" ? "Selected" : "Select"}</button></article>
-                <article className={`music-theme-card ${musicTheme === "serif" ? "active" : ""}`}><span className="theme-serif">do you think<br />that i’ve forgotten<br />about</span><strong>Soft serif</strong><small>Light editorial</small><button type="button" aria-label="Soft serif" aria-pressed={musicTheme === "serif"} onClick={() => setMusicTheme("serif")}>{musicTheme === "serif" ? "Selected" : "Select"}</button></article>
+                <button type="button" aria-label="Clean sans" aria-pressed={musicTheme === "clean"} className={musicTheme === "clean" ? "active" : ""} onClick={() => setMusicTheme("clean")}><span className="theme-clean">i’ve<br />forgotten<br />about</span><strong>Clean sans</strong><small>White · compact</small></button>
+                <button type="button" aria-label="Warm highlight" aria-pressed={musicTheme === "warm"} className={musicTheme === "warm" ? "active" : ""} onClick={() => setMusicTheme("warm")}><span className="theme-warm">do you think<br />that i’ve forgotten<br />about</span><strong>Warm highlight</strong><small>Soft yellow accents</small></button>
+                <button type="button" aria-label="Soft serif" aria-pressed={musicTheme === "serif"} className={musicTheme === "serif" ? "active" : ""} onClick={() => setMusicTheme("serif")}><span className="theme-serif">do you think<br />that i’ve forgotten<br />about</span><strong>Soft serif</strong><small>Light editorial</small></button>
               </div>
               <p className="music-theme-group-label">Reference styles</p>
               <div className="music-theme-options">
-                <article className={`music-theme-card ${musicTheme === "reference_white_sans" ? "active" : ""}`}><span className="theme-reference-white-sans">i’ve<br />forgotten<br />about</span><strong>Reference white sans</strong><small>Light · stacked</small><button type="button" aria-label="Reference white sans" aria-pressed={musicTheme === "reference_white_sans"} onClick={() => setMusicTheme("reference_white_sans")}>{musicTheme === "reference_white_sans" ? "Selected" : "Select"}</button></article>
-                <article className={`music-theme-card ${musicTheme === "reference_yellow_sans" ? "active" : ""}`}><span className="theme-reference-yellow-sans">do you think<br />that i’ve forgotten<br />about</span><strong>Reference yellow sans</strong><small>Pale yellow · spaced</small><button type="button" aria-label="Reference yellow sans" aria-pressed={musicTheme === "reference_yellow_sans"} onClick={() => setMusicTheme("reference_yellow_sans")}>{musicTheme === "reference_yellow_sans" ? "Selected" : "Select"}</button></article>
-                <article className={`music-theme-card ${musicTheme === "reference_white_serif" ? "active" : ""}`}><span className="theme-reference-white-serif">do you think<br />that i’ve forgotten<br />about</span><strong>Reference white serif</strong><small>White · editorial</small><button type="button" aria-label="Reference white serif" aria-pressed={musicTheme === "reference_white_serif"} onClick={() => setMusicTheme("reference_white_serif")}>{musicTheme === "reference_white_serif" ? "Selected" : "Select"}</button></article>
+                <button type="button" aria-label="Reference white sans" aria-pressed={musicTheme === "reference_white_sans"} className={musicTheme === "reference_white_sans" ? "active" : ""} onClick={() => setMusicTheme("reference_white_sans")}><span className="theme-reference-white-sans">i’ve<br />forgotten<br />about</span><strong>Reference white sans</strong><small>Light · stacked</small></button>
+                <button type="button" aria-label="Reference yellow sans" aria-pressed={musicTheme === "reference_yellow_sans"} className={musicTheme === "reference_yellow_sans" ? "active" : ""} onClick={() => setMusicTheme("reference_yellow_sans")}><span className="theme-reference-yellow-sans">do you think<br />that i’ve forgotten<br />about</span><strong>Reference yellow sans</strong><small>Pale yellow · spaced</small></button>
+                <button type="button" aria-label="Reference white serif" aria-pressed={musicTheme === "reference_white_serif"} className={musicTheme === "reference_white_serif" ? "active" : ""} onClick={() => setMusicTheme("reference_white_serif")}><span className="theme-reference-white-serif">do you think<br />that i’ve forgotten<br />about</span><strong>Reference white serif</strong><small>White · editorial</small></button>
               </div>
               </div>
             </FieldGroup>}
