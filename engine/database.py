@@ -320,19 +320,18 @@ class Database:
 
     def list_projects(self) -> list[Project]:
         # The state list is "work can still continue from here", not "work is
-        # running": `paused` and `stalled` are already listed for that reason.
-        # `cancelled_kept` belongs with them — the Workspace offers Retry import
-        # for it (workspace-view.tsx), gated on the *download* phase, which is
-        # exactly when the project has published no asset yet. Omitting it hid a
-        # stopped import from its own retry control and, because the shell then
-        # fell back to the newest project, silently moved the customer into an
-        # unrelated project's Workspace.
+        # running": `paused`, `stalled`, and failed Clip jobs are included so
+        # their recovery/error details stay openable. In particular, a failed
+        # YouTube import may not have published a source asset yet, but its
+        # durable job still offers Retry import. Failed legacy records remain
+        # available in Jobs without reappearing as Clip projects.
         with self._connect() as db:
             rows = db.execute("""
                 SELECT payload,library_folder_id FROM projects
                 WHERE library_deleted=0
                   AND (
                     json_extract(payload, '$.state') IN ('queued','active','paused','recovered','stalled','cancelled_kept')
+                    OR (json_extract(payload, '$.mode')='clip' AND json_extract(payload, '$.state')='failed')
                     OR EXISTS (SELECT 1 FROM assets WHERE assets.source_project_id=projects.id)
                   )
                 ORDER BY updated_at DESC

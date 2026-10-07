@@ -104,11 +104,17 @@ def test_stopped_but_kept_project_stays_visible_before_it_publishes_output(tmp_p
     # project that owns nothing stays hidden — that is the Library rule.
     database = Database(tmp_path / "s6-cut.sqlite3")
     stopped = project("project-stopped", "YouTube import").model_copy(update={"state": "cancelled_kept"})
+    failed_import = project("project-failed-import", "Failed YouTube import").model_copy(
+        update={"state": "failed", "source_kind": "youtube"},
+    )
+    failed_legacy = project("project-failed-legacy", "Failed legacy record").model_copy(
+        update={"mode": "script", "state": "failed", "source_kind": "script"},
+    )
     finished = project("project-finished", "Finished with nothing")
-    database.save_project(stopped)
-    database.save_project(finished)
+    for item in (stopped, failed_import, failed_legacy, finished):
+        database.save_project(item)
 
-    assert [value.id for value in database.list_projects()] == [stopped.id]
+    assert {value.id for value in database.list_projects()} == {stopped.id, failed_import.id}
 
 
 def test_library_asset_deletion_is_idempotent_and_protected_failures_preserve_project(tmp_path: Path) -> None:

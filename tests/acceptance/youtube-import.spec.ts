@@ -14,7 +14,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   assertPlayback, checkPlayback, collectClips,
-  createClipProject, gateway, openWorkspaceForProject, waitForProjectReady,
+  createClipProject, gateway, jobBoundaries, openProjects, openWorkspaceForProject, waitForProjectReady,
   writeManifest as writeManifestTo,
 } from "./support/workspace";
 
@@ -325,8 +325,15 @@ test.describe("S6_cut imports an authorised YouTube URL", () => {
     await field.fill("https://www.youtube.com/watch?v=AAAAAAAAAAA");
     await create.click();
     await expect(page.getByRole("heading", { name: missingName })).toBeVisible({ timeout: 60_000 });
+    await expect.poll(async () => (await jobBoundaries(missingName)).job.state, {
+      message: "a nonexistent video fails within the deadline", timeout: 6 * 60_000,
+    }).toBe("failed");
+    // Failed imports can land on the empty Workspace; reopen the durable job
+    // through Jobs so its failure details are visible just as they are after
+    // returning to the project later.
+    await openWorkspaceForProject(page, missingName);
     const failed = page.locator(".failure-strip");
-    await expect(failed, "a nonexistent video fails visibly within the deadline").toBeVisible({ timeout: 6 * 60_000 });
+    await expect(failed, "the failed YouTube import is visible in its workspace").toBeVisible({ timeout: 30_000 });
     const failureText = (await failed.textContent())?.trim() || "";
     // The message must be human-readable and must not leak internals.
     expect(failureText).not.toMatch(/\/app\/data|Traceback|https?:\/\/[^ ]*googlevideo/i);
