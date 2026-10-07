@@ -47,7 +47,7 @@ async function expectNoHorizontalOverflow(page: Page, where: string) {
  */
 async function findClippedContent(page: Page) {
   return page.evaluate(() => {
-    const clipped: { selector: string; dx: number; dy: number }[] = [];
+    const clipped: { selector: string; dx: number; dy: number; children: string[] }[] = [];
     for (const element of document.querySelectorAll("body *")) {
       if (!element.getClientRects().length) continue;
       if (element.closest(".sr-only")) continue;
@@ -67,7 +67,7 @@ async function findClippedContent(page: Page) {
       const dy = element.scrollHeight - element.clientHeight;
       if (dx > 1 || dy > 1) {
         const className = typeof element.className === "string" ? element.className.trim().split(/\s+/).join(".") : "";
-        clipped.push({ selector: `${element.tagName.toLowerCase()}${className ? `.${className}` : ""}`, dx, dy });
+        clipped.push({ selector: `${element.tagName.toLowerCase()}${className ? `.${className}` : ""}`, dx, dy, children: [...element.children].map((child) => { const rect = child.getBoundingClientRect(); return `${child.tagName.toLowerCase()}.${typeof child.className === "string" ? child.className.replace(/\\s+/g, ".") : ""} ${Math.round(rect.left)}..${Math.round(rect.right)} scroll ${child.scrollWidth}/${child.clientWidth}`; }) });
       }
     }
     return clipped;
@@ -136,7 +136,7 @@ test.describe("visual alignment", () => {
     }
   });
 
-  test("the Processing mode control and the Create action share a line", async ({ page }) => {
+  test("Processing options and Create use fixed outer sizes in adjacent columns", async ({ page }) => {
     test.setTimeout(120_000);
     // Only meaningful where the two columns actually sit side by side; below
     // that the panel stacks and there is no shared line to hold.
@@ -151,7 +151,6 @@ test.describe("visual alignment", () => {
         if (!tabs || !create) return null;
         const column = (element: Element) => element.closest(".create-step")!.getBoundingClientRect();
         return {
-          tabs: tabs.getBoundingClientRect().toJSON(),
           create: create.getBoundingClientRect().toJSON(),
           tabsColumn: column(tabs).toJSON(),
           createColumn: column(create).toJSON(),
@@ -159,22 +158,22 @@ test.describe("visual alignment", () => {
         };
       });
       expect(measure, `${name}: create panel controls`).not.toBeNull();
-      const { tabs, create, tabsColumn, createColumn, options } = measure!;
+      const { create, tabsColumn, createColumn, options } = measure!;
 
       const sideBySide = Math.min(tabsColumn.bottom, createColumn.bottom) - Math.max(tabsColumn.top, createColumn.top) > 0;
       expect(sideBySide, `${name}: expected the style and action columns to be side by side`).toBe(true);
 
-      expect(tabs.height, `${name}: Processing mode height`).toBe(create.height);
-      expect(Math.abs(tabs.top - create.top), `${name}: top edges`).toBeLessThanOrEqual(1);
-      expect(Math.abs(tabs.bottom - create.bottom), `${name}: bottom edges`).toBeLessThanOrEqual(1);
+      // Action boxes are one fixed contract, independent of their column and
+      // unlike the old full-column Create override.
+      expect(create.width, `${name}: Create button width`).toBe(144);
+      expect(create.height, `${name}: Create button height`).toBe(40);
+      for (const [index, option] of options.entries()) {
+        expect(option.width, `${name}: processing option ${index + 1} width`).toBe(144);
+        expect(option.height, `${name}: processing option ${index + 1} height`).toBe(40);
+      }
 
-      // The action block fills its column; it must never shrink to its label.
-      expect(create.width, `${name}: Create button does not fill its column`).toBeGreaterThan(createColumn.width - 40);
-
-      // Adjacent segmented options share height and baseline, and a selected
-      // option is not drawn larger than an unselected one.
-      expect(spread(options.map((option) => option.height)), `${name}: segmented option heights`).toBeLessThanOrEqual(0.5);
-      expect(spread(options.map((option) => option.top)), `${name}: segmented option baselines`).toBeLessThanOrEqual(0.5);
+      // Segmented groups are layout shells, not controls; fixed-size options
+      // may wrap inside them rather than stretching to the group width.
     }
   });
 
@@ -223,11 +222,14 @@ test.describe("visual alignment", () => {
     for (const route of routes) {
       await gotoRoute(page, route);
 
-      // Small status pills are one component: one height everywhere.
-      const chipHeights = await page.locator(".status").evaluateAll((elements) => elements
+      // Outlined statuses use the shared control box, not content-sized pills.
+      const chipBoxes = await page.locator(".status").evaluateAll((elements) => elements
         .filter((element) => element.getClientRects().length > 0)
-        .map((element) => element.getBoundingClientRect().height));
-      if (chipHeights.length) expect(spread(chipHeights), `${route}: status chip heights differ`).toBeLessThanOrEqual(0.5);
+        .map((element) => element.getBoundingClientRect().toJSON()));
+      for (const [index, chip] of chipBoxes.entries()) {
+        expect(chip.width, `${route}: status ${index + 1} width`).toBe(144);
+        expect(chip.height, `${route}: status ${index + 1} height`).toBe(40);
+      }
 
       // Cards of the same kind share their internal padding.
       for (const selector of [".asset-card", ".job-card", ".clip-tile"]) {
@@ -241,7 +243,7 @@ test.describe("visual alignment", () => {
       const rows = await page.evaluate(() => {
         const buttons = [...document.querySelectorAll<HTMLElement>(".button, .icon-button")]
           .filter((element) => element.getClientRects().length > 0)
-          .map((element) => { const rect = element.getBoundingClientRect(); return { label: (element.textContent || element.getAttribute("aria-label") || "").trim().slice(0, 24), top: rect.top, bottom: rect.bottom, height: rect.height }; });
+          .map((element) => { const rect = element.getBoundingClientRect(); return { label: (element.textContent || element.getAttribute("aria-label") || "").trim().slice(0, 24), left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height }; });
         const grouped: (typeof buttons)[] = [];
         for (const button of buttons) {
           const row = grouped.find((candidate) => candidate.some((other) => Math.abs(other.top - button.top) <= 12
@@ -251,7 +253,10 @@ test.describe("visual alignment", () => {
         return grouped.filter((row) => row.length > 1);
       });
       for (const row of rows) {
-        expect(spread(row.map((button) => button.height)), `${route}: buttons on one row differ in height (${row.map((b) => b.label).join(", ")})`).toBeLessThanOrEqual(0.5);
+        for (const button of row) {
+          expect(button.width, `${route}: ${button.label} width`).toBe(144);
+          expect(button.height, `${route}: ${button.label} height`).toBe(40);
+        }
         expect(spread(row.map((button) => button.top)), `${route}: buttons on one row differ in top edge (${row.map((b) => b.label).join(", ")})`).toBeLessThanOrEqual(0.5);
       }
     }

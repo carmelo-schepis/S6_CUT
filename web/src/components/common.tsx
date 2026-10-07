@@ -22,7 +22,7 @@ export function StatusBadge({ state, label, className = "" }: { state: JobState 
         : state === "checking" ? <LoaderCircle size={12} className="spin" />
         : state === "active" || state === "queued" || state === "recovered" ? <LoaderCircle size={12} className="spin" />
           : <AlertTriangle size={12} />;
-  return <span className={`status status-${normalized} ${className}`}>{icon}<span>{text}</span></span>;
+  return <span className={`status status-${normalized} ${className}`} title={text}>{icon}<span>{text}</span></span>;
 }
 
 /**

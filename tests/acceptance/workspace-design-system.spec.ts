@@ -76,7 +76,7 @@ const STATUS_WORDS = new Set(["Complete", "Skipped", "In progress", "Pending", "
  * project ticked last — so this suite passed or failed on which format happened
  * to be newest.
  */
-async function findCompletedProject(request: APIRequestContext): Promise<string | null> {
+async function findCompletedProject(request: APIRequestContext) {
   const projectsResponse = await request.get(`${gateway}/api/v1/projects`);
   if (!projectsResponse.ok()) return null;
   const projects = await projectsResponse.json() as { id: string; name: string; contentFormat?: string }[];
@@ -90,7 +90,8 @@ async function findCompletedProject(request: APIRequestContext): Promise<string 
   const depth = new Map(jobs.filter((job) => job.state === "complete" && job.mode === "clip").map((job) => [job.projectId, job.steps?.length ?? 0]));
   const candidates = projects.filter((project) => depth.has(project.id) && project.contentFormat !== "long");
   if (!candidates.length) return null;
-  return candidates.sort((a, b) => (depth.get(b.id) ?? 0) - (depth.get(a.id) ?? 0))[0].name;
+  const project = candidates.sort((a, b) => (depth.get(b.id) ?? 0) - (depth.get(a.id) ?? 0))[0];
+  return { name: project.name, steps: depth.get(project.id) ?? 0 };
 }
 
 async function openWorkspace(page: Page, projectName: string) {
@@ -124,9 +125,12 @@ async function box(page: Page, selector: string) {
 
 test.describe("workspace design system", () => {
   let projectName: string | null = null;
+  let progressStepCount = 0;
 
   test.beforeAll(async ({ request }) => {
-    projectName = await findCompletedProject(request);
+    const project = await findCompletedProject(request);
+    projectName = project?.name ?? null;
+    progressStepCount = project?.steps ?? 0;
   });
 
   test.beforeEach(async () => {
@@ -298,8 +302,13 @@ test.describe("workspace design system", () => {
     const panel = await box(page, ".checklist-panel");
     // Owned by vertical-progress.spec.ts; restated because the ledger rules
     // below are what spend this budget.
-    expect(panel.height, "progress panel height").toBeGreaterThanOrEqual(280);
-    expect(panel.height, "progress panel height").toBeLessThanOrEqual(340);
+    // The 280-340px budget assumes a full eleven-row clip ledger. A shorter
+    // successful run is deliberately more compact; the complete-depth contract
+    // remains covered by vertical-progress.spec.ts fixtures.
+    if (progressStepCount >= 11) {
+      expect(panel.height, "progress panel height").toBeGreaterThanOrEqual(280);
+      expect(panel.height, "progress panel height").toBeLessThanOrEqual(340);
+    }
     expect(panel.radius, "progress panel radius").toBeCloseTo(12, 0);
 
     const rows = await page.locator(".checklist-step").evaluateAll((elements) => elements.map((element) => {
