@@ -152,7 +152,7 @@
   --error-hover: color-mix(in srgb, var(--error) 86%, var(--black));
   --error-active: color-mix(in srgb, var(--error) 72%, var(--black));
   --error-disabled: color-mix(in srgb, var(--error) 40%, var(--surface-2));
-  --rail: 108px;
+  --rail: 144px;
   /* Spacing / radius / elevation scale. Extend these rather than inventing
      new one-off pixel values in component rules. */
   /* One 4px grid: --space-N is always 4×N, so a token name states its own
@@ -171,15 +171,14 @@
      the alert bands and the page content each started on a different column.
      The steps live beside the existing `--rail` steps in the media queries. */
   --page-inset: 32px;
-  /* Control geometry. Every repeated control resolves to one of these three
-     heights so buttons, inputs, selects and segments in a row share an edge.
-     `--control-height-large` is the segmented shell and the primary action:
-     both must render at exactly the same visible height. */
-  --control-height: 32px;
-  --control-height-small: 24px;
-  /* Small status pills (status badges, counts, capability chips) are a repeated
-     component: one height so a row of them never staggers. */
-  --chip-height: 24px;
+  /* Shared outer control geometry. Legacy size aliases remain available, but
+     interactive controls, fields, selectors and outlined statuses use one
+     fixed 144 × 40px border-box. */
+  --control-width: 144px;
+  --control-height: 40px;
+  --control-height-small: 40px;
+  /* Outlined status boxes share the same outer height as the other controls. */
+  --chip-height: 40px;
   /* A checkbox is a 24px target (WCAG 2.5.8) around a 16px drawn box. Anything
      that has to line the drawn box up with the text column beside it pulls back
      by exactly half the difference — derived, so it stays correct if either
@@ -1441,7 +1440,7 @@ main { min-width: 0; }
 .show-all-projects:hover { border-color: var(--border-strong); color: var(--text); background: var(--surface-2); }
 
 @media (max-width: 1180px) {
-  :root { --rail: 68px; --page-inset: 24px; }
+  :root { --rail: 144px; --page-inset: 24px; }
   .workspace-commandbar { align-items: flex-start; }
   .workspace-project-context { align-items: flex-start; }
   .workspace-controls { flex: 0 1 360px; }
@@ -1464,7 +1463,7 @@ main { min-width: 0; }
 @media (max-width: 820px) {
   :root { --rail: 0px; --page-inset: 16px; }
   .checklist-step-meta { flex-basis: 58%; }
-  .app-shell { display: block; padding-bottom: 58px; }.app-rail { position: fixed; inset: auto 0 0; width: 100%; height: 58px; display: block; padding: 0; border: 0; border-top: 1px solid var(--border); }.app-rail .brand-button, .rail-foot { display: none; }.app-rail nav { height: 100%; min-width: 0; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 0; }.nav-item { min-height: 56px; min-width: 0; padding: 0 1px; border-radius: 0; }.nav-item span { display: block; width: 100%; text-align: center; }.nav-item:focus-visible { outline-offset: -2px; }.nav-item::before { left: 25%; right: 25%; top: 0; bottom: auto; width: auto; height: 2px; }.app-main { grid-column: auto; min-width: 0; }.topbar { width: 100%; min-width: 0; padding-inline: var(--page-inset); }.topbar-context { flex: 1 1 auto; min-width: 0; }.topbar-state { flex: 0 1 auto; min-width: 0; max-width: 48%; }.topbar-state .status { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }.mobile-brand { display: flex; align-items: center; gap: 5px; }.mobile-brand img { width: 25px; height: 25px; border-radius: 6px; }.topbar-context > .muted, .topbar-context > .crumb { display: none; }.save-state { display: none; }.page { padding: var(--space-6) var(--page-inset); }.page-header { display: grid; }.page-header .header-actions { justify-content: flex-start; }
+  .app-shell { display: block; padding-bottom: 58px; }.app-rail { position: fixed; inset: auto 0 0; width: 100%; height: 58px; display: block; padding: 0; border: 0; border-top: 1px solid var(--border); }.app-rail .brand-button, .rail-foot { display: none; }.app-rail nav { height: 100%; min-width: 0; display: flex; align-items: center; gap: 0; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: thin; }.nav-item { flex: 0 0 var(--control-width); min-height: var(--control-height); min-width: var(--control-width); width: var(--control-width); max-width: var(--control-width); height: var(--control-height); padding: 0 var(--control-pad-x); border-radius: 0; }.nav-item span { display: block; width: 100%; text-align: center; }.nav-item:focus-visible { outline-offset: -2px; }.nav-item::before { left: 25%; right: 25%; top: 0; bottom: auto; width: auto; height: 2px; }.app-main { grid-column: auto; min-width: 0; }.topbar { width: 100%; min-width: 0; padding-inline: var(--page-inset); }.topbar-context { flex: 1 1 auto; min-width: 0; }.topbar-state { flex: 0 1 auto; min-width: 0; max-width: 48%; }.topbar-state .status { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }.mobile-brand { display: flex; align-items: center; gap: 5px; }.mobile-brand img { width: 25px; height: 25px; border-radius: 6px; }.topbar-context > .muted, .topbar-context > .crumb { display: none; }.save-state { display: none; }.page { padding: var(--space-6) var(--page-inset); }.page-header { display: grid; }.page-header .header-actions { justify-content: flex-start; }
   .create-panel button, .create-panel input, .create-panel select, .create-panel textarea { scroll-margin-bottom: 76px; }
   .create-topline { align-items: flex-start; gap: 10px; }
   .create-panel { --create-columns: repeat(2, minmax(0, 1fr)); --create-note-column: 2; }
@@ -1905,7 +1904,10 @@ main { min-width: 0; }
 .panel-tabs,
 .inspector-tabs,
 .panel-title,
-.viewer-toolbar {
+.viewer-toolbar,
+.board-header {
+  box-sizing: border-box;
+  height: 40px;
   min-height: 40px;
   padding-inline: var(--space-4);
 }
@@ -2042,4 +2044,179 @@ main { min-width: 0; }
   .inspector-content { padding-inline: var(--space-3); }
   .checklist-step { padding-inline: var(--space-3); }
   .process-checklist::before { left: calc(var(--space-3) + 8px); }
+}
+
+/* Shared outer control contract: 144 × 40px border-box. Structural media
+   previews stay aspect-ratio content, while every actual action stays fixed. */
+button:not([data-fixed-control-size]):not([data-structural-control]) {
+  box-sizing: border-box;
+  flex: 0 0 var(--control-width);
+  width: var(--control-width);
+  min-width: var(--control-width);
+  max-width: var(--control-width);
+  height: var(--control-height);
+  min-height: var(--control-height);
+  max-height: var(--control-height);
+  padding: var(--control-pad-y) var(--control-pad-x);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+a.button:not([data-fixed-control-size]),
+a.icon-button:not([data-fixed-control-size]) {
+  box-sizing: border-box;
+  flex: 0 0 var(--control-width);
+  width: var(--control-width);
+  min-width: var(--control-width);
+  max-width: var(--control-width);
+  height: var(--control-height);
+  min-height: var(--control-height);
+  max-height: var(--control-height);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+input:not([type="checkbox"]):not([type="range"]),
+textarea:not([data-fixed-control-size]),
+select:not([data-fixed-control-size]) {
+  box-sizing: border-box;
+  flex: 0 0 var(--control-width);
+  width: var(--control-width);
+  min-width: var(--control-width);
+  max-width: var(--control-width);
+  height: var(--control-height);
+  min-height: var(--control-height);
+  max-height: var(--control-height);
+}
+
+input[type="range"] {
+  box-sizing: border-box;
+  flex: 0 0 var(--control-width);
+  width: var(--control-width);
+  min-width: var(--control-width);
+  max-width: var(--control-width);
+  height: var(--control-height);
+  min-height: var(--control-height);
+  margin-block: 0;
+}
+
+textarea { overflow: auto; resize: none; }
+
+.status:not([data-fixed-control-size]),
+.section-count:not([data-fixed-control-size]),
+.notice-count:not([data-fixed-control-size]),
+.saved-badge:not([data-fixed-control-size]),
+.readonly-tag:not([data-fixed-control-size]),
+.engine-chips span:not([data-fixed-control-size]),
+.origin-badge:not([data-fixed-control-size]) {
+  box-sizing: border-box;
+  flex: 0 0 var(--control-width);
+  width: var(--control-width);
+  min-width: var(--control-width);
+  max-width: var(--control-width);
+  height: var(--control-height);
+  min-height: var(--control-height);
+  max-height: var(--control-height);
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
+.status > span { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.topbar-state .status { flex: 0 0 var(--control-width); width: var(--control-width); min-width: var(--control-width); max-width: var(--control-width); overflow-wrap: anywhere; }
+.segmented, .mode-tabs { display: flex; flex-wrap: wrap; align-content: flex-start; min-width: 0; max-width: 100%; overflow: visible; }
+.inspector-tabs { min-width: 0; flex-wrap: wrap; }
+.count-control:not(.high-volume-count), .count-control.high-volume-count { width: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); overflow: visible; padding: var(--control-inset); }
+.count-control:not(.high-volume-count) > strong { flex: 0 0 40px; text-align: center; }
+.high-volume-count input { flex: 0 0 var(--control-width); }
+.high-volume-count .count-limit-hint { flex: 1 1 144px; min-width: min(144px, 100%); max-width: 100%; overflow-wrap: anywhere; }
+
+/* Cards remain layout surfaces; their inner actions, not the cards, are controls. */
+.app-rail { padding-inline: 0; }
+.style-card-copy { min-width: 0; display: grid; }
+.style-card-copy small { grid-column: auto; }
+.style-card-action { grid-column: 1 / -1; }
+.style-card-action:focus-visible { outline: 2px solid var(--selector-highlight); outline-offset: 2px; }
+.music-theme-card {
+  min-width: 0;
+  min-height: 152px;
+  display: grid;
+  justify-items: start;
+  align-content: start;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  color: var(--text-primary);
+}
+.music-theme-card.active { border-color: var(--selector-highlight); background: var(--surface-3); }
+.music-theme-card > button { margin-top: auto; }
+.music-theme-card > span { line-height: 1.15; }
+.music-theme-options { align-items: stretch; }
+
+.asset-card-surface { min-width: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); }
+.asset-card-media { position: relative; min-width: 0; height: 102px; overflow: hidden; }
+.asset-card-media > .asset-preview { height: 100%; }
+.asset-card-details { min-width: 0; display: grid; align-content: start; justify-items: start; gap: var(--space-2); }
+.asset-card-details-content { min-width: 0; overflow-wrap: anywhere; }
+.asset-card-details > .asset-card-action { position: static; display: grid; grid-template-rows: 1fr auto; justify-items: start; text-align: left; }
+.asset-card-action { position: absolute; inset: var(--space-1) auto auto var(--space-1); z-index: 2; }
+.asset-card-action strong { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.recent-clip-preview { position: relative; min-width: 0; }
+.recent-clip-preview > button { position: absolute; inset: var(--space-2) auto auto var(--space-2); z-index: 2; }
+.clip-actions { grid-template-columns: minmax(0, 1fr); }
+.clip-select-action { margin-bottom: var(--space-1); }
+.beat-source-item { min-width: 0; padding: var(--space-2); border: 1px solid var(--border-soft); background: var(--surface-2); }
+
+.clip-browser-card { display: flex; min-width: 0; gap: 7px; color: inherit; text-align: left; }
+.clip-browser-item:focus-visible { outline: 2px solid var(--selector-highlight); outline-offset: 2px; }
+.clip-browser-info { min-width: 0; }
+.clip-browser-actions { flex-wrap: wrap; justify-content: flex-end; }
+
+@media (max-width: 600px) {
+  .action-step { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .action-step > *,
+  .action-step > .step-label,
+  .action-step > .field-group,
+  .action-step > .subtitle-toggle,
+  .action-step > .advanced-toggle,
+  .action-step > .advanced-grid,
+  .action-step > .create-actions { grid-column: 1 / -1; }
+}
+
+.profile-row { grid-template-columns: 32px minmax(0, 1fr); }
+.profile-row > .status { grid-column: 1 / -1; justify-self: end; }
+.profile-actions { grid-column: 1 / -1; flex-wrap: wrap; justify-content: flex-start; }
+
+@media (max-width: 820px) {
+  .library-toolbar { flex-wrap: wrap; }
+  .library-toolbar > .search-box { flex: 1 1 144px; min-width: 144px; }
+  .shorts-source-empty { grid-template-columns: minmax(0, 1fr); min-width: 0; }
+  .shorts-source-empty > *, .shorts-source-empty :where(.video-source-picker, .shorts-empty-trim, .subscribe-animation-control, .editor-options) { width: 100%; min-width: 0; max-width: 100%; }
+  .shorts-source-empty h3, .shorts-source-empty p { overflow-wrap: anywhere; }
+  .shorts-source-empty .source-tabs, .shorts-source-empty .subscribe-animation-timing { flex-wrap: wrap; }
+  .music-theme-options { display: flex; flex-wrap: wrap; }
+  .count-control.high-volume-count { display: grid; grid-template-columns: minmax(0, var(--control-width)); }
+  .header-actions, .job-actions, .dialog-actions, .form-actions, .profile-actions,
+  .provider-callout-actions, .shorts-header-actions, .workspace-controls { flex-wrap: wrap; }
+}
+
+@media (max-width: 540px) {
+  .section-heading { flex-wrap: wrap; }
+  .section-heading > .section-tools { flex: 1 0 100%; min-width: 0; justify-content: flex-start; }
+  .section-search { flex: 0 0 144px; max-width: 100%; }
+  .section-search input { width: 144px; max-width: 100%; }
+  .source-step .mini-tabs { flex-wrap: wrap; }
+  .clip-actions { grid-template-columns: minmax(0, 1fr); }
+  .workspace-grid > .viewer-panel { width: 100%; min-width: 0; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; }
+  .workspace-grid .viewer-toolbar { width: 100%; height: auto; min-width: 0; flex-wrap: wrap; }
+  .workspace-grid .viewer-toolbar > div { flex: 1 1 100%; min-width: 0; flex-wrap: wrap; }
+  .workspace-grid .viewer-stage { width: 100%; min-width: 0; }
+  .workspace-grid .viewer-frame.landscape { width: 100%; max-width: 100%; height: auto; aspect-ratio: 16 / 9; }
+  .workspace-grid .transport { min-width: 0; flex-wrap: wrap; }
+  .workspace-grid .transport-spacer { display: none; }
+  .board-header { height: auto; }
+  .board-panel .board-filters { flex: 1 1 100%; min-width: 0; flex-wrap: wrap; }
 }

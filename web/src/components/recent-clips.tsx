@@ -149,11 +149,12 @@ export function RecentClips({ onSelectAsset }: { onSelectAsset: (id: string) => 
     {items.length ? <>
       <div className="recent-clip-grid">
         {items.map((asset) => <article className="recent-clip-card" data-asset-id={asset.id} key={asset.id}>
-          <button className="recent-clip-preview" type="button" aria-label={`Preview ${asset.title}`} onClick={(event) => void openPreview(asset, event.currentTarget)}>
+          <div className="recent-clip-preview">
             {asset.mediaType.startsWith("video/") && asset.previewUrl
               ? <LazyVideoThumbnail key={`${asset.id}:${asset.previewUrl}`} className="recent-clip-thumb" src={asset.previewUrl} onError={() => void latestLoad.current(page, submittedSearch, true)}><span><Film size={24} /></span></LazyVideoThumbnail>
               : <div className="recent-clip-thumb recent-clip-placeholder"><Film size={24} /></div>}
-          </button>
+            <button type="button" aria-label={`Preview ${asset.title}`} onClick={(event) => void openPreview(asset, event.currentTarget)}>Preview</button>
+          </div>
           <div className="recent-clip-content">
             <strong title={asset.title}>{asset.title}</strong>
             <span>{durationLabel(asset.durationSeconds)} · {asset.width && asset.height ? `${asset.width} × ${asset.height}` : "Dimensions unavailable"}</span>
