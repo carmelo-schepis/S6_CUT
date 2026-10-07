@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 import sqlite3
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -451,6 +452,80 @@ def test_library_dedup_and_match_explanation() -> None:
     match = client.get("/api/v1/library/match", params={"text": "The Beatles changed music"})
     assert match.status_code == 200
     assert match.json()["selected"]["title"] == "Beatles poster"
+
+
+def test_library_thumbnail_route_enforces_signed_blob_scope_expiry_and_confinement(monkeypatch, tmp_path: Path) -> None:
+    from engine import app as app_module
+    from engine.models import Asset
+
+    asset = Asset(id="thumbnail-test", title="Thumbnail", filename="source.mp4", media_type="video/mp4", content_hash="a" * 64, blob_id="blob-safe")
+    source = tmp_path / "blobs" / "safe.mp4"
+    source.parent.mkdir()
+    source.write_bytes(b"source bytes")
+    thumbnail = tmp_path / "thumbnail.jpg"
+    thumbnail.write_bytes(b"\xff\xd8" + b"x" * 1100)
+    monkeypatch.setattr(app_module, "settings", replace(settings, data_path=tmp_path))
+    monkeypatch.setattr(app_module.db, "get_asset", lambda asset_id: asset if asset_id == asset.id else None)
+    monkeypatch.setattr(app_module.db, "blob_relative_path", lambda blob_id: "blobs/safe.mp4" if blob_id == "blob-safe" else "blobs/other.mp4")
+    from engine.security import confined as confined_path
+    monkeypatch.setattr(app_module, "confined", confined_path)
+
+    async def extracted(*_args, **_kwargs):
+        return thumbnail
+
+    monkeypatch.setattr(app_module, "get_thumbnail", extracted)
+    expires, signature = signer.sign("library-thumbnail:blob-safe:v1")
+    response = client.get(f"/api/v1/library/assets/{asset.id}/thumbnail", params={"expires": expires, "signature": signature})
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("image/jpeg")
+    assert response.content == thumbnail.read_bytes()
+
+    assert client.get(f"/api/v1/library/assets/{asset.id}/thumbnail", params={"expires": expires, "signature": signature + "x"}).status_code == 403
+    video_expires, video_signature = signer.sign(f"library-asset:{asset.id}:{asset.blob_id}")
+    assert client.get(f"/api/v1/library/assets/{asset.id}/thumbnail", params={"expires": video_expires, "signature": video_signature}).status_code == 403
+    renewed = client.get(f"/api/v1/library/assets/{asset.id}/thumbnail-url")
+    assert renewed.status_code == 200
+    fresh_url = renewed.json()["thumbnailUrl"]
+    assert fresh_url.startswith(f"/api/v1/library/assets/{asset.id}/thumbnail?")
+
+    async def corrupt_source(*_args, **_kwargs):
+        raise RuntimeError("Could not decode a video frame")
+
+    monkeypatch.setattr(app_module, "get_thumbnail", corrupt_source)
+    failed = client.get(f"/api/v1/library/assets/{asset.id}/thumbnail", params={"expires": expires, "signature": signature})
+    assert failed.status_code == 503
+    assert failed.json()["detail"] == "Thumbnail is temporarily unavailable"
+    other_expires, other_signature = signer.sign("library-thumbnail:blob-other:v1")
+    assert client.get(f"/api/v1/library/assets/{asset.id}/thumbnail", params={"expires": other_expires, "signature": other_signature}).status_code == 403
+    assert client.get(f"/api/v1/library/assets/{asset.id}/thumbnail", params={"expires": 1, "signature": signature}).status_code == 403
+
+    monkeypatch.setattr(app_module.db, "blob_relative_path", lambda _: "../../outside.mp4")
+    invalid_path = client.get(f"/api/v1/library/assets/{asset.id}/thumbnail", params={"expires": expires, "signature": signature})
+    assert invalid_path.status_code == 400
+    assert invalid_path.json()["detail"] == "Invalid media reference"
+
+
+def test_orphaned_thumbnail_cache_is_pruned_against_live_video_assets(monkeypatch, tmp_path: Path) -> None:
+    from engine import app as app_module, thumbnails
+
+    monkeypatch.setattr(app_module, "settings", replace(settings, data_path=tmp_path))
+    live_blob_id = "a" * 64
+    monkeypatch.setattr(
+        app_module.db,
+        "list_assets",
+        lambda **_kwargs: [SimpleNamespace(blob_id=live_blob_id, media_type="video/mp4")],
+    )
+    retained = tmp_path / thumbnails.thumbnail_relative(live_blob_id)
+    orphaned = tmp_path / thumbnails.thumbnail_relative("b" * 64)
+    retained.parent.mkdir(parents=True)
+    orphaned.parent.mkdir(parents=True)
+    retained.write_bytes(b"retained")
+    orphaned.write_bytes(b"orphaned")
+
+    app_module._prune_orphaned_thumbnails()
+
+    assert retained.is_file()
+    assert not orphaned.exists()
 
 
 def test_zip_download_uses_unicode_archive_filename(monkeypatch, tmp_path: Path) -> None:

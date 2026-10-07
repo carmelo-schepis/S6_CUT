@@ -509,6 +509,7 @@ class Asset(ApiModel):
     width: int | None = Field(default=None, ge=1)
     height: int | None = Field(default=None, ge=1)
     preview_url: str | None = None
+    thumbnail_url: str | None = None
     aspect_ratio: str | None = None
     published_at: str = Field(default_factory=now_iso)
     created_at: str = Field(default_factory=now_iso)

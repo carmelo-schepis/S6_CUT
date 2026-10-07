@@ -415,6 +415,11 @@ export async function deleteAssets(assetIds: string[]): Promise<{ deleted: strin
   }));
 }
 
+export async function renewAssetThumbnail(id: string): Promise<string> {
+  const result = await request<{ thumbnailUrl: string }>(`/library/assets/${encodeURIComponent(id)}/thumbnail-url`);
+  return result.thumbnailUrl;
+}
+
 export async function updateAsset(id: string, input: Record<string, unknown>): Promise<LibraryAsset> {
   return assetSchema.parse(await request(`/library/assets/${encodeURIComponent(id)}`, {
     method: "PUT",

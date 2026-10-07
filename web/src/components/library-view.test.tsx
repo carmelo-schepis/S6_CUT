@@ -11,19 +11,40 @@ const assets: LibraryAsset[] = [
 ];
 
 vi.mock("../api", () => ({
-  listAssets: vi.fn(async () => assets), listFolders: vi.fn(async () => folders), getHealth: vi.fn().mockRejectedValue(new Error("offline")), updateAsset: vi.fn(), deleteAsset: vi.fn(), uploadAsset: vi.fn(), createFolder: vi.fn(), updateFolder: vi.fn(), archiveFolder: vi.fn(), removeFolder: vi.fn(), moveFolder: vi.fn(), moveAssets: vi.fn(), readableError: () => "Error",
+  listAssets: vi.fn(async () => assets), listFolders: vi.fn(async () => folders), getHealth: vi.fn().mockRejectedValue(new Error("offline")), updateAsset: vi.fn(), deleteAsset: vi.fn(), uploadAsset: vi.fn(), createFolder: vi.fn(), updateFolder: vi.fn(), archiveFolder: vi.fn(), removeFolder: vi.fn(), moveFolder: vi.fn(), moveAssets: vi.fn(), renewAssetThumbnail: vi.fn(), readableError: () => "Error",
 }));
 
-import { deleteAsset, listAssets, listFolders } from "../api";
+import { deleteAsset, listAssets, listFolders, renewAssetThumbnail } from "../api";
 const mockDeleteAsset = vi.mocked(deleteAsset);
 const mockListAssets = vi.mocked(listAssets);
 const mockListFolders = vi.mocked(listFolders);
+const mockRenewAssetThumbnail = vi.mocked(renewAssetThumbnail);
 
 describe("LibraryView", () => {
   beforeEach(() => {
     mockListAssets.mockResolvedValue(assets);
     mockListFolders.mockResolvedValue(folders);
+    mockRenewAssetThumbnail.mockReset();
   });
+  it("renews a failed card still once without breaking selection or explicit video preview", async () => {
+    const stillAsset = { ...assets[0], thumbnailUrl: "/signed/still-expired.jpg" };
+    mockListAssets.mockResolvedValueOnce([stillAsset, assets[1]]);
+    mockRenewAssetThumbnail.mockResolvedValueOnce("/signed/still-renewed.jpg");
+    render(<LibraryView />);
+    await screen.findByRole("button", { name: "Preview Acme launch" }, { timeout: 5000 });
+    const image = await screen.findByRole("img", { name: "Acme launch thumbnail" }, { timeout: 5000 });
+    fireEvent.error(image);
+    await waitFor(() => expect(image).toHaveAttribute("src", "/signed/still-renewed.jpg"));
+    expect(mockRenewAssetThumbnail).toHaveBeenCalledWith("a1");
+    expect(screen.queryByText("Thumbnail unavailable")).not.toBeInTheDocument();
+    expect(document.querySelector(".asset-card video")).toBeNull();
+
+    fireEvent.click(screen.getByLabelText("Select Acme launch"));
+    expect(screen.getByLabelText("Select Acme launch")).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Preview Acme launch" }));
+    expect(screen.getByRole("dialog", { name: "Acme launch video preview" }).querySelector("video")).toHaveAttribute("src", assets[0].previewUrl);
+  });
+
   it("selects the exact requested Library asset ID, including archived-folder assets", async () => {
     const archivedAsset = { ...assets[0], id: "archived-duplicate", title: assets[0].title, folderId: "archived-folder" };
     mockListAssets.mockResolvedValueOnce([...assets, archivedAsset]);
@@ -250,6 +271,19 @@ describe("LibraryView – bounded revalidation", () => {
     emitLibraryChanged();
     await waitFor(() => expect(mockListAssets.mock.calls.length).toBeGreaterThan(callsBefore), { timeout: 2000 });
     expect(screen.getByText("Acme launch")).toBeInTheDocument();
+  });
+
+  it("accepts refreshed signed still URLs while keeping the same source player URL", async () => {
+    const expired = { ...assets[0], thumbnailUrl: "/signed/still-expired.jpg" };
+    const refreshed = { ...assets[0], thumbnailUrl: "/signed/still-refreshed.jpg" };
+    mockListAssets.mockResolvedValueOnce([expired, assets[1]]).mockResolvedValueOnce([refreshed, assets[1]]);
+    render(<LibraryView />);
+    const image = await screen.findByRole("img", { name: "Acme launch thumbnail" });
+    expect(image).toHaveAttribute("src", expired.thumbnailUrl);
+    emitLibraryChanged();
+    await waitFor(() => expect(image).toHaveAttribute("src", refreshed.thumbnailUrl));
+    fireEvent.click(screen.getByRole("button", { name: "Preview Acme launch" }));
+    expect(screen.getByRole("dialog", { name: "Acme launch video preview" }).querySelector("video")).toHaveAttribute("src", assets[0].previewUrl);
   });
 
   it("revalidates on window focus with a debounced server reload", async () => {

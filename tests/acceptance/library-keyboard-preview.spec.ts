@@ -8,7 +8,7 @@ test.use({
   trace: "on-first-retry",
   video: "retain-on-failure",
 });
-test.describe.configure({ mode: "serial", retries: 1 });
+test.describe.configure({ mode: "serial", retries: 0 });
 
 test("Personal Media Library keyboard and pointer regression", async ({ browser }) => {
   const context: BrowserContext = await browser.newContext({ viewport: { width: 1440, height: 1000 } });

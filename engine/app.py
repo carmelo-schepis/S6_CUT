@@ -36,6 +36,7 @@ from .models import (
 )
 from .providers import ProfileService, ProviderError
 from .security import MediaSigner, SecretVault, confined, safe_filename, validate_youtube_url
+from .thumbnails import get_thumbnail, prune_thumbnails
 
 
 # DO-NOT-CHANGE: see DO-NOT-CHANGE/AGENTS.md
@@ -76,6 +77,14 @@ creation_times: defaultdict[str, deque[float]] = defaultdict(deque)
 logger = logging.getLogger(__name__)
 
 
+def _prune_orphaned_thumbnails():
+    retained = {asset.blob_id for asset in db.list_assets(include_archived=True) if asset.media_type.startswith("video/")}
+    try:
+        prune_thumbnails(settings.data_path, retained)
+    except (OSError, ValueError) as exc:
+        logger.warning("Could not prune orphaned video thumbnails: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     # A caption face that fontconfig cannot satisfy is silently replaced by
@@ -87,6 +96,7 @@ async def lifespan(_: FastAPI):
             logger.error("Caption font %r is not installed; fontconfig resolves it to %r. Captions will render in the wrong face.", requested, resolved)
     else:
         logger.info("Caption fonts resolved: %s", ", ".join(sorted({str(preset["fontname"]) for preset in _SUBTITLE_PRESETS.values()})))
+    _prune_orphaned_thumbnails()
     await manager.start()
     try:
         yield
@@ -318,6 +328,8 @@ async def change_project_folder(project_id: str, value: ProjectFolderUpdate) -> 
 async def delete_project(project_id: str, delete_assets: bool = False) -> None:
     try:
         await manager.delete_project(project_id, delete_assets=delete_assets)
+        if delete_assets:
+            _prune_orphaned_thumbnails()
     except KeyError as exc:
         raise _not_found("Project") from exc
     except ValueError as exc:
@@ -953,8 +965,16 @@ def _asset_preview_url(asset: Asset) -> str:
     return f"/api/v1/library/assets/{asset.id}/preview?expires={expires}&signature={signature}"
 
 
+def _thumbnail_url(asset: Asset) -> str | None:
+    if not asset.media_type.startswith("video/") or not asset.blob_id:
+        return None
+    token = f"library-thumbnail:{asset.blob_id}:v1"
+    expires, signature = signer.sign(token)
+    return f"/api/v1/library/assets/{asset.id}/thumbnail?expires={expires}&signature={signature}"
+
+
 def _public_asset(asset: Asset) -> Asset:
-    return asset.model_copy(update={"preview_url": _asset_preview_url(asset)})
+    return asset.model_copy(update={"preview_url": _asset_preview_url(asset), "thumbnail_url": _thumbnail_url(asset)})
 
 
 @app.get("/api/v1/library/folders", response_model=list[LibraryFolder])
@@ -1027,7 +1047,9 @@ async def purge_library(value: LibraryPurgeInput) -> LibraryPurgeResult:
     if value.confirmation != "DELETE ALL CONTENT":
         raise HTTPException(409, "Type DELETE ALL CONTENT exactly to confirm this permanent action.")
     try:
-        return LibraryPurgeResult.model_validate(await manager.purge_library_content())
+        result = LibraryPurgeResult.model_validate(await manager.purge_library_content())
+        _prune_orphaned_thumbnails()
+        return result
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
 
@@ -1107,6 +1129,8 @@ async def delete_library_assets(value: AssetDelete) -> AssetDeleteResult:
             failed[asset_id] = str(exc)
         except OSError as exc:
             failed[asset_id] = f"Storage error: {exc}"
+    if deleted:
+        _prune_orphaned_thumbnails()
     return AssetDeleteResult(deleted=deleted, failed=failed)
 
 
@@ -1191,10 +1215,47 @@ async def preview_asset(asset_id: str, expires: int = Query(...), signature: str
     return FileResponse(target, media_type=asset.media_type)
 
 
+@app.get("/api/v1/library/assets/{asset_id}/thumbnail-url")
+async def asset_thumbnail_url(asset_id: str) -> dict[str, str]:
+    asset = db.get_asset(asset_id)
+    url = _thumbnail_url(asset) if asset else None
+    if not url:
+        raise _not_found("Video asset")
+    return {"thumbnailUrl": url}
+
+
+@app.get("/api/v1/library/assets/{asset_id}/thumbnail")
+async def asset_thumbnail(asset_id: str, expires: int = Query(...), signature: str = Query(...)) -> FileResponse:
+    asset = db.get_asset(asset_id)
+    if not asset or not asset.media_type.startswith("video/"):
+        raise _not_found("Video asset")
+    token = f"library-thumbnail:{asset.blob_id}:v1"
+    if not signer.verify(token, expires, signature):
+        raise HTTPException(403, "Thumbnail link is invalid or expired")
+    source_relative = db.blob_relative_path(asset.blob_id)
+    if not source_relative:
+        raise _not_found("Media blob")
+    try:
+        source = confined(settings.data_path, *source_relative.split("/"))
+    except ValueError as exc:
+        raise HTTPException(400, "Invalid media reference") from exc
+    if not source.is_file():
+        raise _not_found("Media blob")
+    try:
+        target = await get_thumbnail(settings.data_path, asset.blob_id, source_relative, asset.duration_seconds, settings.ffmpeg)
+    except (OSError, RuntimeError, TimeoutError) as exc:
+        logger.warning("Thumbnail extraction failed for asset %s: %s", asset.id, exc)
+        raise HTTPException(503, "Thumbnail is temporarily unavailable") from exc
+    except ValueError as exc:
+        raise HTTPException(400, "Invalid media reference") from exc
+    return FileResponse(target, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=300"})
+
+
 @app.delete("/api/v1/library/assets/{asset_id}", status_code=204)
 async def delete_library_asset(asset_id: str) -> None:
     try:
         await _delete_asset_and_cleanup(asset_id)
+        _prune_orphaned_thumbnails()
     except KeyError as exc:
         raise _not_found("Asset") from exc
     except ValueError as exc:

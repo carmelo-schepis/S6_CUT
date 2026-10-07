@@ -70,6 +70,30 @@ def test_local_tts_terminates_options_before_user_script(tmp_path, monkeypatch) 
     assert captured[-1] == "-f/app/data/secrets/instance.key"
 
 
+def test_signed_link_rejects_expiry_tampering_and_scope_changes(tmp_path, monkeypatch) -> None:
+    now = 2_000_000_000
+    monkeypatch.setattr("engine.security.time.time", lambda: now)
+    signer = MediaSigner(tmp_path / "signing.key", 30)
+    expires, signature = signer.sign("library-thumbnail:asset-a:blob-a:v1")
+
+    assert signer.verify("library-thumbnail:asset-a:blob-a:v1", expires, signature)
+    assert not signer.verify("library-thumbnail:asset-b:blob-a:v1", expires, signature)
+    assert not signer.verify("library-thumbnail:asset-a:blob-b:v1", expires, signature)
+    assert not signer.verify("library-thumbnail:asset-a:blob-a:v1", expires, signature[:-1] + ("A" if signature[-1] != "A" else "B"))
+    assert not signer.verify("library-thumbnail:asset-a:blob-a:v1", now - 1, signature)
+    assert not signer.verify("library-thumbnail:asset-a:blob-a:v1", now + 10_000, signature)
+
+
+def test_confined_rejects_symlink_escape(tmp_path) -> None:
+    root = tmp_path / "data"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (root / "thumbnails").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match="escapes"):
+        confined(root, "thumbnails", "victim.jpg")
+
+
 def test_secrets_encrypt_mask_and_signed_links_expire(tmp_path, monkeypatch) -> None:
     vault = SecretVault(tmp_path / "instance.key")
     secret = b'{"openrouterKey":"sk-or-v1-example-secret"}'

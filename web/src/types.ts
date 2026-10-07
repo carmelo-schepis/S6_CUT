@@ -354,6 +354,7 @@ export const assetSchema = z.object({
   width: z.number().int().positive().nullable().optional(),
   height: z.number().int().positive().nullable().optional(),
   previewUrl: z.string().optional(),
+  thumbnailUrl: z.string().nullable().optional(),
   aspectRatio: z.string().nullable().optional(),
   publishedAt: z.string().optional(),
   brands: z.array(z.string()).default([]),

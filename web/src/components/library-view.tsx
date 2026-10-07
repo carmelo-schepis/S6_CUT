@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent, type MouseEvent } from "react";
 import { Archive, FileImage, Folder, FolderPlus, ImagePlus, Library, RefreshCw, Search, ShieldCheck, Trash2, Upload } from "lucide-react";
-import { archiveFolder, createFolder, deleteAsset, deleteAssets, getHealth, listAssets, listFolders, moveAssets, moveFolder, readableError, removeFolder, updateAsset, updateFolder, uploadAsset } from "../api";
+import { archiveFolder, createFolder, deleteAsset, deleteAssets, getHealth, listAssets, listFolders, moveAssets, moveFolder, readableError, removeFolder, renewAssetThumbnail, updateAsset, updateFolder, uploadAsset } from "../api";
 import { bindRevalidationOnFocus, createBoundedRevalidation, emitLibraryChanged, onLibraryChanged } from "../library-sync";
 import type { AssetOrigin, Health, LibraryAsset, LibraryFolder } from "../types";
 import { Button, EmptyState, Field, FieldGroup, PageHeader, StatusBadge, formatAge } from "./common";
@@ -47,8 +47,8 @@ export function LibraryView({ selectedAssetId }: { selectedAssetId?: string | nu
       for (let attempt = 0; attempt < (retry ? 3 : 1); attempt += 1) {
         try {
           const [nextAssets, nextFolders] = await Promise.all([listAssets({ includeArchived: showArchived || Boolean(selectedAssetId) }), listFolders({ includeArchived: showArchived || Boolean(selectedAssetId) })]);
-          // A refresh re-signs URLs. Retain an already working URL for the same
-          // immutable blob so a harmless revalidation cannot restart media.
+          // Keep the player URL stable for an unchanged blob, but accept newly
+          // signed thumbnail URLs so an idle Library cannot retain expired links.
           setAssets((current) => {
             const previous = new Map(current.map((asset) => [asset.id, asset]));
             return nextAssets.map((asset) => {
@@ -293,24 +293,24 @@ function LibraryAssetCard({ asset, isSelected, isInspected, onPreview, onInspect
   return <article className={`asset-card ${isInspected ? "active" : ""}`} data-asset-id={asset.id}>
     <label className="asset-select"><input aria-label={`Select ${asset.title}`} type="checkbox" checked={isSelected} onChange={handleToggleSelected} /></label>
     {canPreview ? <>
-      <button className="asset-preview-trigger" aria-label={`Preview ${asset.title}`} type="button" onClick={handlePreview}><AssetPreview asset={asset} /></button>
+      <button className="asset-preview-trigger" aria-label={`Preview ${asset.title}`} type="button" onClick={handlePreview}><AssetPreview key={asset.blobId} asset={asset} /></button>
       <button className="asset-card-details" aria-label={`Select ${asset.title} for Rule Inspector`} type="button" onClick={handleInspect}>{details}</button>
-    </> : <button className="asset-card-details asset-card-details-full" aria-label={`Select ${asset.title} for Rule Inspector`} type="button" onClick={handleInspect}><AssetPreview asset={asset} />{details}</button>}
+    </> : <button className="asset-card-details asset-card-details-full" aria-label={`Select ${asset.title} for Rule Inspector`} type="button" onClick={handleInspect}><AssetPreview key={asset.blobId} asset={asset} />{details}</button>}
   </article>;
 }
 
 function AssetPreview({ asset }: { asset: LibraryAsset }) {
   const [unavailable, setUnavailable] = useState(false);
-  if (asset.mediaType.startsWith("video/") && asset.previewUrl && !unavailable) {
-    return <LazyVideoThumbnail key={asset.blobId} className="asset-preview" src={asset.previewUrl} onError={() => setUnavailable(true)} />;
+  if (asset.mediaType.startsWith("video/") && asset.thumbnailUrl && !unavailable) {
+    return <LazyVideoThumbnail key={asset.blobId} className="asset-preview" thumbnailSrc={asset.thumbnailUrl} label={`${asset.title} thumbnail`} onRenew={() => renewAssetThumbnail(asset.id)} onError={() => setUnavailable(true)} />;
   }
-  return <div className="asset-preview"><FileImage size={29} /><span>{unavailable ? "UNAVAILABLE" : asset.mediaType.split("/")[1]?.toUpperCase() || "MEDIA"}</span>{asset.protected && <ShieldCheck size={14} />}</div>;
+  return <div className="asset-preview" role={unavailable ? "status" : undefined}><FileImage size={29} /><span>{unavailable || asset.mediaType.startsWith("video/") ? "Thumbnail unavailable" : asset.mediaType.split("/")[1]?.toUpperCase() || "MEDIA"}</span>{asset.protected && <ShieldCheck size={14} />}</div>;
 }
 
 function FolderTree({ folders, assets, selectedId, onSelect, onAdd, onRename, onMove, onArchive, onRemove }: { folders: LibraryFolder[]; assets: LibraryAsset[]; selectedId: string | null; onSelect: (id: string) => void; onAdd: (parentId: string) => void; onRename: (folder: LibraryFolder) => void; onMove: (folder: LibraryFolder) => void; onArchive: (folder: LibraryFolder) => void; onRemove: (folder: LibraryFolder) => void }) {
   const render = (parentId: string | null, depth = 0) => folders.filter((folder) => (folder.parentId || null) === parentId).map((folder) => {
     const hasChildren = folders.some((item) => item.parentId === folder.id);
-    return <div key={folder.id} className="folder-node" style={{ paddingLeft: depth * 10 }}><button role="treeitem" aria-selected={selectedId === folder.id} aria-level={depth + 1} aria-expanded={hasChildren ? true : undefined} tabIndex={selectedId === folder.id || (!selectedId && folder.system) ? 0 : -1} className={selectedId === folder.id ? "active" : ""} onClick={() => onSelect(folder.id)}><Folder size={14} /><span className="folder-name">{folder.name}</span><span>{assets.filter((asset) => asset.folderId === folder.id).length}</span></button>{!folder.system && <div className="folder-actions"><button aria-label={`Add subfolder to ${folder.name}`} onClick={() => onAdd(folder.id)}>+</button><button aria-label={`Rename ${folder.name}`} onClick={() => onRename(folder)}>Rename</button><button aria-label={`Move ${folder.name}`} onClick={() => onMove(folder)}>Move</button><button aria-label={`${folder.archived ? "Restore" : "Archive"} ${folder.name}`} onClick={() => onArchive(folder)}><Archive size={11} /></button><button aria-label={`Remove ${folder.name}`} onClick={() => onRemove(folder)}>×</button></div>}{hasChildren && <div role="group">{render(folder.id, depth + 1)}</div>}</div>;
+    return <div key={folder.id} className="folder-node"><button role="treeitem" aria-selected={selectedId === folder.id} aria-level={depth + 1} aria-expanded={hasChildren ? true : undefined} tabIndex={selectedId === folder.id || (!selectedId && folder.system) ? 0 : -1} className={selectedId === folder.id ? "active" : ""} onClick={() => onSelect(folder.id)}><Folder size={14} /><span className="folder-name">{folder.name}</span><span>{assets.filter((asset) => asset.folderId === folder.id).length}</span></button>{!folder.system && <div className="folder-actions"><button aria-label={`Add subfolder to ${folder.name}`} onClick={() => onAdd(folder.id)}>+</button><button aria-label={`Rename ${folder.name}`} onClick={() => onRename(folder)}>Rename</button><button aria-label={`Move ${folder.name}`} onClick={() => onMove(folder)}>Move</button><button aria-label={`${folder.archived ? "Restore" : "Archive"} ${folder.name}`} onClick={() => onArchive(folder)}><Archive size={11} /></button><button aria-label={`Remove ${folder.name}`} onClick={() => onRemove(folder)}>×</button></div>}{hasChildren && <div role="group">{render(folder.id, depth + 1)}</div>}</div>;
   });
   const navigate = (event: KeyboardEvent<HTMLDivElement>) => {
     const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="treeitem"]')];

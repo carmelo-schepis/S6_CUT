@@ -13,12 +13,17 @@ export default defineConfig({
   reporter: [["html", { outputFolder: `${artifactRoot}/playwright-report`, open: "never" }], ["json", { outputFile: `${artifactRoot}/playwright-results.json` }]],
   use: {
     baseURL: process.env.S6_ACCEPTANCE_URL || process.env.S6_MUSIC_ACCEPTANCE_URL || "http://127.0.0.1:8080",
-    browserName: "chromium",
     headless: true,
     trace: "retain-on-failure",
     video: "retain-on-failure",
     screenshot: "only-on-failure",
-    ...devices["Desktop Chrome"],
   },
+  projects: [
+    { name: "Desktop Chromium", use: { ...devices["Desktop Chrome"], browserName: "chromium" } },
+    { name: "iPad WebKit portrait", use: { ...devices["iPad (gen 7)"], browserName: "webkit", viewport: { width: 810, height: 1080 }, isMobile: true } },
+    { name: "iPad WebKit landscape", use: { ...devices["iPad (gen 7)"], browserName: "webkit", viewport: { width: 1080, height: 810 }, isMobile: true } },
+    { name: "iPhone WebKit", use: { ...devices["iPhone 13"], browserName: "webkit" } },
+    { name: "Android Chromium", use: { ...devices["Pixel 7"], browserName: "chromium" } },
+  ],
   outputDir: testOutput,
 });
