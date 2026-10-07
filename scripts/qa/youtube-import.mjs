@@ -172,6 +172,9 @@ async function preserveImportedSources() {
   let entries = [];
   try { entries = await readdir(jobsDir); } catch { return found; }
   const destination = join(artifacts, "imported-source");
+  // Never let a prior --retain-source run win the verifier's largest-file
+  // selection when the current run resolved a different YouTube format.
+  await rm(destination, { recursive: true, force: true });
   await mkdir(destination, { recursive: true });
   const isMedia = (name) => /^source-.*\.(mp4|mkv|webm|mov|m4v|avi)$/i.test(name);
   for (const jobId of entries) {

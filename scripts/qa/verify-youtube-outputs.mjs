@@ -2,10 +2,10 @@
  * Content validation for the S6_cut YouTube-import acceptance run.
  *
  * Proves from decoded pixels and decoded audio that each downloaded output is
- * newly rendered from the imported YouTube source: real moving frames, the
- * requested 9:16 geometry, audio carried through, captions where promised, and
- * frames that match the source range the job reported rather than an unrelated
- * one.
+ * newly rendered from the imported YouTube source: changing foreground
+ * regions, the requested 9:16 geometry, audio carried through, captions where
+ * promised, and frames that match the source range the job reported rather than
+ * an unrelated one.
  *
  * Thresholds are the same control-anchored limits used by the content
  * authenticity run (see scripts/qa/verify-outputs.mjs and
@@ -28,7 +28,7 @@ const LIMITS = {
   minMeanLuminance: 12,               // all-black control measured 2.0
   minMeanVariance: 100,               // all-black control measured 0
   minMeanFrameDifference: 0.5,        // frozen control measured 0.001 (max 0.04)
-  minMovingSampleFraction: 0.5,       // frozen control measured 0.00
+  minLocalizedMovingSampleFraction: 0.5, // frozen control measured 0.00
   maxFrozenSeconds: 3.0,
   minDistinctHashFraction: 0.1,       // frozen control produced 1 hash from 40
   minPeakDb: -50,                     // silent control measured -91 dB
@@ -117,7 +117,15 @@ async function verifyClip(clip, context) {
   await writeFile(join(outputDir, "decode.json"), JSON.stringify(decode, null, 2));
   check(decode.ok, `${label}: decodes completely without corruption`, decode.errors.join(" | "));
 
-  const visual = await visualMetrics(file);
+  // Motion is judged on the actual 16:9 source-picture band. The portrait
+  // canvas fills its upper/lower areas with a deliberately blurred still of
+  // the same frame, which otherwise dilutes movement in screen-share videos.
+  const foregroundHeight = Math.round((info.video.width * 9 / 16) / 2) * 2;
+  const foregroundTop = Math.round((info.video.height - foregroundHeight) / 2);
+  const foregroundCrop = info.video.height > info.video.width
+    ? `${info.video.width}:${foregroundHeight}:0:${foregroundTop}`
+    : null;
+  const visual = await visualMetrics(file, { crop: foregroundCrop });
   report.visual = { ...visual, perceptualHashes: undefined, hashCount: visual.perceptualHashes.length };
   await writeFile(join(outputDir, "visual-metrics.json"), JSON.stringify(visual, null, 2));
   check(visual.fractionOfFramesNearlyBlack <= LIMITS.maxNearlyBlackFrameFraction,
@@ -128,10 +136,10 @@ async function verifyClip(clip, context) {
     `${label}: picture has spatial detail, not a flat placeholder`, `variance ${visual.meanVariance.toFixed(0)}`);
   check(visual.meanFrameDifference >= LIMITS.minMeanFrameDifference,
     `${label}: picture changes over time`, `mean frame difference ${visual.meanFrameDifference.toFixed(3)} (frozen control 0.001)`);
-  check(visual.movingSampleFraction >= LIMITS.minMovingSampleFraction,
-    `${label}: most sampled pairs show motion`, `${(visual.movingSampleFraction * 100).toFixed(1)}% above floor ${MOTION_FLOOR}`);
-  check(visual.longestFrozenSeconds <= LIMITS.maxFrozenSeconds,
-    `${label}: no long frozen run`, `${visual.longestFrozenSeconds.toFixed(2)}s`);
+  check(visual.maxTileMovingSampleFraction >= LIMITS.minLocalizedMovingSampleFraction,
+    `${label}: motion appears in a foreground region`, `${(visual.maxTileMovingSampleFraction * 100).toFixed(1)}% of sampled pairs exceed floor ${MOTION_FLOOR}`);
+  check(visual.longestLocallyFrozenSeconds <= LIMITS.maxFrozenSeconds,
+    `${label}: no long fully frozen run`, `${visual.longestLocallyFrozenSeconds.toFixed(2)}s with all 16 regions below floor`);
   check(visual.distinctPerceptualHashes / visual.sampledFrames >= LIMITS.minDistinctHashFraction,
     `${label}: frames are not effectively identical`,
     `${visual.distinctPerceptualHashes} distinct of ${visual.sampledFrames}`);
@@ -174,11 +182,17 @@ async function verifyClip(clip, context) {
       `ink on ${(band.inkFraction * 100).toFixed(0)}% of frames (uncaptioned control 0%)`);
     check(band.distinctBandStates >= LIMITS.minCaptionDistinctStates,
       `${label}: caption text changes over time`, `${band.distinctBandStates} distinct states`);
+    // The app's source-credit overlay is intentionally placed near the lower
+    // right edge. Test the centered caption column so that attribution is not
+    // mistaken for subtitle clipping; centered captions necessarily cross it.
     const edge = await bandActivity(file, {
       top: info.video.height - Math.round(info.video.height * 0.03),
-      height: Math.round(info.video.height * 0.03), samples: 24,
+      height: Math.round(info.video.height * 0.03),
+      left: Math.round(info.video.width * 0.3),
+      cropWidth: Math.round(info.video.width * 0.4),
+      samples: 24,
     });
-    report.captionEdge = edge;
+    report.captionEdge = { ...edge, region: "centered 40% of frame width" };
     check(edge.maxCoverage < 0.02,
       `${label}: captions are not clipped by the bottom frame edge`, `edge ink ${(edge.maxCoverage * 100).toFixed(2)}%`);
   }
@@ -308,7 +322,8 @@ async function main() {
       const p = clip.probe; const v = clip.visual; const a = clip.audio || {};
       console.log(`  clip ${clip.index}: ${p.video.width}x${p.video.height} ${p.video.codec}/${p.audio?.codec || "none"} `
         + `${p.duration.toFixed(2)}s ${(clip.sizeBytes / 1024).toFixed(0)}KB decode=${clip.decode.ok ? "clean" : "CORRUPT"} `
-        + `motion=${v.meanFrameDifference.toFixed(1)} frozen=${v.longestFrozenSeconds.toFixed(1)}s `
+        + `motion=${v.meanFrameDifference.toFixed(1)} local=${(v.maxTileMovingSampleFraction * 100).toFixed(0)}% `
+        + `fullyFrozen=${v.longestLocallyFrozenSeconds.toFixed(1)}s `
         + `black=${(v.fractionOfFramesNearlyBlack * 100).toFixed(0)}% audio=${a.meanVolumeDb ?? "n/a"}dB`
         + (clip.captions ? ` captions=${(clip.captions.inkFraction * 100).toFixed(0)}%/${clip.captions.distinctBandStates}st` : "")
         + (clip.correspondence ? ` src=${clip.correspondence.claimed.meanColourDistance.toFixed(1)} decoy=${clip.correspondence.decoy.meanColourDistance.toFixed(1)}` : ""));

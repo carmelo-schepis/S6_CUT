@@ -255,20 +255,19 @@ function downsampleToHashGrid(plane, size) {
 }
 
 /**
- * Decoded-pixel metrics across the whole output: luminance, near-black
- * coverage, spatial variance, frame-to-frame motion, frozen runs, and a
- * perceptual hash per sample.
+ * Decoded-pixel metrics across the whole output or an optional crop:
+ * luminance, near-black coverage, spatial variance, frame-to-frame motion,
+ * frozen runs, and a perceptual hash per sample.
  *
- * Analysis runs on a 128x128 luma plane, not the 32x32 hash grid: a moving
- * element a few percent of frame width disappears into the averaging at 32x32,
- * which reports real motion as frozen. Sampling is rate-based so short clips
- * and long sources are measured at the same temporal resolution.
+ * Analysis runs on a 128x128 luma plane, not the 32x32 hash grid. Sampling is
+ * rate-based so short clips and long sources are measured at the same temporal
+ * resolution.
  */
 const ANALYSIS_SIZE = 128;
-export async function visualMetrics(file, { samplesPerSecond = 4, maxSamples = 240 } = {}) {
+export async function visualMetrics(file, { samplesPerSecond = 4, maxSamples = 240, crop = null } = {}) {
   const info = await probe(file);
   const samples = Math.max(4, Math.min(maxSamples, Math.round(info.duration * samplesPerSecond)));
-  const frames = await grayFrames(file, { count: samples, size: ANALYSIS_SIZE });
+  const frames = await grayFrames(file, { count: samples, size: ANALYSIS_SIZE, crop });
   if (frames.length < 2) throw new Error(`only ${frames.length} frames decoded from ${basename(file)}`);
   const perFrame = frames.map((plane) => {
     let total = 0;
@@ -288,23 +287,41 @@ export async function visualMetrics(file, { samplesPerSecond = 4, maxSamples = 2
     };
   });
   const diffs = [];
+  const localDiffs = [];
+  const tileSize = ANALYSIS_SIZE / 4;
   for (let index = 1; index < frames.length; index += 1) {
     let delta = 0;
-    for (let pixel = 0; pixel < frames[index].length; pixel += 1) {
-      delta += Math.abs(frames[index][pixel] - frames[index - 1][pixel]);
+    let maxTileDelta = 0;
+    for (let tileY = 0; tileY < 4; tileY += 1) {
+      for (let tileX = 0; tileX < 4; tileX += 1) {
+        let tileDelta = 0;
+        for (let y = tileY * tileSize; y < (tileY + 1) * tileSize; y += 1) {
+          for (let x = tileX * tileSize; x < (tileX + 1) * tileSize; x += 1) {
+            const pixel = y * ANALYSIS_SIZE + x;
+            const difference = Math.abs(frames[index][pixel] - frames[index - 1][pixel]);
+            delta += difference;
+            tileDelta += difference;
+          }
+        }
+        maxTileDelta = Math.max(maxTileDelta, tileDelta / (tileSize * tileSize));
+      }
     }
     diffs.push(delta / frames[index].length);
+    localDiffs.push(maxTileDelta);
   }
-  // A "frozen" pair is one whose mean absolute pixel difference falls below
-  // MOTION_FLOOR; the longest consecutive run is converted back into seconds.
-  // The floor is calibrated against still-image and moving controls rather
-  // than guessed — see calibrate-motion-floor in the acceptance runner.
+  // Global motion describes how much of the frame changes; localized motion
+  // records whether any 1/16 tile changes. The latter detects real movement in
+  // a presenter inset without mistaking static screen-share panels for a frozen
+  // output. A pair is locally frozen only when every tile stays below floor.
   const secondsPerSample = info.duration / Math.max(1, frames.length - 1);
-  let longestFrozen = 0;
-  let run = 0;
-  for (const diff of diffs) {
-    if (diff < MOTION_FLOOR) { run += 1; longestFrozen = Math.max(longestFrozen, run); } else { run = 0; }
-  }
+  const longestRun = (values) => {
+    let longest = 0;
+    let run = 0;
+    for (const value of values) {
+      if (value < MOTION_FLOOR) { run += 1; longest = Math.max(longest, run); } else { run = 0; }
+    }
+    return longest * secondsPerSample;
+  };
   const uniqueHashes = new Set(perFrame.map((entry) => entry.hash));
   const luminances = perFrame.map((entry) => entry.luminance);
   return {
@@ -318,22 +335,26 @@ export async function visualMetrics(file, { samplesPerSecond = 4, maxSamples = 2
     meanVariance: perFrame.reduce((sum, entry) => sum + entry.variance, 0) / perFrame.length,
     minVariance: Math.min(...perFrame.map((entry) => entry.variance)),
     samplesPerSecond: frames.length / Math.max(0.001, info.duration),
+    analysisCrop: crop || "full-frame",
     motionFloor: MOTION_FLOOR,
     meanFrameDifference: diffs.reduce((a, b) => a + b, 0) / diffs.length,
     maxFrameDifference: Math.max(...diffs),
     minFrameDifference: Math.min(...diffs),
     movingSampleFraction: diffs.filter((diff) => diff >= MOTION_FLOOR).length / diffs.length,
-    longestFrozenSeconds: longestFrozen * secondsPerSample,
+    longestFrozenSeconds: longestRun(diffs),
+    meanMaxTileFrameDifference: localDiffs.reduce((sum, diff) => sum + diff, 0) / localDiffs.length,
+    maxTileMovingSampleFraction: localDiffs.filter((diff) => diff >= MOTION_FLOOR).length / localDiffs.length,
+    longestLocallyFrozenSeconds: longestRun(localDiffs),
     distinctPerceptualHashes: uniqueHashes.size,
     perceptualHashes: perFrame.map((entry) => entry.hash),
   };
 }
 
-/** Ink coverage and its temporal variation inside a horizontal band. */
-export async function bandActivity(file, { top, height, samples = 40 }) {
+/** Ink coverage and its temporal variation inside a band and optional x-range. */
+export async function bandActivity(file, { top, height, samples = 40, left = 0, cropWidth = null } = {}) {
   const info = await probe(file);
-  const width = info.video.width;
-  const crop = `${width}:${height}:0:${top}`;
+  const width = cropWidth ?? info.video.width;
+  const crop = `${width}:${height}:${left}:${top}`;
   const size = 48;
   const scratch = `${dirname(file)}/.band-${basename(file)}.raw`;
   const fps = samples / Math.max(0.001, info.duration);
