@@ -1,5 +1,7 @@
 # Autonomous Playwright QA log
 
+> Historical QA log from 2026-09-12. Script mode, AI Video, and narration controls described below have since been retired; this file records prior behavior and must not be used as current product guidance.
+
 Started: 2026-09-12  
 Environment: existing Docker Compose deployment at `http://127.0.0.1:8080` (engine loopback `127.0.0.1:8001`). The services predated this run and will not be stopped by this run. Health on startup: ready; SQLite, FFmpeg, FFprobe, Whisper, yt-dlp, local TTS all available.
 

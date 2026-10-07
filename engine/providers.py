@@ -10,7 +10,6 @@ import httpx
 
 from .database import Database
 from .models import OpenRouterModel, ProfileInput, ProviderProfile, now_iso
-from .openrouter_tts import OpenRouterTTS, OpenRouterTTSError, TTSResult
 from .security import SecretVault, mask_secret
 
 
@@ -22,12 +21,9 @@ class ProviderError(RuntimeError):
 
 
 MASKED_SECRET_MARKER = "••••"
-LEGACY_SECRET_KEY = "elevenlabsKey"
-
 FALLBACKS = {
     "planning": "Deterministic sentence and phrase planner",
     "captions": "Canonical timed transcript",
-    "voice": "Local espeak-ng, then clearly labelled silent rendering",
     "media": "Personal Library, licensed/no-key source, then relevant text card",
 }
 
@@ -57,7 +53,7 @@ def test_openrouter_failure() -> tuple[str, str] | None:
 
 
 def provider_runtime_message(error: Exception, service: str) -> str:
-    if isinstance(error, (ProviderError, OpenRouterTTSError)):
+    if isinstance(error, ProviderError):
         return error.safe_message
     if isinstance(error, httpx.HTTPStatusError):
         status_code = error.response.status_code
@@ -77,7 +73,6 @@ class ProfileService:
     def __init__(self, db: Database, vault: SecretVault):
         self.db = db
         self.vault = vault
-        self.tts = OpenRouterTTS()
         self._migrate_legacy_secrets()
 
     @staticmethod
@@ -103,30 +98,29 @@ class ProfileService:
 
     def _read_secret(self, profile_id: str, profile_persistence: str, encrypted: bytes | None) -> dict[str, str]:
         raw = self.vault.get_session(profile_id) if profile_persistence == "session" else self.vault.decrypt(encrypted)
-        secrets = self._decode(raw)
-        if LEGACY_SECRET_KEY in secrets:
-            # An old installation may still contain the retired provider key. Drop
-            # it on first read and re-encrypt only the supported OpenRouter secret.
-            secrets.pop(LEGACY_SECRET_KEY, None)
-            cleaned = json.dumps(secrets, separators=(",", ":")).encode()
-            if profile_persistence == "session":
-                self.vault.set_session(profile_id, cleaned)
-            else:
-                self.db.replace_profile_secret(profile_id, self.vault.encrypt(cleaned))
-        return secrets
+        return self._decode(raw)
 
     def _migrate_legacy_secrets(self) -> None:
         for profile in self.db.list_profiles():
             record = self.db.get_profile(profile.id)
-            if record:
-                self._read_secret(profile.id, profile.persistence, record[1])
+            if not record:
+                continue
+            secrets = self._read_secret(profile.id, profile.persistence, record[1])
+            if not secrets.pop("elevenlabsKey", None):
+                continue
+            raw = json.dumps({key: value for key, value in secrets.items() if value}, separators=(",", ":")).encode()
+            if profile.persistence == "session":
+                self.vault.set_session(profile.id, raw)
+                self.db.save_profile(profile, b"")
+            else:
+                self.db.save_profile(profile, self.vault.encrypt(raw))
 
     def secrets(self, profile_id: str) -> dict[str, str]:
         record = self.db.get_profile(profile_id)
         if not record:
             return {}
         profile, encrypted = record
-        return self._read_secret(profile_id, profile.persistence, encrypted)
+        return {key: value for key, value in self._read_secret(profile_id, profile.persistence, encrypted).items() if key != "elevenlabsKey"}
 
     def selected_secrets(self, *, include_environment: bool = True) -> tuple[ProviderProfile | None, dict[str, str]]:
         profile = next((item for item in self.db.list_profiles() if item.selected), None)
@@ -151,22 +145,25 @@ class ProfileService:
         key = self._credential(value.openrouter_key, previous.get("openrouterKey", ""))
         previous_profile = existing[0] if existing else None
         text_unchanged = bool(previous_profile and not self._has_new_credential(value.openrouter_key) and value.text_model_id == previous_profile.text_model_id)
-        tts_unchanged = bool(previous_profile and not self._has_new_credential(value.openrouter_key) and value.tts_model_id == previous_profile.tts_model_id and value.tts_voice == previous_profile.tts_voice and value.tts_speed == previous_profile.tts_speed)
+        tts_model_id = previous_profile.tts_model_id if previous_profile else None
+        tts_voice = previous_profile.tts_voice if previous_profile else None
+        tts_speed = previous_profile.tts_speed if previous_profile else 1.0
         profile = ProviderProfile(
-            id=profile_id, name=value.name, text_model_id=value.text_model_id, tts_model_id=value.tts_model_id,
-            tts_voice=value.tts_voice, tts_speed=value.tts_speed, selected=value.selected, persistence=value.persistence,
+            id=profile_id, name=value.name, text_model_id=value.text_model_id, tts_model_id=tts_model_id,
+            tts_voice=tts_voice, tts_speed=tts_speed, selected=value.selected, persistence=value.persistence,
             openrouter_configured=bool(key), openrouter_masked=mask_secret(key),
             text_status=previous_profile.text_status if text_unchanged else ("configured" if key else "not_configured"),
-            tts_status=previous_profile.tts_status if tts_unchanged else ("configured" if key and value.tts_model_id and value.tts_voice else "not_configured"),
+            tts_status=previous_profile.tts_status if previous_profile else "not_configured",
             text_message=previous_profile.text_message if text_unchanged else ("Ready to test" if key else "Optional; deterministic local planning remains available"),
             text_last_checked_at=previous_profile.text_last_checked_at if text_unchanged else None,
-            tts_message=previous_profile.tts_message if tts_unchanged else ("Ready to test" if key and value.tts_model_id and value.tts_voice else "Select an OpenRouter speech model and voice to enable narration."),
-            tts_last_checked_at=previous_profile.tts_last_checked_at if tts_unchanged else None,
+            tts_message=previous_profile.tts_message if previous_profile else None,
+            tts_last_checked_at=previous_profile.tts_last_checked_at if previous_profile else None,
             status="configured" if key else "local only",
-            capabilities=["OpenRouter text generation", "OpenRouter TTS"] if key and value.tts_model_id and value.tts_voice else (["OpenRouter text generation"] if key else []),
+            capabilities=["OpenRouter text generation"] if key else [],
             fallbacks=FALLBACKS,
         )
-        raw = json.dumps({"openrouterKey": key}, separators=(",", ":")).encode()
+        previous["openrouterKey"] = key
+        raw = json.dumps({name: secret for name, secret in previous.items() if secret}, separators=(",", ":")).encode()
         if value.persistence == "session":
             self.vault.set_session(profile_id, raw)
             self.db.save_profile(profile, b"")
@@ -182,8 +179,7 @@ class ProfileService:
         profile, _ = record
         secrets = self.secrets(profile_id)
         return self.save(ProfileInput(
-            name=f"{profile.name} copy", text_model_id=profile.text_model_id, tts_model_id=profile.tts_model_id,
-            tts_voice=profile.tts_voice, tts_speed=profile.tts_speed, openrouter_key=secrets.get("openrouterKey"),
+            name=f"{profile.name} copy", text_model_id=profile.text_model_id, openrouter_key=secrets.get("openrouterKey"),
             persistence=profile.persistence, selected=False,
         ))
 
@@ -224,23 +220,16 @@ class ProfileService:
             output_modalities=modalities, free=free, voices=voices,
         )
 
-    @staticmethod
-    def choose_default_tts_model(models: list[OpenRouterModel]) -> OpenRouterModel | None:
-        free = [model for model in models if model.free and "speech" in model.output_modalities]
-        compatible = [model for model in free if model.voices]
-        return sorted(compatible or free, key=lambda model: model.id)[0] if (compatible or free) else None
-
-    async def openrouter_models(self, output_modalities: str | None = None) -> list[OpenRouterModel]:
+    async def openrouter_models(self) -> list[OpenRouterModel]:
         profile, secrets = self.selected_secrets(include_environment=False)
         if not profile or not profile.openrouter_configured or profile.text_status != "connected":
             raise ProviderError("not_configured", "OpenRouter is not configured. Test the selected profile in Settings.")
         key = secrets.get("openrouterKey")
         if not key:
             raise ProviderError("not_configured", "OpenRouter is not configured. Test the selected profile in Settings.")
-        params = {"output_modalities": output_modalities} if output_modalities else None
         try:
             async with httpx.AsyncClient(timeout=12, follow_redirects=False) as client:
-                response = await client.get("https://openrouter.ai/api/v1/models", params=params, headers={"Authorization": f"Bearer {key}"})
+                response = await client.get("https://openrouter.ai/api/v1/models", headers={"Authorization": f"Bearer {key}"})
         except (httpx.TimeoutException, httpx.RequestError) as exc:
             raise ProviderError("timeout_offline", "OpenRouter is offline or timed out. Try again later.") from exc
         if response.status_code >= 400:
@@ -254,8 +243,6 @@ class ProfileService:
         if not isinstance(entries, list):
             raise ProviderError("malformed_response", "OpenRouter returned an unreadable model list.")
         models = {model.id: model for entry in entries if (model := self._model_from_entry(entry)) is not None}
-        if output_modalities and any(model.output_modalities for model in models.values()):
-            models = {key: model for key, model in models.items() if output_modalities in model.output_modalities}
         return [models[model_id] for model_id in sorted(models)]
 
     async def test(self, profile_id: str) -> ProviderProfile:
@@ -264,26 +251,24 @@ class ProfileService:
             raise KeyError(profile_id)
         profile, _ = record
         secrets = self.secrets(profile_id)
-        profile.text_status = "not_configured" if not secrets.get("openrouterKey") else "configured"
-        profile.tts_status = "not_configured" if not secrets.get("openrouterKey") or not profile.tts_model_id or not profile.tts_voice else "configured"
-        profile.text_message = "Optional; deterministic local planning remains available" if not secrets.get("openrouterKey") else "Ready to test"
-        profile.tts_message = "Select an OpenRouter speech model and voice to enable narration." if profile.tts_status == "not_configured" else "Ready to test"
-        profile.text_last_checked_at = profile.tts_last_checked_at = None
         key = secrets.get("openrouterKey")
+        profile.text_status = "not_configured" if not key else "configured"
+        profile.text_message = "Optional; deterministic local planning remains available" if not key else "Ready to test"
+        profile.text_last_checked_at = None
         if key:
             async with httpx.AsyncClient(timeout=12, follow_redirects=False) as client:
                 try:
                     profile.text_status = "connected"
                     self.db.save_profile(profile)
-                    text_models = await self.openrouter_models()
+                    models = await self.openrouter_models()
                     profile.text_last_checked_at = now_iso()
-                    if not any(item.id == profile.text_model_id for item in text_models):
+                    if not any(item.id == profile.text_model_id for item in models):
                         profile.text_status, profile.text_message = "unavailable", "The configured OpenRouter text model is unavailable"
                     else:
                         generation = await client.post(
                             "https://openrouter.ai/api/v1/chat/completions",
                             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                            json={"model": profile.text_model_id, "messages": [{"role": "user", "content": "Return exactly the JSON object {\\\"ok\\\":true}."}], "temperature": 0, "response_format": {"type": "json_object"}},
+                            json={"model": profile.text_model_id, "messages": [{"role": "user", "content": 'Return exactly {"ok":true}.'}], "temperature": 0, "response_format": {"type": "json_object"}},
                         )
                         if generation.status_code >= 400:
                             profile.text_status, profile.text_message = self._http_failure(generation.status_code, "OpenRouter")
@@ -297,48 +282,10 @@ class ProfileService:
                     profile.text_status, profile.text_message = exc.category, exc.safe_message
                 except (httpx.TimeoutException, httpx.RequestError):
                     profile.text_status, profile.text_message = "timeout_offline", "OpenRouter is offline or timed out; local planning remains available"
-
-                try:
-                    speech_models = await self.openrouter_models("speech")
-                    profile.tts_last_checked_at = now_iso()
-                    selected = next((item for item in speech_models if item.id == profile.tts_model_id), None) if profile.tts_model_id else None
-                    if not profile.tts_model_id:
-                        default = self.choose_default_tts_model(speech_models)
-                        if default and default.voices:
-                            profile.tts_model_id, profile.tts_voice = default.id, default.voices[0]
-                            selected = default
-                        else:
-                            profile.tts_status, profile.tts_message = "unavailable", "No free OpenRouter speech model with a compatible voice is currently available; choose a paid model explicitly if appropriate"
-                    if selected is None and profile.tts_status not in {"unavailable"}:
-                        profile.tts_status, profile.tts_message = "unavailable", "The configured OpenRouter speech model is unavailable"
-                    elif selected and not profile.tts_voice:
-                        profile.tts_status, profile.tts_message = "unsupported_model_or_voice", "Choose a voice supported by the selected speech model"
-                    elif selected and selected.voices and profile.tts_voice not in selected.voices:
-                        profile.tts_status, profile.tts_message = "unsupported_model_or_voice", "The selected voice is not supported by this speech model"
-                    elif selected:
-                        profile.tts_status, profile.tts_message = "connected", "Connected; OpenRouter speech model and voice are available"
-                except ProviderError as exc:
-                    profile.tts_status, profile.tts_message = exc.category, exc.safe_message
-                except (httpx.TimeoutException, httpx.RequestError):
-                    profile.tts_status, profile.tts_message = "timeout_offline", "OpenRouter speech models are offline or timed out"
-        if profile.text_status == "invalid_credentials":
-            profile.tts_status, profile.tts_message = "invalid_credentials", "OpenRouter rejected the saved credentials"
-        profile.status = "connected" if profile.text_status == "connected" and profile.tts_status == "connected" else ("partial" if profile.text_status == "connected" or profile.tts_status == "connected" else ("configured" if key else "local only"))
-        profile.capabilities = [item for item, ready in (("OpenRouter text generation", profile.text_status == "connected"), ("OpenRouter TTS", profile.tts_status == "connected")) if ready]
+        profile.status = "connected" if profile.text_status == "connected" else ("configured" if key else "local only")
+        profile.capabilities = ["OpenRouter text generation"] if profile.text_status == "connected" else []
         self.db.save_profile(profile)
         return profile
-
-    def synthesize_openrouter(self, text: str, output: Path, *, validate=None) -> TTSResult | None:
-        profile, secrets = self.selected_secrets()
-        key = secrets.get("openrouterKey")
-        if not key or not profile or not profile.tts_model_id or not profile.tts_voice:
-            return None
-        if profile.tts_status != "connected":
-            raise ProviderError("unavailable", "OpenRouter TTS is unavailable. Test the selected speech model and voice in Settings.")
-        try:
-            return self.tts.synthesize(text, output, key=key, model=profile.tts_model_id, voice=profile.tts_voice, speed=profile.tts_speed, validate=validate)
-        except OpenRouterTTSError as exc:
-            raise ProviderError(exc.category, exc.safe_message) from exc
 
     async def openrouter_json(self, messages: list[dict[str, str]], schema: dict[str, Any], *, require_saved_profile: bool = False, model_id: str | None = None) -> dict[str, Any] | None:
         profile, secrets = self.selected_secrets(include_environment=not require_saved_profile)

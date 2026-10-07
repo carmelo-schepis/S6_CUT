@@ -2,11 +2,9 @@ import { readdir, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { join, relative, resolve } from "node:path";
 
-// ElevenLabs was retired as a provider: S6_cut speaks to OpenRouter for both
-// text and speech. The engine still carries the code that strips the old key
-// and capabilities out of previously-stored data — that cleanup must stay — but
-// nothing under web/src may reference it, or the name reaches a customer's
-// screen and the shipped bundle.
+// ElevenLabs was retired as a provider. The engine still scrubs its old key
+// from previously stored data, but nothing under web/src may reference the
+// provider or the name reaches a customer's screen and shipped bundle.
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const SEARCH_ROOTS = ["web/src", "web/public"];
 const RETIRED = /eleven\s*labs|elevenlabs/i;
@@ -36,9 +34,9 @@ for (const searchRoot of SEARCH_ROOTS) {
 if (offences.length) {
   console.error("Retired provider referenced in customer-facing source:");
   for (const offence of offences) console.error(`  ${offence}`);
-  console.error("\nS6_cut uses OpenRouter for text and speech. The engine-side cleanup of legacy");
-  console.error("stored data (engine/providers.py LEGACY_SECRET_KEY, the schema-v5 migration) is");
-  console.error("deliberate and stays; the name must not appear in web/src or web/public.");
+  console.error("\nThe engine-side cleanup of legacy provider data is deliberate; the provider name");
+  console.error("stored data (engine/providers.py) is deliberate; the provider name must not appear");
+  console.error("in web/src or web/public.");
   process.exit(1);
 }
 

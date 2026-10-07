@@ -24,7 +24,6 @@ const SCREENS = [
   { id: "library", nav: "Library" },
   { id: "workspace", nav: "Workspace" },
   { id: "shorts-editor", nav: "Shorts Editor" },
-  { id: "ai-video", nav: "AI Video" },
   { id: "jobs", nav: "Jobs" },
   { id: "settings", nav: "Settings" },
 ];

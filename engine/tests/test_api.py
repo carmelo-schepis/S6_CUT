@@ -2,12 +2,10 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
-import sqlite3
-
 import pytest
 from fastapi.testclient import TestClient
 
-from engine.app import _project_name, app, db, profiles, settings, signer
+from engine.app import _project_name, app, db, settings, signer
 
 
 client = TestClient(app)
@@ -20,18 +18,84 @@ def reset_creation_rate_limit() -> None:
     app_module.creation_times.clear()
 
 
-def test_topic_plan_reports_storage_pressure_without_internal_error(monkeypatch) -> None:
-    async def unavailable(*_: object, **__: object):
-        raise sqlite3.OperationalError("disk I/O error")
+def test_openrouter_text_model_discovery_remains_compatible_without_speech_discovery(monkeypatch) -> None:
+    from engine import app as app_module
+    from engine.models import OpenRouterModel
 
-    monkeypatch.setattr(profiles, "openrouter_json", unavailable)
-    response = client.post("/api/v1/ai/topic-plan", json={
-        "topic": "Why bees matter", "audience": "General audience", "tone": "Friendly",
-        "language": "English", "callToAction": "", "instructions": "", "durationSeconds": 30,
-        "aspectRatio": "9:16", "variants": 1, "customScript": "", "modelId": "openai/test",
-    })
-    assert response.status_code == 503
-    assert response.json()["detail"] == "Local project storage is temporarily unavailable. Free disk space and try again."
+    async def fake_models():
+        return [
+            OpenRouterModel(id="text/model", name="Text Model", output_modalities=["text"]),
+            OpenRouterModel(id="speech/model", name="Speech Model", output_modalities=["speech"], voices=["alloy"]),
+        ]
+
+    monkeypatch.setattr(app_module.profiles, "openrouter_models", fake_models)
+    all_models = client.get("/api/v1/openrouter/models")
+    text_models = client.get("/api/v1/openrouter/models?outputModalities=text")
+    retired_speech = client.get("/api/v1/openrouter/models?outputModalities=speech")
+
+    assert all_models.status_code == text_models.status_code == 200
+    assert [model["id"] for model in all_models.json()] == ["text/model", "speech/model"]
+    assert [model["id"] for model in text_models.json()] == ["text/model"]
+    assert retired_speech.status_code == 410
+    assert "/api/v1/openrouter/models" in app.openapi()["paths"]
+    assert "/api/v1/ai/topic-plan" not in app.openapi()["paths"]
+
+
+def test_retired_creation_routes_are_absent_and_have_no_side_effects(monkeypatch) -> None:
+    from engine import app as app_module
+
+    projects_before = {project.id for project in db.list_projects()}
+    jobs_before = {job.id for job in db.list_jobs()}
+    queue_size = app_module.manager.queue.qsize()
+    side_effects: list[str] = []
+
+    def fail(*_: object, **__: object) -> None:
+        side_effects.append("called")
+        raise AssertionError("a retired endpoint must have no side effects")
+
+    monkeypatch.setattr(app_module.manager, "enqueue", fail)
+    monkeypatch.setattr(app_module.db, "save_project", fail)
+    monkeypatch.setattr(app_module.db, "save_job", fail)
+    monkeypatch.setattr(app_module.profiles, "openrouter_json", fail)
+    responses = [
+        client.post("/api/v1/jobs/script", json={"script": "A valid legacy script body", "style": "serious", "aspectRatio": "9:16"}),
+        client.post("/api/v1/ai/topic-plan", json={"topic": "Retired", "customScript": "A valid custom script"}),
+    ]
+    assert [response.status_code for response in responses] == [405, 404]
+    assert "/api/v1/jobs/script" not in app.openapi()["paths"]
+    assert "/api/v1/ai/topic-plan" not in app.openapi()["paths"]
+    assert {project.id for project in db.list_projects()} == projects_before
+    assert {job.id for job in db.list_jobs()} == jobs_before
+    assert app_module.manager.queue.qsize() == queue_size
+    assert side_effects == []
+
+
+def test_legacy_script_controls_reject_without_queue_or_record_mutation(monkeypatch) -> None:
+    import uuid
+
+    from engine import app as app_module
+    from engine.models import Clip, Job, Project
+
+    project_id, job_id, clip_id = (str(uuid.uuid4()) for _ in range(3))
+    project = Project(id=project_id, name="Old Script", mode="script", style="educational", state="failed", source_name="legacy", source_kind="script", requested_count=1, latest_job_id=job_id)
+    job = Job(id=job_id, project_id=project_id, mode="script", state="failed", stage="failed", stage_label="Legacy render retired", progress=100, style="educational", clips=[Clip(id=clip_id, index=1, state="failed", start=0, end=10, duration=10, opening_line="Legacy output")])
+    db.save_project(project)
+    db.save_job(job, {"caption_overrides": {clip_id: {"revision": 1, "cues": []}}})
+    before = db.get_job(job_id).model_dump(mode="json")
+    private_before = db.get_job_private(job_id)
+    queue_size = app_module.manager.queue.qsize()
+    monkeypatch.setattr(app_module.manager, "enqueue", lambda *_args, **_kwargs: pytest.fail("legacy script work must not be enqueued"))
+
+    responses = [
+        client.post(f"/api/v1/jobs/{job_id}/control/resume"),
+        client.post(f"/api/v1/jobs/{job_id}/control/retry-failed"),
+        client.post(f"/api/v1/jobs/{job_id}/clips/{clip_id}/retry"),
+        client.post(f"/api/v1/jobs/{job_id}/clips/{clip_id}/captions/rerender?revision=1"),
+    ]
+    assert all(response.status_code == 409 and "Legacy Script" in response.text for response in responses)
+    assert db.get_job(job_id).model_dump(mode="json") == before
+    assert db.get_job_private(job_id) == private_before
+    assert app_module.manager.queue.qsize() == queue_size
 
 
 @pytest.mark.parametrize(
@@ -297,51 +361,12 @@ def test_storage_diagnostics_stay_available_without_statvfs(monkeypatch, tmp_pat
     assert body["maxRetainedJobs"] == configured_settings.max_retained_jobs
 
 
-def test_script_job_preserves_exact_source_and_returns_durable_records() -> None:
-    script = "The Beatles changed popular music. This second sentence explains why."
-    response = client.post("/api/v1/jobs/script", json={"script": script, "style": "educational", "aspectRatio": "9:16", "narration": "silent"})
-    assert response.status_code == 202, response.text
-    body = response.json()
-    assert body["project"]["mode"] == "script"
-    assert body["job"]["state"] == "queued"
-    private = db.get_job_private(body["job"]["id"])
-    assert private["script"] == script
-    assert private["subscribe_animation"]["enabled"] is False
-    assert body["job"]["contentFormat"] == "short"
-    assert client.get(f"/api/v1/projects/{body['project']['id']}").status_code == 200
-
-
-def test_script_job_snapshots_versioned_animation_and_explicit_long_format(monkeypatch) -> None:
-    from engine import app as app_module
-
-    saved: dict[str, object] = {}
-    monkeypatch.setattr(app_module.db, "save_project", lambda project: saved.update(project=project))
-    monkeypatch.setattr(app_module.db, "save_job", lambda job, private=None: saved.update(job=job, private=private))
-
-    async def enqueue(_: str) -> None:
-        return None
-
-    monkeypatch.setattr(app_module.manager, "enqueue", enqueue)
-    response = client.post("/api/v1/jobs/script", json={
-        "script": "A sufficiently long script checks long form scheduling and persistence.",
-        "aspectRatio": "16:9", "contentFormat": "long", "narration": "silent",
-        "subscribeAnimation": {"enabled": True, "version": 1, "shortFormLeadSeconds": 10},
+def test_retired_tts_profile_controls_are_rejected() -> None:
+    response = client.post("/api/v1/profiles", json={
+        "name": "Retired speech settings", "ttsModelId": "openai/gpt-4o-mini-tts",
+        "ttsVoice": "alloy", "ttsSpeed": 1.2,
     })
-    assert response.status_code == 202, response.text
-    body = response.json()
-    assert body["project"]["contentFormat"] == "long"
-    assert body["job"]["contentFormat"] == "long"
-    assert saved["private"]["content_format"] == "long"
-    assert saved["private"]["subscribe_animation"] == {"version": 1, "enabled": True, "short_form_lead_seconds": 10}
-
-
-def test_tts_speed_accepts_documented_minimum_and_rejects_below() -> None:
-    accepted = client.post("/api/v1/profiles", json={"name": "Minimum TTS speed", "ttsSpeed": 0.25})
-    assert accepted.status_code == 200, accepted.text
-    assert accepted.json()["ttsSpeed"] == 0.25
-
-    rejected = client.post("/api/v1/profiles", json={"name": "Below minimum TTS speed", "ttsSpeed": 0.249})
-    assert rejected.status_code == 422
+    assert response.status_code == 422
 
 
 def test_provider_secrets_are_masked_and_never_returned() -> None:
@@ -358,11 +383,15 @@ def test_provider_secrets_are_masked_and_never_returned() -> None:
     assert key not in listed
 
 
-def test_provider_tests_report_each_optional_service_independently(monkeypatch) -> None:
+def test_provider_test_checks_text_only_and_keeps_legacy_speech_fields(monkeypatch) -> None:
     created = client.post("/api/v1/profiles", json={
-        "name": "Independent provider capabilities", "textModelId": "openai/test", "ttsModelId": "free/speech", "ttsVoice": "alloy",
+        "name": "Legacy provider capabilities", "textModelId": "openai/test",
         "openrouterKey": "openrouter-secret", "persistence": "encrypted", "selected": True,
     }).json()
+    stored = db.get_profile(created["id"])
+    assert stored is not None
+    legacy = stored[0].model_copy(update={"tts_model_id": "free/speech", "tts_voice": "alloy"})
+    db.save_profile(legacy, stored[1])
 
     class Response:
         def __init__(self, status_code: int, payload: dict[str, object]):
@@ -389,7 +418,8 @@ def test_provider_tests_report_each_optional_service_independently(monkeypatch) 
     response = client.post(f"/api/v1/profiles/{created['id']}/test")
     assert response.status_code == 200
     assert response.json()["textStatus"] == "invalid_credentials"
-    assert response.json()["ttsStatus"] == "invalid_credentials"
+    assert response.json()["ttsStatus"] == "not_configured"
+    assert response.json()["ttsModelId"] == "free/speech" and response.json()["ttsVoice"] == "alloy"
     assert "openrouter-secret" not in response.text
 
 
@@ -475,10 +505,24 @@ def test_invalid_url_import_does_not_create_a_project() -> None:
     assert response.status_code == 422
 
 
-def test_specific_job_routes_are_not_shadowed_by_control_actions(monkeypatch, tmp_path) -> None:
-    script = "A complete script sentence creates one durable video project."
-    created = client.post("/api/v1/jobs/script", json={"script": script, "style": "serious", "aspectRatio": "9:16", "narration": "silent"}).json()
-    job_id = created["job"]["id"]
+def test_specific_job_routes_are_not_shadowed_by_control_actions(monkeypatch) -> None:
+    from engine import app as app_module
+
+    monkeypatch.setattr(app_module, "validate_video_upload", lambda *args, **kwargs: {
+        "duration": 20.0, "width": 1920, "height": 1080, "audio": True,
+    })
+
+    async def enqueue(_: str) -> None:
+        return None
+
+    monkeypatch.setattr(app_module.manager, "enqueue", enqueue)
+    folder = app_module.db.list_folders()[0]
+    created = client.post("/api/v1/jobs/clip", data={
+        "name": "Route smoke", "count": "1", "min_duration": "8", "max_duration": "20",
+        "aspect_ratio": "9:16", "library_folder_id": folder.id,
+    }, files={"file": ("fixture.mp4", b"fixture mp4 bytes", "video/mp4")})
+    assert created.status_code == 202, created.text
+    job_id = created.json()["job"]["id"]
     selection = client.put(f"/api/v1/jobs/{job_id}/selection", json={"clipIds": []})
     assert selection.status_code == 200
     export = client.post(f"/api/v1/jobs/{job_id}/export", json={"clipIds": []})

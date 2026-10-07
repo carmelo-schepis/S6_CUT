@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Health, Job, LibraryFolder, Project } from "../types";
+import type { Job, LibraryFolder, Project } from "../types";
 import { WorkspaceView } from "./workspace-view";
 
 // ---------------------------------------------------------------
@@ -17,13 +17,6 @@ const mockGetJob = vi.mocked(getJob);
 const mockListFolders = vi.mocked(listFolders);
 
 vi.stubGlobal("EventSource", class { close() {} });
-
-const health: Health = {
-  status: "ready", version: "test", database: true, ffmpeg: true, ffprobe: true,
-  whisper: true, ytdlp: true, localTts: true, dataPath: "Local mounted data directory",
-  freeBytes: 1_000_000, activeWorkers: 0, queuedJobs: 0,
-  fallbacks: { planning: "deterministic" },
-};
 
 const project: Project = {
   schemaVersion: 1, id: "p1", name: "Test", mode: "clip", style: "serious",
@@ -87,8 +80,6 @@ function renderView(job: Job = publishedJob) {
   return render(
     <WorkspaceView
       project={project}
-      health={health}
-      hasSelectedProvider
       onConfigureProviders={onConfigureProviders}
       onProjectUpdated={onProjectUpdated}
       onGoProjects={onGoProjects}

@@ -105,6 +105,10 @@ try {
   if (seeded.total <= 12 || seeded.items.length !== 12 || !seeded.hasMore) throw new Error("Seeded app does not expose a paginated output set");
 
   run("npx", ["playwright", "test", "--config", "playwright.config.ts", "tests/acceptance/recent-clips-assets.spec.ts"], environment);
+  run("npx", ["playwright", "test", "--config", "playwright.config.ts", "tests/acceptance/retirement.spec.ts"], {
+    ...environment,
+    S6_PLAYWRIGHT_ARTIFACTS: join("test-artifacts", project, "retirement"),
+  });
   run("docker", composeArgs().concat(["restart", "engine"]), environment);
   await waitForApp(url, engineUrl);
   const afterRestart = await fetch(`${url}/api/v1/library/recent-clips?search=&page=1&page_size=12`).then((response) => response.json());
@@ -112,9 +116,9 @@ try {
   await writeFile(join(artifacts, "restart-verification.json"), `${JSON.stringify({ url, project, dataPath, totalAfterRestart: afterRestart.total, checkedAt: new Date().toISOString() }, null, 2)}\n`);
 
   // Run only after the empty Recent clips restart assertion: this spec creates
-  // a disposable script job to prove Projects still opens its exact Workspace.
-  // Give Playwright a separate output directory so its second run cannot clear
-  // the clip screenshots/report produced by the first run.
+  // a disposable Clip project to prove Projects still opens its exact Workspace.
+  // Give Playwright a separate output directory so its run cannot clear the
+  // earlier acceptance screenshots and report.
   const postRestartEnvironment = {
     ...environment,
     S6_PLAYWRIGHT_ARTIFACTS: join("test-artifacts", project, "post-restart"),

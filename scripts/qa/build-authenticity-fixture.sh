@@ -1,9 +1,8 @@
 #!/bin/sh
 # Builds a synthetic, fully-owned acceptance fixture for S6_cut content
-# authenticity verification. Runs inside the S6_cut engine image, which carries
-# ffmpeg 5.1 + espeak-ng + DejaVu fonts. No copyrighted or personal material is
-# used: every frame and every sample is generated from lavfi sources and
-# offline speech synthesis.
+# authenticity verification. Runs only inside the QA fixture-builder image, not
+# the application image. No copyrighted or personal material is used: every
+# frame and every sample is generated from lavfi sources and offline synthesis.
 set -eu
 
 W=/work

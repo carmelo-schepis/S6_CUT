@@ -97,7 +97,7 @@ test.describe("Smart planning survives an OpenRouter failure on a YouTube import
 
     // The import must not be blamed on the provider: it happens before planning.
     await waitForSource(page);
-    await waitForProjectReady(page, observed, "clip", IMPORT_DEADLINE_MS);
+    await waitForProjectReady(page, observed, IMPORT_DEADLINE_MS);
     const processingSeconds = (Date.now() - startedAt) / 1000;
 
     // --- The provider failed, and the application said so --------------------

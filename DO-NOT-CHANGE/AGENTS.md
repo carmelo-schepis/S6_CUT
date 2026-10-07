@@ -198,9 +198,11 @@ using the camelCase field names. This contract is symmetric and exact:
 - `engine/config.py` env vars are consumed by `compose.yaml`, the Dockerfiles, and
   `scripts/dev.mjs`: `S6_DATA_PATH`, `S6_WHISPER_*`, `S6_JOB_*`, `S6_MAX_*`,
   `S6_MEDIA_URL_TTL_SECONDS`, `S6_FAST_GUARD_SECONDS`, `S6_FFMPEG_BIN`,
-  `S6_FFPROBE_BIN`, `S6_YTDLP_BIN`, `S6_LOCAL_TTS_BIN`, `S6_ALLOWED_ORIGINS`.
-  Changing a default or unit (bytes vs MB, seconds vs minutes) silently breaks
-  docker deployments and the dev server.
+  `S6_FFPROBE_BIN`, `S6_YTDLP_BIN`, `S6_ALLOWED_ORIGINS`. The former
+  `S6_LOCAL_TTS_BIN` variable is retired with Script/narration generation; do not
+  reintroduce it as part of current runtime configuration. Changing a default or
+  unit (bytes vs MB, seconds vs minutes) silently breaks docker deployments and
+  the dev server.
 - `compose.yaml` binds `./data` → `/app/data` and the web container proxies
   `/api/` → engine:8001. `docker/nginx.conf` carries the CSP and proxy timeouts.
   Never bypass the nginx proxy for media, and don't relax the CSP

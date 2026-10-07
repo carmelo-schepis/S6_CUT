@@ -427,7 +427,7 @@ def test_switch_fast_reuses_source_and_cancels_smart(monkeypatch: pytest.MonkeyP
     assert proj.latest_job_id == new_job.id
 
 
-def test_switch_fast_refuses_finished_or_script_jobs() -> None:
+def test_switch_fast_refuses_finished_clip_jobs() -> None:
     project = Project(
         id="switch-err-proj", name="err", mode="clip", style="educational",
         state="queued", source_name="x.mp4", source_kind="upload", requested_count=1,
@@ -442,13 +442,6 @@ def test_switch_fast_refuses_finished_or_script_jobs() -> None:
     with pytest.raises(SwitchFastError, match="finished"):
         asyncio.run(manager.control("switch-done", "switch-fast"))
 
-    script = Job(
-        id="switch-script", project_id=project.id, mode="script", processing_mode="smart",
-        state="queued", stage="queued", stage_label="Queued", progress=0, style="educational",
-    )
-    db.save_job(script, {"script": "hello world this is long enough"})
-    with pytest.raises(SwitchFastError, match="Only clip"):
-        asyncio.run(manager.control("switch-script", "switch-fast"))
 
 
 # ---------------------------------------------------------------------------

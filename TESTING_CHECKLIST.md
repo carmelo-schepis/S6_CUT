@@ -1,5 +1,7 @@
 # S6_CUT Autonomous Playwright Test Checklist
 
+> Historical QA record from 2026-09-19/20. Script mode, AI Video, and narration controls described below have since been retired; this file documents past behavior/evidence, not current acceptance criteria.
+
 ## Run: 2026-09-19/20 (live Docker Playwright sweep)
 
 Evidence root: `test-artifacts/qa-sweep-20260919T235544Z/` (screenshots, logs, notes). Existing Compose services were healthy at startup and were not stopped. No project/data deletion or Git operations were performed. This run updates the status below as UI coverage proceeds; prior run evidence remains historical.

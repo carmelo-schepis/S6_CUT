@@ -1,4 +1,6 @@
-# S6_cut — Long-Running YouTube End-to-End Verify-and-Fix Prompt
+# S6_cut — Long-Running YouTube End-to-End Verify-and-Fix Prompt (Archived)
+
+> Historical runbook superseded by current product documentation. It describes the retired Script and AI Video routes and must not be used to create those jobs. Current acceptance covers Clip and Music workflows only; legacy Script data is compatibility-only.
 
 **Target repository:** `/Users/dummy/Documents/S6_CUT` on the macOS host (`dummy@100.108.250.42`).
 **How to use:** open a Claude Code session on that Mac with the working directory set to the repository, then paste everything below the line as the task. Expect a multi-hour run.
@@ -89,7 +91,7 @@ curl -fsS http://127.0.0.1:8080/api/health | tee test-artifacts/"$RUN"/logs/gate
 curl -fsS http://127.0.0.1:8001/api/health | tee test-artifacts/"$RUN"/logs/engine-health.json
 ```
 
-**Gate:** `/api/health` must report `status: ready` with `ffmpeg`, `ffprobe`, `whisper`, `ytdlp`, `localTts`, and `database` all true. If `ytdlp` is false, stop and fix that before touching the UI — every YouTube case depends on it.
+**Gate:** `/api/health` must report `status: ready` with `ffmpeg`, `ffprobe`, `whisper`, `ytdlp`, and `database` all true. The legacy `localTts` health field is retained for response compatibility and is expected to be false. If `ytdlp` is false, stop and fix that before touching the UI — every YouTube case depends on it.
 
 Record image IDs, container start times, and `docker compose config` output into `logs/deployment.txt`.
 

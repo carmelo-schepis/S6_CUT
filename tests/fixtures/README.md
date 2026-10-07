@@ -1,11 +1,15 @@
 # Acceptance fixtures
 
 `openrouter-fallback.mp4` is a synthetic, offline-generated fixture for the
-OpenRouter Smart fallback acceptance test. It contains a simple generated video
-and a single-channel spoken narration; it contains no personal or copyrighted
-source material. The test uses the media only to exercise real local
-transcription, rendering, and verification, and does not assert exact Whisper
-wording.
+OpenRouter Smart fallback and Music-profile upload-path acceptance tests. It
+contains a simple generated video and a single-channel spoken narration; it
+contains no personal or copyrighted source material. It can exercise local
+transcription and rendering, but it is **not** a Music-content validation
+source and must never be used as a substitute for human-sung audio. Live Music
+validation requires an authorized human-sung source, attribution/license
+metadata, and the required cached model. The QA authenticity runner only runs
+that live acceptance when explicitly opted in with `S6_RUN_LIVE_MUSIC=1` and a
+user-provided `S6_MUSIC_SOURCE_VIDEO`.
 
 The committed fixture is intentionally small (about 2.9 MiB), 13.375 seconds
 long, and its reproducibility anchor is:

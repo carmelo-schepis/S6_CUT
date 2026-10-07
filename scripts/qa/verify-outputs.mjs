@@ -54,33 +54,6 @@ const LIMITS = {
   minCaptionDistinctStates: 4,
 };
 
-/**
- * Script mode composes from text, not from source footage: with no matching
- * Library asset the engine deliberately renders a relevant text card over a
- * dark canvas rather than substituting unrelated media (README "Provider and
- * fallback matrix"; IMPLEMENTATION_STATUS limitations). Such an output is
- * legitimately dark and changes in steps as cards and caption groups advance,
- * so the brightness and motion limits are re-anchored — but only against the
- * same negative controls, so the checks still fail an output that is genuinely
- * black or genuinely frozen.
- *
- *   measured black control : luminance 2.0, variance 0,   frame diff 0.000
- *   measured frozen control: luminance 77,  variance 2378, frame diff 0.001
- *   measured script output : luminance 10.7, variance 272, frame diff 0.661
- *
- * `longestFrozenSeconds` carries the motion requirement here instead of
- * `movingSampleFraction`, because short static title cards are expected and
- * the task allows them.
- */
-const TEXT_CARD_LIMITS = {
-  ...LIMITS,
-  minMeanLuminance: 5,          // 2.5x the black control's 2.0
-  minMeanVariance: 50,          // black control measured 0
-  minMeanFrameDifference: 0.1,  // 100x the frozen control's 0.001
-  minMovingSampleFraction: 0.15,
-  maxFrozenSeconds: 3.0,
-};
-
 const failures = [];
 const warnings = [];
 function check(condition, message, detail) {
@@ -94,11 +67,11 @@ const ASPECTS = { "9:16": [1080, 1920], "1:1": [1080, 1080], "16:9": [1920, 1080
 
 async function verifyClip(clip, context) {
   const label = `${context.mode} clip ${clip.index}`;
-  const limits = context.textCard ? TEXT_CARD_LIMITS : LIMITS;
+  const limits = LIMITS;
   const file = clip.downloadPath;
   const outputDir = join(context.outputDir, `clip-${clip.index}-analysis`);
   await mkdir(outputDir, { recursive: true });
-  const report = { label, file: basename(file), index: clip.index, thresholdProfile: context.textCard ? "text-card" : "source-derived" };
+  const report = { label, file: basename(file), index: clip.index, thresholdProfile: "source-derived" };
 
   // --- 1. The downloaded file is real and distinct from the input ----------
   const bytes = await readFile(file);
@@ -264,7 +237,7 @@ async function verifyManifest(name, options) {
     mode: manifest.mode, aspect: "9:16", sourceInfo, fixtureSha,
     outputDir: join(root, name), sections: options.sections,
     expectAudio: options.expectAudio, expectCaptions: options.expectCaptions,
-    checkCorrespondence: options.checkCorrespondence, textCard: Boolean(options.textCard),
+    checkCorrespondence: options.checkCorrespondence,
   };
   const clips = [];
   for (const clip of manifest.clips) clips.push(await verifyClip(clip, context));
@@ -305,14 +278,11 @@ async function main() {
   results.smart = await verifyManifest("smart", { sections: SECTIONS, expectAudio: true, expectCaptions: true, checkCorrespondence: true });
   results.fast = await verifyManifest("fast", { sections: SECTIONS, expectAudio: true, expectCaptions: false, checkCorrespondence: true });
   results.fallback = await verifyManifest("fallback", { sections: SECTIONS, expectAudio: true, expectCaptions: true, checkCorrespondence: true });
-  // Script outputs are generated from text, not from the fixture, so source
-  // correspondence does not apply to them.
-  results.script = await verifyManifest("script", { sections: SECTIONS, expectAudio: true, expectCaptions: true, checkCorrespondence: false, textCard: true });
 
   const summary = {
     generatedAt: new Date().toISOString(),
     fixture: { path: basename(fixturePath), sha256: sha256(await readFile(fixturePath)) },
-    limits: { sourceDerived: LIMITS, textCard: TEXT_CARD_LIMITS },
+    limits: { sourceDerived: LIMITS },
     modes: Object.fromEntries(Object.entries(results).filter(([, value]) => value)),
     failures,
     warnings,

@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Health, Job, LibraryAsset, LibraryFolder, Project } from "../types";
+import type { Job, LibraryAsset, LibraryFolder, Project } from "../types";
 import { WorkspaceView } from "./workspace-view";
 
 // ---------------------------------------------------------------
@@ -17,13 +17,6 @@ const mockGetJob = vi.mocked(getJob);
 const mockControlJob = vi.mocked(controlJob);
 const mockListAssets = vi.mocked(listAssets);
 const mockListFolders = vi.mocked(listFolders);
-
-const health: Health = {
-  status: "ready", version: "test", database: true, ffmpeg: true, ffprobe: true,
-  whisper: true, ytdlp: true, localTts: true, dataPath: "Local mounted data directory",
-  freeBytes: 1_000_000, activeWorkers: 0, queuedJobs: 0,
-  fallbacks: { planning: "deterministic" },
-};
 
 const project: Project = {
   schemaVersion: 1, id: "p1", name: "Test", mode: "clip", style: "serious",
@@ -83,8 +76,6 @@ function renderView(props: Partial<Parameters<typeof WorkspaceView>[0]> = {}) {
   return render(
     <WorkspaceView
       project={project}
-      health={health}
-      hasSelectedProvider
       onConfigureProviders={onConfigureProviders}
       onProjectUpdated={onProjectUpdated}
       onGoProjects={onGoProjects}
@@ -117,11 +108,24 @@ describe("WorkspaceView – page structure", () => {
     expect(names).toEqual(["Source material", "Clip inspector"]);
   });
 
-  it("does not offer the provider callout before /profiles has answered", () => {
-    const { rerender } = renderView({ hasSelectedProvider: false, providersLoaded: false });
-    expect(screen.queryByText(/Add optional AI providers/i)).not.toBeInTheDocument();
-    rerender(<WorkspaceView project={project} health={health} hasSelectedProvider={false} providersLoaded onConfigureProviders={vi.fn()} onProjectUpdated={vi.fn(async () => undefined)} onGoProjects={vi.fn()} />);
-    expect(screen.getByText(/Add optional AI providers/i)).toBeInTheDocument();
+  it("does not repeat provider setup promotions in Workspace", () => {
+    renderView();
+    expect(screen.queryByText(/Add optional OpenRouter planning/i)).not.toBeInTheDocument();
+  });
+
+  it("keeps legacy Script history browseable without retired retry or provider controls", async () => {
+    const legacyProject: Project = { ...project, name: "Archived Script", mode: "script", sourceKind: "script", state: "failed" };
+    const legacyJob: Job = {
+      ...staleSmartJob, mode: "script", state: "failed", stage: "failed", stageLabel: "Legacy Script failed",
+      clips: [{ ...staleSmartJobWithOutputs.clips[0], state: "failed" }],
+      error: "OpenRouter provider voice failed during the retired Script render",
+    };
+    mockGetJob.mockResolvedValue(legacyJob);
+    renderView({ project: legacyProject });
+
+    expect(await screen.findByRole("heading", { name: "Archived Script" })).toBeVisible();
+    expect(await screen.findByText(/provider voice failed during the retired Script render/i)).toBeVisible();
+    expect(screen.queryByRole("button", { name: /retry|pause|resume|stop|configure providers/i })).not.toBeInTheDocument();
   });
 });
 

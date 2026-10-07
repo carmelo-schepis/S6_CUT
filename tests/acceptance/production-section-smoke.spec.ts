@@ -5,7 +5,6 @@ const sections = [
   ["Library", "Personal Media Library"],
   ["Workspace", /.+/],
   ["Shorts Editor", "Shorts Editor"],
-  ["AI Video", "Topic to Video"],
   ["Jobs", "Jobs & recovery"],
   ["Settings", "Settings"],
 ] as const;
@@ -40,5 +39,7 @@ test("production sections load without client or request failures", async ({ pag
   expect(consoleErrors, consoleErrors.join("\n")).toEqual([]);
   expect(pageErrors, pageErrors.join("\n")).toEqual([]);
   expect(requestFailures, requestFailures.join("\n")).toEqual([]);
+  await expect(page.getByRole("button", { name: "AI Video", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Script mode", exact: true })).toHaveCount(0);
   expect(badResponses, badResponses.join("\n")).toEqual([]);
 });

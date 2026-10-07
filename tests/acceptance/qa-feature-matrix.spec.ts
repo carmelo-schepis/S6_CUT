@@ -34,7 +34,7 @@ test.describe("§6.1 application shell", () => {
 
   test("every rail destination navigates and tracks aria-current", async ({ page }) => {
     await boot(page);
-    for (const name of ["Projects", "Library", "Workspace", "Shorts Editor", "AI Video", "Jobs", "Settings"]) {
+    for (const name of ["Projects", "Library", "Workspace", "Shorts Editor", "Jobs", "Settings"]) {
       const button = page.getByRole("button", { name, exact: true }).first();
       await button.click();
       await page.waitForTimeout(1_200);
@@ -161,16 +161,6 @@ test.describe("§6.2 Projects", () => {
     await max.fill("200");
     await page.locator(".create-button").click();
     await expect(page.getByText("Short-form clips can be at most 180 seconds.")).toBeVisible();
-  });
-
-  test("script mode validates length and upload type", async ({ page }) => {
-    await boot(page);
-    await rail(page, "Projects");
-    await page.getByRole("button", { name: "Script mode", exact: true }).click();
-    await page.waitForTimeout(600);
-    await page.getByRole("textbox").first().fill("too short");
-    await page.locator(".create-button").click();
-    await expect(page.getByText("Add at least 10 characters of script.")).toBeVisible();
   });
 
   test("removed Recent projects controls stay absent; Jobs history remains available", async ({ page }) => {

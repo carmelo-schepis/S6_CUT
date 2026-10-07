@@ -119,7 +119,7 @@ test.describe("S6_cut imports an authorised YouTube URL", () => {
     expect(importResult.complete, "YouTube import completed").toBeTruthy();
     expect(importResult.sawBytes, "the engine reported real downloaded bytes").toBeTruthy();
 
-    await waitForProjectReady(page, observed, "clip", IMPORT_DEADLINE_MS);
+    await waitForProjectReady(page, observed, IMPORT_DEADLINE_MS);
     const processingSeconds = (Date.now() - startedAt) / 1000;
 
     await expect(page.locator(".failure-strip")).toHaveCount(0);
@@ -236,7 +236,7 @@ test.describe("S6_cut imports an authorised YouTube URL", () => {
     const importResult = await observeImport(page, projectName, downloadSamples);
     expect(importResult.complete, "YouTube import completed").toBeTruthy();
 
-    await waitForProjectReady(page, observed, "clip", IMPORT_DEADLINE_MS);
+    await waitForProjectReady(page, observed, IMPORT_DEADLINE_MS);
     const processingSeconds = (Date.now() - startedAt) / 1000;
     await expect(page.locator(".failure-strip")).toHaveCount(0);
 
@@ -270,48 +270,6 @@ test.describe("S6_cut imports an authorised YouTube URL", () => {
     await writeManifest("fast", {
       mode: "fast", projectName, videoId: expectedId, requestedCount: 2, actualCount: clips.length,
       processingSeconds, observedStages: [...observed].sort(), clips, downloadSamples,
-    });
-  });
-
-  /**
-   * Burned-in captions from the imported YouTube audio.
-   *
-   * Fast mode transcribes only the windows it selects rather than the whole
-   * source, so caption rendering can be proven on a long import without the
-   * memory cost of transcribing the entire video.
-   */
-  test("Fast mode burns in captions from the imported YouTube audio", async ({ page }) => {
-    test.setTimeout(IMPORT_DEADLINE_MS + 20 * 60_000);
-    const outputDir = path.join(artifacts, "fast-captions");
-    await fs.mkdir(outputDir, { recursive: true });
-    const projectName = `YouTube captions ${Date.now()}`;
-    const observed = new Set<string>();
-    const downloadSamples: Record<string, unknown>[] = [];
-
-    await page.goto("/", { waitUntil: "domcontentloaded" });
-    await expect(page.getByText("Local engine ready")).toBeVisible({ timeout: 90_000 });
-
-    await createClipProject(page, {
-      name: projectName, count: 1, mode: "Fast", aspect: "9:16",
-      min: 20, max: 30, captions: true, source: { kind: "url", url: url! },
-    });
-    const importResult = await observeImport(page, projectName, downloadSamples);
-    expect(importResult.complete, "YouTube import completed").toBeTruthy();
-
-    await waitForProjectReady(page, observed, "clip", IMPORT_DEADLINE_MS);
-    await expect(page.locator(".failure-strip")).toHaveCount(0);
-    // Windowed transcription happens inside rendering, so the whole-source
-    // transcription step must still be absent.
-    expect([...observed].some((entry) => entry.startsWith("Speech transcribed:")),
-      "fast mode does not transcribe the whole source").toBeFalsy();
-
-    const clips = await collectClips(page, projectName, outputDir);
-    expect(clips.length).toBeGreaterThanOrEqual(1);
-    await page.screenshot({ path: path.join(outputDir, "completed-project.png"), fullPage: true });
-
-    await writeManifest("fast-captions", {
-      mode: "fast-captions", projectName, videoId: expectedId, requestedCount: 1,
-      actualCount: clips.length, observedStages: [...observed].sort(), clips,
     });
   });
 

@@ -135,6 +135,26 @@ describe("App shell", () => {
     expect(document.querySelector(".topbar-context")).not.toHaveTextContent(activityProject.name);
   });
 
+  it("keeps legacy Script jobs browseable without showing retired recovery controls", async () => {
+    const project = {
+      schemaVersion: 1 as const, id: "legacy-script", name: "Archived Script", mode: "script" as const,
+      style: "educational" as const, state: "failed" as const, sourceName: "source.mp4", sourceKind: "upload" as const,
+      requestedCount: 1, latestJobId: "legacy-script-job", createdAt: "2026-01-01", updatedAt: "2026-01-01",
+    };
+    mockListProjects.mockResolvedValue([project]);
+    mockListJobs.mockResolvedValue([{
+      ...activityJob, id: "legacy-script-job", projectId: project.id, mode: "script", state: "failed",
+      clips: [{ id: "legacy-output", index: 1, state: "failed" }], error: "Legacy renderer unavailable",
+    }]);
+    mockGetHealth.mockResolvedValue(health);
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Jobs" }));
+    expect(await screen.findByText("LEGACY")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Open" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /retry|pause|resume|stop/i })).not.toBeInTheDocument();
+  });
+
   it("shows exactly one engine startup message while the first health read is outstanding", async () => {
     const pending = deferred<typeof health>();
     mockGetHealth.mockReturnValue(pending.promise);

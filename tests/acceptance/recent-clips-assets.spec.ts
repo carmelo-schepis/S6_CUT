@@ -139,9 +139,17 @@ test("asset-backed Recent clips stay authoritative across selection, deletion, t
   expect(deletable, "fixture needs an unprotected generated output").toBeTruthy();
   const otherTab = await context.newPage();
   const otherErrors = watchErrors(otherTab);
+  const deletedAssetIds = new Set<string>();
+  const expectedDeletedPreview404s: string[] = [];
+  otherTab.on("response", (response) => {
+    const assetId = new URL(response.url()).pathname.match(/^\/api\/v1\/library\/assets\/([^/]+)\/preview$/)?.[1];
+    if (response.status() === 404 && assetId && deletedAssetIds.has(assetId)) expectedDeletedPreview404s.push(assetId);
+    else if (response.status() >= 400) otherErrors.push(`response: ${response.status()} ${response.url()}`);
+  });
   await otherTab.goto("/", { waitUntil: "networkidle" });
   await otherTab.getByRole("button", { name: "Projects", exact: true }).click();
   await expect(otherTab.locator(".recent-clip-card")).toHaveCount(initial.items.length);
+  deletedAssetIds.add(deletable!.id);
   await page.getByRole("button", { name: "Library", exact: true }).click();
   await page.getByLabel("Search media").fill(deletable!.title);
   await page.getByRole("checkbox", { name: `Select ${deletable!.title}`, exact: true }).check();
@@ -173,6 +181,7 @@ test("asset-backed Recent clips stay authoritative across selection, deletion, t
     await page.getByRole("checkbox", { name: `Select ${target.title}`, exact: true }).check();
   }
   await expect(page.getByText("2 selected")).toBeVisible();
+  bulkTargets.forEach((target) => deletedAssetIds.add(target.id));
   await page.getByRole("button", { name: "Delete", exact: true }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Delete 2 items", exact: true }).click();
   await page.getByRole("button", { name: "Projects", exact: true }).click();
@@ -196,6 +205,7 @@ test("asset-backed Recent clips stay authoritative across selection, deletion, t
   const movedFolderAsset = await page.request.get(`${isolated.base}/api/v1/library/assets`).then((response) => response.json()) as { title: string; folderId: string }[];
   expect(movedFolderAsset.find((asset) => asset.title === "RC project 1 clip 2")?.folderId).toBe("00000000-0000-0000-0000-000000000001");
 
+  deletedAssetIds.add(sourceAsset!.id);
   const cascade = await page.request.post(`${isolated.base}/api/v1/library/assets/bulk-delete`, { data: { assetIds: [sourceAsset!.id] } });
   expect(cascade.ok()).toBeTruthy();
   expect((await cascade.json()).deleted).toContain(sourceAsset!.id);
@@ -208,6 +218,7 @@ test("asset-backed Recent clips stay authoritative across selection, deletion, t
   // empty even though history and non-output media still exist.
   const finalOutputs = await recentClips(page);
   expect(finalOutputs.total).toBeGreaterThan(0);
+  finalOutputs.items.forEach((asset) => deletedAssetIds.add(asset.id));
   const finalDelete = await page.request.post(`${isolated.base}/api/v1/library/assets/bulk-delete`, { data: { assetIds: finalOutputs.items.map((asset) => asset.id) } });
   expect(finalDelete.ok()).toBeTruthy();
   expect((await finalDelete.json()).deleted).toHaveLength(finalOutputs.items.length);
@@ -233,6 +244,9 @@ test("asset-backed Recent clips stay authoritative across selection, deletion, t
   expect((await recentClips(page)).total).toBe(0);
   await otherTab.close();
 
+  const deletedPreview404ConsoleErrors = otherErrors.filter((error) => error === "console: Failed to load resource: the server responded with a status of 404 (Not Found)");
+  const unexpectedOtherErrors = otherErrors.filter((error) => !deletedPreview404ConsoleErrors.includes(error));
+  expect(expectedDeletedPreview404s, "404 responses from the other tab must be for previews of deliberately deleted assets").toHaveLength(deletedPreview404ConsoleErrors.length);
+  expect(unexpectedOtherErrors, unexpectedOtherErrors.join("\n")).toEqual([]);
   expect(browserErrors, browserErrors.join("\n")).toEqual([]);
-  expect(otherErrors, otherErrors.join("\n")).toEqual([]);
 });

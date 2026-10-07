@@ -1,4 +1,6 @@
-# S6_cut — Master Build Prompt
+# S6_cut — Master Build Prompt (Archived)
+
+> **Historical prompt — superseded by the current product docs.** Do not treat requirements below as current where they conflict with `README.md` and `IMPLEMENTATION_STATUS.md`. Script mode, narration generation, and AI Video topic planning are retired; do not restore them.
 
 Use this prompt with a capable coding agent from the repository root:
 
@@ -21,8 +23,6 @@ S6_cut is a free, open-source, installable desktop-grade progressive web app tha
 1. **Drop** a local video or paste a supported YouTube URL.
 2. **Pick a style:** Funny, Serious, Educational, or Hype.
 3. **Create**, review results as they complete, then download selected clips or every clip as a ZIP.
-
-It also has **Script mode**. A user pastes or uploads a script and S6_cut produces a new video with narration, word-timed subtitles, and a new relevant image, GIF, or other visual roughly every 2–3 seconds.
 
 S6_cut is local-first and self-hosted:
 
@@ -88,9 +88,7 @@ Implement typed provider interfaces and capability checks. The required degradat
 | Transcription | local Whisper | local Whisper; never require an LLM |
 | Clip segmentation | deterministic TextTiling + boundaries + scoring, optionally improved by OpenRouter | deterministic local result |
 | Caption wording | OpenRouter may clean punctuation and choose phrase groupings | use the timed transcript directly |
-| Caption timing | Whisper/TTS alignment | Whisper/TTS alignment; never invent timestamps with an LLM |
-| Script analysis | OpenRouter structured output | deterministic sentence/phrase beat planner |
-| Script narration | OpenRouter speech model if selected | use a documented local TTS engine; if local TTS is unavailable, offer a clearly labelled no-narration render rather than failing |
+| Caption timing | Local Whisper word timestamps | Use the timed transcript directly; never invent timestamps with an LLM |
 | Image/GIF selection | personal library, then enabled no-key/licensed web sources, then optional keyed sources | library, no-key source, curated fallback, or text card |
 | Generated images | optional configured provider | skip generation and continue |
 | YouTube ingest | local yt-dlp in the engine | local file upload remains available; report URL-specific failures clearly |
@@ -99,7 +97,6 @@ OpenRouter is the single general-purpose LLM integration. In **Settings → Prof
 
 - add, edit, test, duplicate, select, and delete named profiles;
 - enter an OpenRouter API key and configurable model ID;
-- optionally enter an OpenRouter key, speech model, and compatible voice;
 - configure enabled web media sources and any source-specific keys;
 - see masked secrets, connection health, capabilities, and the exact fallback for every service;
 - choose session-only or encrypted persistent storage where supported.
@@ -173,25 +170,9 @@ Use documented APIs or permitted feeds, not brittle web scraping. Preserve provi
 
 Every overlay must have a duration, layer, placement, crop/fit mode, entrance/exit behavior, source/provenance, and confidence. Animated GIF/video timing must render consistently. Avoid covering faces or captions. Apply restrained deterministic motion presets instead of random effects.
 
-### 7. Script mode requirements
+### 7. Retired workflows
 
-Accept pasted text and `.txt`/`.md` uploads. Preserve the exact source script and split it into independently editable paragraphs.
-
-The script pipeline is:
-
-1. validate and normalize the script without silently rewriting it;
-2. create narration using the chosen OpenRouter speech model and voice or the local TTS fallback;
-3. cache voice per paragraph using text + voice/settings hashes;
-4. align narration to words and sentences;
-5. plan semantic visual beats targeting a new visual roughly every 2–3 seconds, allowing natural phrase boundaries;
-6. resolve personal-library and web assets progressively;
-7. assemble a storyboard with editable beats;
-8. render narration, captions, images/GIFs/video, transitions, optional user music, and ducking;
-9. publish a preview and final MP4 with credits/provenance.
-
-If OpenRouter speech is missing, do not display a fatal error. Use local TTS. If neither narration path is operational, explain that the output will be silent and allow the user to continue or add their own voice track. If OpenRouter is missing or fails, use deterministic sentence/phrase beats and straightforward search queries.
-
-Provide a storyboard/Beat board where the user can see the chosen asset, intended concept/entity, source, confidence, rule state, and progress. Allow replace, upload, personal-only, web-only, retry same query, relaxed query, pin, and never-use actions without restarting the whole project.
+Do not implement Script creation, narration synthesis, script beat planning, or AI Video topic planning. Existing legacy Script records and completed media are read-only history; preserve their data and allow their published media to remain browseable without enabling creation, render, retry, or recovery.
 
 ### 8. Personal Media Library
 
@@ -228,7 +209,7 @@ Follow the canonical design documents. The app should feel like a calm professio
 - no neon SaaS gradients, glassmorphism, oversized hero copy, or marketing-page dashboard;
 - desktop-first editing density with a usable review/export experience on smaller screens;
 - persistent navigation for Projects, Library, Workspace, Jobs, and Settings;
-- a clear create strip: source/script → style → Create;
+- a clear create strip: source → style → Create;
 - progressive result cards that can be opened before the whole job finishes;
 - central viewer, Clip/Beat board, selection-driven Inspector, and collapsible layered timeline;
 - visible local/offline/provider/fallback state;
@@ -328,7 +309,7 @@ Then deliver these vertical milestones:
 3. **Batch product:** style-aware ranking, sentence/silence boundaries, multiple independent clips, progressive results, recovery, selection, ZIP.
 4. **URL ingest and profiles:** constrained YouTube import, OpenRouter profile/settings/health, optional LLM enhancement, full fallback tests.
 5. **Library and resolver:** asset ingest, labels/rules, Tier-0 matching, no-key licensed source, provenance, automatic timed overlays.
-6. **Script mode:** script → OpenRouter speech/local voice → forced alignment → 2–3 second beat plan → storyboard → composed video.
+6. **Music workflow:** preserve the existing local Music / sung-vocals workflow without adding speech synthesis.
 7. **Editor polish:** shared preview/export EDL, replacements, transcript/caption edits, basic trim/reframe, keyboard/accessibility/responsive behavior.
 8. **Appliance quality:** TrueNAS/Portainer docs, backup/restore, retention, restart recovery, security hardening, real-media release test.
 
@@ -338,11 +319,10 @@ At every milestone, integrate a working path into the actual UI. Do not build an
 
 Add automated unit, contract, integration, and end-to-end coverage. At minimum prove:
 
-1. With no API keys, a local speech video produces at least one valid captioned short.
-2. With **only an OpenRouter key**, Clip mode and Script mode continue without keyed media sources.
+1. With no API keys, an authorized local video produces at least one valid clip.
+2. With **only an OpenRouter key**, Clip workflows continue without keyed media sources.
 3. With OpenRouter unavailable/malformed/rate-limited, deterministic fallback completes the job with a visible warning.
-4. With OpenRouter speech absent or failing, local TTS is used; if deliberately disabled, the user can produce a silent script video.
-5. A transcript candidate is snapped to valid word/sentence boundaries and does not exceed source duration.
+4. A transcript candidate is snapped to valid word/sentence boundaries and does not exceed source duration.
 6. One failed clip or corrupt GIF does not discard successful clips.
 7. “Beatles” or another fixed named-entity fixture produces a timed entity visual request and either a relevant library/web result or a declared text-card fallback—never an unrelated silent substitution.
 8. Required/Prefer/Never library policies, spacing, date, and maximum-use rules behave deterministically and explain their decisions.
@@ -368,8 +348,7 @@ The MVP is not done until a fresh operator can:
 - receive coherent, non-overlapping, word-captioned vertical clips progressively;
 - see relevant timed library/web overlays with provenance and understandable fallbacks;
 - download one clip or all successful clips as a ZIP;
-- paste/upload a script and produce a unique storyboard/video with 2–3 second visual beats;
-- complete both workflows with only OpenRouter configured, and complete the local Clip workflow with no API keys;
+- use the supported Clip and Music workflows, including with no API keys when providers are optional;
 - restart the app without corrupting completed work;
 - back up all server-side state from one mounted data directory.
 

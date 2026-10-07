@@ -78,12 +78,6 @@ def test_music_upload_api_preserves_100_char_title_and_rejects_101(monkeypatch) 
     assert rejected.status_code == 422
 
 
-def test_music_options_are_rejected_outside_music_clip_requests() -> None:
-    script = client.post("/api/v1/jobs/script", json={
-        "script": "A sufficiently long script to exercise the exact contract.", "musicPresentation": {"version": 1, "subtitleTheme": "clean"},
-    })
-    assert script.status_code == 422
-
 
 def test_music_renderer_contract_and_ass_boundaries(tmp_path: Path) -> None:
     from engine.media import write_music_ass

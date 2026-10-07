@@ -699,13 +699,8 @@ main { min-width: 0; }
    a dead gap beside the taller output column. */
 .source-step .video-source-picker { flex: 1 1 auto; display: flex; flex-direction: column; gap: var(--space-2); min-height: 0; }
 .source-step .drop-zone { flex: 1 1 auto; max-height: 320px; }
-.source-step .script-input-wrap { flex: 1 1 auto; display: flex; flex-direction: column; }
-.source-step .script-input-wrap textarea { flex: 1 1 auto; }
-/* Mode switch labels must never break mid-phrase into "Script / mode". */
 .create-mode-controls { display: flex; align-items: center; gap: var(--space-2); flex: 0 0 auto; }
 .create-topline .segmented button { white-space: nowrap; }
-.script-mode-link { display: inline-flex; align-items: center; gap: 6px; min-height: var(--control-height-large); padding: 0 10px; border: 1px solid transparent; border-radius: var(--radius-lg); background: transparent; color: var(--text-primary); }
-.script-mode-link:hover, .script-mode-link.active { border-color: var(--border); background: var(--surface-2); color: var(--text); }
 .music-mode-icon { font-size: 18px; line-height: 1; }
 /* Steps are flex columns so each one can push its trailing block (actions,
    helper copy) to the bottom instead of leaving a tall dead gap. */
@@ -721,19 +716,12 @@ main { min-width: 0; }
 .drop-zone:hover { border-color: var(--border-strong); background: var(--canvas); }
 .drop-zone:focus-visible { border-color: var(--theme-primary); background: var(--canvas); outline: 2px solid var(--theme-primary-hover); outline-offset: 2px; }
 .drop-zone.drag-active { border-color: var(--theme-primary); box-shadow: 0 0 0 2px var(--red-soft); }
-.drop-zone.drag-active svg { color: var(--theme-primary); }.source-actions { display: flex; gap: 12px; }.source-actions button { border: 0; background: transparent; color: var(--text-primary); text-decoration: underline; }.shorts-editor-form, .topic-video-form { display: grid; gap: var(--space-4); max-width: 1180px; padding: var(--space-5); border-radius: var(--radius-lg); }
-.topic-video-grid { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, .95fr); align-items: start; gap: var(--space-4) var(--space-6); }
-.topic-video-column { display: grid; align-content: start; gap: var(--space-4); min-width: 0; }
-.topic-video-column .field-group + .field-group { padding-top: var(--space-3); }
-.topic-video-form .form-actions { padding-top: var(--space-3); border-top: 1px solid var(--border-soft); }
-@media (max-width: 900px) { .topic-video-grid { grid-template-columns: minmax(0, 1fr); } }.shorts-editor-form h2 { margin: 0 0 var(--space-2); font-size: var(--type-heading-size); font-weight: var(--type-heading-weight); line-height: var(--type-heading-line); letter-spacing: var(--type-heading-tracking); }.shorts-trim-grid, .topic-three-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2); }.provider-status { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); padding: var(--space-3); border: 1px solid var(--border); background: var(--surface-2); }.provider-status > div { display: grid; gap: 3px; }.provider-status span { color: var(--text-primary); }.provider-status.connected { border-color: rgba(76,183,130,.35); }.provider-status.unavailable { border-color: rgba(240,168,75,.35); }.model-picker-row { display: flex; align-items: flex-end; gap: var(--space-2); }.model-picker-row .field { flex: 1; min-width: 0; }.model-picker-row select { width: 100%; }.model-picker-row > .button { flex: 0 0 auto; }.provider-charge-note { margin: 0; color: var(--text-primary); }.plan-review { padding: var(--space-4); }.plan-review small { color: var(--text-primary); }
+.drop-zone.drag-active svg { color: var(--theme-primary); }.source-actions { display: flex; gap: 12px; }.source-actions button { border: 0; background: transparent; color: var(--text-primary); text-decoration: underline; }.shorts-editor-form { display: grid; gap: var(--space-4); max-width: 1180px; padding: var(--space-5); border-radius: var(--radius-lg); }
+.shorts-editor-form h2 { margin: 0 0 var(--space-2); font-size: var(--type-heading-size); font-weight: var(--type-heading-weight); line-height: var(--type-heading-line); letter-spacing: var(--type-heading-tracking); }.shorts-trim-grid, .topic-three-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2); }.provider-status { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); padding: var(--space-3); border: 1px solid var(--border); background: var(--surface-2); }.provider-status > div { display: grid; gap: 3px; }.provider-status span { color: var(--text-primary); }.provider-status.connected { border-color: rgba(76,183,130,.35); }.provider-status.unavailable { border-color: rgba(240,168,75,.35); }.model-picker-row { display: flex; align-items: flex-end; gap: var(--space-2); }.model-picker-row .field { flex: 1; min-width: 0; }.model-picker-row select { width: 100%; }.model-picker-row > .button { flex: 0 0 auto; }.provider-charge-note { margin: 0; color: var(--text-primary); }.plan-review { padding: var(--space-4); }.plan-review small { color: var(--text-primary); }
 .drop-zone svg { color: var(--red-muted); }
 .drop-zone strong { max-width: 90%; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--type-heading-size); font-weight: var(--type-heading-weight); line-height: var(--type-heading-line); letter-spacing: var(--type-heading-tracking); }
 .drop-zone span { color: var(--text-primary); }
 .drop-zone button:not(.button) { border: 0; background: transparent; color: var(--text-primary); text-decoration: underline; }
-.script-input-wrap textarea { min-height: 184px; }
-.script-meta { display: flex; justify-content: space-between; align-items: center; color: var(--text-primary); margin-top: var(--space-2); }
-.script-meta button { display: flex; align-items: center; gap: var(--space-1); min-height: var(--control-height-small); border: 0; background: transparent; color: var(--text-primary); }
 .style-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); margin: 0; }
 .music-theme-group-label { margin: var(--space-2) 0 var(--space-1); color: var(--text-primary); font-size: var(--type-small-size); font-weight: var(--type-emphasis-weight); }
 .music-theme-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2); }
@@ -773,10 +761,6 @@ main { min-width: 0; }
    pinned to the bottom of their column, so the Processing mode segmented
    control and the Create button resolve to the same top and bottom edge. */
 .style-step > .field-group:last-of-type { margin-top: auto; }
-/* Script mode swaps the segmented Processing mode control for a Narration
-   select. It is still the pinned trailing control of its column, so it takes the
-   same large control height and lands on the Create button's line. */
-.style-step > .field-group:last-of-type select { min-height: var(--control-height-large); }
 .create-actions { display: grid; gap: var(--space-2); margin-top: auto; padding-top: var(--space-2); }
 .create-actions .form-error { margin: 0; }
 /* Same visible height as the segmented Processing mode control it aligns with. */
@@ -793,7 +777,6 @@ main { min-width: 0; }
 .processing-mode-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .format-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .mode-note { display: grid; grid-template-columns: var(--space-5) minmax(0, 1fr); align-items: start; gap: var(--space-2); min-width: 0; margin: var(--space-2) 0 0; color: var(--text-primary); }
-.topic-video-form > .mode-note { grid-template-columns: minmax(0, 1fr); }
 .mode-note-icon { display: grid; place-items: center; width: var(--space-5); height: var(--space-5); color: var(--copper-light); }
 .mode-note-copy { min-width: 0; overflow-wrap: anywhere; }
 .mode-note.warning { color: var(--text-primary); background: rgba(240,168,75,.14); padding: var(--space-2); border: 1px solid rgba(240,168,75,.25); border-radius: 6px; }

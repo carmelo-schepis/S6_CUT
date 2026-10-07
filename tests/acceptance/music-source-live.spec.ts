@@ -45,7 +45,7 @@ function safeJob(job: JobData) {
 }
 
 test("real Music upload reaches a persisted, playable terminal job", async ({ page }) => {
-  test.skip(!sourcePath, "Set S6_MUSIC_SOURCE_VIDEO to an authorized human-sung video fixture.");
+  test.skip(!sourcePath, "Set S6_MUSIC_SOURCE_VIDEO to the offline fixture or an authorized human-sung video.");
   const source = path.resolve(sourcePath!);
   const stat = await fs.stat(source);
   expect(stat.isFile(), "S6_MUSIC_SOURCE_VIDEO must name a regular video file").toBeTruthy();

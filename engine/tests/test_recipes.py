@@ -137,7 +137,7 @@ def test_grain_carries_a_pinned_seed() -> None:
 
 def test_source_policy_accepts_todays_kinds() -> None:
     policy = SourcePolicy()
-    for kind in ("upload", "youtube", "script"):
+    for kind in ("upload", "youtube"):
         assert policy.accepts(kind)
     assert not policy.accepts("archival")
     for style in known_styles():

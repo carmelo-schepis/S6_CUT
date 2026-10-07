@@ -41,23 +41,22 @@ test("Projects stays free of Recent projects after restart while creation and na
   await expect(page.getByRole("button", { name: "Workspace", exact: true })).toHaveAttribute("aria-current", "page");
   await expect(page.locator("main h1")).toBeVisible();
 
-  const projectName = `RC disposable script ${Date.now()}`;
+  const projectName = `RC disposable clip ${Date.now()}`;
   await page.getByRole("button", { name: "Projects", exact: true }).click();
   await expect(page.getByRole("region", { name: "Create a project" })).toBeVisible();
-  await page.getByRole("button", { name: "Script mode", exact: true }).click();
-  await page.locator(".script-input-wrap textarea").fill(
-    "A small disposable script acceptance project checks that the Projects creation flow still opens its own Workspace. " +
-    "It exists only in the isolated recent clips stack and is removed with that stack after the test.",
-  );
   await page.getByLabel("Project name").fill(projectName);
-  await page.getByLabel("Narration source").selectOption("local");
-  await page.getByRole("button", { name: "Create script video", exact: true }).click();
+  await page.getByLabel("Choose video file").setInputFiles(`${process.cwd()}/test-video.mp4`);
+  for (let count = 0; count < 4; count += 1) {
+    await page.getByRole("button", { name: "Fewer clips", exact: true }).click();
+  }
+  await page.getByRole("button", { name: /Create 1 short clips?/i }).click();
 
   await expect(page.getByRole("heading", { name: projectName, exact: true })).toBeVisible({ timeout: 60_000 });
   await expect(page.getByRole("button", { name: "Workspace", exact: true })).toHaveAttribute("aria-current", "page");
-  const projects = await page.request.get(`${isolated.base}/api/v1/projects`).then((response) => response.json()) as { id: string; name: string }[];
+  const projects = await page.request.get(`${isolated.base}/api/v1/projects`).then((response) => response.json()) as { id: string; name: string; mode: string }[];
   const created = projects.filter((project) => project.name === projectName);
-  expect(created, "the exact submitted script project exists in the isolated engine").toHaveLength(1);
+  expect(created, "the exact submitted Clip project exists in the isolated engine").toHaveLength(1);
+  expect(created[0].mode).toBe("clip");
   await expect(page.getByRole("heading", { name: projectName, exact: true })).toBeVisible();
 
   expect(browserErrors, browserErrors.join("\n")).toEqual([]);

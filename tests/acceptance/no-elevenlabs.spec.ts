@@ -1,10 +1,8 @@
 import { expect, test } from "@playwright/test";
 
-// S6_cut speaks to OpenRouter for both text and speech. ElevenLabs was removed
-// as a provider, and the only surviving references are the engine-side cleanup
-// paths that strip it out of legacy stored data (`LEGACY_SECRET_KEY` in
-// engine/providers.py and the schema-v5 migration) — neither of which may ever
-// reach a customer's screen or the shipped bundle.
+// S6_cut uses OpenRouter for Smart clip selection. ElevenLabs is a retired
+// provider; its legacy credential is scrubbed from encrypted profiles at
+// startup and must never reach a customer's screen or the shipped bundle.
 const FORBIDDEN = /eleven\s*labs|elevenlabs/i;
 
 test("Settings and the provider form never mention ElevenLabs", async ({ page }) => {

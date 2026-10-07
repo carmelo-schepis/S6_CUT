@@ -2,8 +2,8 @@
  * Isolated content-authenticity acceptance run.
  *
  * Phase 1 stands up a throwaway S6_cut Compose stack with NO test hooks — the
- * same code path a production deployment runs — and drives Smart, Fast, and
- * Script generation through the real browser UI.
+ * same code path a production deployment runs — and drives Smart and Fast
+ * clip generation through the real browser UI.
  *
  * Phase 2 stands up a second throwaway stack with the provider-failure seam
  * enabled, so the OpenRouter fallback path is exercised against a real runtime
@@ -30,17 +30,16 @@ async function directoryExists(directory) {
 
 const fixtureDir = join(artifacts, "fixture");
 const fixture = join(fixtureDir, "s6cut-authenticity-source.mp4");
-const forensicsImage = process.env.S6_FORENSICS_IMAGE || "s6-cut-engine";
+const forensicsImage = process.env.S6_FORENSICS_IMAGE || "s6-cut-retire-script-20261012-forensics";
+const fixtureBuilderImage = "s6-cut-retire-script-20261012-fixture-builder";
 
 /**
  * Build the synthetic acceptance source if it is not already present.
  *
  * The fixture is generated rather than committed: it lives under the ignored
- * test-artifacts directory, so a fresh clone has to produce it. It is built
- * inside the engine image, which carries FFmpeg and espeak-ng, so the host
- * needs no media tooling. See scripts/qa/build-authenticity-fixture.sh for
- * what it contains and why the narration avoids the planner's credit-roll
- * tokens.
+ * test-artifacts directory, so a fresh clone has to produce it. A dedicated
+ * QA-only image carries FFmpeg and espeak-ng; neither is required in the
+ * application image for narration generation. The host needs no media tools.
  */
 async function ensureFixture() {
   try {
@@ -51,12 +50,11 @@ async function ensureFixture() {
   console.log("building the synthetic acceptance fixture (no host FFmpeg required)…");
   await mkdir(fixtureDir, { recursive: true });
   await cp(join(root, "scripts", "qa", "build-authenticity-fixture.sh"), join(fixtureDir, "build-fixture.sh"));
-  // The engine image is built by the first `compose up`; build it up front so
-  // the fixture can be produced before any stack starts.
   await run("docker", ["build", "-f", join(root, "engine", "Dockerfile"), "-t", forensicsImage, root], { timeoutMs: 30 * 60_000 });
-  await run("docker", ["run", "--rm", "--entrypoint", "sh",
+  await run("docker", ["build", "-f", join(root, "scripts", "qa", "Dockerfile.authenticity-fixture"), "-t", fixtureBuilderImage, root], { timeoutMs: 30 * 60_000 });
+  await run("docker", ["run", "--rm", "--network", "none", "--entrypoint", "sh",
     "-u", `${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}`,
-    "-v", `${fixtureDir}:/work`, forensicsImage, "/work/build-fixture.sh"], { timeoutMs: 20 * 60_000 });
+    "-v", `${fixtureDir}:/work`, fixtureBuilderImage, "/work/build-fixture.sh"], { timeoutMs: 20 * 60_000 });
   console.log(`fixture built: ${fixture}`);
 }
 
@@ -93,6 +91,13 @@ async function waitForGateway(url, timeoutMs = 240_000) {
 }
 
 const active = [];
+const usedPorts = new Set();
+function isolatedPort() {
+  let port;
+  do { port = 20_000 + (randomBytes(2).readUInt16BE(0) % 40_000); } while (usedPorts.has(port));
+  usedPorts.add(port);
+  return port;
+}
 
 /**
  * Keep the engine's own log before the stack is destroyed. Without this a
@@ -136,7 +141,9 @@ process.once("SIGTERM", () => stopOnSignal("SIGTERM"));
  * Start an isolated stack. `hooks` are extra engine environment entries; phase
  * 1 passes none so the production code path is what gets measured.
  */
-async function startStack({ label, port, enginePort, hooks = {} }) {
+async function startStack({ label, hooks = {} }) {
+  const port = isolatedPort();
+  const enginePort = isolatedPort();
   // The dataset must be bind-mountable by the Docker daemon; the OS temp
   // directory is not a Docker Desktop shared path, so it lives under the
   // ignored test-artifacts directory and is removed on teardown.
@@ -151,7 +158,16 @@ async function startStack({ label, port, enginePort, hooks = {} }) {
     S6_PORT: String(port),
     S6_ENGINE_PORT: String(enginePort),
     S6_ACCEPTANCE_URL: url,
+    OPENROUTER_API_KEY: "",
+    S6_WHISPER_MODEL: "base",
+    S6_WHISPER_DEVICE: "cpu",
+    S6_WHISPER_COMPUTE_TYPE: "int8",
     S6_AUTHENTICITY_FIXTURE: join(artifacts, "fixture", "s6cut-authenticity-source.mp4"),
+    S6_MUSIC_SOURCE_VIDEO: process.env.S6_RUN_LIVE_MUSIC === "1"
+      ? process.env.S6_MUSIC_SOURCE_VIDEO ?? ""
+      : "",
+    S6_PLAYWRIGHT_ARTIFACTS: join(artifacts, "music-live"),
+    S6_FORENSICS_IMAGE: forensicsImage,
     S6_E2E_PROFILE_KEY: `fixture-${randomBytes(24).toString("hex")}`,
     ...hooks,
   };
@@ -182,15 +198,17 @@ try {
   await ensureFixture();
 
   // --- Phase 1: production code path -------------------------------------
-  const clean = await startStack({ label: "clean", port: 19080, enginePort: 19001 });
+  const clean = await startStack({ label: "clean" });
   await run("npm", ["run", "test:acceptance", "--", ...traceArgs,
     "tests/acceptance/content-authenticity.spec.ts",
-    "-g", "Smart mode renders|Fast mode renders|Script mode renders"], { env: clean.env });
+    "-g", "Smart mode renders|Fast mode renders"], { env: clean.env });
+  await run("npm", ["run", "test:acceptance", "--", ...traceArgs,
+    "tests/acceptance/music-source-live.spec.ts"], { env: clean.env });
   await teardown(clean);
 
   // --- Phase 2: real provider failure -------------------------------------
   const failing = await startStack({
-    label: "providerfail", port: 19082, enginePort: 19003,
+    label: "providerfail",
     hooks: { S6_TEST_MODE: "1", S6_TEST_OPENROUTER_FAILURE: "timeout" },
   });
   await run("npm", ["run", "test:acceptance", "--", ...traceArgs,

@@ -32,7 +32,7 @@ from .media import _SUBTITLE_PRESETS, MediaError, available, caption_font_mismat
 from .models import (
     Asset, AssetDelete, AssetDeleteResult, AssetMove, AssetOrigin, AssetUpdate, AssetPage, CaptionCue, CaptionDownload, CaptionReviewInput, Clip, FolderCreate, FolderMove, FolderUpdate, Health, Job, LibraryPurgeInput, LibraryPurgeResult,
     LibraryFolder, MatchExplanation, RecentClipsPage, ContentFormat, ProcessingMode, ProfileInput, Project, ProjectFolderUpdate,
-    OpenRouterModel, ProviderProfile, ScriptJobInput, SelectionInput, ShortsJobInput, SubscribeAnimationConfig, MusicPresentationConfig, TopicBeat, TopicVideoInput, TopicVideoPlan, now_iso,
+    OpenRouterModel, ProviderProfile, SelectionInput, ShortsJobInput, SubscribeAnimationConfig, MusicPresentationConfig, now_iso,
 )
 from .providers import ProfileService, ProviderError
 from .security import MediaSigner, SecretVault, confined, safe_filename, validate_youtube_url
@@ -280,14 +280,13 @@ def runtime_health() -> Health:
     return Health(
         status="ready" if ffmpeg and ffprobe and whisper and database else "degraded",
         version=__version__, database=database, ffmpeg=ffmpeg, ffprobe=ffprobe, whisper=whisper,
-        ytdlp=available(settings.ytdlp), local_tts=available(settings.local_tts),
+        ytdlp=available(settings.ytdlp), local_tts=False,
         data_path="Container data directory" if str(settings.data_path).startswith("/app/") else "Local mounted data directory",
         free_bytes=free_bytes, configured_workers=settings.job_workers,
         active_workers=manager.active_workers, queued_jobs=manager.queue.qsize(),
         fallbacks={
             "transcription": "Local Whisper is required for automatic clip timing",
             "planning": "Deterministic sentence-aware selection and beat planning",
-            "voice": "Local espeak-ng, then silent render",
             "media": "Personal Library, then relevant text card",
         },
     )
@@ -626,58 +625,6 @@ async def create_shorts_source_job(
     return await _queue_shorts_job(request=request, source_name="YouTube import", source_kind="youtube", source_path=None, source_hash=None, source_metadata=None, url=validated_url, start=parsed_start, end=parsed_end, aspect_ratio=aspect_ratio, library_folder_id=library_folder_id, name=name, burn_subtitles=burn_subtitles, subscribe_animation=subscribe_animation)
 
 
-@app.post("/api/v1/ai/topic-plan", response_model=TopicVideoPlan)
-async def topic_plan(value: TopicVideoInput) -> TopicVideoPlan:
-    if value.custom_script.strip():
-        narration = value.custom_script.strip()
-        words = narration.split()
-        chunk = max(1, len(words) // 6)
-        beats = [TopicBeat(narration=" ".join(words[index:index + chunk]), seconds=max(1, value.duration_seconds / max(1, (len(words) + chunk - 1) // chunk)), keywords=[value.topic]) for index in range(0, len(words), chunk)][:30]
-        return TopicVideoPlan(title=value.topic[:200], hook=words[0][:500], narration=narration, beats=beats, estimated_duration=value.duration_seconds)
-    schema = {"type": "object", "additionalProperties": False, "properties": {"title": {"type": "string"}, "hook": {"type": "string"}, "narration": {"type": "string"}, "beats": {"type": "array", "items": {"type": "object", "additionalProperties": False, "properties": {"narration": {"type": "string"}, "seconds": {"type": "number"}, "keywords": {"type": "array", "items": {"type": "string"}}}, "required": ["narration", "seconds", "keywords"]}}, "estimated_duration": {"type": "number"}, "description": {"type": "string"}, "hashtags": {"type": "array", "items": {"type": "string"}}}, "required": ["title", "hook", "narration", "beats", "estimated_duration", "description", "hashtags"]}
-    target_words = round(value.duration_seconds * 2.5)
-    prompt = f"Create a concise video plan in {value.language} about {value.topic!r}. Audience: {value.audience}. Tone: {value.tone}. Target seconds: {value.duration_seconds}; write approximately {target_words} spoken words so narration duration matches the target at a natural pace. CTA: {value.call_to_action}. Extra instructions: {value.instructions}. Return only JSON matching the schema; use local-library visual keywords and never claim licensing."
-    try:
-        result = await profiles.openrouter_json([{"role": "user", "content": prompt}], schema, require_saved_profile=True, model_id=value.model_id)
-    except ProviderError as exc:
-        status_code = {"not_configured": 503, "invalid_credentials": 502, "rate_limited": 429, "timeout_offline": 503, "unavailable_model": 422, "unsupported_model_or_voice": 422, "malformed_response": 502}.get(exc.category, 502)
-        raise HTTPException(status_code, exc.safe_message) from exc
-    except sqlite3.Error as exc:
-        raise HTTPException(503, "Local project storage is temporarily unavailable. Free disk space and try again.") from exc
-    if not result:
-        raise HTTPException(503, "OpenRouter is not configured. Add and test a provider in Settings, or enter a custom script.")
-    try:
-        return TopicVideoPlan.model_validate(result)
-    except Exception as exc:
-        raise HTTPException(502, "OpenRouter returned a plan that could not be validated.") from exc
-
-
-@app.post("/api/v1/jobs/script", status_code=status.HTTP_202_ACCEPTED)
-async def create_script_job(request: Request, value: ScriptJobInput) -> dict[str, object]:
-    _rate_limit(request)
-    if manager.queue.full():
-        raise HTTPException(429, "The local processing queue is full. Try again after an active job completes.")
-    folder_id = value.library_folder_id or UNSORTED_FOLDER_ID
-    try:
-        selected_folder = db.get_folder(folder_id)
-        if not selected_folder:
-            raise _not_found("Library folder")
-        if selected_folder.archived:
-            raise HTTPException(409, "Archived folders cannot receive new projects")
-        project_id, job_id = str(uuid.uuid4()), str(uuid.uuid4())
-        first_line = next((line.strip() for line in value.script.splitlines() if line.strip()), "Script project")
-        name = _project_name(value.name, first_line[:70])
-        project = Project(id=project_id, name=name, mode="script", style=value.style, content_format=value.content_format, state="queued", source_name=f"{len(value.script)} character script", source_kind="script", requested_count=1, latest_job_id=job_id, library_folder_id=folder_id)
-        job = Job(id=job_id, project_id=project_id, library_folder_id=folder_id, mode="script", content_format=value.content_format, state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style=value.style, steps=manager._script_steps())
-        private = {"script": value.script, "aspect_ratio": value.aspect_ratio, "content_format": value.content_format, "narration": value.narration, "library_folder_id": folder_id, "subscribe_animation": value.subscribe_animation.model_dump()}
-        db.save_project(project)
-        db.save_job(job, private)
-    except sqlite3.Error as exc:
-        raise HTTPException(503, "Local project storage is temporarily unavailable. Free disk space and try again.") from exc
-    await manager.enqueue(job_id)
-    return {"project": project, "job": public_job(job)}
-
-
 @app.post("/api/v1/jobs/{job_id}/repair-publication", response_model=Job)
 async def repair_job_publication(job_id: str) -> Job:
     """Backfill missing Library assets for completed clips in a job.
@@ -740,6 +687,8 @@ async def rerender_captions(job_id: str, clip_id: str, revision: int = Query(...
     job = db.get_job(job_id)
     if not job:
         raise _not_found("Job")
+    if job.mode != "clip":
+        raise HTTPException(409, "Legacy Script jobs cannot be rerendered")
     clip = next((item for item in job.clips if item.id == clip_id), None)
     if not clip:
         raise _not_found("Clip")
@@ -830,6 +779,8 @@ async def retry_clip(job_id: str, clip_id: str) -> Job:
     job = db.get_job(job_id)
     if not job:
         raise _not_found("Job")
+    if job.mode != "clip":
+        raise HTTPException(409, "Legacy Script jobs cannot be retried")
     clip = next((item for item in job.clips if item.id == clip_id), None)
     if not clip:
         raise _not_found("Clip")
@@ -888,17 +839,6 @@ async def download_file(relative_path: str, expires: int = Query(...), signature
     return FileResponse(target, filename=download_name, media_type=media_type)
 
 
-@app.get("/api/v1/openrouter/models", response_model=list[OpenRouterModel])
-async def list_openrouter_models(output_modalities: Annotated[str | None, Query(alias="outputModalities")] = None) -> list[OpenRouterModel]:
-    if output_modalities not in {None, "text", "speech"}:
-        raise HTTPException(422, "Unsupported OpenRouter output modality")
-    try:
-        return await profiles.openrouter_models(output_modalities)
-    except ProviderError as exc:
-        status_code = {"not_configured": 503, "invalid_credentials": 502, "insufficient_balance": 402, "rate_limited": 429, "timeout_offline": 503, "malformed_response": 502, "unsupported_model_or_voice": 422}.get(exc.category, 502)
-        raise HTTPException(status_code, exc.safe_message) from exc
-
-
 @app.get("/api/v1/profiles", response_model=list[ProviderProfile])
 async def list_profiles() -> list[ProviderProfile]:
     return db.list_profiles()
@@ -932,6 +872,24 @@ async def test_profile(profile_id: str) -> ProviderProfile:
         raise _not_found("Profile") from exc
     except Exception as exc:
         raise HTTPException(422, "Provider test could not be completed safely") from exc
+
+
+@app.get("/api/v1/openrouter/models", response_model=list[OpenRouterModel])
+async def list_openrouter_models(
+    output_modalities: Annotated[str | None, Query(alias="outputModalities")] = None,
+) -> list[OpenRouterModel]:
+    if output_modalities == "speech":
+        raise HTTPException(410, "Speech model discovery is retired")
+    if output_modalities not in {None, "text"}:
+        raise HTTPException(422, "Unsupported OpenRouter output modality")
+    try:
+        models = await profiles.openrouter_models()
+    except ProviderError as exc:
+        status_code = {"not_configured": 503, "invalid_credentials": 502, "insufficient_balance": 402, "rate_limited": 429, "timeout_offline": 503, "malformed_response": 502, "unsupported_model_or_voice": 422}.get(exc.category, 502)
+        raise HTTPException(status_code, exc.safe_message) from exc
+    if output_modalities == "text":
+        return [model for model in models if "text" in model.output_modalities]
+    return models
 
 
 @app.delete("/api/v1/profiles/{profile_id}", status_code=204)

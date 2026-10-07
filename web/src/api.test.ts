@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, HEALTH_TIMEOUT_MS, TimeoutError, createClipJob, createFolder, createScriptJob, createShortsJob, createShortsSourceJob, getHealth, listRecentClips, readableError, rerenderCaptions, saveCaptionCues, readableDetail } from "./api";
+import { ApiError, HEALTH_TIMEOUT_MS, TimeoutError, createClipJob, createFolder, createShortsJob, createShortsSourceJob, getHealth, listRecentClips, readableError, rerenderCaptions, saveCaptionCues, readableDetail } from "./api";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -108,14 +108,12 @@ describe("engine API boundary", () => {
       return new Response(JSON.stringify(response), { status: 202, headers: { "Content-Type": "application/json" } });
     }));
     await createClipJob({ style: "serious", count: 1, minDuration: 8, maxDuration: 20, aspectRatio: "9:16", subscribeAnimation: config });
-    await createScriptJob({ script: "A sufficiently long script", style: "serious", aspectRatio: "16:9", contentFormat: "long", narration: "auto", subscribeAnimation: config });
     await createShortsJob({ assetId: "asset", start: 0, aspectRatio: "9:16", subscribeAnimation: config });
     await createShortsSourceJob({ url: "https://youtube.com/watch?v=x", start: 0, aspectRatio: "9:16", subscribeAnimation: config });
     expect((calls[0].body as FormData).get("subscribe_animation")).toBe(JSON.stringify(config));
-    expect(JSON.parse(calls[1].body as string)).toMatchObject({ subscribeAnimation: config, contentFormat: "long" });
-    expect(JSON.parse(calls[2].body as string).subscribeAnimation).toEqual(config);
-    expect((calls[3].body as FormData).get("subscribe_animation")).toBe(JSON.stringify(config));
-    expect(calls.map(({ url }) => url)).toEqual(["/api/v1/jobs/clip", "/api/v1/jobs/script", "/api/v1/jobs/shorts", "/api/v1/jobs/shorts/source"]);
+    expect(JSON.parse(calls[1].body as string)).toMatchObject({ subscribeAnimation: config });
+    expect((calls[2].body as FormData).get("subscribe_animation")).toBe(JSON.stringify(config));
+    expect(calls.map(({ url }) => url)).toEqual(["/api/v1/jobs/clip", "/api/v1/jobs/shorts", "/api/v1/jobs/shorts/source"]);
   });
 
   it("sends scoped caption save and rerender requests without constructing media URLs", async () => {

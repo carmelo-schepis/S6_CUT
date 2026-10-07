@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { AlertTriangle, Captions, Check, Clock, Download, Eye, FileText, Film, Pause, Play, RefreshCw, RotateCcw, RotateCw, SlidersHorizontal, Sparkles, Square, Volume2, Zap } from "lucide-react";
 import { changeProjectFolder, controlJob, createZip, getJob, jobEventsUrl, listAssets, listFolders, readableError, retryClip, setClipSelection } from "../api";
 import { emitLibraryChanged } from "../library-sync";
-import { jobSchema, type Clip, type Health, type Job, type LibraryAsset, type LibraryFolder, type Project } from "../types";
+import { jobSchema, type Clip, type Job, type LibraryAsset, type LibraryFolder, type Project } from "../types";
 import { Button, EmptyState, IconButton, Progress, Skeleton, StatusBadge, WarningList, formatBytes, formatDimensions, formatDuration, resolveOutputAspectRatio, useSingleFlight } from "./common";
 import { jobFacts } from "../status-format";
 import { isTerminalJob, ProcessingState } from "./processing-state";
@@ -72,7 +72,7 @@ function ClipThumb({ clip }: { clip: Clip }) {
   );
 }
 
-export function WorkspaceView({ project, health, providersLoaded = true, hasSelectedProvider = true, onConfigureProviders = () => undefined, onProjectUpdated, onGoProjects }: { project: Project | null; health?: Health | null; providersLoaded?: boolean; hasSelectedProvider?: boolean; onConfigureProviders?: () => void; onProjectUpdated: () => Promise<void>; onGoProjects: () => void }) {
+export function WorkspaceView({ project, onConfigureProviders = () => undefined, onProjectUpdated, onGoProjects }: { project: Project | null; onConfigureProviders?: () => void; onProjectUpdated: () => Promise<void>; onGoProjects: () => void }) {
   const [job, setJob] = useState<Job | null>(null);
   // Until the first job response lands the view must not claim "0 clips" or
   // "Preparing project" — the job may already be rendering.
@@ -88,7 +88,6 @@ export function WorkspaceView({ project, health, providersLoaded = true, hasSele
   const [busy, setBusy] = useState(false);
   const [waitingForEngine, setWaitingForEngine] = useState(false);
   const [subscriptionNonce, setSubscriptionNonce] = useState(0);
-  const [providerCalloutDismissed, setProviderCalloutDismissed] = useState(false);
   const [stalledCalloutDismissed, setStalledCalloutDismissed] = useState(false);
   const [folders, setFolders] = useState<LibraryFolder[]>([]);
   const [now, setNow] = useState(() => Date.now());
@@ -157,6 +156,7 @@ export function WorkspaceView({ project, health, providersLoaded = true, hasSele
   }, []);
 
   const isStalledSmart = Boolean(
+    project?.mode === "clip" &&
     job &&
     job.processingMode === "smart" &&
     job.state === "active" &&
@@ -421,8 +421,8 @@ export function WorkspaceView({ project, health, providersLoaded = true, hasSele
   const batchPlanned = job?.plannedCount ?? job?.clips.length ?? 0;
   const batchSuccessful = job?.successfulCount ?? job?.clips.filter((clip) => clip.state === "complete").length ?? 0;
   const providerRelatedFailure = Boolean(job?.error && /openrouter|provider|credential|api key|model|voice/i.test(job.error));
-  const providerCouldHelp = providerRelatedFailure || Boolean(job?.state === "failed" && project?.mode === "script" && !hasSelectedProvider);
-  const canContinueLocally = providerRelatedFailure && Boolean(project?.mode === "clip" || health?.localTts);
+  const providerCouldHelp = providerRelatedFailure;
+  const canContinueLocally = providerRelatedFailure && project?.mode === "clip";
 
   const act = (action: "pause" | "resume" | "stop-keep" | "retry-failed" | "retry-import" | "switch-fast") => singleFlight(async () => {
     if (!job) return;
@@ -503,22 +503,22 @@ export function WorkspaceView({ project, health, providersLoaded = true, hasSele
       {(job?.capExplanation || project.capExplanation) && <p>{job?.capExplanation || project.capExplanation}</p>}
     </section>}
     <div className="workspace-commandbar">
-      <div className="workspace-project-context"><span className="mode-chip">{project.mode === "clip" ? <Film size={13} /> : <FileText size={13} />} {project.mode === "clip" ? "Clip mode" : "Script mode"}</span><div className="workspace-project-meta"><h1 className="workspace-project-name" title={project.name}>{project.name}</h1><span className="workspace-source-meta" title={project.sourceName}>{project.sourceName}</span><span className="workspace-secondary-meta">{project.style}{project.sourceProfile === "music" ? " · Music / sung vocals" : ""}{project.mode === "clip" && project.contentFormat === "long" ? " · 16:9 landscape" : ""}{job ? ` · ${job.processingMode} processing` : ""}</span></div></div>
+      <div className="workspace-project-context"><span className="mode-chip">{project.mode === "clip" ? <Film size={13} /> : <FileText size={13} />} {project.mode === "clip" ? "Clip mode" : "Legacy script project"}</span><div className="workspace-project-meta"><h1 className="workspace-project-name" title={project.name}>{project.name}</h1><span className="workspace-source-meta" title={project.sourceName}>{project.sourceName}</span><span className="workspace-secondary-meta">{project.style}{project.sourceProfile === "music" ? " · Music / sung vocals" : ""}{project.mode === "clip" && project.contentFormat === "long" ? " · 16:9 landscape" : ""}{job ? ` · ${job.processingMode} processing` : ""}</span></div></div>
       <div className="workspace-controls">{folders.length > 0 && <div className="workspace-folder-field"><label htmlFor="workspace-business-folder">Business folder</label><select id="workspace-business-folder" value={project.libraryFolderId || folders.find((folder) => folder.system)?.id || ""} disabled={busy} onChange={(event) => void changeFolder(event.target.value)}>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></div>}
         {job && <StatusBadge state={job.state} label={job.stageLabel} />}
-        {job && ["active", "queued", "recovered"].includes(job.state) && <Button disabled={busy} onClick={() => act("pause")}><Pause size={15} /> Pause</Button>}
-        {job && ["active", "queued", "recovered", "paused"].includes(job.state) && <Button disabled={busy} onClick={() => act("stop-keep")}><Square size={14} /> Stop & keep</Button>}
-        {job?.state === "paused" && <Button disabled={busy} onClick={() => act("resume")}><Play size={15} /> Resume</Button>}
-        {job && job.clips.some((clip) => clip.state === "failed") && <Button disabled={busy} onClick={() => act("retry-failed")}><RefreshCw size={15} /> Retry failed</Button>}
-        {job?.canRetryImport && <Button disabled={busy} onClick={() => act("retry-import")}><RefreshCw size={15} /> Retry import</Button>}
+        {project?.mode === "clip" && job && ["active", "queued", "recovered"].includes(job.state) && <Button disabled={busy} onClick={() => act("pause")}><Pause size={15} /> Pause</Button>}
+        {project?.mode === "clip" && job && ["active", "queued", "recovered", "paused"].includes(job.state) && <Button disabled={busy} onClick={() => act("stop-keep")}><Square size={14} /> Stop & keep</Button>}
+        {project?.mode === "clip" && job?.state === "paused" && <Button disabled={busy} onClick={() => act("resume")}><Play size={15} /> Resume</Button>}
+        {project?.mode === "clip" && job && job.clips.some((clip) => clip.state === "failed") && <Button disabled={busy} onClick={() => act("retry-failed")}><RefreshCw size={15} /> Retry failed</Button>}
+        {project?.mode === "clip" && job?.canRetryImport && <Button disabled={busy} onClick={() => act("retry-import")}><RefreshCw size={15} /> Retry import</Button>}
         <Button variant="primary" disabled={!selectedIds.length || busy} onClick={exportSelected}><Download size={15} /> Download ZIP <span className="button-count">{selectedIds.length}</span></Button>
       </div>
     </div>
 
     {waitingForEngine && <div className="workspace-offline" role="status">Waiting for the local engine — progress is preserved.</div>}
     {error && !waitingForEngine && <div className="workspace-alert" role="alert"><AlertTriangle size={16} /> {error}<button onClick={() => setError(null)}>Dismiss</button></div>}
-    {isStalledSmart && <div className="stalled-callout" role="status"><Clock size={16} /><div><strong>Smart processing appears stalled</strong><span>This Smart job has not reported progress for over 90 seconds. You can leave this screen — processing will continue in the engine — or switch to a Fast local cut.</span></div><div><Button disabled={busy} onClick={() => act("switch-fast")}><Zap size={14} /> Switch to fast local</Button><Button onClick={() => setStalledCalloutDismissed(true)}>Keep waiting</Button>{job && job.clips.some((clip) => clip.state === "complete") && <Button disabled={busy} onClick={() => act("stop-keep")}><Square size={14} /> Stop & keep outputs</Button>}</div></div>}
-    {job?.state === "failed" && <div className="failure-strip" role="alert"><AlertTriangle size={17} /><div><strong>Project failed</strong><span>{job.error || "The engine could not finish this project. Completed outputs, if any, are still preserved."}</span></div><div><Button disabled={busy} onClick={() => act(job.canRetryImport ? "retry-import" : "retry-failed")}><RefreshCw size={14} /> {job.canRetryImport ? "Retry import" : "Retry failed work"}</Button>{providerCouldHelp && <Button onClick={onConfigureProviders}>Configure providers</Button>}{canContinueLocally && <Button disabled={busy} onClick={() => act("retry-failed")}>Continue with local fallback</Button>}</div></div>}
+    {isStalledSmart && <div className="stalled-callout" role="status"><Clock size={16} /><div><strong>Smart processing appears stalled</strong><span>This Smart job has not reported progress for over 90 seconds. You can leave this screen — processing will continue in the engine — or switch to a Fast local cut.</span></div><div><Button disabled={busy} onClick={() => act("switch-fast")}><Zap size={14} /> Switch to fast local</Button><Button onClick={() => setStalledCalloutDismissed(true)}>Keep waiting</Button>{project?.mode === "clip" && job && job.clips.some((clip) => clip.state === "complete") && <Button disabled={busy} onClick={() => act("stop-keep")}><Square size={14} /> Stop & keep outputs</Button>}</div></div>}
+    {job?.state === "failed" && <div className="failure-strip" role="alert"><AlertTriangle size={17} /><div><strong>Project failed</strong><span>{job.error || "The engine could not finish this project. Completed outputs, if any, are still preserved."}</span></div>{project?.mode === "clip" && <div><Button disabled={busy} onClick={() => act(job.canRetryImport ? "retry-import" : "retry-failed")}><RefreshCw size={14} /> {job.canRetryImport ? "Retry import" : "Retry failed work"}</Button>{providerCouldHelp && <Button onClick={onConfigureProviders}>Configure providers</Button>}{canContinueLocally && <Button disabled={busy} onClick={() => act("retry-failed")}>Continue with local fallback</Button>}</div>}</div>}
     {job?.state === "stalled" && <div className="failure-strip" role="alert"><AlertTriangle size={17} /><div><strong>YouTube download stalled</strong><span>{job.downloadProgress?.message || "No bytes arrived during the configured inactivity window. The retained partial download is safe to retry."}</span></div>{job.canRetryImport && <Button disabled={busy} onClick={() => act("retry-import")}><RefreshCw size={14} /> Retry import</Button>}</div>}
     {job?.canRetryImport && job.state === "cancelled_kept" && <div className="warning-strip" role="status"><AlertTriangle size={14} /><span>{job.downloadProgress ? `Stopped with partial YouTube download retained (${formatBytes(job.downloadProgress.downloadedBytes)}). Retry import to resume it.` : "YouTube import stopped before the download began. Retry import to start it."}</span><Button disabled={busy} onClick={() => act("retry-import")}><RefreshCw size={14} /> Retry import</Button></div>}
     {job && !["complete", "failed", "cancelled_kept"].includes(job.state) && (() => { const facts = jobFacts(job); return <div className="job-strip"><div className="job-strip-text"><strong>{facts.stage}</strong>{facts.detail && <span>{facts.detail}</span>}</div><Progress value={facts.percent} indeterminate={facts.indeterminate} label={facts.stage} /></div>; })()}
@@ -531,15 +531,15 @@ export function WorkspaceView({ project, health, providersLoaded = true, hasSele
     <div className="workspace-grid" data-testid="lower-workspace">
       <aside className="source-panel panel" aria-label="Source material">
         <div className="panel-tabs" role="tablist" aria-label="Source material">
-          <button type="button" role="tab" id="workspace-transcript-tab" aria-controls="workspace-transcript-panel" aria-selected={sourceTab === "transcript"} tabIndex={sourceTab === "transcript" ? 0 : -1} className={sourceTab === "transcript" ? "active" : ""} onClick={() => moveSourceTab("transcript")} onKeyDown={handleSourceTabKeyDown}>{project.mode === "clip" ? "Transcript" : "Script"}</button>
+          <button type="button" role="tab" id="workspace-transcript-tab" aria-controls="workspace-transcript-panel" aria-selected={sourceTab === "transcript"} tabIndex={sourceTab === "transcript" ? 0 : -1} className={sourceTab === "transcript" ? "active" : ""} onClick={() => moveSourceTab("transcript")} onKeyDown={handleSourceTabKeyDown}>Transcript</button>
           <button type="button" role="tab" id="workspace-media-tab" aria-controls="workspace-media-panel" aria-selected={sourceTab === "media"} tabIndex={sourceTab === "media" ? 0 : -1} className={sourceTab === "media" ? "active" : ""} onClick={() => moveSourceTab("media")} onKeyDown={handleSourceTabKeyDown}>Media</button>
         </div>
         <div className="source-content">
           {sourceTab === "transcript" ? <div id="workspace-transcript-panel" role="tabpanel" aria-labelledby="workspace-transcript-tab" tabIndex={0}>
             <div className="source-card"><div className="source-icon">{project.mode === "clip" ? <Film /> : <FileText />}</div><div><strong title={project.sourceName}>{project.sourceName}</strong><span>{project.sourceKind} · preserved source</span></div></div>
-            {project.mode === "clip" ? <div className="transcript-placeholder">
+            <div className="transcript-placeholder">
               {selectedClip ? <><span className="timecode">{formatDuration(selectedClip.start)}</span><p>{selectedClip.openingLine}</p><span className="timecode">{formatDuration(selectedClip.end)}</span><p className="muted">Select another clip to inspect its source range. The full timed-word transcript stays in the project record.</p></> : <p className="muted">{jobLoaded ? "Timed words will appear when transcription completes." : "Loading transcript…"}</p>}
-            </div> : <div className="beat-source-list">{job?.beats.map((beat) => <button key={beat.id}><span>{formatDuration(beat.start)}</span><p>{beat.text}</p></button>)}</div>}
+            </div>
           </div> : <div id="workspace-media-panel" role="tabpanel" aria-labelledby="workspace-media-tab" tabIndex={0}>
             {mediaLoading && <p className="source-state" role="status">Loading project media…</p>}
             {mediaError && <div className="source-error" role="alert"><span>{mediaError}</span><Button onClick={() => void loadMedia(true)}><RefreshCw size={14} /> Retry</Button></div>}
@@ -592,7 +592,6 @@ export function WorkspaceView({ project, health, providersLoaded = true, hasSele
         </div>
         <div className="inspector-content">
           <p className="review-hint" role="note">Review and download finished clips here. To change a cut, adjust the project settings and generate a new version.</p>
-          {providersLoaded && !hasSelectedProvider && !providerCalloutDismissed && <div className="provider-callout compact"><Sparkles size={15} /><div><strong>Add optional AI providers</strong><span>Connect OpenRouter for enhanced planning and speech narration. Local modes remain available.</span></div><div className="provider-callout-actions"><Button onClick={onConfigureProviders}>Configure providers</Button><Button variant="ghost" onClick={() => setProviderCalloutDismissed(true)}>Continue locally</Button></div></div>}
           {detailsTab === "score" && (selectedClip ? <ScoreInspector clip={selectedClip} /> : <p className="muted">Select a clip to inspect its auditable score.</p>)}
           {detailsTab === "captions" && <><div className="inspector-section"><label>Preset</label><span className="readonly-preset">Editorial highlight<span className="readonly-tag">Read-only</span></span><span className="preset-options">Minimal · High contrast box</span></div><div className="inspector-note"><Captions size={15} /><span>Caption style and timing are fixed when the job is created and burned in from local word timestamps.</span></div></>}
           {detailsTab === "asset" && <><div className="inspector-section"><label>Visual intention</label><strong>{selectedClip?.visualLabel || job?.beats[0]?.concept || "No visual beat selected"}</strong></div><div className="inspector-section"><label>Source</label><span>{selectedClip?.provenance[0]?.provider || job?.beats[0]?.source || "Text-card fallback"}</span></div><div className="inspector-note"><Sparkles size={15} /><span>{selectedClip?.provenance[0]?.matchReason || job?.beats[0]?.matchReason || "A relevant text card is preferred over unrelated media."}</span></div></>}

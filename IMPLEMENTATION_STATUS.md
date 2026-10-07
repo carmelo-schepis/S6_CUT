@@ -1,29 +1,32 @@
 # Implementation status
 
-Updated: 2026-09-11
+Updated: 2026-10-12
 
 ## Implemented and wired to the UI
 
+- Script mode and AI Video topic planning are retired from the user interface and public creation/planning API. Legacy Script project/job payloads remain deserializable for history; completed output assets remain in the Library, while interrupted jobs fail closed and legacy render/retry/recovery is disabled.
+
 - Branded React/TypeScript/Vite installable PWA using the supplied logo assets and canonical black/copper design tokens.
 - Outline control layer: buttons, inputs, selects, counts and chips are a hairline plus a label at rest, with fill spent only on hover, active and pressed states, and one near-square `--radius-control` corner across the control layer. Status dots and the numbered step badges stay round; status colour stays chromatic.
-- Projects create strip for local video, constrained YouTube URL, and exact-source Script mode.
+- Projects create strip for local video and constrained YouTube URL, with Clip and Music / sung vocals workflows.
 - Funny, Serious, Educational, and Hype deterministic score weights.
 - FastAPI engine with SQLite WAL project/job/profile/Library records and an atomic per-job JSON checkpoint.
 - Streamed, bounded upload; safe filename/path handling; FFprobe validation; duration limit; queue limit; creation rate limit.
 - New no-provider Auto jobs resolve to Fast local cut: FFprobe-validated, deterministic non-overlapping windows, silent-video support, progressive FFmpeg crop/render, and no Whisper/provider calls.
 - Explicit Smart clips use extracted 16 kHz mono audio, CPU-friendly Faster-Whisper defaults, real segment progress, cancellation checkpoints, versioned transcript cache, optional OpenRouter candidate ordering, and deterministic local fallback.
-- Durable mode-specific processing checklists record real validated checkpoints, provider fallbacks, render counts, partial output verification, retries, pause/cancel, and restart recovery.
-- Independent FFmpeg renders with centre 9:16/1:1/16:9 crop, H.264/AAC, word-highlight captions, matched Library overlays for source clips, and Script-mode text-card beats, followed by FFprobe output validation and atomic publication.
+- Clip processing checklists record validated checkpoints, provider fallbacks, render counts, partial-output verification, retries, pause/cancel, and restart recovery. Legacy Script checklists remain deserializable; interrupted Script jobs fail closed.
+- Independent FFmpeg renders with centre 9:16/1:1/16:9 crop, H.264/AAC, word-highlight captions, matched Library overlays, followed by FFprobe output validation and atomic publication.
 - Progressive workspace through SSE with polling fallback, clip selection, score inspector, storyboard/Beat board, partial success, pause/resume, stop-and-keep, and scoped retry. The internal EDL remains authoritative while the redundant layered-timeline panel is no longer rendered.
 - ZIP export with numbered successful media, `manifest.json`, `credits.json`, and warning/failure summary.
 - Personal Media Library with persistent three-level business folders, Unsorted migration, combined search/type/origin/policy filters, signed previews, protected state, resilient refresh handling, and an exact-confirmation global purge that preserves application configuration.
-- Validated uploads, YouTube sources, Fast/Smart clips, Script outputs, and retries publish idempotently into a shared content-addressed blob store with durable project/job/clip/Library references and neutral matching defaults.
-- Script exact-span planning every roughly 2-3 seconds, OpenRouter TTS -> local espeak-ng -> silent narration fallback, word alignment, storyboard, captions, visual beats, and render.
-- Provider profiles with configurable OpenRouter model, optional OpenRouter speech model and voice, test/duplicate/delete, masked read API, session-only or Fernet-encrypted persistent secrets.
+- Validated uploads, YouTube sources, Fast/Smart clips, and retries publish idempotently into a shared content-addressed blob store with durable project/job/clip/Library references and neutral matching defaults. Historical Script output identity remains supported for existing assets.
+- Provider profiles configure and test OpenRouter text planning. Hidden legacy speech metadata remains readable on existing profile records but cannot be set through the profile API or used by current workflows; retired ElevenLabs credentials are scrubbed while OpenRouter credentials are preserved.
 - One-command `install.sh` installer and data-preserving `uninstall.sh` for Linux and macOS: prerequisite checks, clone/update into `~/s6_cut`, `.env` bootstrap, build/start, readiness wait, service status, and frontend/backend URL summary.
 - nginx same-origin gateway, private engine service, signed media links, security headers, non-root images, one mounted data directory, Compose/TrueNAS/Portainer documentation, and Windows launcher.
 
 ## Verified evidence
+
+> The evidence below largely records earlier revisions and dated live runs. Current retirement-branch checks are recorded first when completed; historical Script/AI Video evidence is not evidence of current functionality.
 
 - `npm run lint` - passed with zero warnings.
 - `npm run typecheck` - passed under TypeScript strict mode.
@@ -31,13 +34,13 @@ Updated: 2026-09-11
 - `python -m pytest engine/tests -q` - 269/269 engine unit/API/security/media/checklist/migration tests passed (265 baseline plus four added by the 2026-09-11 verification run). One Starlette environment deprecation warning is upstream and does not affect results.
 - `npm run build` - Vite production build passed; 1,794 modules transformed.
 - `npm install` and container `npm ci` audits - zero known vulnerabilities.
-- The existing multi-stage web and engine images previously built successfully, including FFmpeg, Faster-Whisper, yt-dlp, deno, and espeak-ng. A final Docker rebuild was attempted after this migration but the host Docker daemon/storage timed out; no container result is claimed for this final revision.
+- Earlier production images were built with FFmpeg, Faster-Whisper, yt-dlp, deno, and espeak-ng. The retired application no longer installs or invokes espeak-ng; the QA-only synthetic media fixture builder remains separate.
 - `docker compose config` passed. Only nginx publishes a LAN-facing host port; the engine additionally binds the host loopback (127.0.0.1:8001) for local API docs/debugging and stays otherwise private on the Compose network.
 - `docker compose up -d` reached healthy state for both services. The production UI remains available at `http://127.0.0.1:8080`.
-- Gateway health reported SQLite, FFmpeg, FFprobe, Whisper, yt-dlp, local TTS, and `/app/data` ready.
+- Earlier gateway health checks verified SQLite, FFmpeg, FFprobe, Whisper, yt-dlp, and `/app/data`; local TTS readiness is no longer part of the current runtime.
 - Response headers verified CSP, `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`, and COOP.
-- Script-mode smoke completed a vertical H.264 render with exact script spans, deterministic beats, captions, and provenance using the silent fallback when no narration provider was configured.
-- OpenRouter-only migration smoke validated one schema-constrained text response, one real free OpenRouter MP3 TTS response using a discovered premade voice, migration of encrypted profile/job metadata, and mocked Settings Playwright coverage at desktop and mobile widths. Redacted evidence is in `test-artifacts/openrouter-migration-20260908T081440Z/`.
+- Historical Script-mode smoke evidence describes the retired workflow and is not evidence that new Script jobs are accepted or rendered.
+- Earlier OpenRouter migration smoke validated schema-constrained text, legacy encrypted profile/job metadata, and mocked Settings coverage. Legacy speech fields are retained on profile records for compatibility but are no longer exposed or used by current workflows. Redacted historical evidence is in `test-artifacts/openrouter-migration-20260908T081440Z/`.
 - Real supplied-media Smart smoke completed a 20.60-second 1080x1920 H.264/AAC clip with 53 timed caption events after local Whisper transcription.
 - Generated Fast-mode end-to-end smoke passed with both AAC and silent sources; each produced two validated 9:16 H.264 clips while instrumentation made any Whisper, OpenRouter, or semantic-selection call fail the test.
 - Signed selected-export ZIP was downloaded and inspected: it contains the successful clip, `manifest.json`, and `credits.json` with project/job/style/score/provenance data.
@@ -60,9 +63,9 @@ Six supplied YouTube sources were driven through the real UI against the live Do
 
 - Reframe is reliable centre crop with reversible source preservation; face/active-speaker trajectory analysis is not implemented yet.
 - The EDL is versioned in the durable job/clip/beat contract, but interactive trim, caption correction, asset replacement, and persisted undo/redo controls are the next editor milestone.
-- The Library resolver is fully local and deterministic. No live no-key web media adapter is enabled; unmatched Script-mode visual beats use a visible relevant text card instead of rights-unknown or unrelated media, while Clip mode always preserves the imported source footage.
+- The Library resolver is fully local and deterministic. No live no-key web media adapter is enabled; Clip mode always preserves the imported source footage.
 - Smart clips may use the selected, tested OpenRouter profile to order validated local candidates. Provider failure is recorded in the checklist and falls back to deterministic local planning; OpenRouter never performs transcription.
-- Local narration uses espeak-ng for dependable offline operation. Higher-quality local neural TTS is not bundled yet.
+- Script creation, narration generation, and AI Video topic planning are retired; no current Clip or Music workflow generates narration.
 - Retention policy is reported/configured; only safe stale partial-file cleanup is automatic in this milestone. Operator-approved project/output cleanup needs a reference-aware UI.
 - The UI shows the canonical EDL structure but the central viewer uses finished media when available rather than frame-accurate draft compositing before render.
 - GPU acceleration is not required and is not configured by the default Compose file.

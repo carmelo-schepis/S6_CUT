@@ -9,12 +9,11 @@ import { ProjectsView } from "./projects-view";
 vi.mock("../api", () => {
   const readableError = (e: unknown) =>
     e instanceof Error ? e.message : "Something went wrong. Try again.";
-  return { readableError, createClipJob: vi.fn(), createScriptJob: vi.fn(), listRecentClips: vi.fn(async () => ({ items: [], page: 1, pageSize: 12, hasMore: false, total: 0 })), listFolders: vi.fn(async () => []), createFolder: vi.fn() };
+  return { readableError, createClipJob: vi.fn(), listRecentClips: vi.fn(async () => ({ items: [], page: 1, pageSize: 12, hasMore: false, total: 0 })), listFolders: vi.fn(async () => []), createFolder: vi.fn() };
 });
 
-import { createClipJob, createScriptJob } from "../api";
+import { createClipJob } from "../api";
 const mockCreateClipJob = vi.mocked(createClipJob);
-const mockCreateScriptJob = vi.mocked(createScriptJob);
 
 const storedValues = new Map<string, string>();
 Object.defineProperty(globalThis, "localStorage", {
@@ -53,7 +52,6 @@ describe("Projects create flow", () => {
   beforeEach(() => {
     storedValues.clear();
     mockCreateClipJob.mockReset();
-    mockCreateScriptJob.mockReset();
   });
   it("keeps creation settings and Recent Clips while omitting Recent projects and its UI", () => {
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
@@ -211,32 +209,12 @@ describe("Projects create flow", () => {
     await waitFor(() => expect(mockCreateClipJob).toHaveBeenCalledWith(expect.objectContaining({ sourceProfile: "music", processingMode: "smart", burnSubtitles: true, count: 5 })));
   });
 
-  it("switches to exact-source Script mode without a setup gate", () => {
+  it("omits retired Script creation while preserving clip project creation", () => {
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: /Script mode/i }));
-    expect(screen.getByPlaceholderText(/Paste the exact script/i)).toBeInTheDocument();
-    expect(screen.getByText(/Upload .txt or .md/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Create script video/i })).toBeEnabled();
-    expect(screen.queryByRole("button", { name: "Auto" })).not.toBeInTheDocument();
-  });
-
-  it("clears a clip validation error when switching to Script mode", () => {
-    render(<ProjectsView health={health} onCreated={vi.fn()} />);
-    fireEvent.click(screen.getByRole("tab", { name: "YouTube" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "YouTube URL" }), { target: { value: "https://example.com/not-youtube" } });
-    fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
-    expect(screen.getByRole("alert")).toHaveTextContent("Only public HTTPS YouTube URLs are supported.");
-    fireEvent.click(screen.getByRole("button", { name: /Script mode/i }));
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-  });
-
-  it("clears a script validation error when the script is edited", () => {
-    render(<ProjectsView health={health} onCreated={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: /Script mode/i }));
-    fireEvent.click(screen.getByRole("button", { name: /Create script video/i }));
-    expect(screen.getByRole("alert")).toHaveTextContent("Add at least 10 characters of script.");
-    fireEvent.change(screen.getByPlaceholderText(/Paste the exact script/i), { target: { value: "A valid disposable script." } });
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Script mode/i })).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/Paste the exact script/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Create script video/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Create 5 short clips/i })).toBeEnabled();
   });
 
   it("defaults to Auto mode and resolves no-provider auto to a Fast local cut note", () => {
@@ -251,7 +229,7 @@ describe("Projects create flow", () => {
     expect(screen.queryByText(/No provider is connected/i)).not.toBeInTheDocument();
     expect(screen.getByText(/Checking connected providers/i)).toBeInTheDocument();
     // The "add a provider" callout is the same claim in another shape.
-    expect(screen.queryByText(/Add optional AI providers/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Add an optional AI provider/i)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Smart" }));
     expect(screen.queryByText(/No provider is connected/i)).not.toBeInTheDocument();
@@ -261,18 +239,18 @@ describe("Projects create flow", () => {
   it("states the no-provider fallback only once /profiles confirms it", () => {
     render(<ProjectsView health={health} providersLoaded hasSelectedProvider={false} onCreated={vi.fn()} />);
     expect(screen.getByText(/No provider is connected, so Auto runs as a fast local cut\./i)).toBeInTheDocument();
-    expect(screen.getByText(/Add optional AI providers/i)).toBeInTheDocument();
+    expect(screen.getByText(/Add an optional AI provider/i)).toBeInTheDocument();
   });
 
   it("remembers when the optional provider callout is dismissed", () => {
     const props = { health, providersLoaded: true, hasSelectedProvider: false, onCreated: vi.fn() };
     const first = render(<ProjectsView {...props} />);
     fireEvent.click(screen.getByRole("button", { name: "Continue locally" }));
-    expect(screen.queryByText(/Add optional AI providers/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Add an optional AI provider/i)).not.toBeInTheDocument();
     first.unmount();
 
     render(<ProjectsView {...props} />);
-    expect(screen.queryByText(/Add optional AI providers/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Add an optional AI provider/i)).not.toBeInTheDocument();
   });
 
   it("reports a connected provider once /profiles confirms it", () => {
@@ -299,37 +277,15 @@ describe("Projects create flow", () => {
     expect(screen.getByText(/local Whisper and deterministic planning/i)).toBeInTheDocument();
   });
 
-  it("trims and sends an explicit project name", async () => {
-    const created: Project = { ...project, id: "named-id", name: "QA Browser Test" };
-    mockCreateScriptJob.mockResolvedValue({ project: created, job: { ...undefinedJob, projectId: "named-id" } });
+  it("trims the project name and preserves editorial style on a Clip request", async () => {
+    const created: Project = { ...project, id: "named-id", name: "QA Browser Test", style: "funny" };
+    mockCreateClipJob.mockResolvedValue({ project: created, job: { ...undefinedJob, mode: "clip", projectId: "named-id", style: "funny" } });
     render(<ProjectsView health={health} hasSelectedProvider={false} onCreated={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: /Script mode/i }));
     fireEvent.change(screen.getByLabelText("Project name"), { target: { value: "  QA Browser Test  " } });
-    fireEvent.change(screen.getByPlaceholderText(/Paste the exact script/i), { target: { value: "This is a script long enough to create a project." } });
-    fireEvent.click(screen.getByRole("button", { name: /Create script video/i }));
-    await waitFor(() => expect(mockCreateScriptJob).toHaveBeenCalledWith(expect.objectContaining({ name: "QA Browser Test" })));
-  });
-
-  it("sends the selected editorial style through script job creation", async () => {
-    const created: Project = { ...project, id: "style-id", style: "funny" };
-    mockCreateScriptJob.mockResolvedValue({ project: created, job: { ...undefinedJob, projectId: "style-id", style: "funny" } });
-    render(<ProjectsView health={health} hasSelectedProvider={false} onCreated={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: /Script mode/i }));
     fireEvent.click(screen.getByRole("button", { name: /Funny/i }));
-    fireEvent.change(screen.getByPlaceholderText(/Paste the exact script/i), { target: { value: "Wow, this amazing idea is a win!" } });
-    fireEvent.click(screen.getByRole("button", { name: /Create script video/i }));
-    await waitFor(() => expect(mockCreateScriptJob).toHaveBeenCalledWith(expect.objectContaining({ style: "funny" })));
-  });
-
-  it("does not send processingMode through the script API", async () => {
-    const created: Project = { ...project, id: "new-id" };
-    mockCreateScriptJob.mockResolvedValue({ project: created, job: { ...undefinedJob, projectId: "new-id" } });
-    render(<ProjectsView health={health} hasSelectedProvider={false} onCreated={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: /Script mode/i }));
-    fireEvent.change(screen.getByPlaceholderText(/Paste the exact script/i), { target: { value: "This is a script long enough to create a project." } });
-    fireEvent.click(screen.getByRole("button", { name: /Create script video/i }));
-    await waitFor(() => {
-      expect(mockCreateScriptJob).toHaveBeenCalledWith(expect.not.objectContaining({ processingMode: expect.anything() }));
-    });
+    fireEvent.click(screen.getByRole("tab", { name: "YouTube" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "YouTube URL" }), { target: { value: "https://www.youtube.com/watch?v=fixture" } });
+    fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
+    await waitFor(() => expect(mockCreateClipJob).toHaveBeenCalledWith(expect.objectContaining({ name: "QA Browser Test", style: "funny" })));
   });
 });

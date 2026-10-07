@@ -6,12 +6,11 @@ import { SettingsView } from "./settings-view";
 
 vi.mock("../api", () => {
   const readableError = (e: unknown) => e instanceof Error ? e.message : "Something went wrong. Try again.";
-  return { readableError, listProfiles: vi.fn(), listOpenRouterModels: vi.fn(), saveProfile: vi.fn(), testProfile: vi.fn(), deleteProfile: vi.fn(), duplicateProfile: vi.fn(), purgeLibraryContent: vi.fn() };
+  return { readableError, listProfiles: vi.fn(), saveProfile: vi.fn(), testProfile: vi.fn(), deleteProfile: vi.fn(), duplicateProfile: vi.fn(), purgeLibraryContent: vi.fn() };
 });
 
-import { deleteProfile, listOpenRouterModels, listProfiles, purgeLibraryContent, saveProfile, testProfile } from "../api";
+import { deleteProfile, listProfiles, purgeLibraryContent, saveProfile, testProfile } from "../api";
 const mockListProfiles = vi.mocked(listProfiles);
-const mockListModels = vi.mocked(listOpenRouterModels);
 const mockSaveProfile = vi.mocked(saveProfile);
 const mockTestProfile = vi.mocked(testProfile);
 const mockDeleteProfile = vi.mocked(deleteProfile);
@@ -28,41 +27,56 @@ function renderView() { return render(<SettingsView health={health} onHealthRefr
 
 describe("SettingsView", () => {
   afterEach(() => unsubscribeLibraryChange());
-  beforeEach(() => { mockListProfiles.mockReset(); mockListModels.mockReset(); mockSaveProfile.mockReset(); mockTestProfile.mockReset(); mockDeleteProfile.mockReset(); mockPurgeLibraryContent.mockReset(); mockListModels.mockResolvedValue([]); });
-  it("renders one OpenRouter section with separate capability states", async () => {
+  beforeEach(() => { mockListProfiles.mockReset(); mockSaveProfile.mockReset(); mockTestProfile.mockReset(); mockDeleteProfile.mockReset(); mockPurgeLibraryContent.mockReset(); });
+  it("shows text-planning provider status without speech controls or promotions", async () => {
     mockListProfiles.mockResolvedValue([connectedProfile]); renderView();
     const article = await screen.findByRole("article");
     expect(within(article).getByText("OpenRouter key")).toBeInTheDocument();
     expect(within(article).getByText("Text generation")).toBeInTheDocument();
-    expect(within(article).getByText("TTS narration")).toBeInTheDocument();
-    expect(within(article).getByText(/selected voice is not supported/i)).toBeInTheDocument();
+    expect(screen.queryByText(/TTS narration|speech model|selected voice/i)).not.toBeInTheDocument();
   });
   it("opens the single-provider form and keeps the key masked", async () => {
     mockListProfiles.mockResolvedValue([]); renderView();
     expect(await screen.findByText("New OpenRouter profile")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("sk-or-v1-…")).toHaveAttribute("type", "password");
   });
-  it("saves separate text and speech selections, then tests the profile", async () => {
+  it("saves and tests text planning profiles without exposing retired speech controls", async () => {
     mockListProfiles.mockResolvedValue([]);
     const saved = { ...baseProfile, id: "new", openrouterConfigured: true, openrouterMasked: "sk-…safe" };
-    mockSaveProfile.mockResolvedValue(saved); mockTestProfile.mockResolvedValue({ ...saved, textStatus: "connected", ttsStatus: "connected", status: "connected" }); mockListProfiles.mockResolvedValueOnce([]).mockResolvedValue([{ ...saved, textStatus: "connected", ttsStatus: "connected", status: "connected" }]);
+    mockSaveProfile.mockResolvedValue(saved); mockTestProfile.mockResolvedValue({ ...saved, textStatus: "connected", status: "connected" }); mockListProfiles.mockResolvedValueOnce([]).mockResolvedValue([{ ...saved, textStatus: "connected", status: "connected" }]);
     renderView(); await screen.findByText("New OpenRouter profile");
-    fireEvent.change(screen.getByPlaceholderText("Select or enter a speech model"), { target: { value: "openai/gpt-4o-mini-tts" } });
-    fireEvent.change(screen.getByPlaceholderText("e.g. alloy"), { target: { value: "alloy" } });
+    expect(screen.queryByLabelText(/TTS model|TTS voice|TTS speed/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /speech models/i })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Save and test connection/i }));
-    await waitFor(() => expect(mockSaveProfile).toHaveBeenCalledWith(expect.objectContaining({ textModelId: "openai/gpt-4.1-mini", ttsModelId: "openai/gpt-4o-mini-tts", ttsVoice: "alloy", persistence: "encrypted" }), undefined));
+    await waitFor(() => expect(mockSaveProfile).toHaveBeenCalledWith(expect.objectContaining({ textModelId: "openai/gpt-4.1-mini", persistence: "encrypted" }), undefined));
     await waitFor(() => expect(mockTestProfile).toHaveBeenCalledWith("new"));
   });
-  it("retains an existing profile when editing with a blank key", async () => {
+  it("preserves stored legacy speech fields without resubmitting them when editing a profile", async () => {
     mockListProfiles.mockResolvedValue([connectedProfile]); mockSaveProfile.mockResolvedValue(connectedProfile); mockTestProfile.mockResolvedValue(connectedProfile);
     renderView(); await screen.findByText("Work profile"); fireEvent.click(screen.getByRole("button", { name: "Edit Work profile" }));
+    expect(screen.queryByLabelText(/TTS model|TTS voice|TTS speed/i)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Save and test connection/i }));
-    await waitFor(() => expect(mockSaveProfile).toHaveBeenCalledWith(expect.objectContaining({ openrouterKey: undefined }), "p1"));
+    await waitFor(() => expect(mockSaveProfile).toHaveBeenCalledWith(expect.objectContaining({
+      openrouterKey: undefined, textModelId: connectedProfile.textModelId,
+    }), "p1"));
+    const savedInput = mockSaveProfile.mock.calls.at(-1)?.[0];
+    expect(savedInput).not.toHaveProperty("ttsModelId");
+    expect(savedInput).not.toHaveProperty("ttsVoice");
+    expect(savedInput).not.toHaveProperty("ttsSpeed");
   });
-  it("refreshes discovered speech models for an existing connected profile", async () => {
-    mockListProfiles.mockResolvedValue([connectedProfile]); mockListModels.mockResolvedValue([{ id: "free/speech", name: "Free speech", outputModalities: ["speech"], free: true, voices: ["alloy"] }]);
-    renderView(); await screen.findByText("Work profile"); fireEvent.click(screen.getByRole("button", { name: "Edit Work profile" }));
-    await waitFor(() => expect(mockListModels).toHaveBeenCalledWith("speech"));
+  it("selects a legacy profile without resubmitting retired speech fields", async () => {
+    const legacyProfile = { ...connectedProfile, selected: false };
+    mockListProfiles.mockResolvedValue([legacyProfile]);
+    mockSaveProfile.mockResolvedValue({ ...legacyProfile, selected: true });
+    renderView(); await screen.findByText("Work profile");
+    fireEvent.click(screen.getByRole("button", { name: "Use profile" }));
+    await waitFor(() => expect(mockSaveProfile).toHaveBeenCalledWith(expect.objectContaining({
+      name: legacyProfile.name, textModelId: legacyProfile.textModelId, selected: true,
+    }), legacyProfile.id));
+    const savedInput = mockSaveProfile.mock.calls[0]?.[0];
+    expect(savedInput).not.toHaveProperty("ttsModelId");
+    expect(savedInput).not.toHaveProperty("ttsVoice");
+    expect(savedInput).not.toHaveProperty("ttsSpeed");
   });
   it("requires the exact destructive confirmation phrase and signals Library revalidation after purge", async () => {
     const libraryChanged = vi.fn();

@@ -1,5 +1,5 @@
 /**
- * §6 feature matrix, part two: Shorts Editor, AI Video, Jobs, Settings and
+ * §6 feature matrix, part two: Shorts Editor, Jobs, Settings and
  * Library. Read-only with respect to the owner's data — no profile is saved,
  * no asset is deleted, and no render is queued.
  */
@@ -95,29 +95,6 @@ test.describe("§6.4 Shorts Editor", () => {
     expect(complete, "complete-only must not exceed the full list").toBeLessThanOrEqual(all);
     expect(badges.every((b) => /complete/i.test(b)) || badges.length === 0,
       `every visible row should be complete: ${badges.join(",")}`).toBeTruthy();
-  });
-});
-
-test.describe("§6.5 AI Video", () => {
-  test("brief bounds clamp target seconds and variants", async ({ page }) => {
-    await boot(page);
-    await rail(page, "AI Video");
-    const seconds = page.locator('input[type="number"]').first();
-    const variants = page.locator('input[type="number"]').last();
-    expect(await seconds.getAttribute("min")).toBe("10");
-    expect(await seconds.getAttribute("max")).toBe("180");
-    expect(await variants.getAttribute("min")).toBe("1");
-    expect(await variants.getAttribute("max")).toBe("3");
-  });
-
-  test("provider status resolves and the aspect select offers every ratio", async ({ page }) => {
-    await boot(page);
-    await rail(page, "AI Video");
-    await page.waitForTimeout(3_000);
-    await expect(page.getByText(/Checking connected providers/i)).toHaveCount(0);
-    const aspect = page.locator("select").filter({ hasText: "9:16" }).first();
-    const options = await aspect.locator("option").allTextContents();
-    expect(new Set(options)).toEqual(new Set(["9:16", "16:9", "1:1", "4:5"]));
   });
 });
 
