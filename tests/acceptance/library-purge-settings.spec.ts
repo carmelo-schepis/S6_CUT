@@ -1,9 +1,9 @@
 import { expect, test } from "@playwright/test";
 
 const profile = {
-  id: "purge-profile", name: "Local profile", textModelId: "openai/gpt-4.1-mini", ttsModelId: null, ttsVoice: null, ttsSpeed: 1, selected: true,
-  persistence: "encrypted", openrouterConfigured: false, openrouterMasked: null, textStatus: "not_configured", ttsStatus: "not_configured",
-  textMessage: null, textLastCheckedAt: null, ttsMessage: null, ttsLastCheckedAt: null, status: "local only", capabilities: [], fallbacks: { planning: "deterministic" },
+  id: "purge-profile", name: "Local profile", textModelId: "openai/gpt-4.1-mini", selected: true,
+  persistence: "encrypted", openrouterConfigured: false, openrouterMasked: null, textStatus: "not_configured",
+  textMessage: null, textLastCheckedAt: null, status: "local only", capabilities: [], fallbacks: { planning: "deterministic" },
 };
 
 for (const [name, width, height] of [["desktop", 1440, 900], ["tablet", 768, 1024], ["mobile", 390, 844]] as const) {

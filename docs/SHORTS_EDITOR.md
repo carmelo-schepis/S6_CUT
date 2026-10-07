@@ -9,8 +9,7 @@ source remainder. Jobs use the existing queue, pause/retry/stop controls,
 atomic publication transaction, immutable content-addressed blobs, and
 server-signed preview/download URLs.
 
-The workflow currently supports 9:16, 16:9, 1:1, and 4:5 output, optional script
-captions through the ASS pipeline, configured/local/silent narration selection,
+The workflow currently supports 9:16, 16:9, 1:1, and 4:5 output, optional burned captions through the ASS pipeline,
 and authorised Library music with bounded volume. It deliberately does not
 include social scheduling, Pexels downloading, scraping-based TTS, a second
 media store, or a separate ShortsGenerator runtime.

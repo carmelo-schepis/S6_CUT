@@ -2,8 +2,8 @@
  * Isolated content-authenticity acceptance run.
  *
  * Phase 1 stands up a throwaway S6_cut Compose stack with NO test hooks — the
- * same code path a production deployment runs — and drives Smart, Fast, and
- * Script generation through the real browser UI.
+ * same code path a production deployment runs — and drives Smart and Fast clip
+ * generation through the real browser UI.
  *
  * Phase 2 stands up a second throwaway stack with the provider-failure seam
  * enabled, so the OpenRouter fallback path is exercised against a real runtime
@@ -36,10 +36,11 @@ const forensicsImage = process.env.S6_FORENSICS_IMAGE || "s6-cut-engine";
  * Build the synthetic acceptance source if it is not already present.
  *
  * The fixture is generated rather than committed: it lives under the ignored
- * test-artifacts directory, so a fresh clone has to produce it. It is built
- * inside the engine image, which carries FFmpeg and espeak-ng, so the host
+ * test-artifacts directory, so a fresh clone has to produce it. A throwaway
+ * fixture-only image adds espeak-ng to the engine image to synthesize source
+ * audio; the production engine image remains free of TTS tooling. The host
  * needs no media tooling. See scripts/qa/build-authenticity-fixture.sh for
- * what it contains and why the narration avoids the planner's credit-roll
+ * what it contains and why the source narration avoids planner credit-roll
  * tokens.
  */
 async function ensureFixture() {
@@ -54,9 +55,11 @@ async function ensureFixture() {
   // The engine image is built by the first `compose up`; build it up front so
   // the fixture can be produced before any stack starts.
   await run("docker", ["build", "-f", join(root, "engine", "Dockerfile"), "-t", forensicsImage, root], { timeoutMs: 30 * 60_000 });
+  const fixtureImage = `${forensicsImage}-authenticity-fixture`;
+  await run("docker", ["build", "--build-arg", `BASE_IMAGE=${forensicsImage}`, "-f", join(root, "scripts", "qa", "Dockerfile.authenticity-fixture"), "-t", fixtureImage, root], { timeoutMs: 30 * 60_000 });
   await run("docker", ["run", "--rm", "--entrypoint", "sh",
     "-u", `${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}`,
-    "-v", `${fixtureDir}:/work`, forensicsImage, "/work/build-fixture.sh"], { timeoutMs: 20 * 60_000 });
+    "-v", `${fixtureDir}:/work`, fixtureImage, "/work/build-fixture.sh"], { timeoutMs: 20 * 60_000 });
   console.log(`fixture built: ${fixture}`);
 }
 
@@ -185,7 +188,7 @@ try {
   const clean = await startStack({ label: "clean", port: 19080, enginePort: 19001 });
   await run("npm", ["run", "test:acceptance", "--", ...traceArgs,
     "tests/acceptance/content-authenticity.spec.ts",
-    "-g", "Smart mode renders|Fast mode renders|Script mode renders"], { env: clean.env });
+    "-g", "Smart mode renders|Fast mode renders"], { env: clean.env });
   await teardown(clean);
 
   // --- Phase 2: real provider failure -------------------------------------

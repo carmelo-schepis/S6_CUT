@@ -46,7 +46,7 @@ test.describe("high-volume batch controls (mocked UI/API)", () => {
       if (path.endsWith("/health")) {
         await route.fulfill({ json: {
           status: "ready", version: "acceptance-mock", database: true, ffmpeg: true, ffprobe: true,
-          whisper: true, ytdlp: true, localTts: true, dataPath: "Container data directory", freeBytes: 1_000_000,
+          whisper: true, ytdlp: true, localTts: false, dataPath: "Container data directory", freeBytes: 1_000_000,
           activeWorkers: 0, queuedJobs: 0, fallbacks: { planning: "deterministic" },
         } });
       } else if (path.endsWith("/profiles")) {
@@ -134,7 +134,7 @@ test.describe("high-volume batch controls (mocked UI/API)", () => {
       if (path.endsWith("/health")) {
         await route.fulfill({ json: {
           status: "ready", version: "acceptance-mock", database: true, ffmpeg: true, ffprobe: true,
-          whisper: true, ytdlp: true, localTts: true, dataPath: "Container data directory", freeBytes: 1_000_000,
+          whisper: true, ytdlp: true, localTts: false, dataPath: "Container data directory", freeBytes: 1_000_000,
           activeWorkers: 0, queuedJobs: 0, fallbacks: { planning: "deterministic" },
         } });
       } else if (path.endsWith("/profiles")) await route.fulfill({ json: [] });

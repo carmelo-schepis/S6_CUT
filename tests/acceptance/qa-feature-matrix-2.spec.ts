@@ -1,5 +1,5 @@
 /**
- * §6 feature matrix, part two: Shorts Editor, AI Video, Jobs, Settings and
+ * §6 feature matrix, part two: Shorts Editor, Jobs, Settings and
  * Library. Read-only with respect to the owner's data — no profile is saved,
  * no asset is deleted, and no render is queued.
  */
@@ -98,29 +98,6 @@ test.describe("§6.4 Shorts Editor", () => {
   });
 });
 
-test.describe("§6.5 AI Video", () => {
-  test("brief bounds clamp target seconds and variants", async ({ page }) => {
-    await boot(page);
-    await rail(page, "AI Video");
-    const seconds = page.locator('input[type="number"]').first();
-    const variants = page.locator('input[type="number"]').last();
-    expect(await seconds.getAttribute("min")).toBe("10");
-    expect(await seconds.getAttribute("max")).toBe("180");
-    expect(await variants.getAttribute("min")).toBe("1");
-    expect(await variants.getAttribute("max")).toBe("3");
-  });
-
-  test("provider status resolves and the aspect select offers every ratio", async ({ page }) => {
-    await boot(page);
-    await rail(page, "AI Video");
-    await page.waitForTimeout(3_000);
-    await expect(page.getByText(/Checking connected providers/i)).toHaveCount(0);
-    const aspect = page.locator("select").filter({ hasText: "9:16" }).first();
-    const options = await aspect.locator("option").allTextContents();
-    expect(new Set(options)).toEqual(new Set(["9:16", "16:9", "1:1", "4:5"]));
-  });
-});
-
 test.describe("§6.6 Jobs", () => {
   test("job cards carry a mode tag and only unsettled jobs show a progress bar", async ({ page }) => {
     await boot(page);
@@ -134,8 +111,8 @@ test.describe("§6.6 Jobs", () => {
       }));
     });
     expect(settled.length, "the Jobs screen should list jobs").toBeGreaterThan(0);
-    const tagged = settled.filter((c) => /CLIP|SCRIPT/i.test(c.text));
-    expect(tagged.length, "every job card should carry a CLIP/SCRIPT tag").toBe(settled.length);
+    const tagged = settled.filter((c) => /CLIP/i.test(c.text));
+    expect(tagged.length, "every remaining job card should carry a CLIP tag").toBe(settled.length);
   });
 
   test("Open navigates to that project's Workspace", async ({ page }) => {

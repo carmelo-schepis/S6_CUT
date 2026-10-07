@@ -1,6 +1,6 @@
 # S6_cut
 
-S6_cut is a free, open-source, local-first video studio. Drop a long video or paste an authorised YouTube URL, choose Funny, Serious, Educational, or Hype, and receive independent vertical shorts with local word-timed captions. Script mode turns exact pasted text into narration, semantic 2–3 second visual beats, a storyboard, and a composed video.
+S6_cut is a free, open-source, local-first video studio. Drop a long video or paste an authorised YouTube URL, choose Funny, Serious, Educational, or Hype, and receive independent vertical shorts with local word-timed captions.
 
 There is no S6_cut account, credit system, watermark, artificial usage limit, or mandatory hosted application backend. The web gateway and private media engine run on hardware you control.
 
@@ -90,7 +90,7 @@ Only nginx publishes a port to your network. The FastAPI engine stays on the Com
 
 ## Local development
 
-Requirements: Node.js 24+, Python 3.12, FFmpeg/FFprobe, and espeak-ng. Install the exact dependencies, then start the Vite UI and FastAPI engine together:
+Requirements: Node.js 24+, Python 3.12, and FFmpeg/FFprobe. Install the exact dependencies, then start the Vite UI and FastAPI engine together:
 
 ```powershell
 npm ci
@@ -158,12 +158,10 @@ Whisper job stages report real, incrementally observed progress: each fraction i
 | Fast clip cutting | Deterministic FFprobe windows and FFmpeg crop | No transcription, captions, model download, or API required |
 | Smart transcription/timing | Local Faster-Whisper | Local Whisper supplies timing; an LLM never performs transcription |
 | Smart clip selection | Optional OpenRouter ordering over validated local candidates | Deterministic local candidate planning |
-| Script planning | Optional OpenRouter structured planning boundary | Deterministic exact-span phrase planner |
-| Narration | Selected OpenRouter speech model and voice | Local espeak-ng; then explicitly silent render |
-| Visuals | Clip mode cuts the imported source; a valid personal Library asset may be composited as an overlay | Script mode uses a relevant local text card when no eligible visual asset matches; Clip mode never substitutes a text card for source footage |
+| Visuals | Clip projects cut the imported source; a valid personal Library asset may be composited as an overlay | Clip mode never substitutes a text card for source footage |
 | YouTube | Constrained local yt-dlp | Local upload remains available and the URL failure is scoped |
 
-The application remains operational when OpenRouter is the only configured API. Clip mode also works with no API key. Optional provider failure becomes a visible warning and local fallback, not a corrupt project.
+The application remains operational when OpenRouter is the only configured API. Clip mode also works with no API key. Script mode and AI Video have been retired; existing project records and completed outputs remain available for reading, download, export, and deletion. Optional provider failure becomes a visible warning and local fallback, not a corrupt project.
 
 ## Data, backup, restore, and removal
 
@@ -171,7 +169,7 @@ All server-side state is under `S6_DATA_PATH`:
 
 ```text
 s6-cut.sqlite3      projects, jobs, business folders, blob references, Library metadata, caches
-jobs/               project references, atomic journals, captions, narration, clips
+jobs/               project references, atomic journals, captions, clips
 blobs/sha256/       shared content-addressed media used by projects and the Library
 library/            legacy personal media retained in place during staged migration
 models/             Faster-Whisper model cache
@@ -199,7 +197,7 @@ See [docs/TRUENAS_PORTAINER.md](docs/TRUENAS_PORTAINER.md) for dataset layout, S
 
 Final renders use one shared local delivery profile: H.264 (`libx264`), `slow`
 preset, CRF 18, `yuv420p`, `+faststart`, and AAC at 192 kbps/48 kHz. Stereo
-sources remain stereo; mono narration remains mono. This increases render time and
+sources remain stereo. This increases render time and
 file size compared with disposable fast encodes, but avoids unnecessary quality
 loss and keeps outputs broadly browser-compatible.
 

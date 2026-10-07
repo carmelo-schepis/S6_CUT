@@ -21,14 +21,13 @@ from .config import Settings
 from .database import Database
 from .library import LibraryRules, ResolvedVisual
 from .media import (
-    DownloadStalled, MediaError, available, download_youtube, probe, probe_audio, render_clip, render_script,
-    _metadata_text, sha256_file, synthesize_local, transcribe, transcription_cache_key, youtube_import_metadata, youtube_import_title,
+    DownloadStalled, MediaError, available, download_youtube, probe, render_clip,
+    _metadata_text, sha256_file, transcribe, transcription_cache_key, youtube_import_metadata, youtube_import_title,
 )
 from .models import (
     Asset, CaptionCue, Clip, ContentFormat, Job, ProcessingMode, ProcessingStep, ProvenanceRecord, ScoreBreakdown, now_iso,
 )
 from .providers import ProfileService, provider_runtime_message
-from .script import align_script_words, plan_beats
 from .security import confined, redact, safe_archive_title, safe_filename
 from .selection import Candidate, _score, _timed_words, candidate_quality, clip_from_candidate, select_candidates, select_music_candidates
 
@@ -225,6 +224,10 @@ class SwitchFastError(RuntimeError):
 
 
 class ProjectDeletingError(RuntimeError):
+    pass
+
+
+class RetiredScriptJobError(RuntimeError):
     pass
 
 
@@ -452,7 +455,12 @@ class JobManager:
         for index in range(self.settings.job_workers):
             self.workers.append(asyncio.create_task(self._worker(index), name=f"s6-worker-{index}"))
         recovered: list[str] = []
-        for job in reversed(self.db.list_jobs(("queued", "active", "recovered"))):
+        for job in reversed(self.db.list_jobs()):
+            if job.mode == "script":
+                self._terminalize_retired_script(job)
+                continue
+            if job.state not in {"queued", "active", "recovered"}:
+                continue
             job.state = "recovered"
             job.stage_label = "Recovered after engine restart"
             self._save(job)
@@ -477,6 +485,8 @@ class JobManager:
         """
         repaired = 0
         for job in self.db.list_jobs():
+            if job.mode == "script":
+                continue
             job, backfilled, _ = self.db.backfill_missing_assets(job)
             private = self.db.get_job_private(job.id)
             for clip in list(job.clips):
@@ -487,7 +497,7 @@ class JobManager:
                     continue
                 try:
                     probe(output, self.settings)
-                    job, _, _ = self._publish_output(job, clip, output, private, script=job.mode == "script")
+                    job, _, _ = self._publish_output(job, clip, output, private)
                     backfilled += 1
                 except Exception as exc:
                     job.warnings.append(f"Could not repair legacy output {clip.index}: {redact(str(exc))}")
@@ -514,6 +524,9 @@ class JobManager:
         self.workers.clear()
 
     async def enqueue(self, job_id: str, *, tolerate_full: bool = False) -> None:
+        job = self.db.get_job(job_id)
+        if job and job.mode == "script":
+            raise RetiredScriptJobError("Legacy jobs are read-only and cannot be queued")
         with self._queue_lock:
             if job_id in self._queued_ids:
                 return
@@ -546,6 +559,22 @@ class JobManager:
                 await asyncio.to_thread(self._process, job_id)
             finally:
                 self.queue.task_done()
+
+    def _terminalize_retired_script(self, job: Job) -> None:
+        """Stop interrupted legacy Script jobs without discarding saved outputs."""
+        if job.state in {"complete", "failed", "partial", "cancelled_kept"}:
+            return
+        completed_at = now_iso()
+        for step in job.steps:
+            if step.status in {"pending", "active"}:
+                step.status = "failed" if step.status == "active" else "skipped"
+                step.detail = "Legacy job was not resumed"
+                step.completed_at = completed_at
+                step.started_at = step.started_at or completed_at
+        job.state, job.stage = "failed", "failed"
+        job.stage_label = "Legacy job stopped"
+        job.error = "This legacy job was not resumed. Existing project records and outputs remain available for download and export."
+        self._save(job)
 
     def _project_is_deleting(self, project_id: str) -> bool:
         with self._deletion_lock:
@@ -719,22 +748,6 @@ class JobManager:
             ProcessingStep(id="ready", label="Project ready"),
         ]
 
-    def _script_steps(self) -> list[ProcessingStep]:
-        return [
-            ProcessingStep(id="validate", label="Script validated"),
-            ProcessingStep(id="planning", label="Planning complete"),
-            ProcessingStep(id="script_generation", label="Script generation complete"),
-            ProcessingStep(id="narration", label="Narration prepared"),
-            ProcessingStep(id="tts", label="OpenRouter speech narration"),
-            ProcessingStep(id="local_voice", label="Local narration fallback"),
-            ProcessingStep(id="align", label="Words aligned"),
-            ProcessingStep(id="plan", label="Visual beats planned"),
-            ProcessingStep(id="assets", label="Assets resolved"),
-            ProcessingStep(id="render", label="Video rendered and saved"),
-            ProcessingStep(id="verify", label="Output verified"),
-            ProcessingStep(id="ready", label="Project ready"),
-        ]
-
     @staticmethod
     def _mark_proven(step: ProcessingStep | None, as_of: str) -> None:
         if step and step.status == "pending":
@@ -744,34 +757,31 @@ class JobManager:
 
     def _restore_proven_steps(self, job: Job, private: dict[str, Any], as_of: str) -> None:
         """For older active jobs, restore only steps provable from persisted records."""
-        by_id = {step.id: step for step in job.steps}
         if job.mode == "script":
-            if job.beats:
-                for step_id in ("validate", "plan"):
+            raise RetiredScriptJobError("Legacy jobs cannot be reconciled")
+        by_id = {step.id: step for step in job.steps}
+        mode = job_processing_mode(job, private)
+        source_path = Path(str(private.get("source_path") or ""))
+        if source_path.is_file():
+            self._mark_proven(by_id.get("source"), as_of)
+        if isinstance(private.get("source_metadata"), dict):
+            self._mark_proven(by_id.get("probe"), as_of)
+        if private.get("transcript"):
+            self._mark_proven(by_id.get("transcribe"), as_of)
+            audio_step = by_id.get("audio")
+            audio_path = self.settings.data_path / "jobs" / job.id / "transcription" / "audio-16k.wav"
+            if audio_path.is_file():
+                self._mark_proven(audio_step, as_of)
+            elif audio_step and audio_step.status == "pending":
+                audio_step.status = "skipped"
+                audio_step.detail = "Legacy transcript exists; audio preparation history unavailable"
+                audio_step.started_at = audio_step.completed_at = as_of
+        if job.clips:
+            if mode == "fast":
+                self._mark_proven(by_id.get("plan"), as_of)
+            else:
+                for step_id in ("local_planning", "select", "boundaries"):
                     self._mark_proven(by_id.get(step_id), as_of)
-        else:
-            mode = job_processing_mode(job, private)
-            source_path = Path(str(private.get("source_path") or ""))
-            if source_path.is_file():
-                self._mark_proven(by_id.get("source"), as_of)
-            if isinstance(private.get("source_metadata"), dict):
-                self._mark_proven(by_id.get("probe"), as_of)
-            if private.get("transcript"):
-                self._mark_proven(by_id.get("transcribe"), as_of)
-                audio_step = by_id.get("audio")
-                audio_path = self.settings.data_path / "jobs" / job.id / "transcription" / "audio-16k.wav"
-                if audio_path.is_file():
-                    self._mark_proven(audio_step, as_of)
-                elif audio_step and audio_step.status == "pending":
-                    audio_step.status = "skipped"
-                    audio_step.detail = "Legacy transcript exists; audio preparation history unavailable"
-                    audio_step.started_at = audio_step.completed_at = as_of
-            if job.clips:
-                if mode == "fast":
-                    self._mark_proven(by_id.get("plan"), as_of)
-                else:
-                    for step_id in ("local_planning", "select", "boundaries"):
-                        self._mark_proven(by_id.get(step_id), as_of)
         render_step = by_id.get("render")
         if render_step and job.clips:
             verified_done = [
@@ -789,13 +799,12 @@ class JobManager:
         mode is known (first processing); complete jobs are left untouched so
         the UI can render a compact legacy summary instead of fabricated history.
         """
+        if job.mode == "script":
+            raise RetiredScriptJobError("Legacy jobs cannot be reconciled")
         if job.steps or job.state == "complete":
             return
         as_of = job.updated_at
-        if job.mode == "script":
-            job.steps = self._script_steps()
-        else:
-            job.steps = self._fast_steps() if job_uses_fast_pipeline(job, private) else self._smart_steps(bool(private.get("use_openrouter")), job.source_profile)
+        job.steps = self._fast_steps() if job_uses_fast_pipeline(job, private) else self._smart_steps(bool(private.get("use_openrouter")), job.source_profile)
         self._restore_proven_steps(job, private, as_of)
         self._save(job, private)
 
@@ -823,8 +832,6 @@ class JobManager:
         Read from the same builders the checklist is created from, so the shape
         on disk and the processor cannot drift apart again.
         """
-        if job.mode == "script":
-            return {step.id for step in self._script_steps()}
         if job_uses_fast_pipeline(job, private):
             return {step.id for step in self._fast_steps()}
         return {step.id for step in self._smart_steps(bool(private.get("use_openrouter")), job.source_profile)}
@@ -840,21 +847,22 @@ class JobManager:
         touches render/verify/ready, so every attempt raised the same error.
         Rebuild the right checklist and restore whatever the job can prove.
         """
+        if job.mode == "script":
+            raise RetiredScriptJobError("Legacy jobs cannot be reconciled")
         if not job.steps or job.state == "complete":
             return
         if {step.id for step in job.steps} == self._required_step_ids(job, private):
             return
         as_of = job.updated_at
-        if job.mode == "script":
-            job.steps = self._script_steps()
-        else:
-            job.steps = self._fast_steps() if job_uses_fast_pipeline(job, private) else self._smart_steps(bool(private.get("use_openrouter")), job.source_profile)
+        job.steps = self._fast_steps() if job_uses_fast_pipeline(job, private) else self._smart_steps(bool(private.get("use_openrouter")), job.source_profile)
         # Replays nothing: published clips keep the render counters they earned.
         self._restore_proven_steps(job, private, as_of)
         self._save(job, private)
 
     def _reconcile_steps(self, job: Job, private: dict[str, Any]) -> None:
         """Initialize legacy steps and detect retries triggered outside the control path."""
+        if job.mode == "script":
+            raise RetiredScriptJobError("Legacy jobs cannot be reconciled")
         self._init_steps(job, private)
         self._repair_step_shape(job, private)
         if job.steps and any(clip.state == "queued" for clip in job.clips):
@@ -937,13 +945,18 @@ class JobManager:
         try:
             job = self.db.get_job(job_id)
             private = self.db.get_job_private(job_id) if job else {}
-            if not job or job.state == "complete" or (job.state == "cancelled_kept" and not private.get("retry_import")):
+            if not job:
+                return
+            if job.mode == "script":
+                self._terminalize_retired_script(job)
+                return
+            if job.state == "complete" or (job.state == "cancelled_kept" and not private.get("retry_import")):
                 return
             self._reconcile_steps(job, private)
             if job.mode == "clip":
                 self._process_clip(job, private)
             else:
-                self._process_script(job, private)
+                self._terminalize_retired_script(job)
         except media_module.TranscriptionCancelled:
             return
         except DownloadStalled:
@@ -1033,7 +1046,7 @@ class JobManager:
 
     # DO-NOT-CHANGE: staged publication — resolve folder, hash+promote blob, atomic DB commit;
     # re-publishing the same (origin, project, job, clip) identity must reuse, never duplicate
-    def _publish_output(self, job: Job, clip: Clip, output: Path, private: dict[str, Any], *, script: bool = False) -> tuple[Job, Clip, Asset]:
+    def _publish_output(self, job: Job, clip: Clip, output: Path, private: dict[str, Any]) -> tuple[Job, Clip, Asset]:
         """Atomically publish one validated clip output to the Clip Board and Media Library.
 
         Staged publication protocol:
@@ -1057,10 +1070,10 @@ class JobManager:
             width, height = {"9:16": (1080, 1920), "1:1": (1080, 1080), "16:9": (1920, 1080), "4:5": (1080, 1350)}[str(private["aspect_ratio"])]
         project = self.db.get_project(job.project_id)
         project_name = project.name if project else "Project"
-        title = f"{project_name} — Script video" if script else _semantic_clip_title(project_name, clip)
+        title = _semantic_clip_title(project_name, clip)
         if self._project_is_deleting(job.project_id):
             raise media_module.TranscriptionCancelled("Project was deleted before output publication")
-        origin = "script-output" if script else "generated-clip"
+        origin = "generated-clip"
 
         digest = sha256_file(output)
         _, relative = self.rules._publish_blob(output, digest)
@@ -1074,7 +1087,7 @@ class JobManager:
             licence="Generated from user-supplied or authorised source",
         )
         published_at = now_iso()
-        applied_credit = None if script else youtube_creator_credit(job, private)
+        applied_credit = youtube_creator_credit(job, private)
         clip = clip.model_copy(update={
             "state": "complete", "output_name": output.name, "title": title,
             "creator_credit": applied_credit,
@@ -1595,7 +1608,7 @@ class JobManager:
             subtitles_enabled = bool(private.get("burn_subtitles", private.get("subtitles_enabled", job.burn_subtitles)))
             clip_words = media_module.caption_words_for_clip(words, clip.start, clip.end)
             # render_clip receives source-time words; write_ass performs the
-            # same bounded local conversion for Smart and Script outputs.
+            # same bounded local conversion for every Clip output.
             clip_words = [
                 {**word, "start": float(word["start"]) + clip.start, "end": float(word["end"]) + clip.start}
                 for word in clip_words
@@ -1853,149 +1866,6 @@ class JobManager:
         ready_label = "landscape clips ready" if job_content_format(job, private) == "long" else "fast cuts ready"
         self._finish_render_steps(job, private, successful, failed, output_dir, result_label, ready_label)
 
-    def _process_script(self, job: Job, private: dict[str, Any]) -> None:
-        script = str(private["script"])
-        work = self.settings.data_path / "jobs" / job.id
-        work.mkdir(parents=True, exist_ok=True)
-        narration: Path | None = None
-        self.start_step(job, "validate", detail="Validating script input", label="Validating the exact source script", progress=5, private=private)
-        if len(script.strip()) < 10:
-            raise MediaError("The script is too short to render")
-        self.complete_step(job, "validate", detail=f"Script validated — {len(script)} characters", private=private)
-        self.skip_step(job, "planning", detail="Plan supplied by the reviewed topic workflow", private=private)
-        self.skip_step(job, "script_generation", detail="Reviewed script supplied by the user", private=private)
-        if private.get("narration") != "silent":
-            if private.get("narration") == "auto":
-                try:
-                    self.start_step(job, "tts", detail="Requesting OpenRouter speech narration", label="Creating paragraph-safe narration", progress=15, private=private)
-                    candidate = work / "narration-openrouter.mp3"
-                    if candidate.is_file():
-                        try:
-                            probe_audio(candidate, self.settings)
-                            narration = candidate
-                        except MediaError:
-                            candidate.unlink(missing_ok=True)
-                    if narration is None:
-                        result = self.profiles.synthesize_openrouter(script, candidate, validate=lambda path: probe_audio(path, self.settings))
-                        if result:
-                            narration = candidate
-                            private["tts"] = {"model": result.model, "voice": result.voice, "request_id": result.request_id, "generation_id": result.generation_id, "usage": result.usage, "cost": result.cost, "reused": result.reused}
-                            detail = "Reused completed OpenRouter narration" if result.reused else "OpenRouter narration complete"
-                            self.complete_step(job, "tts", detail=detail, private=private)
-                        else:
-                            self.skip_step(job, "tts", detail="OpenRouter TTS is not configured; used local narration", private=private)
-                    else:
-                        self.complete_step(job, "tts", detail="Reused completed OpenRouter narration", private=private)
-                except Exception as exc:
-                    self.fail_step(job, "tts", detail=redact(str(exc)), private=private)
-                    job.warnings.append(f"{provider_runtime_message(exc, 'OpenRouter TTS')}; used the local voice fallback.")
-            else:
-                self.skip_step(job, "tts", detail="Local narration selected", private=private)
-            if narration is None and available(self.settings.local_tts):
-                self.start_step(job, "local_voice", detail="Synthesising local narration", label="Synthesising local narration", progress=15, private=private)
-                try:
-                    narration = synthesize_local(script, work / "narration-local.wav", self.settings)
-                    self.complete_step(job, "local_voice", detail="Local narration complete", private=private)
-                except Exception as exc:
-                    self.fail_step(job, "local_voice", detail=redact(str(exc)), private=private)
-                    job.warnings.append("Local narration failed; continued with a clearly labelled silent render.")
-            elif narration is not None:
-                self.skip_step(job, "local_voice", detail="OpenRouter narration succeeded", private=private)
-            else:
-                self.skip_step(job, "local_voice", detail="Local TTS unavailable; used silent render", private=private)
-            if narration is None:
-                self.skip_step(job, "narration", detail="No narration engine available; silent render used", private=private)
-                job.warnings.append("No narration engine was available. Continued with a clearly labelled silent render.")
-            else:
-                self.complete_step(job, "narration", detail="Narration ready", private=private)
-        else:
-            self.skip_step(job, "narration", detail="Silent render selected", private=private)
-            self.skip_step(job, "planning", detail="Silent render selected", private=private)
-            self.skip_step(job, "script_generation", detail="Silent render selected", private=private)
-            self.skip_step(job, "tts", detail="Silent render selected", private=private)
-            self.skip_step(job, "local_voice", detail="Silent render selected", private=private)
-        if narration:
-            duration = probe_audio(narration, self.settings)["duration"]
-            self.start_step(job, "align", detail="Aligning narration to exact script words", label="Aligning narration to exact script words", progress=31, private=private)
-            try:
-                spoken = transcribe(narration, self.settings)["words"]
-            except Exception as exc:
-                spoken = []
-                job.warnings.append(f"Forced alignment used deterministic audio-duration fallback ({redact(str(exc))}).")
-        else:
-            spoken = []
-            duration = max(5.0, len(script.split()) / 2.4)
-        words = align_script_words(script, duration, spoken)
-        self.complete_step(job, "align", detail="Exact word alignment complete" if spoken else "Duration-based alignment fallback", private=private)
-        self.start_step(job, "plan", detail="Planning semantic visuals every 2–3 seconds", label="Planning semantic visuals every 2–3 seconds", progress=43, private=private)
-        beats = plan_beats(script, words, self.rules)
-        for beat in beats:
-            if script[beat.char_start:beat.char_end] != beat.text:
-                raise MediaError("Beat planner violated the exact source-script span invariant")
-        job.beats = beats
-        self._save(job, private)
-        self.complete_step(job, "plan", detail=f"{len(beats)} visual beats planned", private=private)
-        self.start_step(job, "assets", detail="Resolving library and text-card visuals", label="Resolving visual assets", progress=55, private=private)
-        visuals = [(beat.concept, beat.start, beat.end) for beat in beats]
-        overlays: list[tuple[Path, float, float]] = []
-        provenance: list[ProvenanceRecord] = []
-        for beat in beats:
-            resolved = self.rules.resolve(beat.text)
-            if resolved.asset_path and resolved.asset_path.exists() and len(overlays) < 40:
-                overlays.append((resolved.asset_path, beat.start, beat.end))
-            if resolved.asset:
-                provenance.append(ProvenanceRecord(id=str(uuid.uuid4()), provider="personal-library", licence=resolved.asset.licence, attribution=resolved.asset.attribution or resolved.asset.title, query=beat.concept, match_reason=resolved.match_reason, content_hash=resolved.asset.content_hash))
-            else:
-                provenance.append(ProvenanceRecord(id=str(uuid.uuid4()), provider="local-text-card", licence="Generated locally by S6_cut", attribution="No attribution required", query=beat.concept, match_reason=resolved.match_reason))
-        self.complete_step(job, "assets", detail=f"{len(provenance)} visual matches resolved", private=private)
-        score = ScoreBreakdown(hook=70, coherence=85, ending=80, energy=65, practical_value=75, visual_potential=82, completeness=90, penalties=0, total=81, explanation="Script video preserves the exact narration and uses deterministic semantic beat planning.")
-        clip = job.clips[0] if job.clips else Clip(id=str(uuid.uuid4()), index=1, state="queued", start=0, end=duration, duration=duration, opening_line=" ".join(script.split()[:18]), score=score, provenance=provenance)
-        job.clips = [clip]
-        clip.state = "rendering"
-        self.start_step(job, "render", detail="Rendering narration, captions, and visual beats", label="Rendering narration, captions, and visual beats", progress=67, current=1, total=1, private=private)
-        output = work / "clips" / "01-script-video.mp4"
-        try:
-            try:
-                render_script(output, duration=duration, aspect=private["aspect_ratio"], narration=narration, words=words, visuals=visuals, overlays=overlays, settings=self.settings, style=job.style, **_format_render_kwargs(render_script, job_content_format(job, private)), **_subscribe_render_kwargs(render_script, private.get("subscribe_animation")))
-            except TypeError as exc:
-                if "unexpected keyword argument 'style'" not in str(exc):
-                    raise
-                render_script(output, duration=duration, aspect=private["aspect_ratio"], narration=narration, words=words, visuals=visuals, overlays=overlays, settings=self.settings)
-        except Exception as exc:
-            clip.state = "failed"
-            clip.error = redact(str(exc))
-            clip.selected = False
-            self.fail_step(job, "render", detail="Script render failed", private=private)
-            self.fail_step(job, "verify", detail="No output to verify", private=private)
-            job.state = "failed"
-            job.stage = "failed"
-            job.stage_label = "Script render failed"
-            job.error = clip.error
-            self._save(job, private)
-            self.fail_step(job, "ready", detail="Project failed", private=private)
-            return
-        if not output.is_file():
-            clip = clip.model_copy(update={"state": "failed", "error": "Rendered output is missing from disk", "selected": False})
-            job.clips = [clip if c.id == clip.id else c for c in job.clips]
-            self.fail_step(job, "render", detail="Script render failed", private=private)
-            self.fail_step(job, "verify", detail="Rendered output missing from disk", private=private)
-            job.state = "failed"
-            job.stage = "failed"
-            job.stage_label = "Script render failed"
-            job.error = clip.error
-            self._save(job, private)
-            self.fail_step(job, "ready", detail="Project failed", private=private)
-            return
-        job, clip, _ = self._publish_output(job, clip, output, private, script=True)
-        self.complete_step(job, "render", detail="Script video rendered", private=private)
-        self.complete_step(job, "verify", detail="Output verified", current=1, total=1, private=private)
-        job.state = "complete"
-        job.stage = "complete"
-        job.stage_label = "Script video ready"
-        job.progress = 100
-        self._save(job, private)
-        self.complete_step(job, "ready", detail="Project ready", private=private)
-
     async def delete_project(self, project_id: str, *, delete_assets: bool = False, allow_protected: bool = False):
         """Stop a project's workers before deleting their durable records.
 
@@ -2153,6 +2023,8 @@ class JobManager:
         job = self.db.get_job(job_id)
         if not job:
             raise KeyError(job_id)
+        if job.mode == "script":
+            raise RetiredScriptJobError("Legacy jobs are read-only and cannot be controlled")
         if self._project_is_deleting(job.project_id):
             raise ProjectDeletingError("This project is being deleted")
         if action == "retry-import":

@@ -5,7 +5,6 @@ const sections = [
   ["Library", "Personal Media Library"],
   ["Workspace", /.+/],
   ["Shorts Editor", "Shorts Editor"],
-  ["AI Video", "Topic to Video"],
   ["Jobs", "Jobs & recovery"],
   ["Settings", "Settings"],
 ] as const;

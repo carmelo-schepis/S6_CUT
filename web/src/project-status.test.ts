@@ -74,10 +74,6 @@ describe("workspace activity derivation", () => {
     expect(workspaceActivity([project], [job({ state: "complete" }), job({ id: "failed", state: "failed" })])).toBeNull();
   });
 
-  it("does not produce activity for script-mode jobs", () => {
-    expect(workspaceActivity([project], [job({ mode: "script" })])).toBeNull();
-  });
-
   it("falls back to the requested count for a queued job with no clips", () => {
     expect(workspaceActivity([{ ...project, requestedCount: 5 }], [job({ stage: "queued", clips: [] })]))
       .toEqual({ liveJobCount: 1, remainingClips: 5, activeJobCount: 1, isProcessing: true });

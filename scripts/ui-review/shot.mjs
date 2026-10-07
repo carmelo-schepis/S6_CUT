@@ -8,7 +8,6 @@ const jobs = [
   { nav: "Jobs", vp: [1440, 900], name: "jobs-1440" },
   { nav: "Settings", vp: [1440, 900], name: "settings-1440" },
   { nav: "Shorts Editor", vp: [1440, 900], name: "shorts-1440" },
-  { nav: "AI Video", vp: [1440, 900], name: "aivideo-1440" },
   { nav: "Projects", vp: [390, 844], name: "projects-390" },
   { nav: "Workspace", vp: [390, 844], name: "workspace-390" },
   { nav: "Settings", vp: [390, 844], name: "settings-390" },

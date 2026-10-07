@@ -57,7 +57,7 @@ test("Library deletion preserves Library behavior without restoring Projects lis
     if (request.method() === "GET" && url.pathname === "/api/v1/health") {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
         status: "ready", version: "test", database: true, ffmpeg: true, ffprobe: true,
-        whisper: true, ytdlp: true, localTts: true, dataPath: "Test database", freeBytes: 1_000_000,
+        whisper: true, ytdlp: true, localTts: false, dataPath: "Test database", freeBytes: 1_000_000,
         configuredWorkers: 0, activeWorkers: 0, queuedJobs: 0, fallbacks: { planning: "local" },
       }) });
       return;

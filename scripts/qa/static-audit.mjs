@@ -16,7 +16,7 @@ const [vw, vh] = (process.argv[3] || "1440x1000").split("x").map(Number);
 const label = `${vw}x${vh}`;
 const base = process.env.S6_ACCEPTANCE_URL || "http://127.0.0.1:8080";
 
-const RAIL = ["Projects", "Library", "Workspace", "Shorts Editor", "AI Video", "Jobs", "Settings"];
+const RAIL = ["Projects", "Library", "Workspace", "Shorts Editor", "Jobs", "Settings"];
 
 // The COOP notice is emitted by Chromium for any non-https origin and is not a
 // product error; every other console error is recorded.

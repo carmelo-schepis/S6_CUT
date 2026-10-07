@@ -5,15 +5,15 @@ import { ProjectsView } from "./projects-view";
 
 vi.mock("../api", () => ({
   readableError: (error: unknown) => error instanceof Error ? error.message : "Unexpected error",
-  createClipJob: vi.fn(), createScriptJob: vi.fn(),
+  createClipJob: vi.fn(),
   listRecentClips: vi.fn(async () => ({ items: [], page: 1, pageSize: 12, hasMore: false, total: 0 })),
   listFolders: vi.fn(async () => []), createFolder: vi.fn(),
 }));
-import { createClipJob, createScriptJob } from "../api";
+import { createClipJob } from "../api";
 
 const health: Health = {
   status: "ready", version: "test", database: true, ffmpeg: true, ffprobe: true, whisper: true,
-  ytdlp: true, localTts: true, dataPath: "Local mounted data directory", freeBytes: 1_000_000,
+  ytdlp: true, dataPath: "Local mounted data directory", freeBytes: 1_000_000,
   activeWorkers: 0, queuedJobs: 0, fallbacks: { planning: "deterministic" },
 };
 const project: Project = {
@@ -21,23 +21,21 @@ const project: Project = {
   sourceName: "source.mp4", sourceKind: "upload", requestedCount: 2, latestJobId: "job",
   createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
 };
-const mode = (name: "Clip" | "Music" | "Script") => screen.getByRole("button", { name: new RegExp(name === "Clip" ? "^Clip(?: mode)?$" : name === "Music" ? "^Music(?: / sung vocals)?$" : "^Script(?: mode)?$", "i") });
+const mode = (name: "Clip" | "Music") => screen.getByRole("button", { name: new RegExp(name === "Clip" ? "^Clip(?: mode)?$" : "^Music(?: / sung vocals)?$", "i") });
 const chooseFile = () => fireEvent.change(screen.getByLabelText("Choose video file"), { target: { files: [new File(["video"], "song.mp4", { type: "video/mp4" })] } });
 
-beforeEach(() => { vi.mocked(createClipJob).mockReset(); vi.mocked(createScriptJob).mockReset(); });
+beforeEach(() => { vi.mocked(createClipJob).mockReset(); });
 
 describe("Music presentation creation controls", () => {
-  it("keeps Clip as the initial mode, promotes Music, and preserves Script as a reachable workflow", () => {
+  it("keeps Clip as the initial mode and promotes Music", () => {
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
     expect(mode("Clip")).toHaveAttribute("aria-pressed", "true");
     expect(mode("Music")).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Script mode/i })).not.toBeInTheDocument();
     fireEvent.click(mode("Music"));
     expect(mode("Music")).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: /Short form · 9:16/i })).toHaveAttribute("aria-pressed", "true");
     expect(screen.queryByRole("button", { name: "Auto" })).not.toBeInTheDocument();
-    fireEvent.click(mode("Script"));
-    expect(screen.getByPlaceholderText(/Paste the exact script/i)).toBeVisible();
-    expect(screen.getByRole("button", { name: /Create script video/i })).toBeEnabled();
     fireEvent.click(mode("Clip"));
     expect(mode("Clip")).toHaveAttribute("aria-pressed", "true");
   });
@@ -78,9 +76,8 @@ describe("Music presentation creation controls", () => {
     expect(screen.getByRole("group", { name: "Lyrics subtitle theme" })).toBeVisible();
   });
 
-  it("omits Music-only settings from Clip and Script submissions and avoids stale setting leaks", async () => {
+  it("omits Music-only settings from Clip submissions and avoids stale setting leaks", async () => {
     vi.mocked(createClipJob).mockResolvedValue({ project, job: undefined as never });
-    vi.mocked(createScriptJob).mockResolvedValue({ project: { ...project, mode: "script" }, job: undefined as never });
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
     chooseFile();
     fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
@@ -90,13 +87,6 @@ describe("Music presentation creation controls", () => {
 
     fireEvent.click(mode("Music"));
     fireEvent.change(screen.getByRole("textbox", { name: "Top text" }), { target: { value: "Do not leak" } });
-    fireEvent.click(mode("Script"));
-    fireEvent.change(screen.getByPlaceholderText(/Paste the exact script/i), { target: { value: "This is a valid exact-source script for the submission." } });
-    fireEvent.click(screen.getByRole("button", { name: /Create script video/i }));
-    await waitFor(() => expect(createScriptJob).toHaveBeenCalledTimes(1));
-    expect(vi.mocked(createScriptJob).mock.calls[0][0]).not.toHaveProperty("musicPresentation");
-    expect(vi.mocked(createScriptJob).mock.calls[0][0]).not.toHaveProperty("musicTopText");
-
     fireEvent.click(mode("Music"));
     chooseFile();
     fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));

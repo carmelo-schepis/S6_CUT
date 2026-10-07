@@ -68,6 +68,12 @@ def test_recent_clips_filters_sources_manual_images_and_missing_metadata_file(mo
     body = response.json()
     assert [item["id"] for item in body["items"]] == [good.id, "asset-script"]
     assert body["total"] == 2
+    historical = next(item for item in body["items"] if item["id"] == "asset-script")
+    assert historical["origin"] == "script-output"
+    with _client(monkeypatch, tmp_path, db) as client:
+        preview = client.get(historical["previewUrl"])
+    assert preview.status_code == 200
+    assert preview.content == b"media-script"
 
 
 def test_recent_clips_search_count_pagination_and_newest_tie_break(monkeypatch, tmp_path):

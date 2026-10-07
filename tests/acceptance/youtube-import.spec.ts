@@ -119,7 +119,7 @@ test.describe("S6_cut imports an authorised YouTube URL", () => {
     expect(importResult.complete, "YouTube import completed").toBeTruthy();
     expect(importResult.sawBytes, "the engine reported real downloaded bytes").toBeTruthy();
 
-    await waitForProjectReady(page, observed, "clip", IMPORT_DEADLINE_MS);
+    await waitForProjectReady(page, observed, IMPORT_DEADLINE_MS);
     const processingSeconds = (Date.now() - startedAt) / 1000;
 
     await expect(page.locator(".failure-strip")).toHaveCount(0);
@@ -236,7 +236,7 @@ test.describe("S6_cut imports an authorised YouTube URL", () => {
     const importResult = await observeImport(page, projectName, downloadSamples);
     expect(importResult.complete, "YouTube import completed").toBeTruthy();
 
-    await waitForProjectReady(page, observed, "clip", IMPORT_DEADLINE_MS);
+    await waitForProjectReady(page, observed, IMPORT_DEADLINE_MS);
     const processingSeconds = (Date.now() - startedAt) / 1000;
     await expect(page.locator(".failure-strip")).toHaveCount(0);
 
@@ -298,7 +298,7 @@ test.describe("S6_cut imports an authorised YouTube URL", () => {
     const importResult = await observeImport(page, projectName, downloadSamples);
     expect(importResult.complete, "YouTube import completed").toBeTruthy();
 
-    await waitForProjectReady(page, observed, "clip", IMPORT_DEADLINE_MS);
+    await waitForProjectReady(page, observed, IMPORT_DEADLINE_MS);
     await expect(page.locator(".failure-strip")).toHaveCount(0);
     // Windowed transcription happens inside rendering, so the whole-source
     // transcription step must still be absent.

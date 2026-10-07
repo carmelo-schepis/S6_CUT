@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
-import { FileText, Film, FolderOpen, Plus, Sparkles, Zap } from "lucide-react";
-import { createClipJob, createFolder, createScriptJob, listFolders, readableError } from "../api";
+import { useEffect, useState } from "react";
+import { Film, Plus, Sparkles, Zap } from "lucide-react";
+import { createClipJob, createFolder, listFolders, readableError } from "../api";
 import { DEFAULT_SUBSCRIBE_ANIMATION, type BatchMode, type ContentFormat, type Health, type LibraryFolder, type ProcessingMode, type Project, type SourceProfile, type Style, type SubscribeAnimationConfig, type MusicTheme } from "../types";
 import { Button, Field, FieldGroup, StepBadge, useSingleFlight } from "./common";
 import { VideoSourcePicker } from "./video-source-picker";
@@ -29,12 +29,10 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
   onCreated: (project: Project) => void;
   onSelectLibraryAsset?: (assetId: string) => void;
 }) {
-  const [mode, setMode] = useState<"clip" | "script">("clip");
   const [sourceType, setSourceType] = useState<"file" | "url">("file");
   const [file, setFile] = useState<File | null>(null);
   const [url, setUrl] = useState("");
   const [projectName, setProjectName] = useState("");
-  const [script, setScript] = useState("");
   const [style, setStyle] = useState<Style>("educational");
   const [count, setCount] = useState(5);
   const [highVolumeCount, setHighVolumeCount] = useState("5");
@@ -44,7 +42,6 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
   const [minDuration, setMinDuration] = useState(20);
   const [maxDuration, setMaxDuration] = useState(60);
   const [aspectRatio, setAspectRatio] = useState("9:16");
-  const [narration, setNarration] = useState<"auto" | "local" | "silent">("auto");
   const [processingMode, setProcessingMode] = useState<ProcessingMode>("auto");
   const [sourceProfile, setSourceProfile] = useState<SourceProfile>("speech");
   const [musicTheme, setMusicTheme] = useState<MusicTheme>("clean");
@@ -63,11 +60,10 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
   });
   const [folders, setFolders] = useState<LibraryFolder[]>([]);
   const [libraryFolderId, setLibraryFolderId] = useState("");
-  const scriptInput = useRef<HTMLInputElement>(null);
   const singleFlight = useSingleFlight();
 
   useEffect(() => {
-    if (mode !== "clip" || sourceType !== "file" || !file) return;
+    if (sourceType !== "file" || !file) return;
     const objectUrl = URL.createObjectURL(file);
     const video = document.createElement("video");
     video.preload = "metadata";
@@ -75,7 +71,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
     video.onerror = () => setSourceDuration(null);
     video.src = objectUrl;
     return () => { URL.revokeObjectURL(objectUrl); video.removeAttribute("src"); };
-  }, [file, mode, sourceType]);
+  }, [file, sourceType]);
 
   useEffect(() => {
     void listFolders().then((next) => {
@@ -100,14 +96,14 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
     setError(null);
     const rawHighVolumeCount = highVolumeCount.trim();
     const highVolumeCountValue = rawHighVolumeCount === "" ? 1 : Number(rawHighVolumeCount);
-    if (mode === "clip" && batchMode === "high_volume" && rawHighVolumeCount !== "" && !/^-?[0-9]+$/.test(rawHighVolumeCount)) {
+    if (batchMode === "high_volume" && rawHighVolumeCount !== "" && !/^-?[0-9]+$/.test(rawHighVolumeCount)) {
       return setError("Requested count must be a whole number from 1 to 500.");
     }
-    const requestedCount = mode === "clip" && batchMode === "high_volume"
+    const requestedCount = batchMode === "high_volume"
       ? Math.min(500, Math.max(1, highVolumeCountValue))
       : count;
-    if (mode === "clip" && sourceType === "file" && !file) return setError("Choose a local video first.");
-    if (mode === "clip" && sourceType === "url") {
+    if (sourceType === "file" && !file) return setError("Choose a local video first.");
+    if (sourceType === "url") {
       if (!url.trim()) return setError("Paste a supported YouTube URL first.");
       try {
         const parsed = new URL(url.trim());
@@ -119,8 +115,6 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
         return setError("Only public HTTPS YouTube URLs are supported.");
       }
     }
-    if (mode === "script" && script.trim().length < 10) return setError("Add at least 10 characters of script.");
-    if (mode === "clip") {
       if (!Number.isFinite(requestedCount) || !Number.isInteger(requestedCount) || requestedCount < 1 || requestedCount > (batchMode === "high_volume" ? 500 : 30)) return setError(batchMode === "high_volume" ? "High-volume batches support 1–500 requested outputs." : "Standard batches support 1–30 requested outputs.");
       setCount(requestedCount);
       if (batchMode === "high_volume") setHighVolumeCount(String(requestedCount));
@@ -131,11 +125,9 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
       if (sourceProfile === "music" && musicTopText.length > 100) return setError("Top text must be 100 characters or fewer.");
       if (musicConfigurationMessage) return setError(musicConfigurationMessage);
       if (musicFeasibilityMessage) return setError(musicFeasibilityMessage);
-    }
     setSubmitting(true);
     try {
-      const result = mode === "clip"
-        ? await createClipJob({
+      const result = await createClipJob({
           file: sourceType === "file" ? file || undefined : undefined,
           url: sourceType === "url" ? url.trim() : undefined,
           name: projectName.trim() || undefined, style, count: requestedCount, minDuration, maxDuration,
@@ -145,8 +137,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
           sourceProfile, burnSubtitles: fastMode ? false : burnSubtitles,
           subscribeAnimation, libraryFolderId: libraryFolderId || undefined,
           ...(sourceProfile === "music" ? { musicPresentation: { version: 1 as const, subtitleTheme: musicTheme }, musicTopText } : {}),
-        })
-        : await createScriptJob({ script, name: projectName.trim() || undefined, style, aspectRatio, contentFormat: aspectRatio === "16:9" ? "long" : "short", narration, subscribeAnimation, libraryFolderId: libraryFolderId || undefined });
+        });
       if (libraryFolderId) localStorage.setItem(RECENT_FOLDER_KEY, libraryFolderId);
       onCreated(result.project);
     } catch (cause) {
@@ -155,13 +146,6 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
       setSubmitting(false);
     }
   });
-
-  const loadScriptFile = async (selected: File | undefined) => {
-    if (!selected) return;
-    if (!/\.(txt|md)$/i.test(selected.name)) return setError("Script uploads must be .txt or .md files.");
-    setScript(await selected.text());
-    setError(null);
-  };
 
   // Until /profiles answers we do not know whether a provider is connected, and
   // must not assert that none is: that read can take several seconds, and the
@@ -205,26 +189,22 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
         <div><h2 id="create-title">Create a project</h2><p>Nothing leaves this machine unless you use a URL or an enabled provider.</p></div>
         <div className="create-mode-controls">
           <div className="segmented" aria-label="Creation mode">
-            <button type="button" aria-pressed={mode === "clip" && sourceProfile === "speech"} className={mode === "clip" && sourceProfile === "speech" ? "active" : ""} onClick={() => { setError(null); setMode("clip"); setSourceProfile("speech"); }}><Film size={15} /> Clip mode</button>
-            <button type="button" aria-label="Music / sung vocals" aria-pressed={mode === "clip" && sourceProfile === "music"} className={mode === "clip" && sourceProfile === "music" ? "active" : ""} onClick={() => { setError(null); setMode("clip"); setSourceProfile("music"); setBatchMode("standard"); setCount(Math.min(30, batchMode === "high_volume" ? Math.min(500, Math.max(1, Number(highVolumeCount) || 1)) : count)); setContentFormat("short"); setAspectRatio("9:16"); setBurnSubtitles(true); }}><span className="music-mode-icon" aria-hidden="true">♫</span> Music mode</button>
+            <button type="button" aria-pressed={sourceProfile === "speech"} className={sourceProfile === "speech" ? "active" : ""} onClick={() => { setError(null); setSourceProfile("speech"); }}><Film size={15} /> Clip mode</button>
+            <button type="button" aria-label="Music / sung vocals" aria-pressed={sourceProfile === "music"} className={sourceProfile === "music" ? "active" : ""} onClick={() => { setError(null); setSourceProfile("music"); setBatchMode("standard"); setCount(Math.min(30, batchMode === "high_volume" ? Math.min(500, Math.max(1, Number(highVolumeCount) || 1)) : count)); setContentFormat("short"); setAspectRatio("9:16"); setBurnSubtitles(true); }}><span className="music-mode-icon" aria-hidden="true">♫</span> Music mode</button>
           </div>
-          <button type="button" className={`script-mode-link${mode === "script" ? " active" : ""}`} aria-pressed={mode === "script"} onClick={() => { setError(null); setMode("script"); }}><FileText size={14} /> Script mode</button>
         </div>
       </div>
 
-      {providersLoaded && !hasSelectedProvider && !providerCalloutDismissed && <div className="provider-callout"><Sparkles size={17} /><div><strong>Add optional AI providers</strong><span>OpenRouter improves planning and provides optional speech narration. Local modes stay available.</span></div><div className="provider-callout-actions"><Button onClick={onConfigureProviders}>Configure providers</Button><Button variant="ghost" onClick={() => {
+      {providersLoaded && !hasSelectedProvider && !providerCalloutDismissed && <div className="provider-callout"><Sparkles size={17} /><div><strong>Add optional AI providers</strong><span>OpenRouter can improve Smart planning. Local modes stay available.</span></div><div className="provider-callout-actions"><Button onClick={onConfigureProviders}>Configure providers</Button><Button variant="ghost" onClick={() => {
         setProviderCalloutDismissed(true);
         try { localStorage.setItem(PROVIDER_CALLOUT_DISMISSED_KEY, "true"); } catch { /* Storage can be unavailable in hardened browsers. */ }
       }}>Continue locally</Button></div></div>}
 
       <div className="create-grid">
         <div className="create-step source-step">
-          <div className="step-label"><StepBadge step={1} /><span className="step-label-text">{mode === "clip" ? "Add source" : "Add script"}</span></div>
-          {mode === "clip" ? <VideoSourcePicker mode={sourceType} onModeChange={(next) => { setError(null); setSourceType(next as "file" | "url"); }} file={file} onFile={(next, pickerError) => { setFile(next); setSourceDuration(null); if (pickerError) setError(pickerError); else setError(null); }} url={url} onUrl={setUrl} /> : <div className="script-input-wrap">
-            <textarea value={script} onChange={(event) => { setScript(event.target.value); setError(null); }} placeholder="Paste the exact script. S6_cut preserves this source text…" rows={8} />
-            <div className="script-meta"><span>{script.length.toLocaleString()} characters</span><input ref={scriptInput} type="file" accept=".txt,.md,text/plain,text/markdown" onChange={(event) => loadScriptFile(event.target.files?.[0])} hidden /><button onClick={() => scriptInput.current?.click()}><FolderOpen size={14} /> Upload .txt or .md</button></div>
-          </div>}
-          {mode === "clip" && healthChecked && <div className="engine-summary">
+          <div className="step-label"><StepBadge step={1} /><span className="step-label-text">Add source</span></div>
+          <VideoSourcePicker mode={sourceType} onModeChange={(next) => { setError(null); setSourceType(next as "file" | "url"); }} file={file} onFile={(next, pickerError) => { setFile(next); setSourceDuration(null); if (pickerError) setError(pickerError); else setError(null); }} url={url} onUrl={setUrl} />
+          {healthChecked && <div className="engine-summary">
             <span className={`engine-dot ${health?.status || "offline"}`} aria-hidden="true" />
             <strong>{health?.status === "ready" ? "Local engine ready" : health ? "Local fallback mode" : "Local engine unavailable"}</strong>
             <span className="engine-chips">
@@ -245,7 +225,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
             </div>
           </FieldGroup>
 
-          {mode === "clip" ? <>
+          <>
             {sourceProfile === "music" && <FieldGroup title="Lyrics presentation" hint={MUSIC_PROFILE_NOTE}>
               <div role="group" aria-label="Lyrics subtitle theme">
               <p className="music-theme-group-label">Current styles</p>
@@ -296,9 +276,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
                 <button type="button" aria-pressed={processingMode === "smart"} className={processingMode === "smart" ? "active" : ""} onClick={() => setProcessingMode("smart")}><Sparkles size={13} /> <span>Smart</span></button>
               </div>
             </FieldGroup>}
-          </> : <FieldGroup title="Narration" hint="Automatic uses a local voice when needed, then a clearly labelled silent render.">
-            <Field label="Narration source"><select value={narration} onChange={(event) => setNarration(event.target.value as typeof narration)}><option value="auto">Automatic fallback</option><option value="local">Local voice only</option><option value="silent">Silent render (no narration)</option></select></Field>
-          </FieldGroup>}
+          </>
         </div>
 
         <div className="create-step action-step">
@@ -308,24 +286,24 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
             <div className="folder-picker"><Field label="Business folder"><select aria-label="Business folder" value={libraryFolderId} onChange={(event) => setLibraryFolderId(event.target.value)}>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></Field><Button variant="ghost" onClick={addFolder}><Plus size={13} /> New folder</Button></div>
           </FieldGroup>
 
-          {mode === "clip" && sourceProfile === "music" && <FieldGroup title="Top text" hint="Optional · displayed separately in the upper black area. Up to 100 characters.">
+          {sourceProfile === "music" && <FieldGroup title="Top text" hint="Optional · displayed separately in the upper black area. Up to 100 characters.">
             <Field label="Top text"><input value={musicTopText} maxLength={100} onChange={(event) => setMusicTopText(event.target.value)} placeholder="Leave blank to omit" /></Field>
           </FieldGroup>}
 
-          <SubscribeAnimationControl value={subscribeAnimation} onChange={setSubscribeAnimation} longForm={mode === "clip" ? contentFormat === "long" : aspectRatio === "16:9"} />
+          <SubscribeAnimationControl value={subscribeAnimation} onChange={setSubscribeAnimation} longForm={contentFormat === "long"} />
 
-          {mode === "clip" && sourceProfile === "speech" && <label className="subtitle-toggle"><input type="checkbox" checked={fastMode ? false : burnSubtitles} disabled={fastMode} onChange={(event) => setBurnSubtitles(event.target.checked)} /> <span><strong>Burn in subtitles</strong><small>{fastMode ? "Fast mode skips transcription and captions. Choose Smart mode to enable them." : "Uses local word timing. Fast mode skips captions."}</small></span></label>}
+          {sourceProfile === "speech" && <label className="subtitle-toggle"><input type="checkbox" checked={fastMode ? false : burnSubtitles} disabled={fastMode} onChange={(event) => setBurnSubtitles(event.target.checked)} /> <span><strong>Burn in subtitles</strong><small>{fastMode ? "Fast mode skips transcription and captions. Choose Smart mode to enable them." : "Uses local word timing. Fast mode skips captions."}</small></span></label>}
 
           <button className="advanced-toggle" onClick={() => setAdvanced(!advanced)} aria-expanded={advanced}>Advanced controls <span aria-hidden="true">{advanced ? "−" : "+"}</span></button>
           {advanced && <div className="advanced-grid">
-            <Field label="Aspect"><select value={aspectRatio} disabled={mode === "clip" && contentFormat === "long"} onChange={(event) => setAspectRatio(event.target.value)}><option>9:16</option><option>1:1</option><option>16:9</option><option>4:5</option></select></Field>
-            {mode === "clip" && <><Field label="Minimum seconds"><input type="number" min={8} max={120} value={minDuration} onChange={(event) => setMinDuration(Number(event.target.value))} /></Field><Field label="Maximum seconds"><input type="number" min={10} max={contentFormat === "long" ? 1800 : 180} value={maxDuration} onChange={(event) => setMaxDuration(Number(event.target.value))} /></Field></>}
+            <Field label="Aspect"><select value={aspectRatio} disabled={contentFormat === "long"} onChange={(event) => setAspectRatio(event.target.value)}><option>9:16</option><option>1:1</option><option>16:9</option><option>4:5</option></select></Field>
+            <Field label="Minimum seconds"><input type="number" min={8} max={120} value={minDuration} onChange={(event) => setMinDuration(Number(event.target.value))} /></Field><Field label="Maximum seconds"><input type="number" min={10} max={contentFormat === "long" ? 1800 : 180} value={maxDuration} onChange={(event) => setMaxDuration(Number(event.target.value))} /></Field>
           </div>}
 
           <div className="create-actions">
             {(musicConfigurationMessage || musicFeasibilityMessage) && <p className="form-error" role="status">{musicConfigurationMessage || musicFeasibilityMessage}</p>}
             {error && <p className="form-error" role="alert">{error}</p>}
-            <Button variant="primary" className="create-button" disabled={submitting || health?.ffmpeg === false || Boolean(musicConfigurationMessage || musicFeasibilityMessage)} onClick={submit}>{submitting ? "Creating…" : <><Plus size={16} /> {mode === "clip" ? `Create ${activeCount} ${contentFormat === "long" ? "landscape clip" : "short clip"}${activeCount === 1 ? "" : "s"}` : "Create script video"}</>}</Button>
+            <Button variant="primary" className="create-button" disabled={submitting || health?.ffmpeg === false || Boolean(musicConfigurationMessage || musicFeasibilityMessage)} onClick={submit}>{submitting ? "Creating…" : <><Plus size={16} /> {`Create ${activeCount} ${contentFormat === "long" ? "landscape clip" : "short clip"}${activeCount === 1 ? "" : "s"}`}</>}</Button>
           </div>
         </div>
 

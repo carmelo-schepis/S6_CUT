@@ -23,7 +23,7 @@ const VIEWPORTS = [
   { name: "768x1024", width: 768, height: 1024 },
   { name: "390x844", width: 390, height: 844 },
 ];
-const NAV = ["Projects", "Library", "Workspace", "Shorts Editor", "AI Video", "Jobs", "Settings"];
+const NAV = ["Projects", "Library", "Workspace", "Shorts Editor", "Jobs", "Settings"];
 
 // Media and third-party surfaces are out of scope for the text-colour rule.
 const COLLECT = `(() => {
@@ -134,15 +134,6 @@ async function run() {
       await shot(page, vp.name, route);
 
       if (label === "Projects") {
-        // Script mode swaps the workflow steps; capture both.
-        const script = page.locator(".mode-tabs button", { hasText: /^Script mode$/i });
-        if (await script.count()) {
-          await script.first().click(); await page.waitForTimeout(600);
-          await snap(page, vp.name, "projects", "script-mode");
-          await shot(page, vp.name, "projects-script-mode");
-          const clip = page.locator(".mode-tabs button", { hasText: /^Clip mode$/i });
-          if (await clip.count()) { await clip.first().click(); await page.waitForTimeout(500); }
-        }
         // Selected vs unselected style cards.
         const cards = page.locator(".style-card");
         if (await cards.count() > 1) {

@@ -14,7 +14,7 @@ from engine import media as media_module
 from engine.app import app, db, manager, resolve_processing_mode, settings
 from engine.config import Settings
 from engine.database import Database
-from engine.jobs import JobManager, SwitchFastError, job_processing_mode
+from engine.jobs import JobManager, RetiredScriptJobError, SwitchFastError, job_processing_mode
 from engine.library import LibraryRules
 from engine.media import MediaError
 from engine.models import Job, ProfileInput, Project
@@ -447,7 +447,7 @@ def test_switch_fast_refuses_finished_or_script_jobs() -> None:
         state="queued", stage="queued", stage_label="Queued", progress=0, style="educational",
     )
     db.save_job(script, {"script": "hello world this is long enough"})
-    with pytest.raises(SwitchFastError, match="Only clip"):
+    with pytest.raises(RetiredScriptJobError, match="read-only"):
         asyncio.run(manager.control("switch-script", "switch-fast"))
 
 

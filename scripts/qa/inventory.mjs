@@ -5,7 +5,7 @@ import { writeFile, mkdir } from "node:fs/promises";
 
 const BASE = process.env.S6_URL || "http://127.0.0.1:8080";
 const OUT = process.env.OUT || "test-artifacts/qa";
-const SCREENS = ["Projects", "Library", "Workspace", "Shorts Editor", "AI Video", "Jobs", "Settings"];
+const SCREENS = ["Projects", "Library", "Workspace", "Shorts Editor", "Jobs", "Settings"];
 
 const collect = () => {
   const rows = [];

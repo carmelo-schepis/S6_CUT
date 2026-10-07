@@ -84,7 +84,7 @@ async function shot(page, vp, name) {
   await page.screenshot({ path: resolve(dir, `${LABEL}-${name}.png`), fullPage: false });
 }
 
-const NAV = ["Projects","Library","Workspace","Shorts Editor","AI Video","Jobs","Settings"];
+const NAV = ["Projects","Library","Workspace","Shorts Editor","Jobs","Settings"];
 
 async function run() {
   const browser = await chromium.launch();

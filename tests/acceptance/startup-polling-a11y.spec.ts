@@ -9,18 +9,18 @@ import { test, expect, type Page, type Route } from "@playwright/test";
 
 const HEALTH_READY = {
   status: "ready", version: "0.1.0", database: true, ffmpeg: true, ffprobe: true, whisper: true,
-  ytdlp: true, localTts: true, dataPath: "/app/data", freeBytes: 2_000_000_000,
+  ytdlp: true, localTts: false, dataPath: "/app/data", freeBytes: 2_000_000_000,
   configuredWorkers: 1, activeWorkers: 1, queuedJobs: 0,
-  fallbacks: { transcription: "Local Whisper", planning: "Deterministic", voice: "espeak-ng", media: "Library" },
+  fallbacks: { transcription: "Local Whisper", planning: "Deterministic", media: "Library" },
 };
 
 const CONNECTED_PROFILE = {
-  id: "profile-1", name: "Studio", textModelId: "vendor/model", ttsModelId: "free/speech", ttsVoice: "alloy", ttsSpeed: 1, selected: true,
+  id: "profile-1", name: "Studio", textModelId: "vendor/model", selected: true,
   persistence: "encrypted", openrouterConfigured: true, openrouterMasked: "••••1234", textStatus: "connected",
-  ttsStatus: "connected", textMessage: "Connected", textLastCheckedAt: null, ttsMessage: "Connected", ttsLastCheckedAt: null, status: "connected",
-  capabilities: ["OpenRouter text generation", "OpenRouter TTS"], fallbacks: { planning: "Deterministic planner", voice: "Local espeak-ng" },
+  textMessage: "Connected", textLastCheckedAt: null, status: "connected",
+  capabilities: ["OpenRouter text generation"], fallbacks: { planning: "Deterministic planner" },
 };
-const DISCONNECTED_PROFILE = { ...CONNECTED_PROFILE, openrouterConfigured: false, textStatus: "not_configured", ttsStatus: "not_configured", textMessage: null };
+const DISCONNECTED_PROFILE = { ...CONNECTED_PROFILE, openrouterConfigured: false, textStatus: "not_configured", textMessage: null };
 
 const asset = (id: string, title: string, mediaType = "video/mp4") => ({
   id, title, description: "", mediaType, filename: `${id}.mp4`, tags: [], brands: [], people: [],
@@ -28,9 +28,6 @@ const asset = (id: string, title: string, mediaType = "video/mp4") => ({
   minSpacingSeconds: 0, maxUsesPerProject: 3, licence: "User supplied", attribution: "",
   contentHash: id, folderId: "folder-1", origin: "manual-import", blobId: id, createdAt: "2026-01-01T00:00:00Z",
 });
-// The mocked profile reports OpenRouter as connected, so the AI Video screen
-// will fetch the model list. Without this the request reaches the real engine,
-// which answers 503 "OpenRouter is not configured" and logs a console error.
 const OPENROUTER_MODELS = [{ id: "vendor/model", name: "Vendor Model", contextLength: 128000 }];
 const FOLDERS = [{ id: "folder-1", name: "Unsorted", parentId: null, description: "", color: null, archived: false, system: true, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" }];
 
@@ -242,8 +239,6 @@ test.describe("provider availability", () => {
     await expect(page.getByText(/Auto uses a connected provider, otherwise a fast local cut/i)).toBeVisible({ timeout: 20_000 });
     await expect(page.getByText(/No provider is connected/i)).toHaveCount(0);
 
-    await page.getByRole("button", { name: "AI Video", exact: true }).click();
-    await expect(page.locator(".provider-status")).toContainText(/OpenRouter connected/i);
   });
 });
 
@@ -277,7 +272,7 @@ test.describe("Library empty states", () => {
 });
 
 test.describe("page structure", () => {
-  const screens = ["Projects", "Library", "Workspace", "Shorts Editor", "AI Video", "Jobs", "Settings"];
+  const screens = ["Projects", "Library", "Workspace", "Shorts Editor", "Jobs", "Settings"];
 
   test("every screen has one top-level main, one h1, and named complementary landmarks", async ({ page }) => {
     test.setTimeout(120_000);
@@ -359,7 +354,7 @@ test.describe("responsive controls", () => {
       await page.goto("/", { waitUntil: "domcontentloaded" });
       await expect(page.locator(".engine-startup")).toHaveCount(0);
 
-      for (const screen of ["Projects", "Library", "Workspace", "Shorts Editor", "AI Video", "Jobs", "Settings"]) {
+      for (const screen of ["Projects", "Library", "Workspace", "Shorts Editor", "Jobs", "Settings"]) {
         await page.getByRole("button", { name: screen, exact: true }).click();
         await page.waitForTimeout(700);
         const undersized = await page.evaluate(() => {

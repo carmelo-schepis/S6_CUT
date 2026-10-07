@@ -8,13 +8,12 @@
  * correspondence; nothing is created or driven through it.
  */
 import { expect, test } from "@playwright/test";
-import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   OVERALL_DEADLINE_MS, assertPlayback, capturePlaybackStills, checkPlayback, collectClips,
-  createClipProject, extractZip, gateway, jobBoundaries, openProjects, openWorkspaceForProject, waitForProjectReady,
+  createClipProject, gateway, openWorkspaceForProject, waitForProjectReady,
   writeManifest as writeManifestTo,
 } from "./support/workspace";
 
@@ -273,110 +272,5 @@ test.describe("S6_cut generates real playable video", () => {
     });
   });
 
-  test("Script mode renders a video from pasted text with local narration", async ({ page }) => {
-    test.setTimeout(OVERALL_DEADLINE_MS + 5 * 60_000);
-    const outputDir = path.join(artifacts, "script");
-    await fs.mkdir(outputDir, { recursive: true });
-    const projectName = `Script authenticity ${Date.now()}`;
-    const observed = new Set<string>();
-    const script = "A copper kettle warms slowly on the workshop bench. "
-      + "The deterministic planner divides this narration into short visual beats. "
-      + "Every rendered frame is produced on this machine without any hosted service. "
-      + "Local narration keeps the whole pipeline offline and repeatable.";
 
-    await page.goto("/", { waitUntil: "domcontentloaded" });
-    await expect(page.getByText("Local engine ready")).toBeVisible({ timeout: 90_000 });
-    await openProjects(page);
-
-    await page.getByRole("button", { name: /Script mode/ }).click();
-    await page.locator(".script-input-wrap textarea").fill(script);
-    await page.getByLabel("Project name").fill(projectName);
-    await page.getByLabel("Narration source").selectOption("local");
-    await page.getByRole("button", { name: "Advanced controls", exact: true }).click();
-    await page.getByLabel("Aspect").selectOption("9:16");
-    await page.getByRole("button", { name: "Create script video", exact: true }).click();
-    await expect(page.getByRole("heading", { name: projectName })).toBeVisible({ timeout: 60_000 });
-
-    await waitForProjectReady(page, observed, "script");
-    await expect(page.locator(".failure-strip")).toHaveCount(0);
-    for (const label of ["Script validated", "Words aligned", "Visual beats planned",
-      "Video rendered and saved", "Output verified", "Project ready"]) {
-      expect([...observed].some((entry) => entry.startsWith(`${label}:`)), `stage observed: ${label}`).toBeTruthy();
-    }
-    // Local narration was requested, so the local voice must be what ran.
-    expect([...observed], "local narration produced the voice track").toEqual(
-      expect.arrayContaining([expect.stringMatching(/^Local narration fallback:(complete|skipped)/)]),
-    );
-
-    // The storyboard must carry beats derived from the pasted script.
-    const beatTiles = page.locator(".beat-tile");
-    const beats = await beatTiles.count();
-    expect(beats, "storyboard beats were planned").toBeGreaterThan(0);
-    const beatText = (await beatTiles.allTextContents()).join(" ").toLowerCase();
-    const scriptWords = ["kettle", "planner", "beats", "machine", "narration"];
-    const matched = scriptWords.filter((word) => beatText.includes(word));
-    expect(matched.length, `beats reflect the pasted script (matched ${matched.join(",")})`).toBeGreaterThanOrEqual(2);
-
-    // Script mode renders one video, auto-selected in the viewer.
-    const playback = await assertPlayback(page);
-    checkPlayback(playback, "script output");
-    await capturePlaybackStills(page, outputDir, "script-output");
-    await page.screenshot({ path: path.join(outputDir, "completed-project.png"), fullPage: true });
-
-    // The only workspace download control for a Script project is Download ZIP.
-    const zipPath = path.join(outputDir, "script-export.zip");
-    const [download] = await Promise.all([
-      page.waitForEvent("download", { timeout: 180_000 }),
-      page.getByRole("button", { name: /Download ZIP/ }).click(),
-    ]);
-    await download.saveAs(zipPath);
-    const extracted = await extractZip(zipPath, path.join(outputDir, "export"));
-    const media = extracted.filter((entry) => entry.toLowerCase().endsWith(".mp4"));
-    expect(media.length, "the export ZIP contains rendered media").toBeGreaterThanOrEqual(1);
-    // Sidecars are recorded, not asserted: commit 2af8f9c deliberately reduced
-    // the archive to video only ("clean video ZIP exports"), while
-    // ARCHITECTURE.md, README.md, IMPLEMENTATION_STATUS.md and
-    // DO-NOT-CHANGE/AGENTS.md still describe manifest.json and credits.json.
-    // That drift is reported by the run rather than enforced here.
-    const sidecars = extracted.filter((entry) => /manifest\.json|credits\.json|warnings\.txt/.test(entry))
-      .map((entry) => path.basename(entry));
-
-    const { job } = await jobBoundaries(projectName);
-    const engineClip = job.clips.find((clip: { state: string }) => clip.state === "complete");
-    const bytes = await fs.readFile(media[0]);
-    const clips = [{
-      index: 1,
-      id: engineClip.id,
-      title: engineClip.title || "",
-      metaText: "",
-      reportedDuration: engineClip.duration,
-      reportedWidth: engineClip.width ?? null,
-      reportedHeight: engineClip.height ?? null,
-      sourceStart: engineClip.start,
-      sourceEnd: engineClip.end,
-      savedToLibrary: Boolean(engineClip.libraryAssetId),
-      libraryAssetId: engineClip.libraryAssetId ?? null,
-      downloadPath: media[0],
-      sha256: createHash("sha256").update(bytes).digest("hex"),
-      sizeBytes: bytes.length,
-      playback,
-    }];
-    expect(clips[0].savedToLibrary, "script output is saved to the Library").toBeTruthy();
-
-    // Persistence across reload.
-    await page.reload({ waitUntil: "domcontentloaded" });
-    await openWorkspaceForProject(page, projectName);
-    await expect(page.getByRole("heading", { name: projectName })).toBeVisible({ timeout: 60_000 });
-    await expect(page.locator(".beat-tile")).toHaveCount(beats, { timeout: 60_000 });
-    checkPlayback(await assertPlayback(page), "script after reload");
-    await page.screenshot({ path: path.join(outputDir, "reload-restored.png"), fullPage: true });
-
-    const narrationNotes = await page.locator(".notice-panel").allTextContents();
-    await writeManifest("script", {
-      mode: "script", projectName, script, requestedCount: 1, actualCount: clips.length,
-      observedStages: [...observed].sort(), beats, beatText, clips, narrationNotes,
-      exportEntries: extracted.map((entry) => path.basename(entry)),
-      exportSidecars: sidecars,
-    });
-  });
 });

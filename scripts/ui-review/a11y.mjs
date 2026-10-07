@@ -23,7 +23,7 @@ console.log("--- TAB ORDER (Projects) ---");
 order.forEach((o, i) => console.log(String(i + 1).padStart(2), o));
 
 // 2. Unnamed interactive controls anywhere in the app.
-for (const nav of ["Projects", "Library", "Workspace", "Shorts Editor", "AI Video", "Jobs", "Settings"]) {
+for (const nav of ["Projects", "Library", "Workspace", "Shorts Editor", "Jobs", "Settings"]) {
   await page.getByRole("button", { name: nav, exact: true }).first().click();
   await page.waitForTimeout(1500);
   const unnamed = await page.evaluate(() => {

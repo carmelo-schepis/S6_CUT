@@ -125,7 +125,7 @@ check("J10 aspect is disabled for long form only", await aspect.isEnabled());
 await advToggle.click();
 
 // ---------- J17: navigation & persistence ----------
-for (const s of ["Library", "Jobs", "Settings", "Workspace", "Shorts Editor", "AI Video", "Projects"]) {
+for (const s of ["Library", "Jobs", "Settings", "Workspace", "Shorts Editor", "Projects"]) {
   await page.getByRole("button", { name: s, exact: true }).first().click();
   await page.waitForTimeout(1200);
   const heading = await page.locator("main h1, main h2").first().innerText().catch(() => "");

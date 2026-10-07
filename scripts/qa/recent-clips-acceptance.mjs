@@ -112,7 +112,7 @@ try {
   await writeFile(join(artifacts, "restart-verification.json"), `${JSON.stringify({ url, project, dataPath, totalAfterRestart: afterRestart.total, checkedAt: new Date().toISOString() }, null, 2)}\n`);
 
   // Run only after the empty Recent clips restart assertion: this spec creates
-  // a disposable script job to prove Projects still opens its exact Workspace.
+  // a disposable MP4 clip job to prove Projects still opens its exact Workspace.
   // Give Playwright a separate output directory so its second run cannot clear
   // the clip screenshots/report produced by the first run.
   const postRestartEnvironment = {

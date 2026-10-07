@@ -6,7 +6,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     S6_DATA_PATH=/app/data
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg espeak-ng ca-certificates tini curl unzip \
+    && apt-get install -y --no-install-recommends ffmpeg ca-certificates tini curl unzip \
     && rm -rf /var/lib/apt/lists/* \
     && curl -fsSL -o /tmp/deno.zip https://github.com/denoland/deno/releases/download/v2.3.0/deno-x86_64-unknown-linux-gnu.zip \
     && unzip -q /tmp/deno.zip -d /usr/local/bin \

@@ -9,12 +9,11 @@ import { ProjectsView } from "./projects-view";
 vi.mock("../api", () => {
   const readableError = (e: unknown) =>
     e instanceof Error ? e.message : "Something went wrong. Try again.";
-  return { readableError, createClipJob: vi.fn(), createScriptJob: vi.fn(), listRecentClips: vi.fn(async () => ({ items: [], page: 1, pageSize: 12, hasMore: false, total: 0 })), listFolders: vi.fn(async () => []), createFolder: vi.fn() };
+  return { readableError, createClipJob: vi.fn(), listRecentClips: vi.fn(async () => ({ items: [], page: 1, pageSize: 12, hasMore: false, total: 0 })), listFolders: vi.fn(async () => []), createFolder: vi.fn() };
 });
 
-import { createClipJob, createScriptJob } from "../api";
+import { createClipJob } from "../api";
 const mockCreateClipJob = vi.mocked(createClipJob);
-const mockCreateScriptJob = vi.mocked(createScriptJob);
 
 const storedValues = new Map<string, string>();
 Object.defineProperty(globalThis, "localStorage", {
@@ -31,7 +30,7 @@ Object.defineProperty(globalThis, "localStorage", {
 
 const health: Health = {
   status: "ready", version: "test", database: true, ffmpeg: true, ffprobe: true,
-  whisper: true, ytdlp: true, localTts: true, dataPath: "Local mounted data directory",
+  whisper: true, ytdlp: true, dataPath: "Local mounted data directory",
   freeBytes: 1_000_000, activeWorkers: 0, queuedJobs: 0,
   fallbacks: { planning: "deterministic" },
 };
@@ -43,7 +42,7 @@ const project: Project = {
 };
 
 const undefinedJob: Job = {
-  schemaVersion: 1, id: "job-id", projectId: "project-id", mode: "script", state: "queued",
+  schemaVersion: 1, id: "job-id", projectId: "project-id", mode: "clip", state: "queued",
   stage: "queued", stageLabel: "Queued on this machine", progress: 0, currentItem: 0, totalItems: 0,
   style: "serious", processingMode: "fast", warnings: [], error: null, clips: [], beats: [], steps: [],
   createdAt: "2026-08-13T00:00:00Z", updatedAt: "2026-08-13T00:00:00Z",
@@ -53,7 +52,6 @@ describe("Projects create flow", () => {
   beforeEach(() => {
     storedValues.clear();
     mockCreateClipJob.mockReset();
-    mockCreateScriptJob.mockReset();
   });
   it("keeps creation settings and Recent Clips while omitting Recent projects and its UI", () => {
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
@@ -211,34 +209,6 @@ describe("Projects create flow", () => {
     await waitFor(() => expect(mockCreateClipJob).toHaveBeenCalledWith(expect.objectContaining({ sourceProfile: "music", processingMode: "smart", burnSubtitles: true, count: 5 })));
   });
 
-  it("switches to exact-source Script mode without a setup gate", () => {
-    render(<ProjectsView health={health} onCreated={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: /Script mode/i }));
-    expect(screen.getByPlaceholderText(/Paste the exact script/i)).toBeInTheDocument();
-    expect(screen.getByText(/Upload .txt or .md/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Create script video/i })).toBeEnabled();
-    expect(screen.queryByRole("button", { name: "Auto" })).not.toBeInTheDocument();
-  });
-
-  it("clears a clip validation error when switching to Script mode", () => {
-    render(<ProjectsView health={health} onCreated={vi.fn()} />);
-    fireEvent.click(screen.getByRole("tab", { name: "YouTube" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "YouTube URL" }), { target: { value: "https://example.com/not-youtube" } });
-    fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
-    expect(screen.getByRole("alert")).toHaveTextContent("Only public HTTPS YouTube URLs are supported.");
-    fireEvent.click(screen.getByRole("button", { name: /Script mode/i }));
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-  });
-
-  it("clears a script validation error when the script is edited", () => {
-    render(<ProjectsView health={health} onCreated={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: /Script mode/i }));
-    fireEvent.click(screen.getByRole("button", { name: /Create script video/i }));
-    expect(screen.getByRole("alert")).toHaveTextContent("Add at least 10 characters of script.");
-    fireEvent.change(screen.getByPlaceholderText(/Paste the exact script/i), { target: { value: "A valid disposable script." } });
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-  });
-
   it("defaults to Auto mode and resolves no-provider auto to a Fast local cut note", () => {
     render(<ProjectsView health={health} hasSelectedProvider={false} onCreated={vi.fn()} />);
     expect(screen.getByRole("button", { name: "Auto" })).toHaveClass("active");
@@ -299,37 +269,4 @@ describe("Projects create flow", () => {
     expect(screen.getByText(/local Whisper and deterministic planning/i)).toBeInTheDocument();
   });
 
-  it("trims and sends an explicit project name", async () => {
-    const created: Project = { ...project, id: "named-id", name: "QA Browser Test" };
-    mockCreateScriptJob.mockResolvedValue({ project: created, job: { ...undefinedJob, projectId: "named-id" } });
-    render(<ProjectsView health={health} hasSelectedProvider={false} onCreated={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: /Script mode/i }));
-    fireEvent.change(screen.getByLabelText("Project name"), { target: { value: "  QA Browser Test  " } });
-    fireEvent.change(screen.getByPlaceholderText(/Paste the exact script/i), { target: { value: "This is a script long enough to create a project." } });
-    fireEvent.click(screen.getByRole("button", { name: /Create script video/i }));
-    await waitFor(() => expect(mockCreateScriptJob).toHaveBeenCalledWith(expect.objectContaining({ name: "QA Browser Test" })));
-  });
-
-  it("sends the selected editorial style through script job creation", async () => {
-    const created: Project = { ...project, id: "style-id", style: "funny" };
-    mockCreateScriptJob.mockResolvedValue({ project: created, job: { ...undefinedJob, projectId: "style-id", style: "funny" } });
-    render(<ProjectsView health={health} hasSelectedProvider={false} onCreated={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: /Script mode/i }));
-    fireEvent.click(screen.getByRole("button", { name: /Funny/i }));
-    fireEvent.change(screen.getByPlaceholderText(/Paste the exact script/i), { target: { value: "Wow, this amazing idea is a win!" } });
-    fireEvent.click(screen.getByRole("button", { name: /Create script video/i }));
-    await waitFor(() => expect(mockCreateScriptJob).toHaveBeenCalledWith(expect.objectContaining({ style: "funny" })));
-  });
-
-  it("does not send processingMode through the script API", async () => {
-    const created: Project = { ...project, id: "new-id" };
-    mockCreateScriptJob.mockResolvedValue({ project: created, job: { ...undefinedJob, projectId: "new-id" } });
-    render(<ProjectsView health={health} hasSelectedProvider={false} onCreated={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: /Script mode/i }));
-    fireEvent.change(screen.getByPlaceholderText(/Paste the exact script/i), { target: { value: "This is a script long enough to create a project." } });
-    fireEvent.click(screen.getByRole("button", { name: /Create script video/i }));
-    await waitFor(() => {
-      expect(mockCreateScriptJob).toHaveBeenCalledWith(expect.not.objectContaining({ processingMode: expect.anything() }));
-    });
-  });
 });

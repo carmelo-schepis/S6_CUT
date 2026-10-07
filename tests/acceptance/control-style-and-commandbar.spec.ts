@@ -68,7 +68,7 @@ test.describe("control style", () => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto("/", { waitUntil: "domcontentloaded" });
 
-    for (const route of ["Projects", "Library", "Shorts Editor", "AI Video", "Jobs", "Settings"] as const) {
+    for (const route of ["Projects", "Library", "Shorts Editor", "Jobs", "Settings"] as const) {
       await gotoRoute(page, route);
       const controls = await readControls(page, EXEMPT);
       expect(controls.length, `${route}: expected visible controls`).toBeGreaterThan(0);
@@ -96,7 +96,7 @@ test.describe("control style", () => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto("/", { waitUntil: "domcontentloaded" });
 
-    for (const route of ["Projects", "Library", "Shorts Editor", "AI Video", "Jobs", "Settings"] as const) {
+    for (const route of ["Projects", "Library", "Shorts Editor", "Jobs", "Settings"] as const) {
       await gotoRoute(page, route);
       const measured = await page.evaluate(() => {
         // Chromium serialises a color-mix() result as color(srgb …), never as

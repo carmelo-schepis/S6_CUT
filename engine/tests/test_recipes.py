@@ -135,10 +135,11 @@ def test_grain_carries_a_pinned_seed() -> None:
     assert LookTreatment().grain_seed == LookTreatment().grain_seed
 
 
-def test_source_policy_accepts_todays_kinds() -> None:
+def test_source_policy_accepts_clip_source_kinds() -> None:
     policy = SourcePolicy()
-    for kind in ("upload", "youtube", "script"):
+    for kind in ("upload", "youtube"):
         assert policy.accepts(kind)
+    assert not policy.accepts("script")
     assert not policy.accepts("archival")
     for style in known_styles():
         assert recipe_for(style).source.accepts("youtube")

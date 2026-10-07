@@ -1,7 +1,7 @@
 // Page-level overflow / clipping check that ignores deliberate scrollers.
 import { chromium } from "@playwright/test";
 const BASE = process.env.S6_URL || "http://127.0.0.1:5173";
-const SCREENS = ["Projects", "Library", "Workspace", "Shorts Editor", "AI Video", "Jobs", "Settings"];
+const SCREENS = ["Projects", "Library", "Workspace", "Shorts Editor", "Jobs", "Settings"];
 const VPS = [[1440,900],[1280,800],[1024,768],[768,1024],[390,844]];
 const b = await chromium.launch();
 for (const [w, h] of VPS) {

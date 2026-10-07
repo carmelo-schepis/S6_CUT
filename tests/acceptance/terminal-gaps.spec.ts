@@ -148,9 +148,6 @@ test("terminal exact viewport, screenshot, and ZIP evidence", async ({ browser, 
     await expect(page.getByRole("heading", { name: "Shorts Editor" })).toBeVisible();
     diagnostics.measurements.push(await measure(page, "shorts-editor", { width, height }));
     await page.screenshot({ path: path.join(artifacts, `${name}-shorts-editor.png`), fullPage: true });
-    await open(page, "AI Video");
-    await expect(page.getByRole("heading", { name: "Topic to Video" })).toBeVisible();
-    diagnostics.measurements.push(await measure(page, "ai-assistant", { width, height }));
     await open(page, "Jobs");
     await expect(page.getByRole("heading", { name: "Jobs & recovery" })).toBeVisible();
     diagnostics.measurements.push(await measure(page, "jobs", { width, height }));
