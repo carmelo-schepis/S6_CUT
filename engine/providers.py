@@ -21,6 +21,7 @@ class ProviderError(RuntimeError):
 
 
 MASKED_SECRET_MARKER = "••••"
+RETIRED_TTS_MESSAGE = "Text-to-speech is retired"
 FALLBACKS = {
     "planning": "Deterministic sentence and phrase planner",
     "captions": "Canonical timed transcript",
@@ -100,14 +101,28 @@ class ProfileService:
         raw = self.vault.get_session(profile_id) if profile_persistence == "session" else self.vault.decrypt(encrypted)
         return self._decode(raw)
 
+    @staticmethod
+    def _retire_tts_status(profile: ProviderProfile):
+        profile.tts_status = "not_configured"
+        profile.tts_message = RETIRED_TTS_MESSAGE
+        profile.tts_last_checked_at = None
+
     def _migrate_legacy_secrets(self) -> None:
         for profile in self.db.list_profiles():
             record = self.db.get_profile(profile.id)
             if not record:
                 continue
             secrets = self._read_secret(profile.id, profile.persistence, record[1])
-            if not secrets.pop("elevenlabsKey", None):
+            removed_legacy_secret = "elevenlabsKey" in secrets
+            secrets.pop("elevenlabsKey", None)
+            status_needs_reset = (
+                profile.tts_status != "not_configured"
+                or profile.tts_message != RETIRED_TTS_MESSAGE
+                or profile.tts_last_checked_at is not None
+            )
+            if not removed_legacy_secret and not status_needs_reset:
                 continue
+            self._retire_tts_status(profile)
             raw = json.dumps({key: value for key, value in secrets.items() if value}, separators=(",", ":")).encode()
             if profile.persistence == "session":
                 self.vault.set_session(profile.id, raw)
@@ -153,11 +168,11 @@ class ProfileService:
             tts_voice=tts_voice, tts_speed=tts_speed, selected=value.selected, persistence=value.persistence,
             openrouter_configured=bool(key), openrouter_masked=mask_secret(key),
             text_status=previous_profile.text_status if text_unchanged else ("configured" if key else "not_configured"),
-            tts_status=previous_profile.tts_status if previous_profile else "not_configured",
+            tts_status="not_configured",
             text_message=previous_profile.text_message if text_unchanged else ("Ready to test" if key else "Optional; deterministic local planning remains available"),
             text_last_checked_at=previous_profile.text_last_checked_at if text_unchanged else None,
-            tts_message=previous_profile.tts_message if previous_profile else None,
-            tts_last_checked_at=previous_profile.tts_last_checked_at if previous_profile else None,
+            tts_message=RETIRED_TTS_MESSAGE,
+            tts_last_checked_at=None,
             status="configured" if key else "local only",
             capabilities=["OpenRouter text generation"] if key else [],
             fallbacks=FALLBACKS,
@@ -250,6 +265,7 @@ class ProfileService:
         if not record:
             raise KeyError(profile_id)
         profile, _ = record
+        self._retire_tts_status(profile)
         secrets = self.secrets(profile_id)
         key = secrets.get("openrouterKey")
         profile.text_status = "not_configured" if not key else "configured"

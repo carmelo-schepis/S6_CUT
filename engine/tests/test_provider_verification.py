@@ -85,7 +85,7 @@ def test_invalid_openrouter_key_is_precise(tmp_path: Path, monkeypatch: pytest.M
     assert "secret must not escape" not in (result.text_message or "")
 
 
-def test_profile_test_keeps_hidden_speech_fields_but_verifies_only_text(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_profile_test_keeps_hidden_speech_configuration_but_reports_tts_retired(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     service, profile_id = make_service(tmp_path)
     profile = service.db.get_profile(profile_id)[0]
     profile.tts_model_id, profile.tts_voice, profile.tts_speed, profile.tts_status = "legacy/speech", "legacy-voice", 1.25, "connected"
@@ -94,7 +94,9 @@ def test_profile_test_keeps_hidden_speech_fields_but_verifies_only_text(tmp_path
     result = run_test(service, profile_id)
     assert result.text_status == "connected"
     assert result.status == "connected"
-    assert (result.tts_model_id, result.tts_voice, result.tts_speed, result.tts_status) == ("legacy/speech", "legacy-voice", 1.25, "connected")
+    assert (result.tts_model_id, result.tts_voice, result.tts_speed, result.tts_status) == ("legacy/speech", "legacy-voice", 1.25, "not_configured")
+    assert result.tts_message == "Text-to-speech is retired"
+    assert result.tts_last_checked_at is None
     assert FakeClient.completion_calls == 1
 
 
@@ -148,11 +150,35 @@ def test_remaining_profile_edits_preserve_all_stored_credentials_and_hidden_fiel
     vault = SecretVault(tmp_path / "secrets" / "instance.key")
     service = ProfileService(db, vault)
     profile = service.save(ProfileInput(name="Legacy", text_model_id="openai/test", openrouter_key="openrouter-secret", selected=True))
-    hidden = db.get_profile(profile.id)[0].model_copy(update={"tts_model_id": "legacy/speech", "tts_voice": "legacy-voice", "tts_speed": 1.25})
+    hidden = db.get_profile(profile.id)[0].model_copy(update={
+        "tts_model_id": "legacy/speech", "tts_voice": "legacy-voice", "tts_speed": 1.25,
+        "tts_status": "connected", "tts_message": "Connected", "tts_last_checked_at": "2026-01-01T00:00:00+00:00",
+    })
     db.save_profile(hidden, vault.encrypt(b'{"openrouterKey":"openrouter-secret","elevenlabsKey":"legacy-secret"}'))
     edited = service.save(ProfileInput(name="Updated", text_model_id="openai/updated", openrouter_key="", selected=True), profile.id)
     assert (edited.tts_model_id, edited.tts_voice, edited.tts_speed) == ("legacy/speech", "legacy-voice", 1.25)
+    assert edited.tts_status == "not_configured"
+    assert edited.tts_message == "Text-to-speech is retired"
+    assert edited.tts_last_checked_at is None
     assert service.secrets(profile.id) == {"openrouterKey": "openrouter-secret"}
     record = db.get_profile(profile.id)
     assert record and vault.decrypt(record[1]) == b'{"openrouterKey":"openrouter-secret"}'
     assert b"legacy-secret" not in (record[1] or b"")
+
+
+def test_existing_tts_status_is_retired_at_startup(tmp_path: Path):
+    db = Database(tmp_path / "s6-cut.sqlite3")
+    vault = SecretVault(tmp_path / "secrets" / "instance.key")
+    service = ProfileService(db, vault)
+    profile = service.save(ProfileInput(name="Legacy", text_model_id="openai/test", selected=True))
+    stale = db.get_profile(profile.id)[0].model_copy(update={
+        "tts_status": "connected", "tts_message": "Connected", "tts_last_checked_at": "2026-01-01T00:00:00+00:00",
+    })
+    db.save_profile(stale)
+
+    restarted = ProfileService(db, vault)
+    current = db.get_profile(profile.id)[0]
+    assert current.tts_status == "not_configured"
+    assert current.tts_message == "Text-to-speech is retired"
+    assert current.tts_last_checked_at is None
+    assert restarted.secrets(profile.id) == {}

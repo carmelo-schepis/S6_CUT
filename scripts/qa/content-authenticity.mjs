@@ -18,6 +18,7 @@ import { access as fsAccess, cp, mkdir, mkdtemp, rm, chmod, writeFile } from "no
 import { fileURLToPath } from "node:url";
 import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
+import { createServer } from "node:net";
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const composeFile = join(root, "compose.yaml");
@@ -92,11 +93,25 @@ async function waitForGateway(url, timeoutMs = 240_000) {
 
 const active = [];
 const usedPorts = new Set();
-function isolatedPort() {
-  let port;
-  do { port = 20_000 + (randomBytes(2).readUInt16BE(0) % 40_000); } while (usedPorts.has(port));
-  usedPorts.add(port);
-  return port;
+async function isolatedPort() {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const port = 20_000 + (randomBytes(2).readUInt16BE(0) % 40_000);
+    if (usedPorts.has(port)) continue;
+    const server = createServer();
+    try {
+      await new Promise((resolvePromise, reject) => {
+        server.once("error", reject);
+        server.listen({ host: "127.0.0.1", port, exclusive: true }, resolvePromise);
+      });
+    } catch (error) {
+      if (error?.code === "EADDRINUSE") continue;
+      throw error;
+    }
+    await new Promise((resolvePromise, reject) => server.close((error) => error ? reject(error) : resolvePromise()));
+    usedPorts.add(port);
+    return port;
+  }
+  throw new Error("could not find an unused loopback port for the isolated authenticity stack");
 }
 
 /**
@@ -142,8 +157,8 @@ process.once("SIGTERM", () => stopOnSignal("SIGTERM"));
  * 1 passes none so the production code path is what gets measured.
  */
 async function startStack({ label, hooks = {} }) {
-  const port = isolatedPort();
-  const enginePort = isolatedPort();
+  const port = await isolatedPort();
+  const enginePort = await isolatedPort();
   // The dataset must be bind-mountable by the Docker daemon; the OS temp
   // directory is not a Docker Desktop shared path, so it lives under the
   // ignored test-artifacts directory and is removed on teardown.

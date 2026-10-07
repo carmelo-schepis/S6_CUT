@@ -72,10 +72,10 @@ restart or mutate a shared service. Only after that empty-result persistence
 assertion passes, the runner invokes `recent-clips-projects.spec.ts`. This
 post-restart real-app test checks that Recent projects remains absent after a
 reload, the project-creation form and Settings remain available, Jobs & recovery
-and Workspace navigation work, and submitting a disposable script project opens
-that exact project's Workspace. Jobs & recovery access checks the seeded
-`Retry import` control remains available for stopped partial work; no
-retry/control mutation is issued against historical fixture jobs.
+and Workspace navigation work. Submitting a disposable Clip project using
+the isolated fixture video opens that exact project's Workspace. Jobs & recovery
+access checks the seeded `Retry import` control remains available for stopped
+partial work; no retry/control mutation is issued against historical fixture jobs.
 
 ## Coverage status
 
