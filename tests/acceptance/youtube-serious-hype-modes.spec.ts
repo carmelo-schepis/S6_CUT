@@ -129,11 +129,11 @@ function inspectDecodedBlackPadding(jobId: string, outputName: string) {
   const topBlackFraction = blackFraction(0, 240);
   const bottomBlackFraction = blackFraction(1680, 1920);
   const bottomClearBandBlackFraction = blackFraction(1680, 1800);
-  // Source credit may occupy a small lower-corner area. The decoded frame
-  // should nevertheless be solid black through both 240-pixel bands elsewhere.
-  expect(topBlackFraction).toBeGreaterThanOrEqual(0.995);
-  expect(bottomBlackFraction).toBeGreaterThanOrEqual(0.75);
-  expect(bottomClearBandBlackFraction).toBeGreaterThanOrEqual(0.995);
+  // Captions and source credit are kept inside the foreground; both exposed
+  // bands must remain black across the complete decoded frame.
+  expect(topBlackFraction).toBe(1);
+  expect(bottomBlackFraction).toBe(1);
+  expect(bottomClearBandBlackFraction).toBe(1);
   for (const y of [80, 160, 1720, 1760]) {
     expect(Math.max(...centerPixel(y)), `expected black center padding at y=${y}`).toBeLessThanOrEqual(12);
   }
@@ -220,7 +220,7 @@ async function createAndInspect(page: import("@playwright/test").Page, testInfo:
     expect(hasTranscriptWord(burnScript)).toBeTruthy();
   }
   const mediaVerification = await inspectDownloadedOutput(completed.job.id, engineClip.outputName, clips[0].downloadPath, settings.aspect || "9:16", clips[0].sourceStart);
-  const partialFillPixels = !settings.upload && !settings.captions && (settings.aspect || "9:16") === "9:16" &&
+  const partialFillPixels = !settings.upload && (settings.aspect || "9:16") === "9:16" &&
     settings.style !== "Funny" &&
     Math.abs(mediaVerification.sourceDisplayAspect / (16 / 9) - 1) <= 0.02
     ? inspectDecodedBlackPadding(completed.job.id, engineClip.outputName)

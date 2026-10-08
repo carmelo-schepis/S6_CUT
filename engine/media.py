@@ -1385,7 +1385,7 @@ def _scrim_events(look: "LookTreatment", width: int, height: int, duration: floa
     return style, events
 
 
-def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duration: float, visuals: Iterable[tuple[str, float, float]], width: int, height: int, style: str = "educational", creator_credit: str | None = None, credit_alignment: int = 3, content_format: str | None = None, music_theme: str | None = None, music_top_text: str | None = None) -> None:
+def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duration: float, visuals: Iterable[tuple[str, float, float]], width: int, height: int, style: str = "educational", creator_credit: str | None = None, credit_alignment: int = 3, content_format: str | None = None, music_theme: str | None = None, music_top_text: str | None = None, bottom_safe_inset: int = 0) -> None:
     preset = _subtitle_preset(style, content_format)
     if music_theme in {"clean", "warm", "serif"}:
         preset = dict(preset)
@@ -1414,7 +1414,7 @@ def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duratio
         outline = max(2, round(preset["outline"] * type_scale))
         shadow = max(1, round(preset["shadow"] * type_scale))
     margin_x = metrics["margin_x"]
-    margin_v = max(60, round(int(preset["margin_v"]) * vertical_scale))
+    margin_v = max(60, round(int(preset["margin_v"]) * vertical_scale)) + bottom_safe_inset
     if music_theme:
         band_height = min(height, round(width * 0.75 / 2) * 2)
         margin_v = round((height - band_height) / 2 + band_height * 0.08)
@@ -1424,7 +1424,7 @@ def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duratio
     credit_fontsize = max(20, round(26 * visual_scale))
     # Keep the credit anchored to the bottom edge with only a small inset for
     # glyphs, outlines, and the translucent panel.
-    credit_margin = _credit_margin(height)
+    credit_margin = _credit_margin(height) + bottom_safe_inset
     credit_max_chars = max(12, int(usable * .92 / (_CHAR_WIDTH_FACTOR * credit_fontsize)))
     credit_text = _wrap_credit(creator_credit, credit_max_chars) if creator_credit else ""
     # A translucent light face with a dark stroke stays legible over changing
@@ -1514,6 +1514,31 @@ def _overlay_inputs(command: list[str], overlays: list[tuple[Path, float, float]
             command.extend(["-stream_loop", "-1", "-i", str(path)])
 
 
+def _partial_fill_vertical_padding(
+    src_width: int, src_height: int, target_width: int, target_height: int, *,
+    centered_partial_fill: bool = False, sample_aspect_ratio: float = 1.0,
+):
+    if not centered_partial_fill or (target_width, target_height) != (1080, 1920):
+        return 0
+    try:
+        sar = float(sample_aspect_ratio)
+    except (TypeError, ValueError) as exc:
+        raise MediaError("Invalid source sample aspect ratio") from exc
+    if not math.isfinite(sar) or sar <= 0:
+        raise MediaError("Invalid source sample aspect ratio")
+    if abs((src_width / src_height * sar) / (16 / 9) - 1) > 0.02:
+        return 0
+    foreground_height = round(target_height * PARTIAL_FILL_VERTICAL_OCCUPANCY / 2) * 2
+    return (target_height - foreground_height) // 2
+
+
+def _black_padding_filter_chain(width: int, height: int, vertical_padding: int):
+    return (
+        f"drawbox=x=0:y=0:w={width}:h={vertical_padding}:color=black:t=fill,"
+        f"drawbox=x=0:y={height - vertical_padding}:w={width}:h={vertical_padding}:color=black:t=fill"
+    )
+
+
 def _source_layout_filter(src_width: int, src_height: int, target_width: int, target_height: int, *, centered_partial_fill: bool = False, sample_aspect_ratio: float = 1.0) -> str:
     """Keep the complete source visible, optionally using centered black-padded partial fill."""
     dimensions: list[int] = []
@@ -1530,25 +1555,21 @@ def _source_layout_filter(src_width: int, src_height: int, target_width: int, ta
         raise MediaError("Target video dimensions must be even for yuv420p")
     source_aspect = src_width / src_height
     target_aspect = target_width / target_height
-    if centered_partial_fill and target_width == 1080 and target_height == 1920:
-        try:
-            sar = float(sample_aspect_ratio)
-        except (TypeError, ValueError) as exc:
-            raise MediaError("Invalid source sample aspect ratio") from exc
-        if not math.isfinite(sar) or sar <= 0:
-            raise MediaError("Invalid source sample aspect ratio")
-        if abs((source_aspect * sar) / (16 / 9) - 1) <= 0.02:
-            # Normalize displayed pixels (including non-square SAR), scale to
-            # the full output height, retain that full-height center crop, and
-            # add fixed black bars rather than a blurred duplicate background.
-            normalize_sar = "setsar=1," if abs(sar - 1.0) < 1e-9 else "scale=trunc(iw*sar/2)*2:ih:flags=lanczos,setsar=1,"
-            foreground_height = round(target_height * PARTIAL_FILL_VERTICAL_OCCUPANCY / 2) * 2
-            vertical_padding = (target_height - foreground_height) // 2
-            return (
-                f"{normalize_sar}scale=-2:{foreground_height}:flags=lanczos,"
-                f"crop={target_width}:{foreground_height}:(iw-{target_width})/2:0,"
-                f"pad={target_width}:{target_height}:0:{vertical_padding}:color=black,setsar=1[base]"
-            )
+    vertical_padding = _partial_fill_vertical_padding(
+        src_width, src_height, target_width, target_height,
+        centered_partial_fill=centered_partial_fill, sample_aspect_ratio=sample_aspect_ratio,
+    )
+    if vertical_padding:
+        # Normalize displayed pixels (including non-square SAR), scale the
+        # sharp center crop into the inner field, and leave solid black bars.
+        sar = float(sample_aspect_ratio)
+        normalize_sar = "setsar=1," if abs(sar - 1.0) < 1e-9 else "scale=trunc(iw*sar/2)*2:ih:flags=lanczos,setsar=1,"
+        foreground_height = target_height - 2 * vertical_padding
+        return (
+            f"{normalize_sar}scale=-2:{foreground_height}:flags=lanczos,"
+            f"crop={target_width}:{foreground_height}:(iw-{target_width})/2:0,"
+            f"pad={target_width}:{target_height}:0:{vertical_padding}:color=black,setsar=1[base]"
+        )
     if abs(source_aspect / target_aspect - 1) <= 0.12:
         return f"scale={target_width}:{target_height}:force_original_aspect_ratio=increase:flags=lanczos,crop={target_width}:{target_height},setsar=1[base]"
     # Overscale the undarkened background before blurring and cropping so the
@@ -1692,8 +1713,14 @@ def _filters(
     centered_partial_fill: bool = False,
     sample_aspect_ratio: float = 1.0,
 ) -> tuple[str, str]:
+    vertical_padding = 0
     if source_dimensions:
         layout = _music_source_layout_filter(width, height, source_dimensions, music_treatment == "grayscale") if music_treatment else _source_layout_filter(*source_dimensions, width, height, centered_partial_fill=centered_partial_fill, sample_aspect_ratio=sample_aspect_ratio)
+        if not music_treatment:
+            vertical_padding = _partial_fill_vertical_padding(
+                *source_dimensions, width, height, centered_partial_fill=centered_partial_fill,
+                sample_aspect_ratio=sample_aspect_ratio,
+            )
         filters = [f"[0:v]{layout}"]
     else:
         filters = [f"[0:v]scale={width}:{height}:flags=lanczos,setsar=1[base]"]
@@ -1707,7 +1734,13 @@ def _filters(
         current = output
     current = _composite_subscribe_animations(filters, current, subscribe_animations)
     filters.append(f"[{current}]subtitles={ass_name}[outv]")
-    return ";".join(filters), "outv"
+    output = "outv"
+    if vertical_padding:
+        filters.append(
+            f"[outv]{_black_padding_filter_chain(width, height, vertical_padding)}[masked]"
+        )
+        output = "masked"
+    return ";".join(filters), output
 
 
 # DO-NOT-CHANGE: atomic render (.partial.mp4 + os.replace) with structural output
@@ -1721,8 +1754,19 @@ def render_clip(source: Path, output: Path, *, start: float, end: float, aspect:
     src_width, src_height = source_meta["width"], source_meta["height"]
     if source_meta["rotation"] % 180:
         src_width, src_height = src_height, src_width
+    source_dimensions = (src_width, src_height)
+    sample_aspect_ratio = 1.0
+    if centered_partial_fill:
+        raw_sample_aspect_ratio = source_meta.get("sample_aspect_ratio", 1.0)
+        sample_aspect_ratio = float(raw_sample_aspect_ratio if raw_sample_aspect_ratio is not None else 0.0)
+        if source_meta["rotation"] % 180 and sample_aspect_ratio > 0:
+            sample_aspect_ratio = 1.0 / sample_aspect_ratio
+    vertical_padding = 0 if music_theme or music_treatment else _partial_fill_vertical_padding(
+        *source_dimensions, width, height, centered_partial_fill=centered_partial_fill,
+        sample_aspect_ratio=sample_aspect_ratio,
+    )
     credit_alignment = _credit_alignment(source, start=start, end=end, width=width, height=height, settings=settings) if creator_credit else 3
-    write_ass(ass, words, offset=start, duration=duration, visuals=visuals, width=width, height=height, style=style, creator_credit=creator_credit, credit_alignment=credit_alignment, content_format=content_format, music_theme=music_theme, music_top_text=music_top_text)
+    write_ass(ass, words, offset=start, duration=duration, visuals=visuals, width=width, height=height, style=style, creator_credit=creator_credit, credit_alignment=credit_alignment, content_format=content_format, music_theme=music_theme, music_top_text=music_top_text, bottom_safe_inset=vertical_padding)
     write_caption_sidecars(output, words, offset=start, duration=duration, style=style, music_theme=music_theme)
     if creator_credit:
         # The downloadable ASS is caption-only; the internal burn script must
@@ -1735,13 +1779,6 @@ def render_clip(source: Path, output: Path, *, start: float, end: float, aspect:
     subtitle_index = 1 + len(overlays) + len(subscribe_animations)
     if embed_subtitles:
         command.extend(["-i", str(output.with_suffix(".srt"))])
-    source_dimensions = (src_width, src_height)
-    sample_aspect_ratio = 1.0
-    if centered_partial_fill:
-        raw_sample_aspect_ratio = source_meta.get("sample_aspect_ratio", 1.0)
-        sample_aspect_ratio = float(raw_sample_aspect_ratio if raw_sample_aspect_ratio is not None else 0.0)
-        if source_meta["rotation"] % 180 and sample_aspect_ratio > 0:
-            sample_aspect_ratio = 1.0 / sample_aspect_ratio
     filters, mapped = _filters(width, height, overlays, 1, ass.name, source_dimensions, subscribe_animations, music_treatment, centered_partial_fill, sample_aspect_ratio)
     command.extend(["-t", f"{duration:.3f}", "-filter_complex", filters, "-map", f"[{mapped}]"])
     if has_audio:
@@ -2077,6 +2114,10 @@ def render_fast_clip(
         sample_aspect_ratio = float(raw_sample_aspect_ratio if raw_sample_aspect_ratio is not None else 0.0)
         if meta["rotation"] % 180 and sample_aspect_ratio > 0:
             sample_aspect_ratio = 1.0 / sample_aspect_ratio
+    vertical_padding = 0 if music_treatment else _partial_fill_vertical_padding(
+        src_width, src_height, width, height, centered_partial_fill=centered_partial_fill,
+        sample_aspect_ratio=sample_aspect_ratio,
+    )
     vf = _source_layout_filter(src_width, src_height, width, height, centered_partial_fill=centered_partial_fill, sample_aspect_ratio=sample_aspect_ratio).removesuffix("[base]")
     look_treatment = recipe_for(style, content_format).look
     look_before, look_after = _look_stages(look_treatment)
@@ -2099,7 +2140,7 @@ def render_fast_clip(
     if (subtitles_enabled and words) or creator_credit:
         ass = output.parent / (f"{output.stem}.burn.ass" if creator_credit else f"{output.stem}.ass")
         credit_alignment = _credit_alignment(source, start=start, end=end, width=width, height=height, settings=settings) if creator_credit else 3
-        write_ass(ass, words or [], offset=0, duration=duration, visuals=[], width=width, height=height, style=style, creator_credit=creator_credit, credit_alignment=credit_alignment, content_format=content_format)
+        write_ass(ass, words or [], offset=0, duration=duration, visuals=[], width=width, height=height, style=style, creator_credit=creator_credit, credit_alignment=credit_alignment, content_format=content_format, bottom_safe_inset=vertical_padding)
         if creator_credit:
             write_ass(output.with_suffix(".ass"), words or [], offset=0, duration=duration, visuals=[], width=width, height=height, style=style, content_format=content_format)
     if look_before or look_after:
@@ -2129,10 +2170,16 @@ def render_fast_clip(
             graph.append(f"[{current}]subtitles={ass.name}[outv]")
         else:
             graph.append(f"[{current}]null[outv]")
-        command.extend(["-filter_complex", ";".join(graph), "-map", "[outv]"])
+        mapped_output = "outv"
+        if vertical_padding:
+            graph.append(f"[outv]{_black_padding_filter_chain(width, height, vertical_padding)}[masked]")
+            mapped_output = "masked"
+        command.extend(["-filter_complex", ";".join(graph), "-map", f"[{mapped_output}]"])
     else:
         if ass:
             vf = f"{vf},subtitles={ass.name}"
+        if vertical_padding:
+            vf = f"{vf},{_black_padding_filter_chain(width, height, vertical_padding)}"
         command.extend(["-vf", vf, "-map", "0:v"])
     command.extend([
         "-c:v",

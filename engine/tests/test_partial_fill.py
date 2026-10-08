@@ -178,13 +178,15 @@ def test_rendered_fast_and_smart_partial_fill_geometry(tmp_path: Path) -> None:
     ], check=True, capture_output=True)
 
     rendered = []
+    caption_words = [{"start": 0.3, "end": 1.4, "text": "Keep captions inside the foreground"}]
     for mode in ("fast", "smart"):
         output = tmp_path / f"{mode}.mp4"
-        common = dict(start=0.1, end=1.9, aspect="9:16", settings=settings, has_audio=True, centered_partial_fill=True)
+        common = dict(start=0.1, end=1.9, aspect="9:16", settings=settings, has_audio=True, centered_partial_fill=True,
+                      creator_credit="Source: Regression fixture")
         if mode == "fast":
-            render_fast_clip(source, output, **common, style="serious", subtitles_enabled=False)
+            render_fast_clip(source, output, **common, words=caption_words, style="serious", subtitles_enabled=True)
         else:
-            render_clip(source, output, **common, words=[], visuals=[], overlays=[], style="serious")
+            render_clip(source, output, **common, words=caption_words, visuals=[], overlays=[], style="serious")
         metadata = probe(output, settings)
         assert (metadata["width"], metadata["height"]) == (1080, 1920)
         assert metadata["audio"] is True
@@ -214,8 +216,8 @@ def test_rendered_fast_and_smart_partial_fill_geometry(tmp_path: Path) -> None:
     for frame in rendered:
         assert len(frame) == 1080 * 1920 * 3
 
-        # The uncovered canvas is genuinely black, not a blurred enlargement
-        # of the source. Check every decoded RGB sample in both exposed bands.
+        # Captions and creator credit are positioned in the foreground, and
+        # the post-subtitle mask keeps every decoded sample in both pads black.
         top_band = frame[:239 * 1080 * 3]
         bottom_band = frame[1680 * 1080 * 3:]
         assert max(top_band) <= black_tolerance, "rows above the foreground must be black"
