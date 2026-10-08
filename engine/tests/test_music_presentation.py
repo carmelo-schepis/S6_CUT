@@ -112,6 +112,7 @@ def test_music_renderer_contract_and_ass_boundaries(tmp_path: Path) -> None:
         assert title_event.startswith("Dialogue: 20,0,0:00:02.00,MusicTop,")
         assert title_event.endswith(",," + escaped_title)
         top_style = next(line for line in content.splitlines() if line.startswith("Style: MusicTop,"))
+        assert top_style.split(",")[2] == "54"  # top title size is not coupled to lyric scaling
         assert top_style.split(",")[18] == "8"  # top-centred, not coupled to lyric alignment
         for event in events:
             fields = event.split(",", 9)
@@ -166,7 +167,11 @@ def test_reference_music_layout_preserves_every_word_and_phrase_timing(tmp_path:
         content = path.read_text(encoding="utf-8")
         style = next(line for line in content.splitlines() if line.startswith("Style: Caption,"))
         assert style.split(",")[1] == face
-        assert style.split(",")[2] in {"122", "135", "150"}
+        assert style.split(",")[2] == {
+            "reference_white_sans": "155",
+            "reference_yellow_sans": "140",
+            "reference_white_serif": "172",
+        }[theme]
         assert style.split(",")[3] == color
         assert style.split(",")[16] == "1" and style.split(",")[17] == "0"
         events = [line for line in content.splitlines() if line.startswith("Dialogue: 10,")]
@@ -184,6 +189,75 @@ def test_reference_music_layout_preserves_every_word_and_phrase_timing(tmp_path:
         assert all(r"\N" not in row for row in events)
         assert events[0].startswith("Dialogue: 10,0:00:01.00,")
         assert events[-1].split(",", 3)[2] == "0:00:03.00"
+
+
+def test_music_size_multiplier_is_applied_once_only_for_explicit_shorts(tmp_path: Path) -> None:
+    from engine.media import SHORT_FORM_SUBTITLE_SIZE_MULTIPLIER, write_ass
+
+    canvases = ((1080, 1920), (1080, 1350), (1080, 1080), (1920, 1080))
+    reference_sizes = {
+        "reference_white_sans": 135,
+        "reference_yellow_sans": 122,
+        "reference_white_serif": 150,
+    }
+    for width, height in canvases:
+        scale = min(width, height) / 1080
+        for theme in ("clean", "warm", "serif", *reference_sizes):
+            base = reference_sizes.get(theme, 56)
+            rendered_base = max(28, round(base * scale))
+            expected_short = round(rendered_base * SHORT_FORM_SUBTITLE_SIZE_MULTIPLIER)
+            sizes = {}
+            for fmt in (None, "long", "short"):
+                path = tmp_path / f"{theme}-{width}x{height}-{fmt or 'omitted'}.ass"
+                write_ass(
+                    path, [{"text": "Sing", "start": 0.1, "end": 0.5}], offset=0, duration=1,
+                    visuals=[], width=width, height=height, music_theme=theme, content_format=fmt,
+                )
+                style = next(line for line in path.read_text().splitlines() if line.startswith("Style: Caption,"))
+                sizes[fmt] = int(style.split(",")[2])
+            assert sizes[None] == rendered_base
+            assert sizes["long"] == rendered_base
+            assert sizes["short"] == expected_short
+
+
+def test_reference_white_serif_spacing_fits_landscape_short_canvas(tmp_path: Path) -> None:
+    from engine.media import _font_advance_metrics, write_music_ass
+
+    words = [
+        {"text": text, "start": 0.2 + index * 0.24, "end": 0.4 + index * 0.24}
+        for index, text in enumerate(("do", "you", "think", "that", "i’ve", "forgotten", "about"))
+    ]
+    path = tmp_path / "reference-serif-landscape.ass"
+    width, height = 1920, 1080
+    write_music_ass(path, words, offset=0, duration=2, width=width, height=height, subtitle_theme="reference_white_serif")
+    content = path.read_text(encoding="utf-8")
+    style = next(line for line in content.splitlines() if line.startswith("Style: Caption,"))
+    events = [line for line in content.splitlines() if line.startswith("Dialogue: 10,")]
+    second_line = events[1].split(",,", 1)[1]
+    hard_spaces = second_line.count(r"\h")
+    units_per_em, glyph_advances = _font_advance_metrics(str(Path(__file__).parents[1] / "fonts/bodoni_moda/BodoniModa-Variable.ttf"))
+    font_scale = int(style.split(",")[2]) * int(style.split(",")[11]) / 100 / units_per_em
+    natural_width = sum(glyph_advances.get(ord(char), units_per_em * 0.55) for char in "i’veforgotten") * font_scale
+    space_width = glyph_advances.get(ord(" "), units_per_em * 0.25) * font_scale
+
+    assert 1 <= hard_spaces < 64
+    assert natural_width + hard_spaces * space_width <= width * 0.82
+
+
+def test_short_reference_serif_keeps_a_word_separator_when_no_extra_spacing_fits(tmp_path: Path) -> None:
+    from engine.media import write_music_ass
+
+    words = [
+        {"text": text, "start": 0.2 + index * 0.24, "end": 0.4 + index * 0.24}
+        for index, text in enumerate(("do", "you", "think", "that", "i’ve", "forgotten", "about"))
+    ]
+    path = tmp_path / "reference-serif-narrow-short.ass"
+    write_music_ass(path, words, offset=0, duration=2, width=1080, height=1350, subtitle_theme="reference_white_serif")
+    events = [line for line in path.read_text(encoding="utf-8").splitlines() if line.startswith("Dialogue: 10,")]
+    second_line = events[1].split(",,", 1)[1]
+
+    assert second_line.count(r"\h") == 1
+    assert r"i’ve\h" in second_line and "forgotten" in second_line
 
 
 def test_reference_layout_keeps_long_words_apostrophes_accents_and_fallback_glyphs(tmp_path: Path) -> None:
@@ -211,9 +285,9 @@ def test_reference_layout_scales_font_metrics_and_overrides_with_canvas_size(tmp
 
     long_word = [{"text": "extraordinaryuncharacteristicallylongword", "start": 0.0, "end": 0.5}]
     for theme, expected_font in (
-        ("reference_white_sans", 90),
-        ("reference_yellow_sans", 81),
-        ("reference_white_serif", 100),
+        ("reference_white_sans", 103),
+        ("reference_yellow_sans", 93),
+        ("reference_white_serif", 115),
     ):
         path = tmp_path / f"scaled-{theme}.ass"
         write_music_ass(path, long_word, offset=0, duration=1, width=720, height=1280, subtitle_theme=theme)

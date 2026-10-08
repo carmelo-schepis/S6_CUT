@@ -70,12 +70,12 @@ def test_the_legacy_preset_projection_matches_the_recipe() -> None:
         assert _subtitle_preset(style) == preset
 
 
-def test_shorts_use_the_base_recipe_and_long_form_overrides_it() -> None:
-    # Shorts are the base treatment; long form is where the speech-edit look
-    # lives, so every mode must actually differ there rather than inheriting.
+def test_short_keeps_recipe_font_base_and_long_form_baseline() -> None:
+    legacy_base = {"funny": 86, "serious": 64, "educational": 68, "hype": 80}
     for style in known_styles():
-        assert recipe_for(style, "short") == recipe_for(style), f"{style} shorts drifted from the base"
-        assert recipe_for(style, "long") != recipe_for(style), f"{style} long form is not differentiated"
+        assert recipe_for(style, "short").caption.font == legacy_base[style]
+        assert recipe_for(style).caption.font == legacy_base[style]  # omitted format remains compatible
+        assert recipe_for(style, "long").caption.font == {"funny": 88, "serious": 68, "educational": 70, "hype": 84}[style]
 
 
 def test_long_form_grades_differ_while_the_explainer_stays_ungraded() -> None:
