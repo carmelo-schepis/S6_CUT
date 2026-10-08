@@ -79,6 +79,22 @@ def _displayed_dimensions(metadata: dict[str, Any]) -> tuple[int, int] | None:
     return values[0], values[1]
 
 
+def _displayed_aspect_ratio(metadata: dict[str, Any]) -> float | None:
+    dimensions = _displayed_dimensions(metadata)
+    if not dimensions:
+        return None
+    try:
+        sample_aspect_ratio = float(metadata.get("sample_aspect_ratio") or 1.0)
+        rotation = float(metadata.get("rotation") or 0)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(sample_aspect_ratio) or sample_aspect_ratio <= 0 or not math.isfinite(rotation):
+        return None
+    if rotation % 180:
+        sample_aspect_ratio = 1.0 / sample_aspect_ratio
+    return (dimensions[0] / dimensions[1]) * sample_aspect_ratio
+
+
 def _source_quality_warnings(metadata: dict[str, Any]) -> list[str]:
     dimensions = _displayed_dimensions(metadata)
     if not dimensions:
@@ -320,6 +336,21 @@ def _youtube_creator_name(value: object) -> str | None:
     return _metadata_text(value, 120)
 
 
+def centered_partial_fill_eligible(job: Job, private: dict[str, Any], metadata: dict[str, Any]) -> bool:
+    """Opt-in layout for authoritative YouTube landscape sources in Shorts."""
+    if (
+        job.mode != "clip" or job.style not in {"serious", "hype"}
+        or getattr(job, "source_profile", "speech") == "music" or private.get("source_profile") == "music"
+        or job_content_format(job, private) != "short"
+        or private.get("aspect_ratio") != "9:16"
+        or private.get("source_kind") != "youtube"
+        or not private.get("url")
+    ):
+        return False
+    aspect_ratio = _displayed_aspect_ratio(metadata)
+    return bool(aspect_ratio and abs(aspect_ratio / (16 / 9) - 1) <= 0.02)
+
+
 def youtube_creator_credit(job: Job, private: dict[str, Any]) -> str | None:
     """Return the bounded YouTube credit used by both preview and export."""
     if not private.get("url") or job_content_format(job, private) != "short":
@@ -387,6 +418,29 @@ def _music_render_kwargs(render, theme: str, top_text: str | None, treatment: st
     accepted = {parameter.name for parameter in parameters}
     values = {"music_theme": theme, "music_top_text": top_text, "music_treatment": treatment}
     return values if accepts_any else {name: value for name, value in values.items() if name in accepted}
+
+
+def _compatible_render_kwargs(render, values: dict[str, Any]) -> dict[str, Any]:
+    """Retain accepted keyword options for legacy render adapters and test doubles."""
+    try:
+        parameters = inspect.signature(render).parameters.values()
+    except (TypeError, ValueError):
+        return values
+    if any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters):
+        return values
+    accepted = {parameter.name for parameter in parameters if parameter.kind in {inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY}}
+    return {name: value for name, value in values.items() if name in accepted}
+
+
+def _centered_partial_fill_kwargs(render, enabled: bool) -> dict[str, bool]:
+    """Pass the additive layout flag only to renderers that support it."""
+    try:
+        parameters = inspect.signature(render).parameters.values()
+    except (TypeError, ValueError):
+        return {}
+    if any(parameter.name == "centered_partial_fill" or parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters):
+        return {"centered_partial_fill": enabled}
+    return {}
 
 
 def _format_render_kwargs(render, content_format: str) -> dict[str, str]:
@@ -1164,6 +1218,10 @@ class JobManager:
         self._save(job, private)
 
     def _source(self, job: Job, private: dict[str, Any]) -> Path:
+        if not private.get("source_kind"):
+            project = self.db.get_project(job.project_id)
+            if project:
+                private["source_kind"] = project.source_kind
         if private.get("source_path"):
             source = Path(private["source_path"])
             if source.is_file():
@@ -1278,6 +1336,7 @@ class JobManager:
             ) if job.source_profile == "music" else {}
             render(source, output, start=clip.start, end=clip.end, aspect=private["aspect_ratio"], settings=self.settings,
                    has_audio=bool(metadata["audio"]), words=words, style=job.style,
+                   **_centered_partial_fill_kwargs(render, centered_partial_fill_eligible(job, private, metadata)),
                    subtitles_enabled=bool(private.get("burn_subtitles", job.burn_subtitles)),
                    embed_subtitles=bool(private.get("embed_subtitles", job.embed_subtitles)),
                    **_subscribe_render_kwargs(render, private.get("subscribe_animation")),
@@ -1628,6 +1687,7 @@ class JobManager:
                     "start": clip.start, "end": clip.end, "aspect": private["aspect_ratio"],
                     "words": clip_words if subtitles_enabled or bool(private.get("embed_subtitles", job.embed_subtitles)) else [],
                     "visuals": [], "overlays": overlays, "settings": self.settings, "style": job.style,
+                    **_centered_partial_fill_kwargs(render_clip, centered_partial_fill_eligible(job, private, metadata)),
                     **({"embed_subtitles": True} if private.get("embed_subtitles", job.embed_subtitles) else {}),
                     **_subscribe_render_kwargs(render_clip, private.get("subscribe_animation")),
                     **_creator_render_kwargs(render_clip, youtube_creator_credit(job, private)),
@@ -1844,14 +1904,15 @@ class JobManager:
                         else:
                             warning = f"Clip {clip.index}: Local captioning unavailable; exported without captions. ({detail})"
                         job.warnings.append(warning)
-                render_kwargs: dict[str, Any] = {"start": clip.start, "end": clip.end, "aspect": private["aspect_ratio"], "has_audio": has_audio, "settings": self.settings, **_subscribe_render_kwargs(render, private.get("subscribe_animation"))}
+                render_kwargs: dict[str, Any] = {"start": clip.start, "end": clip.end, "aspect": private["aspect_ratio"], "has_audio": has_audio, "settings": self.settings, **_centered_partial_fill_kwargs(render, centered_partial_fill_eligible(job, private, metadata)), **_subscribe_render_kwargs(render, private.get("subscribe_animation"))}
                 if embed_subtitles:
                     render_kwargs["embed_subtitles"] = True
-                if words:
-                    render_kwargs.update({"words": words, "style": job.style, "subtitles_enabled": subtitles_enabled})
+                # Style is a rendering input even when there are no caption words;
+                # otherwise Fast silently falls back to the renderer's default look.
+                render_kwargs.update({"words": words, "style": job.style, "subtitles_enabled": subtitles_enabled})
                 render_kwargs.update(_creator_render_kwargs(render, youtube_creator_credit(job, private)))
                 render_kwargs.update(_format_render_kwargs(render, job_content_format(job, private)))
-                render(source, output, **render_kwargs)
+                render(source, output, **_compatible_render_kwargs(render, render_kwargs))
                 job, clip, _ = self._publish_output(job, clip, output, private)
             except Exception as exc:
                 clip = clip.model_copy(update={"state": "failed", "error": redact(str(exc)), "selected": False})

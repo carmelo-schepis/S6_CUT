@@ -14,6 +14,7 @@ from engine.media import (
     BACKGROUND_BLUR_FILTER,
     BACKGROUND_BLUR_PERCENT,
     BACKGROUND_BLUR_SIGMA,
+    PARTIAL_FILL_VERTICAL_OCCUPANCY,
     MediaError,
     _fast_crop_scale_filter,
     _source_layout_filter,
@@ -88,6 +89,17 @@ def test_rational_to_float() -> None:
 # ---------------------------------------------------------------------------
 #  _rotation_from_stream
 # ---------------------------------------------------------------------------
+
+
+def test_probe_exposes_non_square_sample_aspect_ratio(monkeypatch: pytest.MonkeyPatch, settings: Settings, tmp_path: Path) -> None:
+    import json
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(media_module, "run", lambda *_args, **_kwargs: SimpleNamespace(stdout=json.dumps({
+        "streams": [{"codec_type": "video", "width": 720, "height": 1080, "sample_aspect_ratio": "8:3", "avg_frame_rate": "30/1"}],
+        "format": {"duration": "2"},
+    })))
+    assert probe(tmp_path / "anamorphic.mp4", settings)["sample_aspect_ratio"] == pytest.approx(8 / 3)
 
 
 def test_rotation_from_stream() -> None:
@@ -189,6 +201,20 @@ def test_source_layout_uses_identical_undarkened_blurred_fill_for_mismatched_asp
     assert int(overscan.group(2)) >= target[1] + 2
 
 
+def test_centered_partial_fill_is_static_centered_and_three_quarters_height() -> None:
+    vf = _source_layout_filter(1920, 1080, 1080, 1920, centered_partial_fill=True)
+    assert PARTIAL_FILL_VERTICAL_OCCUPANCY == 0.75
+    assert "scale=-2:1440" in vf
+    assert "crop=1080:1440:(iw-1080)/2:0" in vf
+    assert "overlay=(W-w)/2:(H-h)/2" in vf
+    assert BACKGROUND_BLUR_FILTER in vf
+
+
+def test_centered_partial_fill_falls_back_outside_target_geometry() -> None:
+    assert "scale=-2:1440" not in _source_layout_filter(1920, 1080, 1080, 1080, centered_partial_fill=True)
+    assert "scale=-2:1440" not in _source_layout_filter(1920, 1000, 1080, 1920, centered_partial_fill=True)
+
+
 def test_source_layout_uses_simple_path_for_native_and_near_native_aspects() -> None:
     for source, target in [
         ((1080, 1920), (1080, 1920)),
@@ -206,14 +232,14 @@ def test_source_layout_uses_simple_path_for_native_and_near_native_aspects() -> 
 def test_render_paths_use_shared_source_layout_filter(monkeypatch: pytest.MonkeyPatch, settings: Settings, tmp_path: Path) -> None:
     source = tmp_path / "source.mp4"
     source.write_bytes(b"source")
-    calls: list[tuple[int, int, int, int]] = []
+    calls: list[tuple[int, int, int, int, bool]] = []
     metadata = {"width": 640, "height": 360, "rotation": 0, "audio": False, "duration": 2.0}
 
     def fake_probe(path: Path, __: Settings):
         return metadata if path == source else {**metadata, "width": 1080, "height": 1920, "duration": 1.0}
 
-    def fake_layout(src_width: int, src_height: int, target_width: int, target_height: int):
-        calls.append((src_width, src_height, target_width, target_height))
+    def fake_layout(src_width: int, src_height: int, target_width: int, target_height: int, *, centered_partial_fill: bool = False, sample_aspect_ratio: float = 1.0):
+        calls.append((src_width, src_height, target_width, target_height, centered_partial_fill))
         return "scale=1080:1920,setsar=1[base]"
 
     def fake_run(command: list[str], **_: object):
@@ -222,9 +248,9 @@ def test_render_paths_use_shared_source_layout_filter(monkeypatch: pytest.Monkey
     monkeypatch.setattr(media_module, "probe", fake_probe)
     monkeypatch.setattr(media_module, "run", fake_run)
     monkeypatch.setattr(media_module, "_source_layout_filter", fake_layout)
-    render_fast_clip(source, tmp_path / "fast.mp4", start=0, end=1, aspect="9:16", settings=settings, has_audio=False)
-    render_clip(source, tmp_path / "smart.mp4", start=0, end=1, aspect="9:16", words=[], visuals=[], overlays=[], settings=settings, has_audio=False)
-    assert calls == [(640, 360, 1080, 1920), (640, 360, 1080, 1920)]
+    render_fast_clip(source, tmp_path / "fast.mp4", start=0, end=1, aspect="9:16", settings=settings, has_audio=False, centered_partial_fill=True)
+    render_clip(source, tmp_path / "smart.mp4", start=0, end=1, aspect="9:16", words=[], visuals=[], overlays=[], settings=settings, has_audio=False, centered_partial_fill=True)
+    assert calls == [(640, 360, 1080, 1920, True), (640, 360, 1080, 1920, True)]
 
 
 @pytest.mark.parametrize("dimensions", [(0, 360), (640, 0), (-1, 360), (640, -1), ("bad", 360), (640, float("inf"))])

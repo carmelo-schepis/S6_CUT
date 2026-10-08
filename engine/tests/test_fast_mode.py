@@ -108,6 +108,39 @@ def _fake_render(source: Path, output: Path, *, start: float, end: float, aspect
     output.write_bytes(b"rendered-fast-clip")
 
 
+def test_fast_renderer_receives_style_without_caption_words(monkeypatch: pytest.MonkeyPatch) -> None:
+    tmp_path = _tmpdir()
+    test_db, test_manager = _cluster(tmp_path)
+    monkeypatch.setattr("engine.jobs.probe", lambda *_args, **_kwargs: {"duration": 100.0, "width": 1920, "height": 1080, "video_codec": "h264", "audio": False, "audio_codec": None, "rotation": 0, "sample_aspect_ratio": 1.0})
+    monkeypatch.setattr(media_module, "plan_fast_windows", _fake_plan)
+    rendered: list[dict[str, Any]] = []
+
+    def capture_render(source: Path, output: Path, *, start: float, end: float, aspect: str, has_audio: bool, settings: Settings, style: str, words: list[dict[str, Any]], subtitles_enabled: bool, centered_partial_fill: bool) -> None:
+        rendered.append({"style": style, "words": words, "subtitles_enabled": subtitles_enabled, "centered_partial_fill": centered_partial_fill})
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"rendered-fast-clip")
+
+    monkeypatch.setattr(media_module, "render_fast_clip", capture_render)
+    source = tmp_path / "hype.mp4"
+    source.write_bytes(b"fixture")
+    _clip_job(test_db, "fast-style-no-words", "fast-style-project", source=source, count=2)
+    job = test_db.get_job("fast-style-no-words")
+    assert job is not None
+    job.style = "hype"
+    project = test_db.get_project(job.project_id)
+    assert project is not None
+    project.source_kind = "youtube"
+    test_db.save_project(project)
+    private = test_db.get_job_private(job.id)
+    private.update({"url": "https://www.youtube.com/watch?v=fixture", "source_kind": "youtube"})
+    test_db.save_job(job, private)
+
+    test_manager._process(job.id)
+    assert len(rendered) == 2
+    assert all(call == {"style": "hype", "words": [], "subtitles_enabled": False, "centered_partial_fill": True} for call in rendered)
+    assert test_db.get_job(job.id).state == "complete"
+
+
 def test_fast_pipeline_skips_smart_components(monkeypatch: pytest.MonkeyPatch) -> None:
     tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
@@ -483,3 +516,12 @@ def test_api_auto_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
         explicit = client.post("/api/v1/jobs/clip", data=data, files=files)
         assert explicit.status_code == 202, explicit.text
         assert explicit.json()["job"]["processingMode"] == "fast"
+
+        youtube = client.post("/api/v1/jobs/clip", data={
+            "url": "https://www.youtube.com/watch?v=abcdefghijk",
+            "style": "serious", "count": 1, "min_duration": 8, "max_duration": 15,
+            "aspect_ratio": "9:16", "processing_mode": "fast",
+        })
+        assert youtube.status_code == 202, youtube.text
+        youtube_job_id = youtube.json()["job"]["id"]
+        assert db.get_job_private(youtube_job_id)["source_kind"] == "youtube"

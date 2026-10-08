@@ -14,7 +14,7 @@ export default defineConfig({
   use: {
     baseURL: process.env.S6_ACCEPTANCE_URL || process.env.S6_MUSIC_ACCEPTANCE_URL || "http://127.0.0.1:8080",
     headless: true,
-    trace: "retain-on-failure",
+    trace: process.env.S6_ACCEPTANCE_TRACE === "1" ? "on" : "retain-on-failure",
     video: "retain-on-failure",
     screenshot: "only-on-failure",
   },
