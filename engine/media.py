@@ -76,6 +76,7 @@ BACKGROUND_BLUR_SIGMA = 30
 BACKGROUND_BLUR_STEPS = 2
 BACKGROUND_BLUR_FILTER = f"gblur=sigma={BACKGROUND_BLUR_SIGMA}:steps={BACKGROUND_BLUR_STEPS}"
 BACKGROUND_OVERSCAN_FACTOR = 1.12
+PARTIAL_FILL_VERTICAL_OCCUPANCY = 0.75
 CREDIT_BOTTOM_INSET_RATIO = 0.0125
 CREDIT_MIN_MARGIN = 12
 
@@ -375,6 +376,7 @@ def probe(path: Path, settings: Settings, *, max_seconds: int | None = None) -> 
         "audio_channels": int(audio["channels"]) if audio and str(audio.get("channels", "")).isdigit() else None,
         "frame_rate": round(frame_rate, 3),
         "rotation": _rotation_from_stream(video),
+        "sample_aspect_ratio": _rational_to_float(str(video.get("sample_aspect_ratio") or "").replace(":", "/")) or 1.0,
     }
 
 
@@ -1507,8 +1509,8 @@ def _overlay_inputs(command: list[str], overlays: list[tuple[Path, float, float]
             command.extend(["-stream_loop", "-1", "-i", str(path)])
 
 
-def _source_layout_filter(src_width: int, src_height: int, target_width: int, target_height: int) -> str:
-    """Keep the complete source visible for materially different aspect ratios."""
+def _source_layout_filter(src_width: int, src_height: int, target_width: int, target_height: int, *, centered_partial_fill: bool = False, sample_aspect_ratio: float = 1.0) -> str:
+    """Keep the complete source visible, optionally using a centered partial fill."""
     dimensions: list[int] = []
     for name, value in (("source width", src_width), ("source height", src_height), ("target width", target_width), ("target height", target_height)):
         try:
@@ -1523,6 +1525,27 @@ def _source_layout_filter(src_width: int, src_height: int, target_width: int, ta
         raise MediaError("Target video dimensions must be even for yuv420p")
     source_aspect = src_width / src_height
     target_aspect = target_width / target_height
+    if centered_partial_fill and target_width == 1080 and target_height == 1920:
+        try:
+            sar = float(sample_aspect_ratio)
+        except (TypeError, ValueError) as exc:
+            raise MediaError("Invalid source sample aspect ratio") from exc
+        if not math.isfinite(sar) or sar <= 0:
+            raise MediaError("Invalid source sample aspect ratio")
+        if abs((source_aspect * sar) / (16 / 9) - 1) <= 0.02:
+            foreground_height = round(target_height * PARTIAL_FILL_VERTICAL_OCCUPANCY / 2) * 2
+            background_width = max(target_width + 2, math.ceil(target_width * BACKGROUND_OVERSCAN_FACTOR / 2) * 2)
+            background_height = max(target_height + 2, math.ceil(target_height * BACKGROUND_OVERSCAN_FACTOR / 2) * 2)
+            normalize_sar = "setsar=1," if abs(sar - 1.0) < 1e-9 else "scale=trunc(iw*sar/2)*2:ih:flags=lanczos,setsar=1,"
+            return (
+                f"{normalize_sar}split=2[foreground][background];"
+                f"[background]scale={background_width}:{background_height}:force_original_aspect_ratio=increase:flags=lanczos,"
+                f"crop={background_width}:{background_height},{BACKGROUND_BLUR_FILTER},"
+                f"crop={target_width}:{target_height}:(iw-{target_width})/2:(ih-{target_height})/2,setsar=1[bg];"
+                f"[foreground]scale=-2:{foreground_height}:flags=lanczos,"
+                f"crop={target_width}:{foreground_height}:(iw-{target_width})/2:0,setsar=1[fg];"
+                "[bg][fg]overlay=(W-w)/2:(H-h)/2:format=auto,setsar=1[base]"
+            )
     if abs(source_aspect / target_aspect - 1) <= 0.12:
         return f"scale={target_width}:{target_height}:force_original_aspect_ratio=increase:flags=lanczos,crop={target_width}:{target_height},setsar=1[base]"
     # Overscale the undarkened background before blurring and cropping so the
@@ -1663,9 +1686,11 @@ def _filters(
     ass_name: str, source_dimensions: tuple[int, int] | None = None,
     subscribe_animations: list[tuple[int, float, float, float, float]] | None = None,
     music_treatment: str | None = None,
+    centered_partial_fill: bool = False,
+    sample_aspect_ratio: float = 1.0,
 ) -> tuple[str, str]:
     if source_dimensions:
-        layout = _music_source_layout_filter(width, height, source_dimensions, music_treatment == "grayscale") if music_treatment else _source_layout_filter(*source_dimensions, width, height)
+        layout = _music_source_layout_filter(width, height, source_dimensions, music_treatment == "grayscale") if music_treatment else _source_layout_filter(*source_dimensions, width, height, centered_partial_fill=centered_partial_fill, sample_aspect_ratio=sample_aspect_ratio)
         filters = [f"[0:v]{layout}"]
     else:
         filters = [f"[0:v]scale={width}:{height}:flags=lanczos,setsar=1[base]"]
@@ -1684,7 +1709,7 @@ def _filters(
 
 # DO-NOT-CHANGE: atomic render (.partial.mp4 + os.replace) with structural output
 # validation (dimensions/audio) before the output is publishable
-def render_clip(source: Path, output: Path, *, start: float, end: float, aspect: str, words: list[dict[str, Any]], visuals: list[tuple[str, float, float]], overlays: list[tuple[Path, float, float]], settings: Settings, style: str = "educational", has_audio: bool = True, embed_subtitles: bool = False, subtitle_language: str = "und", creator_credit: str | None = None, content_format: str | None = None, subscribe_animation: dict[str, Any] | None = None, music_theme: str | None = None, music_top_text: str | None = None, music_treatment: str | None = None) -> None:
+def render_clip(source: Path, output: Path, *, start: float, end: float, aspect: str, words: list[dict[str, Any]], visuals: list[tuple[str, float, float]], overlays: list[tuple[Path, float, float]], settings: Settings, style: str = "educational", has_audio: bool = True, embed_subtitles: bool = False, subtitle_language: str = "und", creator_credit: str | None = None, content_format: str | None = None, centered_partial_fill: bool = False, subscribe_animation: dict[str, Any] | None = None, music_theme: str | None = None, music_top_text: str | None = None, music_treatment: str | None = None) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     ass = output.parent / (f"{output.stem}.burn.ass" if creator_credit else f"{output.stem}.ass")
     duration = end - start
@@ -1708,7 +1733,10 @@ def render_clip(source: Path, output: Path, *, start: float, end: float, aspect:
     if embed_subtitles:
         command.extend(["-i", str(output.with_suffix(".srt"))])
     source_dimensions = (src_width, src_height)
-    filters, mapped = _filters(width, height, overlays, 1, ass.name, source_dimensions, subscribe_animations, music_treatment)
+    sample_aspect_ratio = float(source_meta.get("sample_aspect_ratio") or 1.0)
+    if source_meta["rotation"] % 180:
+        sample_aspect_ratio = 1.0 / sample_aspect_ratio
+    filters, mapped = _filters(width, height, overlays, 1, ass.name, source_dimensions, subscribe_animations, music_treatment, centered_partial_fill, sample_aspect_ratio)
     command.extend(["-t", f"{duration:.3f}", "-filter_complex", filters, "-map", f"[{mapped}]"])
     if has_audio:
         command.extend(["-map", "0:a:0", "-c:a", DELIVERY_AUDIO_CODEC, "-b:a", DELIVERY_AUDIO_BITRATE, "-ar", DELIVERY_AUDIO_RATE])
@@ -1969,6 +1997,7 @@ def render_fast_clip(
     subtitle_language: str = "und",
     creator_credit: str | None = None,
     content_format: str | None = None,
+    centered_partial_fill: bool = False,
     subscribe_animation: dict[str, Any] | None = None,
     music_theme: str | None = None,
     music_top_text: str | None = None,
@@ -2023,7 +2052,7 @@ def render_fast_clip(
             visuals=[], overlays=[], settings=settings, style=style, has_audio=has_audio,
             embed_subtitles=embed_subtitles, subtitle_language=subtitle_language,
             creator_credit=creator_credit, content_format=content_format,
-            subscribe_animation=subscribe_animation, music_theme=music_theme,
+            centered_partial_fill=centered_partial_fill, subscribe_animation=subscribe_animation, music_theme=music_theme,
             music_top_text=music_top_text, music_treatment=music_treatment,
         )
         return
@@ -2036,7 +2065,10 @@ def render_fast_clip(
     src_width, src_height = meta["width"], meta["height"]
     if meta["rotation"] % 180:
         src_width, src_height = src_height, src_width
-    vf = _source_layout_filter(src_width, src_height, width, height).removesuffix("[base]")
+    sample_aspect_ratio = float(meta.get("sample_aspect_ratio") or 1.0)
+    if meta["rotation"] % 180:
+        sample_aspect_ratio = 1.0 / sample_aspect_ratio
+    vf = _source_layout_filter(src_width, src_height, width, height, centered_partial_fill=centered_partial_fill, sample_aspect_ratio=sample_aspect_ratio).removesuffix("[base]")
     look_treatment = recipe_for(style, content_format).look
     look_before, look_after = _look_stages(look_treatment)
     frame_rate = float(meta.get("frame_rate") or 0) or 30.0
