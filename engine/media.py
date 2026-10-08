@@ -50,6 +50,7 @@ def delivery_preset(content_format: str | None) -> str:
     return DELIVERY_PRESET_BY_FORMAT.get(content_format or "", DELIVERY_PRESET)
 
 DELIVERY_CRF = "18"
+SHORT_FORM_SUBTITLE_SIZE_MULTIPLIER = 1.15
 DELIVERY_AUDIO_CODEC = "aac"
 DELIVERY_AUDIO_BITRATE = "192k"
 DELIVERY_AUDIO_RATE = "48000"
@@ -1096,7 +1097,7 @@ def _font_advance_metrics(font_path: str) -> tuple[int, dict[int, int]]:
     return units_per_em, {codepoint: advances[glyph] for codepoint, glyph in glyph_map.items() if glyph < len(advances)}
 
 
-def _reference_music_events(group: list[dict[str, Any]], theme: str, *, width: int, height: int, duration: float) -> list[str]:
+def _reference_music_events(group: list[dict[str, Any]], theme: str, *, width: int, height: int, duration: float, content_format: str | None = None) -> list[str]:
     """Render independently positioned phrase rows with shared karaoke timing."""
     words = [str(word["text"]) for word in group]
     fonts = {
@@ -1107,6 +1108,8 @@ def _reference_music_events(group: list[dict[str, Any]], theme: str, *, width: i
     relative_font, design_size, scale_x = fonts[theme]
     type_scale = min(width, height) / _CAPTION_REFERENCE_SHORT_EDGE
     rendered_design_size = max(28, round(design_size * type_scale))
+    if content_format == "short":
+        rendered_design_size = round(rendered_design_size * SHORT_FORM_SUBTITLE_SIZE_MULTIPLIER)
     font_scale = rendered_design_size / design_size
     units_per_em, glyph_advances = _font_advance_metrics(str(Path(__file__).parent / "fonts" / relative_font))
     line_limit = width * 0.82
@@ -1149,7 +1152,18 @@ def _reference_music_events(group: list[dict[str, Any]], theme: str, *, width: i
         else:
             spacing_scale = 1.8
             minimum_spacing = 1
-        return max(minimum_spacing, 1, min(64, round((line_limit - natural_width) / (space_px * (len(line) - 1)) * spacing_scale)))
+        available_width = line_limit - natural_width
+        requested = max(
+            minimum_spacing, 1,
+            min(64, round(available_width / (space_px * (len(line) - 1)) * spacing_scale)),
+        )
+        if content_format == "short":
+            max_that_fits = max(
+                1,
+                1 + math.floor(available_width / (space_px * (len(line) - 1))),
+            )
+            return min(requested, max_that_fits)
+        return requested
 
     start = max(0.0, float(group[0]["start"]))
     end = min(duration, max(start + 0.05, float(group[-1]["end"])))
@@ -1384,6 +1398,8 @@ def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duratio
     type_scale = min(width, height) / _CAPTION_REFERENCE_SHORT_EDGE
     vertical_scale = height / _CAPTION_REFERENCE_HEIGHT
     fontsize = max(28, round(preset["font"] * type_scale))
+    if content_format == "short":
+        fontsize = round(fontsize * SHORT_FORM_SUBTITLE_SIZE_MULTIPLIER)
     if music_theme in reference_presets:
         outline = round(preset["outline"] * type_scale)
         shadow = round(preset["shadow"] * type_scale)
@@ -1434,7 +1450,7 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
     local = selected_words if music_theme else _caption_words_with_emojis(selected_words, style)
     if music_theme in reference_presets:
         for group in _reference_music_groups(local, max_words=3 if music_theme == "reference_white_sans" else 7):
-            events.extend(_reference_music_events(group, music_theme, width=width, height=height, duration=duration))
+            events.extend(_reference_music_events(group, music_theme, width=width, height=height, duration=duration, content_format=content_format))
     for index, word in enumerate(local):
         if music_theme in reference_presets:
             continue
@@ -1479,7 +1495,7 @@ def write_music_ass(
         raise ValueError("Unknown music subtitle theme")
     write_ass(
         path, words, offset=offset, duration=duration, visuals=[], width=width, height=height,
-        style="educational", music_theme=subtitle_theme, music_top_text=top_text,
+        style="educational", content_format="short", music_theme=subtitle_theme, music_top_text=top_text,
     )
 
 

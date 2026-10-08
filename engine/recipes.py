@@ -157,9 +157,9 @@ _BASE_RECIPES: dict[str, EditRecipe] = {
 
 DEFAULT_STYLE = "educational"
 
-# Per-format deltas merged over the base recipe. Empty on purpose: long form
-# currently renders exactly as shorts do, and this is where that stops being
-# true once the caption redesign lands.
+# Per-format deltas merged over the base recipe. Long form is explicitly
+# authored; short sizing is applied by the renderer after canvas scaling so
+# legacy callers that omit content_format keep their original treatment.
 _FORMAT_OVERRIDES: dict[str, dict[str, Mapping[str, Any]]] = {
     "short": {},
     # Long form is watched further from the screen and reads as a speech edit:

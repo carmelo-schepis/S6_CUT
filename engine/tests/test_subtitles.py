@@ -137,6 +137,42 @@ def test_wrap_never_splits_a_single_long_word(tmp_path: Path) -> None:
     assert joined == ["Supercalifragilisticexpialidocious", "next"]
 
 
+def test_short_speech_font_is_scaled_once_after_canvas_resolution(tmp_path: Path) -> None:
+    expected = {
+        "funny": (86, 99),
+        "serious": (64, 74),
+        "educational": (68, 78),
+        "hype": (80, 92),
+    }
+    canvases = ((1080, 1920), (1080, 1350), (1080, 1080), (1920, 1080))
+    for width, height in canvases:
+        for style, (base_size, short_size) in expected.items():
+            paths = {kind: tmp_path / f"{style}-{width}x{height}-{kind}.ass" for kind in ("short", "long", "legacy")}
+            write_ass(paths["short"], _words("Keep", "every", "word"), offset=0, duration=4, visuals=[],
+                      width=width, height=height, style=style, content_format="short")
+            write_ass(paths["long"], _words("Keep", "every", "word"), offset=0, duration=4, visuals=[],
+                      width=width, height=height, style=style, content_format="long")
+            write_ass(paths["legacy"], _words("Keep", "every", "word"), offset=0, duration=4, visuals=[],
+                      width=width, height=height, style=style)
+            sizes = {kind: int(_parse_styles(path.read_text())["Caption"]["Fontsize"]) for kind, path in paths.items()}
+            assert sizes["short"] == short_size
+            assert sizes["long"] == {"funny": 88, "serious": 68, "educational": 70, "hype": 84}[style]
+            assert sizes["legacy"] == base_size
+            assert all(word in paths["short"].read_text() for word in ("Keep", "every", "word"))
+
+
+def test_short_speech_wrapping_keeps_words_and_never_exceeds_two_lines(tmp_path: Path) -> None:
+    words = _words("OpenRouter", "preserves", "extraordinarylongwords", "without", "splitting", "any", "of", "them")
+    path = tmp_path / "short-wrapped.ass"
+    write_ass(path, words, offset=0, duration=10, visuals=[], width=1080, height=1920,
+              style="funny", content_format="short")
+    events = _caption_events(path.read_text())
+    assert events
+    assert all(event.split(",,")[-1].count(r"\N") <= 1 for event in events)
+    rendered = " ".join(event.split(",,")[-1] for event in events)
+    assert all(word["text"] in rendered for word in words)
+
+
 def test_nine_by_sixteen_uses_vertical_playres(tmp_path: Path) -> None:
     ass = _write(tmp_path, _words("Hello", "world"), width=1080, height=1920)
     assert "PlayResX: 1080" in ass
@@ -258,6 +294,7 @@ def test_creator_credit_wraps_truncates_and_uses_subtle_contrast(tmp_path: Path)
     write_ass(path, [], offset=0, duration=4, visuals=[], width=1080, height=1920, creator_credit="Source: Creator")
     style = _parse_styles(path.read_text(encoding="utf-8"))["Credit"]
     assert style["PrimaryColour"].startswith("&H22")  # modest transparency
+    assert style["Fontsize"] == "26"  # short caption scaling never changes creator credits
     assert style["BorderStyle"] == "3"  # translucent contrast panel
     assert int(style["MarginR"]) >= 80
     assert int(style["MarginV"]) == _credit_margin(1920)
