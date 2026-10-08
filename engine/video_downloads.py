@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import os
 import re
 import shutil
@@ -59,6 +60,10 @@ def prepare_video_mp4(source: Path, destination: Path, settings: Settings) -> di
     that cannot be muxed into MP4. The source is never modified.
     """
     original = probe(source, settings, max_seconds=settings.max_long_source_seconds)
+    if not math.isfinite(original["duration"]) or original["duration"] <= 0:
+        raise MediaError("FFprobe did not report a finite, positive source duration")
+    if original["width"] <= 0 or original["height"] <= 0:
+        raise MediaError("FFprobe did not report valid source dimensions")
     partial = destination.with_name(destination.stem + ".partial.mp4")
     partial.unlink(missing_ok=True)
     attempts = [
@@ -84,8 +89,10 @@ def prepare_video_mp4(source: Path, destination: Path, settings: Settings) -> di
                     audio = next((item for item in streams if item.get("codec_type") == "audio"), None)
                     duration = float(checked.get("format", {}).get("duration") or (video or {}).get("duration") or 0)
                     format_names = set(container.split(","))
-                    if "mp4" not in format_names or not video or duration <= 0:
+                    if "mp4" not in format_names or not video:
                         raise MediaError("FFprobe did not find a valid MP4 video stream")
+                    if not math.isfinite(duration) or duration <= 0:
+                        raise MediaError("FFprobe did not report a finite, positive MP4 duration")
                     if int(video.get("width") or 0) != original["width"] or int(video.get("height") or 0) != original["height"]:
                         raise MediaError("MP4 preparation changed the source video dimensions")
                     if abs(duration - original["duration"]) > max(1.0, original["duration"] * 0.005):
@@ -99,7 +106,7 @@ def prepare_video_mp4(source: Path, destination: Path, settings: Settings) -> di
                     last_error = str(exc)
                     # Structural loss (duration/dimensions/audio) is not repaired
                     # by another encoding attempt; only container/codec issues are.
-                    if any(text in last_error for text in ("dimensions", "complete source duration")):
+                    if any(text in last_error for text in ("dimensions", "complete source duration", "finite")):
                         raise
             else:
                 last_error = "FFmpeg did not produce a non-empty MP4 file"
@@ -178,7 +185,7 @@ class VideoDownloadManager:
                 return False
             _, container = _probe_container(path, self.settings)
             metadata = probe(path, self.settings, max_seconds=self.settings.max_long_source_seconds)
-            return "mp4" in container.split(",") and metadata["width"] > 0 and metadata["height"] > 0
+            return "mp4" in container.split(",") and math.isfinite(metadata["duration"]) and metadata["duration"] > 0 and metadata["width"] > 0 and metadata["height"] > 0
         except (MediaError, OSError, ValueError):
             return False
 

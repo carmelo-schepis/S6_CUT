@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from engine.config import settings as default_settings
-from engine.media import probe
+from engine.media import MediaError, probe
 from engine.security import MediaSigner
 from engine.models import now_iso
 from engine.video_downloads import VideoDownloadManager, VideoDownloadTask, prepare_video_mp4
@@ -222,3 +222,47 @@ def test_failed_mp4_preparation_never_publishes_destination(tmp_path: Path):
         prepare_video_mp4(source, destination, settings)
     assert not destination.exists()
     assert not destination.with_name("published.partial.mp4").exists()
+
+
+def test_prepare_video_mp4_rejects_non_finite_source_duration(tmp_path: Path, monkeypatch):
+    settings = _media_settings(tmp_path)
+    source = tmp_path / "source.mkv"
+    source.write_bytes(b"source")
+    destination = tmp_path / "published.mp4"
+    monkeypatch.setattr("engine.video_downloads.probe", lambda *_args, **_kwargs: {"duration": float("nan"), "width": 320, "height": 180})
+
+    with pytest.raises(MediaError, match="finite, positive source duration"):
+        prepare_video_mp4(source, destination, settings)
+    assert not destination.exists()
+
+
+def test_prepare_video_mp4_rejects_non_finite_output_duration(tmp_path: Path, monkeypatch):
+    settings = _media_settings(tmp_path)
+    source = _generate_media(tmp_path / "source.mkv", settings, with_audio=True)
+    destination = tmp_path / "published.mp4"
+
+    def fake_ffmpeg(command, *, timeout):
+        Path(command[-1]).write_bytes(b"partial output")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("engine.video_downloads.run", fake_ffmpeg)
+    monkeypatch.setattr(
+        "engine.video_downloads._probe_container",
+        lambda *_args: ({"format": {"duration": "nan"}, "streams": [{"codec_type": "video", "width": 320, "height": 180}, {"codec_type": "audio"}]}, "mov,mp4,m4a,3gp,3g2,mj2"),
+    )
+
+    with pytest.raises(MediaError, match="finite, positive MP4 duration"):
+        prepare_video_mp4(source, destination, settings)
+    assert not destination.exists()
+    assert not destination.with_name("published.partial.mp4").exists()
+
+
+def test_startup_validation_rejects_non_finite_final_duration(tmp_path: Path, monkeypatch):
+    settings = _media_settings(tmp_path)
+    manager = VideoDownloadManager(settings, MediaSigner(tmp_path / "signing.key", 30))
+    final = tmp_path / "final.mp4"
+    final.write_bytes(b"verified path fixture")
+    monkeypatch.setattr("engine.video_downloads._probe_container", lambda *_args: ({"format": {}}, "mov,mp4,m4a,3gp,3g2,mj2"))
+    monkeypatch.setattr("engine.video_downloads.probe", lambda *_args, **_kwargs: {"duration": float("inf"), "width": 320, "height": 180})
+
+    assert manager._is_valid_final(final) is False
