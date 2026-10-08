@@ -82,7 +82,7 @@ def test_video_download_rejects_a_controlled_downloader_path_outside_job(
     monkeypatch.setattr(media, "validate_youtube_url", lambda value: value)
     monkeypatch.setattr(media, "_run_ytdlp_download", lambda *_args, **_kwargs: [escaped])
 
-    with pytest.raises(media.MediaError, match="outside its job directory"):
+    with pytest.raises(media.MediaError, match="escaped its job directory"):
         download_youtube("https://www.youtube.com/watch?v=fixture", job_dir, settings)
 
 

@@ -47,6 +47,15 @@ export const DEFAULT_SUBSCRIBE_ANIMATION: SubscribeAnimationConfig = {
   shortFormLeadSeconds: 5,
 };
 
+export const videoDownloadTaskSchema = z.object({
+  id: z.string(), url: z.string(), state: z.enum(["queued", "active", "complete", "failed"]), phase: z.string(),
+  downloadedBytes: z.number().nonnegative(), totalBytes: z.number().nonnegative().nullable().optional(),
+  percent: z.number().min(0).max(100).nullable().optional(), message: z.string().nullable().optional(),
+  filename: z.string().nullable().optional(), downloadUrl: z.string().nullable().optional(), error: z.string().nullable().optional(),
+  createdAt: z.string(), updatedAt: z.string(),
+});
+export type VideoDownloadTask = z.infer<typeof videoDownloadTaskSchema>;
+
 export const downloadProgressSchema = z.object({
   downloadedBytes: z.number().nonnegative(),
   totalBytes: z.number().nonnegative().nullable().optional(),

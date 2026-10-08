@@ -30,6 +30,8 @@ import {
   type OpenRouterModel,
   type Style,
   type SubscribeAnimationConfig,
+  videoDownloadTaskSchema,
+  type VideoDownloadTask,
 } from "./types";
 
 const API = "/api/v1";
@@ -140,6 +142,16 @@ async function request<T>(path: string, init?: RequestInitWithTimeout): Promise<
   }
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
+}
+
+export async function createVideoOnlyDownload(url: string): Promise<VideoDownloadTask> {
+  return videoDownloadTaskSchema.parse(await request("/video-downloads", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }),
+  }));
+}
+
+export async function getVideoOnlyDownload(id: string): Promise<VideoDownloadTask> {
+  return videoDownloadTaskSchema.parse(await request(`/video-downloads/${encodeURIComponent(id)}`));
 }
 
 export async function getHealth(): Promise<Health> {

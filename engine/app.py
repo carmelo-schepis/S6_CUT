@@ -8,6 +8,7 @@ import json
 import logging
 import math
 import os
+import re
 import shutil
 import sqlite3
 import time
@@ -37,6 +38,7 @@ from .models import (
 from .providers import ProfileService, ProviderError
 from .security import MediaSigner, SecretVault, confined, safe_filename, validate_youtube_url
 from .thumbnails import get_thumbnail, prune_thumbnails
+from .video_downloads import VideoDownloadInput, VideoDownloadManager, VideoDownloadTask
 
 
 # DO-NOT-CHANGE: see DO-NOT-CHANGE/AGENTS.md
@@ -71,6 +73,7 @@ signer = MediaSigner(settings.data_path / "secrets" / "media-signing.key", setti
 rules = LibraryRules(db, settings.data_path / "library")
 profiles = ProfileService(db, vault)
 manager = JobManager(db, rules, profiles, settings)
+video_downloads = VideoDownloadManager(settings, signer)
 creation_times: defaultdict[str, deque[float]] = defaultdict(deque)
 
 
@@ -98,9 +101,11 @@ async def lifespan(_: FastAPI):
         logger.info("Caption fonts resolved: %s", ", ".join(sorted({str(preset["fontname"]) for preset in _SUBTITLE_PRESETS.values()})))
     _prune_orphaned_thumbnails()
     await manager.start()
+    await video_downloads.start()
     try:
         yield
     finally:
+        await video_downloads.stop()
         await manager.stop()
 
 
@@ -859,6 +864,62 @@ async def download_file(relative_path: str, expires: int = Query(...), signature
         return FileResponse(target, media_type=media_type)
     download_name = target.name if media_type == "application/zip" else safe_filename(target.name, "s6-cut-download")
     return FileResponse(target, filename=download_name, media_type=media_type)
+
+
+@app.post("/api/v1/video-downloads", response_model=VideoDownloadTask, status_code=202)
+async def create_video_download(value: VideoDownloadInput, request: Request) -> VideoDownloadTask:
+    _rate_limit(request)
+    try:
+        task, created = await video_downloads.create(value.url)
+    except OverflowError as exc:
+        raise HTTPException(429, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    # Reused tasks distinguish duplicates without changing the durable task contract.
+    if not created:
+        response = task.model_copy()
+        response.message = "An identical download already exists" if task.state != "complete" else "This video was already downloaded"
+        if response.state == "complete" and response.filename:
+            if safe_filename(response.filename, "") != response.filename or not response.filename.endswith(".mp4"):
+                response = video_downloads.mark_unavailable(task.id) or response
+            else:
+                relative = f"exports/video-downloads/{task.id}/{response.filename}"
+                try:
+                    target = confined(settings.data_path, *relative.split("/"))
+                except ValueError:
+                    target = settings.data_path / "missing-video-download.mp4"
+                if target.is_file():
+                    expires, signature = signer.sign(relative)
+                    response.download_url = f"/api/v1/files/{relative}?expires={expires}&signature={signature}"
+                else:
+                    response = video_downloads.mark_unavailable(task.id) or response
+        return response
+    return task
+
+
+@app.get("/api/v1/video-downloads/{task_id}", response_model=VideoDownloadTask)
+async def get_video_download(task_id: str) -> VideoDownloadTask:
+    if not re.fullmatch(r"[0-9a-f]{32}", task_id):
+        raise _not_found("Video download")
+    task = video_downloads.get(task_id)
+    if not task:
+        raise _not_found("Video download")
+    result = task.model_copy()
+    if result.download_url and result.state == "complete" and result.filename:
+        if safe_filename(result.filename, "") != result.filename or not result.filename.endswith(".mp4"):
+            result = video_downloads.mark_unavailable(task_id) or result
+        else:
+            relative = f"exports/video-downloads/{task_id}/{result.filename}"
+            try:
+                target = confined(settings.data_path, *relative.split("/"))
+            except ValueError:
+                target = settings.data_path / "missing-video-download.mp4"
+            if target.is_file():
+                expires, signature = signer.sign(relative)
+                result.download_url = f"/api/v1/files/{relative}?expires={expires}&signature={signature}"
+            else:
+                result = video_downloads.mark_unavailable(task_id) or result
+    return result
 
 
 @app.get("/api/v1/openrouter/models", response_model=list[OpenRouterModel])
