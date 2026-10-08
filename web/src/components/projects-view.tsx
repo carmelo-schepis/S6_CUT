@@ -4,6 +4,7 @@ import { createClipJob, createFolder, listFolders, readableError } from "../api"
 import { DEFAULT_SUBSCRIBE_ANIMATION, type BatchMode, type ContentFormat, type Health, type LibraryFolder, type ProcessingMode, type Project, type SourceProfile, type Style, type SubscribeAnimationConfig, type MusicTheme } from "../types";
 import { Button, Field, FieldGroup, StepBadge, useSingleFlight } from "./common";
 import { VideoSourcePicker } from "./video-source-picker";
+import { VideoOnlyDownload } from "./video-only-download";
 import { SubscribeAnimationControl } from "./subscribe-animation-control";
 import { RecentClips } from "./recent-clips";
 
@@ -203,7 +204,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
       <div className="create-grid">
         <div className="create-step source-step">
           <div className="step-label"><StepBadge step={1} /><span className="step-label-text">Add source</span></div>
-          <VideoSourcePicker mode={sourceType} onModeChange={(next) => { setError(null); setSourceType(next as "file" | "url"); }} file={file} onFile={(next, pickerError) => { setFile(next); setSourceDuration(null); if (pickerError) setError(pickerError); else setError(null); }} url={url} onUrl={setUrl} />
+          <VideoSourcePicker mode={sourceType} onModeChange={(next) => { setError(null); setSourceType(next as "file" | "url"); }} file={file} onFile={(next, pickerError) => { setFile(next); setSourceDuration(null); if (pickerError) setError(pickerError); else setError(null); }} url={url} onUrl={setUrl} downloadAction={<VideoOnlyDownload url={url} />} />
           {healthChecked && <div className="engine-summary">
             <span className={`engine-dot ${health?.status || "offline"}`} aria-hidden="true" />
             <strong>{health?.status === "ready" ? "Local engine ready" : health ? "Local fallback mode" : "Local engine unavailable"}</strong>
