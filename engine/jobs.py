@@ -84,7 +84,10 @@ def _displayed_aspect_ratio(metadata: dict[str, Any]) -> float | None:
     if not dimensions:
         return None
     try:
-        sample_aspect_ratio = float(metadata.get("sample_aspect_ratio") or 1.0)
+        raw_sample_aspect_ratio = metadata.get("sample_aspect_ratio", 1.0)
+        if raw_sample_aspect_ratio is None:
+            return None
+        sample_aspect_ratio = float(raw_sample_aspect_ratio)
         rotation = float(metadata.get("rotation") or 0)
     except (TypeError, ValueError):
         return None
@@ -1218,10 +1221,14 @@ class JobManager:
         self._save(job, private)
 
     def _source(self, job: Job, private: dict[str, Any]) -> Path:
-        if not private.get("source_kind"):
-            project = self.db.get_project(job.project_id)
-            if project:
-                private["source_kind"] = project.source_kind
+        project = self.db.get_project(job.project_id)
+        if project:
+            # The persisted project is authoritative; recover old or stale job
+            # snapshots without allowing them to opt an upload into YouTube-only layout.
+            private["source_kind"] = project.source_kind
+        else:
+            # An orphaned snapshot cannot prove its source origin, so fail closed.
+            private.pop("source_kind", None)
         if private.get("source_path"):
             source = Path(private["source_path"])
             if source.is_file():

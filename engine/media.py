@@ -359,6 +359,11 @@ def probe(path: Path, settings: Settings, *, max_seconds: int | None = None) -> 
     if duration > duration_limit:
         raise MediaError(f"Source duration {duration:.1f}s exceeds the configured {duration_limit}-second limit; choose Long form for sources up to {settings.max_long_source_seconds}s." if max_seconds is None else f"Source duration {duration:.1f}s exceeds the configured {duration_limit}-second limit")
     frame_rate = _rational_to_float(video.get("avg_frame_rate")) or _rational_to_float(video.get("r_frame_rate")) or 0.0
+    raw_sample_aspect_ratio = video.get("sample_aspect_ratio")
+    sample_aspect_ratio = (
+        1.0 if raw_sample_aspect_ratio is None or str(raw_sample_aspect_ratio).strip().casefold() in {"", "n/a"}
+        else _rational_to_float(str(raw_sample_aspect_ratio).replace(":", "/"))
+    )
     return {
         "duration": duration,
         "width": int(video.get("width") or 0),
@@ -376,7 +381,7 @@ def probe(path: Path, settings: Settings, *, max_seconds: int | None = None) -> 
         "audio_channels": int(audio["channels"]) if audio and str(audio.get("channels", "")).isdigit() else None,
         "frame_rate": round(frame_rate, 3),
         "rotation": _rotation_from_stream(video),
-        "sample_aspect_ratio": _rational_to_float(str(video.get("sample_aspect_ratio") or "").replace(":", "/")) or 1.0,
+        "sample_aspect_ratio": sample_aspect_ratio,
     }
 
 
@@ -1510,7 +1515,7 @@ def _overlay_inputs(command: list[str], overlays: list[tuple[Path, float, float]
 
 
 def _source_layout_filter(src_width: int, src_height: int, target_width: int, target_height: int, *, centered_partial_fill: bool = False, sample_aspect_ratio: float = 1.0) -> str:
-    """Keep the complete source visible, optionally using a centered partial fill."""
+    """Keep the complete source visible, optionally using centered black-padded partial fill."""
     dimensions: list[int] = []
     for name, value in (("source width", src_width), ("source height", src_height), ("target width", target_width), ("target height", target_height)):
         try:
@@ -1533,18 +1538,16 @@ def _source_layout_filter(src_width: int, src_height: int, target_width: int, ta
         if not math.isfinite(sar) or sar <= 0:
             raise MediaError("Invalid source sample aspect ratio")
         if abs((source_aspect * sar) / (16 / 9) - 1) <= 0.02:
-            foreground_height = round(target_height * PARTIAL_FILL_VERTICAL_OCCUPANCY / 2) * 2
-            background_width = max(target_width + 2, math.ceil(target_width * BACKGROUND_OVERSCAN_FACTOR / 2) * 2)
-            background_height = max(target_height + 2, math.ceil(target_height * BACKGROUND_OVERSCAN_FACTOR / 2) * 2)
+            # Normalize displayed pixels (including non-square SAR), scale to
+            # the full output height, retain that full-height center crop, and
+            # add fixed black bars rather than a blurred duplicate background.
             normalize_sar = "setsar=1," if abs(sar - 1.0) < 1e-9 else "scale=trunc(iw*sar/2)*2:ih:flags=lanczos,setsar=1,"
+            foreground_height = round(target_height * PARTIAL_FILL_VERTICAL_OCCUPANCY / 2) * 2
+            vertical_padding = (target_height - foreground_height) // 2
             return (
-                f"{normalize_sar}split=2[foreground][background];"
-                f"[background]scale={background_width}:{background_height}:force_original_aspect_ratio=increase:flags=lanczos,"
-                f"crop={background_width}:{background_height},{BACKGROUND_BLUR_FILTER},"
-                f"crop={target_width}:{target_height}:(iw-{target_width})/2:(ih-{target_height})/2,setsar=1[bg];"
-                f"[foreground]scale=-2:{foreground_height}:flags=lanczos,"
-                f"crop={target_width}:{foreground_height}:(iw-{target_width})/2:0,setsar=1[fg];"
-                "[bg][fg]overlay=(W-w)/2:(H-h)/2:format=auto,setsar=1[base]"
+                f"{normalize_sar}scale=-2:{foreground_height}:flags=lanczos,"
+                f"crop={target_width}:{foreground_height}:(iw-{target_width})/2:0,"
+                f"pad={target_width}:{target_height}:0:{vertical_padding}:color=black,setsar=1[base]"
             )
     if abs(source_aspect / target_aspect - 1) <= 0.12:
         return f"scale={target_width}:{target_height}:force_original_aspect_ratio=increase:flags=lanczos,crop={target_width}:{target_height},setsar=1[base]"
@@ -1733,9 +1736,12 @@ def render_clip(source: Path, output: Path, *, start: float, end: float, aspect:
     if embed_subtitles:
         command.extend(["-i", str(output.with_suffix(".srt"))])
     source_dimensions = (src_width, src_height)
-    sample_aspect_ratio = float(source_meta.get("sample_aspect_ratio") or 1.0)
-    if source_meta["rotation"] % 180:
-        sample_aspect_ratio = 1.0 / sample_aspect_ratio
+    sample_aspect_ratio = 1.0
+    if centered_partial_fill:
+        raw_sample_aspect_ratio = source_meta.get("sample_aspect_ratio", 1.0)
+        sample_aspect_ratio = float(raw_sample_aspect_ratio if raw_sample_aspect_ratio is not None else 0.0)
+        if source_meta["rotation"] % 180 and sample_aspect_ratio > 0:
+            sample_aspect_ratio = 1.0 / sample_aspect_ratio
     filters, mapped = _filters(width, height, overlays, 1, ass.name, source_dimensions, subscribe_animations, music_treatment, centered_partial_fill, sample_aspect_ratio)
     command.extend(["-t", f"{duration:.3f}", "-filter_complex", filters, "-map", f"[{mapped}]"])
     if has_audio:
@@ -2065,9 +2071,12 @@ def render_fast_clip(
     src_width, src_height = meta["width"], meta["height"]
     if meta["rotation"] % 180:
         src_width, src_height = src_height, src_width
-    sample_aspect_ratio = float(meta.get("sample_aspect_ratio") or 1.0)
-    if meta["rotation"] % 180:
-        sample_aspect_ratio = 1.0 / sample_aspect_ratio
+    sample_aspect_ratio = 1.0
+    if centered_partial_fill:
+        raw_sample_aspect_ratio = meta.get("sample_aspect_ratio", 1.0)
+        sample_aspect_ratio = float(raw_sample_aspect_ratio if raw_sample_aspect_ratio is not None else 0.0)
+        if meta["rotation"] % 180 and sample_aspect_ratio > 0:
+            sample_aspect_ratio = 1.0 / sample_aspect_ratio
     vf = _source_layout_filter(src_width, src_height, width, height, centered_partial_fill=centered_partial_fill, sample_aspect_ratio=sample_aspect_ratio).removesuffix("[base]")
     look_treatment = recipe_for(style, content_format).look
     look_before, look_after = _look_stages(look_treatment)

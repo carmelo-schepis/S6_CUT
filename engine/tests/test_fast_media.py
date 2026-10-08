@@ -204,10 +204,11 @@ def test_source_layout_uses_identical_undarkened_blurred_fill_for_mismatched_asp
 def test_centered_partial_fill_is_static_centered_and_three_quarters_height() -> None:
     vf = _source_layout_filter(1920, 1080, 1080, 1920, centered_partial_fill=True)
     assert PARTIAL_FILL_VERTICAL_OCCUPANCY == 0.75
-    assert "scale=-2:1440" in vf
+    assert "scale=-2:1440:flags=lanczos" in vf
     assert "crop=1080:1440:(iw-1080)/2:0" in vf
-    assert "overlay=(W-w)/2:(H-h)/2" in vf
-    assert BACKGROUND_BLUR_FILTER in vf
+    assert "pad=1080:1920:0:240:color=black" in vf
+    assert "overlay=" not in vf
+    assert BACKGROUND_BLUR_FILTER not in vf
 
 
 def test_centered_partial_fill_falls_back_outside_target_geometry() -> None:

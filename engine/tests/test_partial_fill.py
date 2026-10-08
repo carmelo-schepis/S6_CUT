@@ -46,10 +46,26 @@ def test_partial_fill_uses_display_geometry_including_sar_and_rotation() -> None
     assert centered_partial_fill_eligible(job, private, {"width": 720, "height": 1080, "sample_aspect_ratio": 8 / 3})
     assert centered_partial_fill_eligible(job, private, {"width": 1080, "height": 720, "sample_aspect_ratio": 3 / 8, "rotation": 90})
     assert not centered_partial_fill_eligible(job, private, {"width": 720, "height": 1080, "sample_aspect_ratio": 1.0})
+    assert not centered_partial_fill_eligible(job, private, {"width": 1920, "height": 1080, "sample_aspect_ratio": 0})
+    assert not centered_partial_fill_eligible(job, private, {"width": 1920, "height": 1080, "sample_aspect_ratio": None})
+    assert not centered_partial_fill_eligible(job, private, {"width": 1920, "height": 1080, "sample_aspect_ratio": float("nan")})
     assert centered_partial_fill_eligible(job, private, {"width": 1920, "height": 1059})
     assert not centered_partial_fill_eligible(job, private, {"width": 1920, "height": 1058})
     music_job = SimpleNamespace(mode="clip", style="serious", content_format="short", source_profile="music")
     assert not centered_partial_fill_eligible(music_job, private, {"width": 1920, "height": 1080})
+
+
+def test_probe_keeps_invalid_sar_ineligible_instead_of_defaulting_to_square_pixels(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import json
+    from engine import media as media_module
+
+    settings = Settings.from_env()
+    for sample_aspect_ratio, expected in (("0:1", None), ("N/A", 1.0)):
+        payload = {"streams": [{"codec_type": "video", "width": 1920, "height": 1080,
+                              "sample_aspect_ratio": sample_aspect_ratio}], "format": {"duration": "1"}}
+        monkeypatch.setattr(media_module, "run", lambda *_args, **_kwargs: SimpleNamespace(stdout=json.dumps(payload)))
+        metadata = probe(tmp_path / "source.mp4", settings)
+        assert metadata["sample_aspect_ratio"] == expected
 
 
 def test_caption_rerender_retains_authoritative_partial_fill_option(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -101,6 +117,36 @@ def test_partial_fill_eligibility_survives_retry_and_fast_switch_snapshots() -> 
     rerender_private = private | {"caption_rerender": {"run_id": "rerender"}}
     assert all(centered_partial_fill_eligible(snapshot, rerender_private, metadata)
                for snapshot in (job, retry_job, switched_job))
+
+
+def test_source_kind_snapshot_is_refreshed_from_persisted_project(tmp_path: Path) -> None:
+    from engine.jobs import JobManager
+
+    source = tmp_path / "source.mp4"
+    source.touch()
+    manager = object.__new__(JobManager)
+    manager.db = SimpleNamespace(get_project=lambda _project_id: SimpleNamespace(source_kind="upload"))
+    manager._register_source = lambda *_args: None
+    manager.complete_step = lambda *_args, **_kwargs: None
+    private = {"source_kind": "youtube", "source_path": str(source)}
+
+    assert manager._source(SimpleNamespace(project_id="project"), private) == source
+    assert private["source_kind"] == "upload"
+
+
+def test_source_kind_snapshot_without_persisted_project_fails_closed(tmp_path: Path) -> None:
+    from engine.jobs import JobManager
+
+    source = tmp_path / "source.mp4"
+    source.touch()
+    manager = object.__new__(JobManager)
+    manager.db = SimpleNamespace(get_project=lambda _project_id: None)
+    manager._register_source = lambda *_args: None
+    manager.complete_step = lambda *_args, **_kwargs: None
+    private = {"source_kind": "youtube", "source_path": str(source)}
+
+    assert manager._source(SimpleNamespace(project_id="deleted-project"), private) == source
+    assert "source_kind" not in private
 
 
 def test_partial_fill_rejects_long_form() -> None:
@@ -163,44 +209,53 @@ def test_rendered_fast_and_smart_partial_fill_geometry(tmp_path: Path) -> None:
         red, green, blue = value
         return red > 170 and green < 90 and blue > 170
 
+    black_tolerance = 12  # Allow minor RGB noise from H.264 encoding.
+    geometry = []
     for frame in rendered:
-        # The source's center box (x=308..332) is preserved at the canvas
-        # center; the two moving edge markers are removed by the symmetric crop.
+        assert len(frame) == 1080 * 1920 * 3
+
+        # The uncovered canvas is genuinely black, not a blurred enlargement
+        # of the source. Check every decoded RGB sample in both exposed bands.
+        top_band = frame[:239 * 1080 * 3]
+        bottom_band = frame[1680 * 1080 * 3:]
+        assert max(top_band) <= black_tolerance, "rows above the foreground must be black"
+        assert max(bottom_band) <= black_tolerance, "rows below the foreground must be black"
+        assert max(max(pixel(frame, x, 239)) for x in range(1080)) <= black_tolerance
+        assert max(max(pixel(frame, x, 1680)) for x in range(1080)) <= black_tolerance
+
+        # The white source-edge bars are 3/360 of the source height, hence
+        # about 12 output rows after scaling to the 1440px foreground.
+        assert min(pixel(frame, 540, 240)) > 190
+        assert min(pixel(frame, 540, 250)) > 190
+        assert min(pixel(frame, 540, 1670)) > 190
+        assert min(pixel(frame, 540, 1679)) > 190
+
+        # The center source marker remains centered by a symmetric horizontal
+        # crop. Its two magenta edge markers are outside that crop.
         assert is_red(pixel(frame, 540, 928))
         red_points = [(x, y) for y in range(830, 950, 2) for x in range(480, 600, 2) if is_red(pixel(frame, x, y))]
         assert red_points
-        red_width = max(x for x, _ in red_points) - min(x for x, _ in red_points)
-        red_height = max(y for _, y in red_points) - min(y for _, y in red_points)
-        assert red_width == pytest.approx(red_height, abs=5), "center marker should retain its aspect ratio"
-        assert 490 <= min(x for x, _ in red_points) <= 510 and 570 <= max(x for x, _ in red_points) <= 590
+        red_left, red_right = min(x for x, _ in red_points), max(x for x, _ in red_points)
         red_top, red_bottom = min(y for _, y in red_points), max(y for _, y in red_points)
+        red_width, red_height = red_right - red_left, red_bottom - red_top
+        assert red_width == pytest.approx(red_height, abs=5), "center marker should retain its proportions"
+        assert 490 <= red_left <= 510 and 570 <= red_right <= 590
         assert 838 <= red_top <= 842 and 932 <= red_bottom <= 938
+        assert abs((red_left + red_right) / 2 - 540) <= 2, "center crop must be horizontally symmetric"
         assert not any(is_magenta(pixel(frame, x, 928)) for x in range(0, 1080, 12))
-        # 75% occupancy leaves approximately 240 pixels of blurred source at
-        # the top and bottom, rather than scaling the foreground to full height.
-        assert pixel(frame, 540, 120) != (0, 0, 0)
-        assert pixel(frame, 540, 1800) != (0, 0, 0)
-        assert min(pixel(frame, 540, 240)) > 200 and max(pixel(frame, 540, 239)) < 200
-        assert min(pixel(frame, 540, 1678)) > 200 and max(pixel(frame, 540, 1680)) < 200
-        sharp_edge = max(sum(abs(a - b) for a, b in zip(pixel(frame, x, 960), pixel(frame, x + 1, 960))) for x in range(1, 1078))
-        blur_edge = max(sum(abs(a - b) for a, b in zip(pixel(frame, x, 120), pixel(frame, x + 1, 120))) for x in range(1, 1078))
-        assert sharp_edge > blur_edge * 2, "foreground should remain sharper than blurred exposed background"
 
-    # Temporal source detail remains visible in both exposed bands; compare
-    # coarse decoded samples at separated times without production helpers.
-    moving_samples = []
-    for timestamp in (0.2, 1.4):
-        raw = subprocess.run([
-            settings.ffmpeg, "-v", "error", "-ss", str(timestamp), "-i", str(tmp_path / "fast.mp4"),
-            "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-",
-        ], check=True, capture_output=True).stdout
-        moving_samples.append(tuple(pixel(raw, x, y) for y in (80, 120, 1800, 1840) for x in range(80, 1080, 100)))
-    difference = sum(
-        abs(channel_a - channel_b)
-        for sample_a, sample_b in zip(*moving_samples)
-        for channel_a, channel_b in zip(sample_a, sample_b)
+        # The hard red-to-grey transitions on the marker prove the foreground
+        # detail was scaled, not softened like a background blur.
+        marker_edge = max(
+            sum(abs(a - b) for a, b in zip(pixel(frame, x, 928), pixel(frame, x + 1, 928)))
+            for x in range(red_left - 2, red_right + 2)
+        )
+        assert marker_edge > 80, "the foreground retains a distinct sharp edge after the Serious treatment"
+        geometry.append((red_left, red_right, red_top, red_bottom))
+
+    assert all(abs(fast - smart) <= 2 for fast, smart in zip(*geometry)), (
+        "Fast and Smart must place the foreground geometry identically"
     )
-    assert difference > 100, "upper/lower blurred regions should retain temporal source detail"
 
     # Fast/Smart use the same geometry; independent encodes can differ by a few
     # RGB levels, so assert a low average decoded-frame error, not byte identity.
