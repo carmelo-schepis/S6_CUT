@@ -1,11 +1,10 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
-import { Download, RefreshCw } from "lucide-react";
-import { ApiError, createVideoOnlyDownload, getVideoOnlyDownload, readableError } from "../api";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Download } from "lucide-react";
+import { createVideoOnlyDownload, getVideoOnlyDownload, readableError } from "../api";
 import type { VideoDownloadTask } from "../types";
 import { Button } from "./common";
 
 const STORAGE_KEY = "s6-cut.video-download-only-task";
-const AUTO_DOWNLOAD_KEY = "s6-cut.video-download-only-auto";
 
 function youtubeId(value: string) {
   try {
@@ -20,41 +19,50 @@ function youtubeId(value: string) {
   }
 }
 
-function statusLabel(task: VideoDownloadTask) {
-  if (task.state === "queued") return "Queued";
-  if (task.state === "failed") return "Failed";
-  if (task.state === "complete") return "Ready";
-  if (task.phase === "preparing") return "Preparing MP4";
-  return "Downloading";
-}
-
 export function VideoOnlyDownload({ url }: { url: string }) {
   const [task, setTask] = useState<VideoDownloadTask | null>(null);
   const [taskForVideo, setTaskForVideo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [errorForVideo, setErrorForVideo] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [refreshingLink, setRefreshingLink] = useState(false);
-  const [linkNotice, setLinkNotice] = useState<string | null>(null);
+  const [restoringTask, setRestoringTask] = useState(() => {
+    try { return typeof window !== "undefined" && Boolean(window.localStorage.getItem(STORAGE_KEY)); }
+    catch { return false; }
+  });
   const requestInFlight = useRef(false);
+  const isMounted = useRef(false);
   const automaticDownloadId = useRef<string | null>(null);
+  const autoDownloadPending = useRef<string | null>(null);
   const downloadLink = useRef<HTMLAnchorElement>(null);
   const currentVideoId = youtubeId(url);
   const latestVideoId = useRef(currentVideoId);
+  useLayoutEffect(() => {
+    latestVideoId.current = currentVideoId;
+    isMounted.current = true;
+    return () => { isMounted.current = false; };
+  }, [currentVideoId]);
   const currentTask = useMemo(() => task && currentVideoId && taskForVideo === currentVideoId ? task : null, [task, taskForVideo, currentVideoId]);
 
-  useEffect(() => { latestVideoId.current = currentVideoId; }, [currentVideoId]);
-
   useEffect(() => {
-    const id = window.localStorage.getItem(STORAGE_KEY);
+    let alive = true;
+    let id: string | null;
+    try { id = window.localStorage.getItem(STORAGE_KEY); }
+    catch { return; }
     if (!id) return;
     void getVideoOnlyDownload(id).then((saved) => {
+      if (!alive) return;
+      const videoId = youtubeId(saved.url);
       setTask(saved);
-      setTaskForVideo(youtubeId(saved.url));
-    }).catch((cause: unknown) => {
-      if (cause instanceof ApiError && cause.status === 404) window.localStorage.removeItem(STORAGE_KEY);
-      else setError(readableError(cause));
+      setTaskForVideo(videoId);
+      if (saved.state === "queued" || saved.state === "active") autoDownloadPending.current = saved.id;
+    }).catch(() => {
+      if (alive) {
+        try { window.localStorage.removeItem(STORAGE_KEY); } catch { /* Ignore unavailable browser storage. */ }
+      }
+    }).finally(() => {
+      if (alive) setRestoringTask(false);
     });
+    return () => { alive = false; };
   }, []);
 
   useEffect(() => {
@@ -62,90 +70,83 @@ export function VideoOnlyDownload({ url }: { url: string }) {
     let alive = true;
     const poll = window.setInterval(() => {
       void getVideoOnlyDownload(currentTask.id).then((fresh) => {
-        if (alive && youtubeId(fresh.url) === currentVideoId) setTask(fresh);
+        if (!alive || latestVideoId.current !== currentVideoId || youtubeId(fresh.url) !== currentVideoId) return;
+        setTask(fresh);
       }).catch((cause: unknown) => {
-        if (!alive) return;
-        if (cause instanceof ApiError && cause.status === 404) {
-          setError("This download task is no longer available. Start a new download.");
+        if (alive && latestVideoId.current === currentVideoId) {
+          setError(readableError(cause));
           setErrorForVideo(currentVideoId);
-          window.clearInterval(poll);
-        } else { setError(readableError(cause)); setErrorForVideo(currentVideoId); }
+        }
       });
     }, 1200);
     return () => { alive = false; window.clearInterval(poll); };
   }, [currentTask, currentVideoId]);
 
   useEffect(() => {
-    if (!currentTask || currentTask.state !== "complete" || !currentTask.downloadUrl || automaticDownloadId.current === currentTask.id) return;
-    try {
-      if (window.localStorage.getItem(AUTO_DOWNLOAD_KEY) === currentTask.id) return;
-      window.localStorage.setItem(AUTO_DOWNLOAD_KEY, currentTask.id);
-    } catch { /* Session-local ref still prevents duplicate effects if storage is unavailable. */ }
+    if (!currentTask || currentTask.state !== "complete" || !currentTask.downloadUrl
+      || autoDownloadPending.current !== currentTask.id || automaticDownloadId.current === currentTask.id) return;
+    if (latestVideoId.current !== currentVideoId) return;
     automaticDownloadId.current = currentTask.id;
+    autoDownloadPending.current = null;
     downloadLink.current?.click();
-  }, [currentTask]);
+  }, [currentTask, currentVideoId]);
 
   const start = async () => {
     const videoId = youtubeId(url);
-    if (!videoId || requestInFlight.current) {
-      if (!videoId) setError("Enter a valid HTTPS YouTube video URL.");
+    if (requestInFlight.current) return;
+    if (!videoId) {
+      setError("Enter a valid HTTPS YouTube URL.");
+      setErrorForVideo(url);
       return;
     }
     requestInFlight.current = true;
     setSubmitting(true);
     setError(null);
     setErrorForVideo(null);
-    setLinkNotice(null);
     try {
-      const next = await createVideoOnlyDownload(url.trim());
-      if (latestVideoId.current === videoId) {
-        setTask(next);
-        setTaskForVideo(videoId);
-        window.localStorage.setItem(STORAGE_KEY, next.id);
+      let next: VideoDownloadTask;
+      if (currentTask?.state === "complete") {
+        next = await getVideoOnlyDownload(currentTask.id);
+      } else {
+        if (currentTask && (currentTask.state === "queued" || currentTask.state === "active")) return;
+        next = await createVideoOnlyDownload(url.trim());
+      }
+      if (!isMounted.current || latestVideoId.current !== videoId || youtubeId(next.url) !== videoId) return;
+      setTask(next);
+      setTaskForVideo(videoId);
+      try { window.localStorage.setItem(STORAGE_KEY, next.id); } catch { /* Keep the current interaction working without browser storage. */ }
+      if (next.state === "complete" && next.downloadUrl) {
+        autoDownloadPending.current = null;
+        automaticDownloadId.current = next.id;
+        if (downloadLink.current) {
+          downloadLink.current.href = next.downloadUrl;
+          downloadLink.current.download = next.filename || "";
+          downloadLink.current.click();
+        }
+      } else if (next.state === "queued" || next.state === "active") {
+        autoDownloadPending.current = next.id;
       }
     } catch (cause) {
-      if (latestVideoId.current === videoId) { setError(readableError(cause)); setErrorForVideo(videoId); }
+      if (isMounted.current && latestVideoId.current === videoId) {
+        setError(readableError(cause));
+        setErrorForVideo(videoId);
+      }
     } finally {
       requestInFlight.current = false;
-      setSubmitting(false);
+      if (isMounted.current) setSubmitting(false);
     }
   };
 
-  const pending = currentTask?.state === "queued" || currentTask?.state === "active";
-  const refreshExpiredLink = async (event: MouseEvent<HTMLAnchorElement>) => {
-    if (!currentTask?.downloadUrl || !currentVideoId) return;
-    const expires = Number(new URL(currentTask.downloadUrl, window.location.href).searchParams.get("expires"));
-    if (Number.isFinite(expires) && expires > Math.floor(Date.now() / 1000)) return;
-    event.preventDefault();
-    setRefreshingLink(true);
-    try {
-      const fresh = await getVideoOnlyDownload(currentTask.id);
-      if (youtubeId(fresh.url) === currentVideoId && fresh.state === "complete") {
-        setTask(fresh);
-        setTaskForVideo(currentVideoId);
-        setLinkNotice("The download link was refreshed. Select Download MP4 again.");
-      }
-    } catch (cause) {
-      setError(readableError(cause));
-      setErrorForVideo(currentVideoId);
-    } finally {
-      setRefreshingLink(false);
-    }
-  };
+  const pending = restoringTask || submitting || currentTask?.state === "queued" || currentTask?.state === "active";
+  const requestError = error && (errorForVideo === currentVideoId || errorForVideo === url) ? error : null;
+  const taskError = currentTask?.state === "failed" ? currentTask.error : null;
+  const visibleError = requestError || taskError;
+  const shortError = visibleError ? visibleError.split(/[\r\n]/, 1)[0].trim().slice(0, 120) : null;
   return <div className="video-only-download">
-    <Button type="button" variant="secondary" disabled={!currentVideoId || submitting || pending} onClick={() => void start()}>
-      <Download size={15} /> Download video only
+    <Button type="button" variant="secondary" disabled={!url.trim() || Boolean(pending)} onClick={() => void start()}>
+      <Download size={15} /> {pending ? "Downloading…" : "Download video"}
     </Button>
-    {error && errorForVideo === currentVideoId && <p className="form-error" role="alert">{error}</p>}
-    {currentTask && <div className="video-only-status" role="status" aria-live="polite">
-      <strong>{statusLabel(currentTask)}</strong>
-      {currentTask.message && <span>{currentTask.message}</span>}
-      {currentTask.state === "active" && (currentTask.percent == null
-        ? <progress aria-label="Download progress" />
-        : <><progress aria-label="Download progress" max="100" value={currentTask.percent} /><span>{Math.round(currentTask.percent)}%</span></>)}
-      {linkNotice && <span role="status">{linkNotice}</span>}
-      {currentTask.state === "complete" && currentTask.downloadUrl && <a ref={downloadLink} className="button button-primary" href={currentTask.downloadUrl} download={currentTask.filename || undefined} onClick={(event) => void refreshExpiredLink(event)}><Download size={14} /> {refreshingLink ? "Refreshing link…" : "Download MP4"}</a>}
-      {currentTask.state === "failed" && <><small>{currentTask.error}</small><Button type="button" onClick={() => void start()}><RefreshCw size={14} /> Try again</Button></>}
-    </div>}
+    {shortError && <p className="form-error" role="alert">{shortError}</p>}
+    <a ref={downloadLink} href={currentTask?.downloadUrl || undefined} download={currentTask?.filename || undefined} hidden aria-hidden="true" tabIndex={-1} />
   </div>;
 }

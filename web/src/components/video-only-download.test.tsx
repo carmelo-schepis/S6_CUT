@@ -28,18 +28,20 @@ describe("video-only download action", () => {
   it("appears beside the URL only in the YouTube source section", () => {
     const renderPicker = (mode: "file" | "url") => render(<VideoSourcePicker mode={mode} onModeChange={vi.fn()} file={null} onFile={vi.fn()} url={firstUrl} onUrl={vi.fn()} downloadAction={<VideoOnlyDownload url={firstUrl} />} />);
     const local = renderPicker("file");
-    expect(screen.queryByRole("button", { name: "Download video only" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Download video" })).not.toBeInTheDocument();
     local.unmount();
     renderPicker("url");
-    expect(screen.getByRole("button", { name: "Download video only" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Download video" })).toBeInTheDocument();
   });
 
-  it("requires a valid YouTube URL and submits only the URL", async () => {
+  it("shows a useful error for an invalid URL and submits only a valid YouTube URL", async () => {
     const { rerender } = render(<VideoOnlyDownload url="not a URL" />);
-    expect(screen.getByRole("button", { name: "Download video only" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Download video" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Enter a valid HTTPS YouTube URL.");
+    expect(createVideoOnlyDownload).not.toHaveBeenCalled();
     rerender(<VideoOnlyDownload url={firstUrl} />);
     vi.mocked(createVideoOnlyDownload).mockResolvedValue(task());
-    fireEvent.click(screen.getByRole("button", { name: "Download video only" }));
+    fireEvent.click(screen.getByRole("button", { name: "Download video" }));
     await waitFor(() => expect(createVideoOnlyDownload).toHaveBeenCalledWith(firstUrl));
     expect(createVideoOnlyDownload).toHaveBeenCalledTimes(1);
   });
@@ -48,46 +50,74 @@ describe("video-only download action", () => {
     let resolve!: (value: VideoDownloadTask) => void;
     vi.mocked(createVideoOnlyDownload).mockImplementation(() => new Promise((done) => { resolve = done; }));
     render(<VideoOnlyDownload url={firstUrl} />);
-    const button = screen.getByRole("button", { name: "Download video only" });
+    const button = screen.getByRole("button", { name: "Download video" });
     fireEvent.click(button);
     fireEvent.click(button);
     expect(createVideoOnlyDownload).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Downloading…" })).toBeDisabled();
     await act(async () => resolve(task()));
   });
 
-  it("does not present an old task if the URL changes while creation is pending", async () => {
+  it("does not present or download a task when its URL changed during creation", async () => {
     let resolve!: (value: VideoDownloadTask) => void;
     vi.mocked(createVideoOnlyDownload).mockImplementation(() => new Promise((done) => { resolve = done; }));
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
     const { rerender } = render(<VideoOnlyDownload url={firstUrl} />);
-    fireEvent.click(screen.getByRole("button", { name: "Download video only" }));
+    fireEvent.click(screen.getByRole("button", { name: "Download video" }));
     rerender(<VideoOnlyDownload url={secondUrl} />);
     await act(async () => resolve(task({ state: "complete", phase: "complete", filename: "video.mp4", downloadUrl: "/download" })));
-    expect(screen.queryByRole("link", { name: "Download MP4" })).not.toBeInTheDocument();
-    expect(screen.queryByText("Ready")).not.toBeInTheDocument();
+    expect(click).not.toHaveBeenCalled();
+    expect(screen.queryByText("Downloading…")).not.toBeInTheDocument();
     expect(getVideoOnlyDownload).not.toHaveBeenCalled();
-  });
-
-  it("automatically initiates the browser download only once across remounts", async () => {
-    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
-    const ready = task({ state: "complete", phase: "complete", filename: "youtube-video.mp4", downloadUrl: "/signed.mp4" });
-    vi.mocked(createVideoOnlyDownload).mockResolvedValue(ready);
-    vi.mocked(getVideoOnlyDownload).mockResolvedValue(ready);
-    const first = render(<VideoOnlyDownload url={firstUrl} />);
-    fireEvent.click(screen.getByRole("button", { name: "Download video only" }));
-    await waitFor(() => expect(click).toHaveBeenCalledTimes(1));
-    first.unmount();
-    render(<VideoOnlyDownload url={firstUrl} />);
-    await waitFor(() => expect(screen.getByRole("link", { name: "Download MP4" })).toBeInTheDocument());
-    expect(click).toHaveBeenCalledTimes(1);
     click.mockRestore();
   });
 
-  it("announces failures and allows a retry", async () => {
+  it("automatically initiates the browser download when the task completes", async () => {
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    const ready = task({ state: "complete", phase: "complete", filename: "youtube-video.mp4", downloadUrl: "/signed.mp4" });
+    vi.mocked(createVideoOnlyDownload).mockResolvedValue(ready);
+    render(<VideoOnlyDownload url={firstUrl} />);
+    fireEvent.click(screen.getByRole("button", { name: "Download video" }));
+    await waitFor(() => expect(click).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole("link", { name: "Download MP4" })).not.toBeInTheDocument();
+    click.mockRestore();
+  });
+
+  it("re-downloads a completed task after refreshing its signed link", async () => {
+    const ready = task({ state: "complete", phase: "complete", filename: "youtube-video.mp4", downloadUrl: "/signed.mp4" });
+    vi.mocked(createVideoOnlyDownload).mockResolvedValue(ready);
+    vi.mocked(getVideoOnlyDownload).mockResolvedValue({ ...ready, downloadUrl: "/refreshed.mp4" });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    render(<VideoOnlyDownload url={firstUrl} />);
+    fireEvent.click(screen.getByRole("button", { name: "Download video" }));
+    await waitFor(() => expect(click).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Download video" }));
+    await waitFor(() => expect(getVideoOnlyDownload).toHaveBeenCalledWith(ready.id));
+    await waitFor(() => expect(click).toHaveBeenCalledTimes(2));
+    expect(createVideoOnlyDownload).toHaveBeenCalledTimes(1);
+    click.mockRestore();
+  });
+
+  it("announces failures and allows the same button to retry", async () => {
     vi.mocked(createVideoOnlyDownload).mockRejectedValueOnce(new Error("Try again later")).mockResolvedValueOnce(task());
     render(<VideoOnlyDownload url={firstUrl} />);
-    fireEvent.click(screen.getByRole("button", { name: "Download video only" }));
+    fireEvent.click(screen.getByRole("button", { name: "Download video" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Try again later");
-    fireEvent.click(screen.getByRole("button", { name: "Download video only" }));
+    fireEvent.click(screen.getByRole("button", { name: "Download video" }));
     await waitFor(() => expect(createVideoOnlyDownload).toHaveBeenCalledTimes(2));
+  });
+
+  it("retries a terminal failed task with the same button", async () => {
+    const failed = task({ state: "failed", phase: "failed", error: "The source download failed. Try again." });
+    window.localStorage.setItem("s6-cut.video-download-only-task", failed.id);
+    vi.mocked(getVideoOnlyDownload).mockResolvedValue(failed);
+    vi.mocked(createVideoOnlyDownload).mockResolvedValue(task());
+    render(<VideoOnlyDownload url={firstUrl} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("source download failed");
+    const button = screen.getByRole("button", { name: "Download video" });
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+    await waitFor(() => expect(createVideoOnlyDownload).toHaveBeenCalledWith(firstUrl));
+    expect(createVideoOnlyDownload).toHaveBeenCalledTimes(1);
   });
 });

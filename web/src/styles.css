@@ -781,6 +781,7 @@ main { min-width: 0; }
 .mode-note.warning { color: var(--text-primary); background: rgba(240,168,75,.14); padding: var(--space-2); border: 1px solid rgba(240,168,75,.25); border-radius: 6px; }
 .mode-note strong { color: var(--text); font-weight: var(--type-emphasis-weight); }
 .video-only-download { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-2); }
+.video-only-download > .form-error { flex-basis: 100%; margin: 0; overflow-wrap: anywhere; }
 .video-only-status { display: flex; flex-wrap: wrap; align-items: center; gap: 6px var(--space-2); color: var(--text-primary); font-size: var(--type-small-size); }
 .video-only-status > span, .video-only-status small { color: var(--text-muted); }
 .video-only-status progress { width: 112px; height: 8px; accent-color: var(--copper); }
