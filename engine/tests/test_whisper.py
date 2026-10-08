@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import inspect
+import io
 import json
+import math
 import shutil
 import subprocess
 import sys
 import tempfile
 import types
+import wave
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -28,6 +31,29 @@ from engine.media import (
 # ---------------------------------------------------------------------------
 #  Fixtures
 # ---------------------------------------------------------------------------
+
+
+def test_faster_whisper_decode_audio_with_installed_pyav() -> None:
+    from faster_whisper.audio import decode_audio
+    import numpy as np
+
+    sample_rate = 16_000
+    sample_count = sample_rate // 4
+    audio = io.BytesIO()
+    with wave.open(audio, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(sample_rate)
+        frames = b"".join(
+            int(10_000 * math.sin(2 * math.pi * 440 * index / sample_rate)).to_bytes(2, "little", signed=True)
+            for index in range(sample_count)
+        )
+        wav.writeframes(frames)
+
+    samples = decode_audio(io.BytesIO(audio.getvalue()), sampling_rate=sample_rate)
+
+    assert samples.size > 0
+    assert np.isfinite(samples).all()
 
 
 @pytest.fixture()
