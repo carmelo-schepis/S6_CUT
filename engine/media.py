@@ -1308,6 +1308,10 @@ def write_caption_sidecars(path: Path, words: list[dict[str, Any]], *, offset: f
     path.with_suffix(".vtt").write_text(vtt, encoding="utf-8")
 
 
+CREDIT_VISIBLE_SECONDS = 10.0
+CREDIT_FADE_SECONDS = 1.0
+
+
 def _wrap_credit(value: str | None, max_chars: int) -> str:
     """Bound a creator credit to at most two readable, natural-word lines."""
     if not value:
@@ -1483,7 +1487,10 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
         # The renderer chooses the quieter lower corner when source frames are
         # available; either side stays outside the bottom-centred caption band.
         # The explicit wrap keeps long channel names inside the safe width.
-        events.append(f"Dialogue: 2,0,{_ass_time(duration)},Credit,,0,0,0,,{_ass_escape(credit_text)}")
+        credit_end = min(duration, CREDIT_VISIBLE_SECONDS + CREDIT_FADE_SECONDS)
+        fade_milliseconds = round(max(0.0, credit_end - CREDIT_VISIBLE_SECONDS) * 1000)
+        fade_tag = f"{{\\fad(0,{fade_milliseconds})}}" if fade_milliseconds else ""
+        events.append(f"Dialogue: 2,0,{_ass_time(credit_end)},Credit,,0,0,0,,{fade_tag}{_ass_escape(credit_text)}")
     path.write_text(header + "\n".join(events) + "\n", encoding="utf-8")
 
 
@@ -1600,8 +1607,9 @@ def _credit_alignment(source: Path, *, start: float, end: float, width: int, hei
         return 3
     sample_width = 160
     sample_height = max(64, round(sample_width * height / width))
-    duration = max(0.1, end - start)
-    timestamps = (start, start + duration * 0.5, max(start, end - 0.15))
+    visible_end = min(end, start + CREDIT_VISIBLE_SECONDS)
+    duration = max(0.1, visible_end - start)
+    timestamps = (start, start + duration * 0.5, max(start, visible_end - 0.15))
     left_scores: list[float] = []
     right_scores: list[float] = []
     layout = f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},scale={sample_width}:{sample_height},format=gray"
