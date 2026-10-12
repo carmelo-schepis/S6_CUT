@@ -209,16 +209,46 @@ describe("Projects create flow", () => {
     await waitFor(() => expect(mockCreateClipJob).toHaveBeenCalledWith(expect.objectContaining({ sourceProfile: "music", processingMode: "smart", burnSubtitles: true, count: 5 })));
   });
 
-  it("defaults hook text on only when eligible and omits it when unchecked", async () => {
+  it.each(["Auto", "Smart"])("keeps eligible %s hook text unchecked by default with a connected provider", (mode) => {
+    render(<ProjectsView health={health} hasSelectedProvider onCreated={vi.fn()} />);
+    if (mode === "Smart") fireEvent.click(screen.getByRole("button", { name: "Smart" }));
+    const hookText = screen.getByRole("checkbox", { name: /AI hook text/i });
+    expect(hookText).toBeEnabled();
+    expect(hookText).not.toBeChecked();
+    expect(hookText.parentElement).toHaveTextContent("Off by default. Tick to have OpenRouter write a short curiosity hook at the top of each short.");
+  });
+
+  it("sends hookText true only after an explicit opt-in", async () => {
     mockCreateClipJob.mockResolvedValue({ project, job: undefinedJob });
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
-    const hookText = screen.getByRole("checkbox", { name: /AI hook text/i });
-    expect(hookText).toBeChecked();
-    fireEvent.click(hookText);
-    fireEvent.change(screen.getByLabelText("Choose video file"), { target: { files: [new File(["video"], "movie.mp4", { type: "video/mp4" })] } });
+    fireEvent.click(screen.getByRole("button", { name: "Smart" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /AI hook text/i }));
+    fireEvent.click(screen.getByRole("tab", { name: "YouTube" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "YouTube URL" }), { target: { value: "https://www.youtube.com/watch?v=fixture" } });
+    fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
+    await waitFor(() => expect(mockCreateClipJob).toHaveBeenCalledWith(expect.objectContaining({ hookText: true })));
+  });
+
+  it("omits hookText when eligible but unticked", async () => {
+    mockCreateClipJob.mockResolvedValue({ project, job: undefinedJob });
+    render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    fireEvent.click(screen.getByRole("tab", { name: "YouTube" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "YouTube URL" }), { target: { value: "https://www.youtube.com/watch?v=fixture" } });
     fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
     await waitFor(() => expect(mockCreateClipJob).toHaveBeenCalled());
     expect(mockCreateClipJob.mock.calls[0][0]).not.toHaveProperty("hookText");
+  });
+
+  it("resets hook text opt-in after eligibility is lost and regained", () => {
+    render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    const checkbox = screen.getByRole("checkbox", { name: /AI hook text/i });
+    fireEvent.click(checkbox);
+    expect(checkbox).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Fast" }));
+    expect(checkbox).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Smart" }));
+    expect(checkbox).toBeEnabled();
+    expect(checkbox).not.toBeChecked();
   });
 
   it.each([

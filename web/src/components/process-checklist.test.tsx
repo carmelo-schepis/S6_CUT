@@ -31,11 +31,11 @@ describe("ProcessChecklist – structure & semantics", () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it("renders the hook_text processing step as a readable checklist item", () => {
-    const hookText: ProcessingStep = { id: "hook_text", label: "AI hook text", status: "active" };
+  it("renders the hook_text processing step label supplied by the engine", () => {
+    const hookText: ProcessingStep = { id: "hook_text", label: "Hook text written", status: "active" };
     render(<ProcessChecklist steps={[hookText]} />);
     expect(screen.getByTestId("progress-step-hook_text")).toHaveAttribute("data-step-id", "hook_text");
-    expect(screen.getByText("AI hook text")).toBeInTheDocument();
+    expect(screen.getByText("Hook text written")).toBeInTheDocument();
   });
 
   it("renders steps in API-reported order", () => {

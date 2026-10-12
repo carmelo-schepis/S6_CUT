@@ -336,7 +336,7 @@ describe("WorkspaceView – publication metadata, Details rename, read-only capt
   const publishedJob: Job = {
     schemaVersion: 1, id: "j1", projectId: "p1", mode: "clip", state: "complete",
     stage: "done", stageLabel: "Complete", progress: 100,
-    currentItem: 2, totalItems: 2, style: "serious", processingMode: "fast",
+    currentItem: 2, totalItems: 2, style: "serious", processingMode: "fast", hookTextEnabled: true,
     warnings: [], error: null,
     clips: [
       {
@@ -457,11 +457,31 @@ describe("WorkspaceView – publication metadata, Details rename, read-only capt
     expect(screen.getAllByText("Read-only")).toHaveLength(2);
     expect(screen.getByText("Editorial highlight")).toBeInTheDocument();
     expect(screen.getByText("Minimal · High contrast box")).toBeInTheDocument();
-    expect(screen.getByText("Hook text · OpenRouter")).toBeInTheDocument();
+    expect(screen.getByText("AI hook text", { selector: "label" })).toBeInTheDocument();
     expect(screen.getByText("Not generated")).toBeInTheDocument();
     // No select inside the inspector content
     const inspectorContent = document.querySelector(".inspector-content");
     expect(inspectorContent?.querySelector("select")).toBeNull();
+  });
+
+  it("shows only AI-hook-unavailable warnings when an enabled hook was not generated", async () => {
+    mockGetJob.mockResolvedValue({ ...publishedJob, warnings: ["AI hook text unavailable: OpenRouter timed out.", "A separate render warning."] });
+    renderView();
+    fireEvent.click(screen.getByRole("button", { name: /captions/i }));
+    expect(await screen.findByText("Not generated")).toBeInTheDocument();
+    expect(screen.getAllByText("AI hook text unavailable: OpenRouter timed out.")).toHaveLength(2);
+    const hookSection = screen.getByText("AI hook text", { selector: "label" }).closest(".inspector-section");
+    expect(hookSection).toHaveTextContent("AI hook text unavailable: OpenRouter timed out.");
+    expect(hookSection).not.toHaveTextContent("A separate render warning.");
+  });
+
+  it("hides the hook section when the job did not enable hook text", async () => {
+    mockGetJob.mockResolvedValue({ ...publishedJob, hookTextEnabled: false });
+    renderView();
+    fireEvent.click(screen.getByRole("button", { name: /captions/i }));
+    expect(await screen.findByText("Editorial highlight")).toBeInTheDocument();
+    expect(screen.queryByText("AI hook text")).not.toBeInTheDocument();
+    expect(screen.queryByText("Not generated")).not.toBeInTheDocument();
   });
 
   it("no timeline as before", async () => {
