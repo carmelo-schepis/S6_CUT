@@ -276,7 +276,7 @@ def test_word_by_word_highlighting_is_preserved(tmp_path: Path) -> None:
         assert (r"{\c&H0077D6FF&}" + str(words[index]["text"])) in event
 
 
-def test_youtube_creator_credit_shows_ten_seconds_then_fades_in_safe_corner(tmp_path: Path) -> None:
+def test_youtube_creator_credit_shows_eight_seconds_then_fades_in_safe_corner(tmp_path: Path) -> None:
     path = tmp_path / "credit.ass"
     write_ass(path, [], offset=0, duration=12.5, visuals=[], width=1080, height=1920, creator_credit="Source: Maker {One}")
     ass = path.read_text(encoding="utf-8")
@@ -284,12 +284,12 @@ def test_youtube_creator_credit_shows_ten_seconds_then_fades_in_safe_corner(tmp_
     assert credit["Alignment"] == "3"  # lower-right, outside centred captions
     assert credit["MarginR"] == credit["MarginL"]
     assert int(credit["MarginV"]) == _credit_margin(1920) == 24
-    assert "Dialogue: 2,0,0:00:11.00,Credit,,0,0,0,,{\\fad(0,1000)}Source: Maker \\{One\\}" in ass
+    assert "Dialogue: 2,0,0:00:09.00,Credit,,0,0,0,,{\\fad(0,1000)}Source: Maker \\{One\\}" in ass
 
 
 @pytest.mark.parametrize(
     ("duration", "end", "fade"),
-    ((4, "0:00:04.00", ""), (10, "0:00:10.00", ""), (10.5, "0:00:10.50", r"{\fad(0,500)}"), (60, "0:00:11.00", r"{\fad(0,1000)}")),
+    ((4, "0:00:04.00", ""), (8, "0:00:08.00", ""), (8.5, "0:00:08.50", r"{\fad(0,500)}"), (60, "0:00:09.00", r"{\fad(0,1000)}")),
 )
 def test_creator_credit_duration_and_fade_are_capped(duration: float, end: str, fade: str, tmp_path: Path) -> None:
     path = tmp_path / "credit-duration.ass"
@@ -322,7 +322,7 @@ def test_credit_alignment_samples_only_near_the_clip_start(monkeypatch, tmp_path
     _credit_alignment(source, start=5, end=65, width=1080, height=1920, settings=settings)
     seeks = [float(command[command.index("-ss") + 1]) for command in captured]
     assert len(seeks) == 3
-    assert all(value <= 15 for value in seeks)
+    assert all(value <= 5 + 8 for value in seeks)
 
 
 def test_creator_credit_wraps_truncates_and_uses_subtle_contrast(tmp_path: Path) -> None:
@@ -334,7 +334,11 @@ def test_creator_credit_wraps_truncates_and_uses_subtle_contrast(tmp_path: Path)
     write_ass(path, [], offset=0, duration=4, visuals=[], width=1080, height=1920, creator_credit="Source: Creator")
     style = _parse_styles(path.read_text(encoding="utf-8"))["Credit"]
     assert style["PrimaryColour"].startswith("&H22")  # modest transparency
-    assert style["Fontsize"] == "26"  # short caption scaling never changes creator credits
+    assert style["Fontsize"] == "44"  # legible opening credit at the 1080x1920 reference
+    # Short caption scaling never changes creator credits.
+    unscaled = tmp_path / "credit-style-unscaled.ass"
+    write_ass(unscaled, [], offset=0, duration=4, visuals=[], width=1080, height=1920, creator_credit="Source: Creator", content_format="short")
+    assert _parse_styles(unscaled.read_text(encoding="utf-8"))["Credit"]["Fontsize"] == style["Fontsize"]
     assert style["BorderStyle"] == "3"  # translucent contrast panel
     assert int(style["MarginR"]) >= 80
     assert int(style["MarginV"]) == _credit_margin(1920)
@@ -353,9 +357,11 @@ def test_credit_stays_at_the_bottom_for_supported_canvas_sizes(tmp_path: Path) -
         assert int(credit["MarginL"]) >= 40 and int(credit["MarginR"]) >= 40
         assert int(credit["MarginL"]) < width // 2 and int(credit["MarginR"]) < width // 2
         event = next(line for line in text.splitlines() if line.startswith("Dialogue: 2,"))
-        assert "0:00:11.00" in event
+        assert "0:00:09.00" in event
         assert "Source: 频道" in event
-        assert r"\N" not in event
+        # The legible 9:16 credit may use its second line for this long name;
+        # it never exceeds the two-line bound.
+        assert event.count(r"\N") <= (1 if (width, height) == (1080, 1920) else 0)
 
     wrapped = tmp_path / "credit-wrapped.ass"
     write_ass(wrapped, [], offset=0, duration=3, visuals=[], width=1080, height=1080, creator_credit="Source: 频道 🎬 " + "LongCreatorName " * 8)

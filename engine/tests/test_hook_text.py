@@ -172,7 +172,7 @@ def test_rendered_hook_is_only_in_burn_ass_and_stops_for_subscribe(monkeypatch, 
     assert hook not in output.with_suffix(".srt").read_text(encoding="utf-8")
     assert "Dialogue: 5,0,0:00:15.00,Hook" in burn_ass
     credit_event = next(line for line in burn_ass.splitlines() if line.startswith("Dialogue: 2,"))
-    assert credit_event.startswith("Dialogue: 2,0,0:00:11.00,Credit,")
+    assert credit_event.startswith("Dialogue: 2,0,0:00:09.00,Credit,")
     assert r"{\fad(0,1000)}" in credit_event
     assert ",Caption," in burn_ass and ",Caption," in caption_ass
     caption_events = [line for line in caption_ass.splitlines() if line.startswith("Dialogue:")]
