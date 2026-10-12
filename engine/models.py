@@ -44,6 +44,15 @@ class DownloadProgress(ApiModel):
 UNSORTED_LIBRARY_FOLDER_ID = "00000000-0000-0000-0000-000000000001"
 
 
+class PenaltyItem(ApiModel):
+    kind: Literal["filler_words", "length_off_target"]
+    points: float = Field(ge=0)
+    filler_word_counts: dict[str, int] | None = None
+    points_per_word: float | None = Field(default=None, ge=0)
+    speech_seconds: float | None = Field(default=None, ge=0)
+    target_seconds: float | None = Field(default=None, ge=0)
+
+
 class ScoreBreakdown(ApiModel):
     hook: float = Field(ge=0, le=100)
     coherence: float = Field(ge=0, le=100)
@@ -53,6 +62,7 @@ class ScoreBreakdown(ApiModel):
     visual_potential: float = Field(ge=0, le=100)
     completeness: float = Field(ge=0, le=100)
     penalties: float = Field(ge=0, le=100)
+    penalty_items: list[PenaltyItem] | None = None
     llm_contribution: float | None = Field(default=None, ge=0, le=100)
     total: float = Field(ge=0, le=100)
     explanation: str = Field(min_length=1, max_length=400)

@@ -69,6 +69,16 @@ export const downloadProgressSchema = z.object({
 });
 export type DownloadProgress = z.infer<typeof downloadProgressSchema>;
 
+export const penaltyItemSchema = z.object({
+  kind: z.string(),
+  points: z.number(),
+  fillerWordCounts: z.record(z.string(), z.number()).nullable().optional(),
+  pointsPerWord: z.number().nullable().optional(),
+  speechSeconds: z.number().nullable().optional(),
+  targetSeconds: z.number().nullable().optional(),
+});
+export type PenaltyItem = z.infer<typeof penaltyItemSchema>;
+
 export const scoreSchema = z.object({
   hook: z.number().min(0).max(100),
   coherence: z.number().min(0).max(100),
@@ -78,6 +88,7 @@ export const scoreSchema = z.object({
   visualPotential: z.number().min(0).max(100),
   completeness: z.number().min(0).max(100),
   penalties: z.number().min(0).max(100),
+  penaltyItems: z.array(penaltyItemSchema).nullable().optional(),
   llmContribution: z.number().min(0).max(100).nullable().default(null),
   total: z.number().min(0).max(100),
   explanation: z.string(),
