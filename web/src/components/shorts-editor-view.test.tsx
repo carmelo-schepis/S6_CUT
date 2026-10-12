@@ -15,7 +15,8 @@ describe("ShortsEditorView", () => {
   afterEach(() => vi.useRealTimers());
   it("explains the accepted source, editing controls, and queued output", async () => {
     render(<ShortsEditorView onJobCreated={vi.fn()} />);
-    expect(screen.getByText("Trim an authorised video into a social-ready clip. Choose the section, output shape, and subtitles, then queue the render.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Shorts Editor" })).toBeInTheDocument();
+    expect(screen.queryByText("Trim an authorised video into a social-ready clip. Choose the section, output shape, and subtitles, then queue the render.")).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByText("Library")).toBeInTheDocument());
     expect(screen.getByText("Local file")).toBeInTheDocument();
     expect(screen.getByText("YouTube")).toBeInTheDocument();

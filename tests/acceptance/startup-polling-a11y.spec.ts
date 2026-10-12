@@ -222,23 +222,24 @@ test.describe("provider availability", () => {
     await mockEngine(page, { profilesDelayMs: 6_000, profiles: [DISCONNECTED_PROFILE] });
     await page.goto("/", { waitUntil: "domcontentloaded" });
 
-    await expect(page.getByText(/Checking connected providers/i).first()).toBeVisible();
-    await expect(page.getByText(/No provider is connected/i)).toHaveCount(0);
     await expect(page.getByText(/Add optional AI providers/i)).toHaveCount(0);
 
-    // Once it resolves, the confirmed condition is stated.
-    await expect(page.getByText(/No provider is connected, so Auto runs as a fast local cut/i)).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByText(/Add optional AI providers/i)).toBeVisible();
+    // Only a confirmed disconnected profile response enables the callout.
+    await expect(page.getByText(/Add optional AI providers/i)).toBeVisible({ timeout: 20_000 });
   });
 
-  test("reports a connected provider once /profiles confirms one", async ({ page }) => {
-    await mockEngine(page, { profilesDelayMs: 3_000, profiles: [CONNECTED_PROFILE] });
+  test("updates provider availability when Settings confirms a connected profile", async ({ page }) => {
+    const options = { profilesDelayMs: 3_000, profiles: [DISCONNECTED_PROFILE] };
+    await mockEngine(page, options);
     await page.goto("/", { waitUntil: "domcontentloaded" });
 
-    await expect(page.getByText(/Checking connected providers/i).first()).toBeVisible();
-    await expect(page.getByText(/Auto uses a connected provider, otherwise a fast local cut/i)).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByText(/No provider is connected/i)).toHaveCount(0);
+    await expect(page.getByText(/Add optional AI providers/i)).toBeVisible({ timeout: 20_000 });
+    options.profiles = [CONNECTED_PROFILE];
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await expect(page.getByText("Active", { exact: true })).toBeVisible({ timeout: 20_000 });
 
+    await page.getByRole("button", { name: "Projects", exact: true }).click();
+    await expect(page.getByText(/Add optional AI providers/i)).toHaveCount(0);
   });
 });
 

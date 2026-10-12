@@ -165,19 +165,6 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
   const musicFeasibilityMessage = sourceProfile === "music" && knownSourceDuration !== null && Number.isFinite(minDuration) && minDuration > 0 && activeCount > Math.floor((knownSourceDuration + 1e-9) / minDuration)
     ? `This ${knownSourceDuration.toFixed(1)}s source can fit at most ${Math.floor(knownSourceDuration / minDuration)} non-overlapping clips of at least ${minDuration}s. Reduce the count or minimum duration; the requested count will not be changed automatically.`
     : null;
-  const modeNote = batchMode === "high_volume"
-    ? "Fast and Smart remain available. Smart searches the full local word-timed transcript deterministically; provider ordering is bypassed for this larger batch."
-    : sourceProfile === "music"
-      ? MUSIC_PROFILE_NOTE
-    : processingMode === "fast"
-    ? "Fast runs deterministically on this machine. It skips transcription and captions."
-    : processingMode === "smart"
-      ? !providersLoaded ? "Checking connected providers… Smart uses one when available, otherwise local Whisper and deterministic planning."
-        : hasSelectedProvider ? "Smart uses the selected provider for enhanced planning."
-          : "No provider is connected, so Smart runs on local Whisper and deterministic planning."
-      : !providersLoaded ? "Checking connected providers… Auto uses one when available, otherwise a fast local cut."
-        : hasSelectedProvider ? "Auto uses a connected provider, otherwise a fast local cut."
-          : "No provider is connected, so Auto runs as a fast local cut.";
   return <div className="page projects-page">
     {/* Every screen carries exactly one h1. The page introduction that used to
         hold this one was removed with the Projects header, and the create panel
@@ -243,7 +230,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
               </div>
               </div>
             </FieldGroup>}
-            <FieldGroup title="Format" hint={contentFormat === "long" ? "Landscape scenes are selected across the whole source." : "Vertical clips are selected for short-form viewing."}>
+            <FieldGroup title="Format">
               <div className="segmented mode-tabs format-tabs" aria-label="Content format">
                 <button type="button" aria-pressed={contentFormat === "short"} className={contentFormat === "short" ? "active" : ""} onClick={() => { setContentFormat("short"); setAspectRatio("9:16"); }}>Short form · 9:16</button>
                 <button type="button" aria-pressed={contentFormat === "long"} className={contentFormat === "long" ? "active" : ""} disabled={sourceProfile === "music"} onClick={() => { setContentFormat("long"); setAspectRatio("16:9"); }}>Long form · 16:9</button>
@@ -270,7 +257,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
               {batchMode === "high_volume" && sourceType === "file" && knownSourceDuration === null && <p className="form-hint">Choose a local source to check its duration; FFprobe remains authoritative.</p>}
             </FieldGroup>
 
-            {sourceProfile === "speech" && <FieldGroup title="Processing mode" hint={modeNote}>
+            {sourceProfile === "speech" && <FieldGroup title="Processing mode">
               <div className="segmented mode-tabs processing-mode-tabs" aria-label="Processing mode">
                 <button type="button" aria-pressed={processingMode === "auto"} className={processingMode === "auto" ? "active" : ""} onClick={() => setProcessingMode("auto")}><Sparkles size={13} /> <span>Auto</span></button>
                 <button type="button" aria-pressed={processingMode === "fast"} className={processingMode === "fast" ? "active" : ""} onClick={() => { setProcessingMode("fast"); setBurnSubtitles(false); }}><Zap size={13} /> <span>Fast</span></button>
@@ -308,10 +295,6 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
           </div>
         </div>
 
-        {/* Its own row of the panel grid, under the action column. Kept out of
-            `.create-actions` so the footnote cannot push the Create button off
-            the line it shares with the Processing mode control. */}
-        <div className="create-note-row"><p className="rights-copy">Only process content you own or are authorised to use.</p></div>
       </div>
     </section>
 

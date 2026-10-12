@@ -16,9 +16,7 @@ export function JobsView({ onOpenProject, jobs, onRefresh }: { onOpenProject: (i
   // independent /jobs poll and could race the activity indicator's source.
   const load = () => { void onRefresh().then(() => setError(null)); };
   const action = async (job: Job, next: "pause" | "resume" | "retry-failed" | "retry-import") => { try { await controlJob(job.id, next); load(); } catch (cause) { setError(readableError(cause)); } };
-  const running = jobs.some((job) => ["queued", "active", "paused", "stalled", "recovered"].includes(job.state));
-  const description = jobs.length === 0 ? "No job history yet. Create a Clip project to start a durable local render." : running ? "Live stages and partial results stay available here while completed history remains below." : "No jobs are currently running. Completed history and recovery controls remain available here.";
-  return <div className="page jobs-page"><PageHeader eyebrow="Durable queue" title="Jobs & recovery" description={description} actions={<><span className="section-count">{jobs.length} total</span><Button onClick={load}><RefreshCw size={14} /> Refresh</Button></>} />
+  return <div className="page jobs-page"><PageHeader eyebrow="Durable queue" title="Jobs & recovery" actions={<><span className="section-count">{jobs.length} total</span><Button onClick={load}><RefreshCw size={14} /> Refresh</Button></>} />
     {error && <p className="form-error" role="alert">{error}</p>}
     {jobs.length ? <><div className="jobs-list">{(showAll ? jobs : jobs.slice(0, JOB_LIMIT)).map((job) => <article className="job-card" key={job.id} data-job-id={job.id} data-project-id={job.projectId}><div className="job-mode">{job.mode === "clip" ? "CLIP" : "LEGACY"}</div><div className="job-main">{(() => {
         const ready = job.clips.filter((clip) => clip.state === "complete").length;

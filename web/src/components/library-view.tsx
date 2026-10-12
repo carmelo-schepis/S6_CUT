@@ -223,7 +223,7 @@ export function LibraryView({ selectedAssetId }: { selectedAssetId?: string | nu
           <Field label="Title"><input value={selected.title} onChange={(event) => setSelected({ ...selected, title: event.target.value })} onBlur={() => saveSelected({ title: selected.title })} /></Field>
           <Field label="Policy" hint="Controls whether this asset may be chosen automatically."><select value={selected.policy} onChange={(event) => saveSelected({ policy: event.target.value })}><option value="required">Required</option><option value="prefer">Prefer</option><option value="neutral">Neutral</option><option value="never">Never</option></select></Field>
         </FieldGroup>
-        <FieldGroup title="Matching" hint="Comma-separated. Used by deterministic selection." headingLevel={2}>
+        <FieldGroup title="Matching" headingLevel={2}>
           <Field label="Trigger phrases"><input value={selected.triggers.join(", ")} onChange={(event) => setSelected({ ...selected, triggers: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} onBlur={() => saveSelected({ triggers: selected.triggers })} /></Field>
           <Field label="Tags"><input value={selected.tags.join(", ")} onChange={(event) => setSelected({ ...selected, tags: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} onBlur={() => saveSelected({ tags: selected.tags })} /></Field>
           <Field label="Brands"><input value={selected.brands.join(", ")} onChange={(event) => setSelected({ ...selected, brands: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} onBlur={() => saveSelected({ brands: selected.brands })} /></Field>

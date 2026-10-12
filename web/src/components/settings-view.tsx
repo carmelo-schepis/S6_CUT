@@ -55,7 +55,7 @@ export function SettingsView({ health, onHealthRefresh, onProfilesChanged, onSki
     finally { setPurging(false); }
   };
 
-  return <><div className="page settings-page"><PageHeader eyebrow="Local appliance" title="Settings" description="Configure an optional OpenRouter text-planning profile. Local cutting remains available without an API." actions={<Button variant="primary" onClick={() => { setSetupDismissed(false); setEditing("new"); }}><Plus size={15} /> New profile</Button>} />
+  return <><div className="page settings-page"><PageHeader eyebrow="Local appliance" title="Settings" actions={<Button variant="primary" onClick={() => { setSetupDismissed(false); setEditing("new"); }}><Plus size={15} /> New profile</Button>} />
     {error && <p className="form-error" role="alert">{error}</p>}
     <div className="settings-grid"><div className="settings-column">
       <section className="settings-card profiles-card" id="provider-profiles"><div className="settings-card-head"><div><KeyRound size={18} /><div><h2>OpenRouter</h2><p>An encrypted credential enables optional text planning.</p></div></div><div className="profile-head-actions"><StatusBadge state={profiles.some((profile) => profile.selected) ? "local" : "fallback"} label={profiles.length ? `${profiles.length} saved` : "Local modes only"} />{profiles.length > 0 && <Button onClick={() => { setSetupDismissed(false); setEditing("new"); }}><Plus size={13} /> Add profile</Button>}</div></div>
