@@ -1520,14 +1520,16 @@ class JobManager:
             warning = f"AI hook text unavailable: {reason.rstrip('.')} . Clips were rendered without hook text."
             warning = warning.replace(" .", ".")
             private["hook_text"] = {"enabled": True, "status": "failed", "reason": reason}
-            job.warnings.append(warning) if warning not in job.warnings else None
+            if warning not in job.warnings:
+                job.warnings.append(warning)
             self.fail_step(job, "hook_text", detail=warning, private=private)
             return
         if state.get("status") == "generating":
             reason = "previous hook generation was interrupted"
             warning = f"AI hook text unavailable: {reason}. Clips were rendered without hook text."
             private["hook_text"] = {"enabled": True, "status": "failed", "reason": reason}
-            job.warnings.append(warning) if warning not in job.warnings else None
+            if warning not in job.warnings:
+                job.warnings.append(warning)
             self.fail_step(job, "hook_text", detail=warning, private=private)
             return
         self.start_step(job, "hook_text", detail="Writing transcript-grounded hooks", label="Writing hook text", progress=38, private=private)

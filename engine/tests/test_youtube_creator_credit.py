@@ -9,7 +9,7 @@ import pytest
 from engine.config import Settings
 from engine.jobs import _source_clip_visual_metadata, youtube_creator_credit
 from engine.library import ResolvedVisual
-from engine.media import dimensions, probe, render_fast_clip
+from engine.media import dimensions, probe, render_fast_clip, write_ass
 from engine.models import Asset, Job
 
 
@@ -58,6 +58,42 @@ def _frame(path: Path, timestamp: float, settings: Settings) -> bytes:
         capture_output=True,
     )
     return result.stdout
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg") or not shutil.which("ffprobe"), reason="FFmpeg smoke test requires ffmpeg and ffprobe")
+def test_creator_credit_fades_out_of_the_encoded_frame(tmp_path: Path) -> None:
+    settings = Settings.from_env()
+    source = tmp_path / "source.mp4"
+    subprocess.run([
+        settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi",
+        "-i", "testsrc2=size=1080x1920:rate=30:duration=14", "-c:v", "libx264", "-preset", "ultrafast", str(source),
+    ], check=True, capture_output=True)
+    base_ass = tmp_path / "base.ass"
+    credit_ass = tmp_path / "credit.ass"
+    write_ass(base_ass, [], offset=0, duration=14, visuals=[], width=1080, height=1920)
+    write_ass(credit_ass, [], offset=0, duration=14, visuals=[], width=1080, height=1920, creator_credit="Source: Fade Fixture", credit_alignment=3)
+    crop = "crop=540:160:540:1760,format=gray"
+    differences = {}
+    for timestamp in (1.0, 5.0, 9.5, 10.0, 10.25, 10.5, 10.75, 11.0, 11.5, 13.0):
+        rendered = []
+        for ass_path in (base_ass, credit_ass):
+            result = subprocess.run([
+                settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-ss", str(timestamp), "-i", str(source),
+                "-vf", f"setpts=PTS+{timestamp}/TB,subtitles={ass_path},{crop}", "-frames:v", "1", "-f", "rawvideo", "pipe:1",
+            ], check=True, capture_output=True)
+            rendered.append(result.stdout)
+        assert len(rendered[0]) == len(rendered[1]) == 540 * 160
+        differences[timestamp] = sum(abs(left - right) for left, right in zip(*rendered)) / (540 * 160)
+
+    full = min(differences[1.0], differences[5.0], differences[9.5], differences[10.0])
+    assert full > 3.0
+    assert 0.65 * full < differences[10.25] < 0.85 * full
+    assert 0.4 * full < differences[10.5] < 0.6 * full
+    assert 0.15 * full < differences[10.75] < 0.35 * full
+    assert differences[10.25] > differences[10.5] > differences[10.75]
+    assert differences[11.0] < 0.1 * full
+    assert differences[11.5] < 0.1 * full
+    assert differences[13.0] < 0.1 * full
 
 
 @pytest.mark.skipif(not shutil.which("ffmpeg") or not shutil.which("ffprobe"), reason="FFmpeg smoke test requires ffmpeg and ffprobe")

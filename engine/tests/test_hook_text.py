@@ -150,6 +150,7 @@ def test_rendered_hook_is_only_in_burn_ass_and_stops_for_subscribe(monkeypatch, 
     output = tmp_path / "clip.mp4"
     metadata = {"width": 1080, "height": 1920, "rotation": 0, "sample_aspect_ratio": 1.0, "audio": True, "duration": 20}
     monkeypatch.setattr(media, "probe", lambda *_args, **_kwargs: metadata)
+    monkeypatch.setattr(media, "_credit_alignment", lambda *_args, **_kwargs: 3)
 
     def fake_run(command, **_kwargs):
         from pathlib import Path
@@ -159,7 +160,7 @@ def test_rendered_hook_is_only_in_burn_ass_and_stops_for_subscribe(monkeypatch, 
     words = [{"text": "Captions", "start": 0, "end": 1}]
     hook = "The quiet clue changes the ending more than you think."
     render_clip(source, output, start=0, end=20, aspect="9:16", words=words, visuals=[], overlays=[],
-                settings=SimpleNamespace(ffmpeg="ffmpeg"), hook_text=hook,
+                settings=SimpleNamespace(ffmpeg="ffmpeg"), hook_text=hook, creator_credit="Source: Creator",
                 subscribe_animation={"enabled": True, "version": 1, "short_form_lead_seconds": 5})
     burn_ass = output.with_name("clip.burn.ass").read_text(encoding="utf-8")
     caption_ass = output.with_suffix(".ass").read_text(encoding="utf-8")
@@ -170,5 +171,9 @@ def test_rendered_hook_is_only_in_burn_ass_and_stops_for_subscribe(monkeypatch, 
     assert hook not in caption_ass
     assert hook not in output.with_suffix(".srt").read_text(encoding="utf-8")
     assert "Dialogue: 5,0,0:00:15.00,Hook" in burn_ass
+    credit_event = next(line for line in burn_ass.splitlines() if line.startswith("Dialogue: 2,"))
+    assert credit_event.startswith("Dialogue: 2,0,0:00:11.00,Credit,")
+    assert r"{\fad(0,1000)}" in credit_event
     assert ",Caption," in burn_ass and ",Caption," in caption_ass
+    assert ",Hook," not in caption_ass and ",Credit," not in caption_ass and "HookScrim" not in caption_ass
     assert hook not in output.with_suffix(".vtt").read_text(encoding="utf-8")
