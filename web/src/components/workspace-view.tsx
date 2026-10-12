@@ -8,6 +8,7 @@ import { jobFacts } from "../status-format";
 import { isTerminalJob, ProcessingState } from "./processing-state";
 import { LazyVideoThumbnail } from "./lazy-video-thumbnail";
 import { ProcessChecklist } from "./process-checklist";
+import { PenaltyDetails } from "./penalty-details";
 
 // J and L shuttle the preview by a readable step rather than a single frame;
 // the frame buttons cover frame-accurate movement.
@@ -638,5 +639,5 @@ function ScoreInspector({ clip }: { clip: Clip }) {
     ["Hook", clip.score.hook], ["Coherence", clip.score.coherence], ["Ending", clip.score.ending],
     ["Energy", clip.score.energy], ["Practical value", clip.score.practicalValue], ["Visual potential", clip.score.visualPotential], ["Completeness", clip.score.completeness],
   ] as const;
-  return <><div className="score-total"><span>{Math.round(clip.score.total)}</span><div><strong>Selection score</strong><small>Deterministic local model</small></div></div><p className="score-explanation">{clip.score.explanation}</p><div className="factor-list">{factors.map(([label, value]) => <div key={label}><span>{label}</span><div><i style={{ width: `${value}%` }} /></div><strong>{Math.round(value)}</strong></div>)}</div>{clip.score.penalties > 0 && <div className="penalty"><AlertTriangle size={14} /> Penalties −{Math.round(clip.score.penalties)}</div>}</>;
+  return <><div className="score-total"><span>{Math.round(clip.score.total)}</span><div><strong>Selection score</strong><small>Deterministic local model</small></div></div><p className="score-explanation">{clip.score.explanation}</p><div className="factor-list">{factors.map(([label, value]) => <div key={label}><span>{label}</span><div><i style={{ width: `${value}%` }} /></div><strong>{Math.round(value)}</strong></div>)}</div><PenaltyDetails score={clip.score} /></>;
 }

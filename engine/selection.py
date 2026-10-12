@@ -6,10 +6,11 @@ from bisect import bisect_right
 from dataclasses import dataclass
 from typing import Any
 
-from .models import Clip, ScoreBreakdown, Style
+from .models import Clip, PenaltyItem, ScoreBreakdown, Style
 
 
 SENTENCE_END = re.compile(r"[.!?][\"')\]]*$")
+FILLER_WORDS = ("um", "uh", "like", "basically", "actually")
 HOOK_WORDS = {"why", "how", "secret", "never", "best", "worst", "truth", "imagine", "mistake", "here's", "what"}
 PRACTICAL_WORDS = {"step", "first", "second", "because", "means", "example", "learn", "use", "tip", "method"}
 ENERGY_WORDS = {"amazing", "incredible", "crazy", "shocking", "love", "hate", "wow", "huge", "always", "never"}
@@ -45,6 +46,20 @@ def _sentence_ranges(words: list[dict[str, Any]]) -> list[tuple[int, int]]:
     return ranges
 
 
+def _penalties(normalized: list[str], duration: float, target: float, points_per_filler: int) -> tuple[float, list[PenaltyItem]]:
+    filler_word_counts: dict[str, int] = {}
+    for token in normalized:
+        if token in FILLER_WORDS:
+            filler_word_counts[token] = filler_word_counts.get(token, 0) + 1
+    filler = sum(filler_word_counts.values())
+    filler_points = filler * points_per_filler
+    length_points = abs(duration - target) / max(target, 1) * 15
+    return min(40, filler_points + length_points), [
+        PenaltyItem(kind="filler_words", points=filler_points, filler_word_counts=filler_word_counts, points_per_word=points_per_filler),
+        PenaltyItem(kind="length_off_target", points=length_points, speech_seconds=duration, target_seconds=target),
+    ]
+
+
 def _score(words: list[dict[str, Any]], style: Style, target: float) -> ScoreBreakdown:
     text = " ".join(str(item["text"]) for item in words)
     normalized = re.findall(r"[\w']+", text.casefold())
@@ -57,14 +72,13 @@ def _score(words: list[dict[str, Any]], style: Style, target: float) -> ScoreBre
     practical = min(100, 30 + 11 * len(set(normalized) & PRACTICAL_WORDS))
     visual = min(100, 35 + 7 * len(re.findall(r"\b[A-Z][\w'-]+", text)) + min(20, len(set(normalized)) / 3))
     complete = min(100, 42 + (30 if SENTENCE_END.search(str(words[-1]["text"])) else 0) + (15 if words[0]["text"][0:1].isupper() else 0))
-    filler = sum(token in {"um", "uh", "like", "basically", "actually"} for token in normalized)
-    penalties = min(40, filler * 4 + abs(duration - target) / max(target, 1) * 15)
+    penalties, penalty_items = _penalties(normalized, duration, target, 4)
     values = {"hook": hook, "coherence": coherence, "ending": ending, "energy": energy, "practical": practical, "visual": visual, "complete": complete}
     weights = STYLE_WEIGHTS[style]
     total = sum(values[key] * weights[key] for key in values) / sum(weights.values()) - penalties
     strongest = max(values, key=values.get)
     reason_map = {"hook": "an immediate opening", "coherence": "a coherent thought", "ending": "a clean ending", "energy": "a strong energy signal", "practical": "clear practical value", "visual": "concrete visual potential", "complete": "a complete idea"}
-    return ScoreBreakdown(hook=hook, coherence=coherence, ending=ending, energy=energy, practical_value=practical, visual_potential=visual, completeness=complete, penalties=penalties, total=max(0, min(100, total)), explanation=f"Selected for {reason_map[strongest]} with {style} style weighting.")
+    return ScoreBreakdown(hook=hook, coherence=coherence, ending=ending, energy=energy, practical_value=practical, visual_potential=visual, completeness=complete, penalties=penalties, penalty_items=penalty_items, total=max(0, min(100, total)), explanation=f"Selected for {reason_map[strongest]} with {style} style weighting.")
 
 
 def candidate_quality(words: list[dict[str, Any]], minimum_speech_density: float = 0.18) -> tuple[bool, str, bool]:
@@ -202,14 +216,13 @@ def _score_music(words: list[dict[str, Any]], style: Style, target: float) -> Sc
     energy = min(100, 38 + 12 * len(unique & ENERGY_WORDS))
     practical = min(100, 35 + 8 * len(unique & PRACTICAL_WORDS))
     visual = min(100, 38 + min(25, len(unique) / 2))
-    filler = sum(token in {"um", "uh", "like", "basically", "actually"} for token in normalized)
-    penalties = min(40, filler * 3 + abs(duration - target) / max(target, 1) * 15)
+    penalties, penalty_items = _penalties(normalized, duration, target, 3)
     values = {"hook": hook, "coherence": coherence, "ending": ending, "energy": energy, "practical": practical, "visual": visual, "complete": complete}
     weights = STYLE_WEIGHTS[style]
     total = sum(values[key] * weights[key] for key in values) / sum(weights.values()) - penalties
     strongest = max(values, key=values.get)
     reason_map = {"hook": "an immediate lyric opening", "coherence": "continuous lyric timing", "ending": "a natural musical ending", "energy": "a strong lyric energy signal", "practical": "clear lyrical content", "visual": "concrete visual potential", "complete": "a complete lyric passage"}
-    return ScoreBreakdown(hook=hook, coherence=coherence, ending=ending, energy=energy, practical_value=practical, visual_potential=visual, completeness=complete, penalties=penalties, total=max(0, min(100, total)), explanation=f"Selected for {reason_map[strongest]} with music {style} weighting.")
+    return ScoreBreakdown(hook=hook, coherence=coherence, ending=ending, energy=energy, practical_value=practical, visual_potential=visual, completeness=complete, penalties=penalties, penalty_items=penalty_items, total=max(0, min(100, total)), explanation=f"Selected for {reason_map[strongest]} with music {style} weighting.")
 
 
 def _music_units(lines: list[list[dict[str, Any]]], maximum: float) -> list[list[dict[str, Any]]]:
