@@ -146,6 +146,8 @@ async function startEligibleProject(page, name: string, source: "fixture" | "you
 }
 
 test.describe("AI hook text acceptance", () => {
+  test.use({ serviceWorkers: "block" });
+
   test.afterAll(async () => {
     if (!liveProfileId) return;
     await fetch(`${gateway}/api/v1/profiles/${encodeURIComponent(liveProfileId)}`, { method: "DELETE" });
@@ -161,6 +163,7 @@ test.describe("AI hook text acceptance", () => {
     });
     await openCreation(page);
     await chooseSpeechSource(page);
+    await page.getByRole("button", { name: "Smart", exact: true }).click();
     await page.getByLabel("Project name").fill("AI hook payload acceptance");
     const hook = page.getByRole("checkbox", { name: /AI hook text/i });
     await expect(hook).toBeEnabled();
