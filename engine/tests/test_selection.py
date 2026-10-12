@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from engine.selection import select_candidates
+from engine.selection import _score, _score_music, select_candidates
 
 
 def fixture_words() -> list[dict[str, object]]:
@@ -24,6 +24,28 @@ def test_candidates_are_deterministic_complete_and_non_overlapping() -> None:
     assert all(8 <= item.end - item.start <= 24 for item in first)
     for left, right in zip(first, first[1:]):
         assert left.end <= right.start
+
+
+def test_score_penalties_are_itemized_without_changing_totals() -> None:
+    words = [
+        {"text": "Um", "start": 0.0, "end": 0.5},
+        {"text": "like", "start": 0.5, "end": 1.0},
+        {"text": "hello.", "start": 1.0, "end": 2.5},
+    ]
+    scored = _score(words, "serious", 4)
+    assert scored.penalties == min(40, 2 * 4 + abs(2.5 - 4) / max(4, 1) * 15)
+    assert [item.kind for item in scored.penalty_items or []] == ["filler_words", "length_off_target"]
+    filler, length = scored.penalty_items or []
+    assert filler.points == 8
+    assert filler.filler_word_counts == {"um": 1, "like": 1}
+    assert filler.points_per_word == 4
+    assert length.points == abs(2.5 - 4) / max(4, 1) * 15
+    assert length.speech_seconds == 2.5
+    assert length.target_seconds == 4
+
+    music_scored = _score_music(words, "serious", 4)
+    assert music_scored.penalties == min(40, 2 * 3 + abs(2.5 - 4) / max(4, 1) * 15)
+    assert music_scored.penalty_items[0].points_per_word == 3
 
 
 def test_style_weights_change_auditable_ranking() -> None:
