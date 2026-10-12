@@ -1099,6 +1099,28 @@ def _font_advance_metrics(font_path: str) -> tuple[int, dict[int, int]]:
     return units_per_em, {codepoint: advances[glyph] for codepoint, glyph in glyph_map.items() if glyph < len(advances)}
 
 
+@lru_cache(maxsize=4)
+def _libass_height_units(font_path: str) -> int:
+    """Return the font-unit height libass maps to one ASS font-size unit.
+
+    libass rescales the requested size by hhea/(usWinAscent + usWinDescent)
+    before asking FreeType for hhea ascender-descender, so the OS/2 win metrics
+    decide the rendered scale when present.
+    """
+    font = Path(font_path).read_bytes()
+    table_count = struct.unpack_from(">H", font, 4)[0]
+    tables = {}
+    for index in range(table_count):
+        record = 12 + index * 16
+        tables[font[record:record + 4].decode("ascii")] = struct.unpack_from(">I", font, record + 8)[0]
+    ascender, descender = struct.unpack_from(">hh", font, tables["hhea"] + 4)
+    if "OS/2" in tables:
+        win_ascent, win_descent = struct.unpack_from(">HH", font, tables["OS/2"] + 74)
+        if win_ascent + win_descent:
+            return win_ascent + win_descent
+    return ascender - descender
+
+
 def _reference_music_events(group: list[dict[str, Any]], theme: str, *, width: int, height: int, duration: float, content_format: str | None = None) -> list[str]:
     """Render independently positioned phrase rows with shared karaoke timing."""
     words = [str(word["text"]) for word in group]
@@ -1425,9 +1447,10 @@ def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duratio
     # glyphs, outlines, and the translucent panel.
     credit_margin = _credit_margin(height)
     credit_max_chars = max(12, int(usable * .92 / (_CHAR_WIDTH_FACTOR * credit_fontsize)))
-    hook_fontsize = max(1, round(52 * type_scale))
-    hook_floor = max(1, round(44 * type_scale))
-    hook_margin_x = max(1, round(90 * width / 1080))
+    hook_fontsize = max(1, round(72 * type_scale))
+    hook_floor = max(1, round(60 * type_scale))
+    hook_margin_x = max(1, round(60 * width / 1080))
+    hook_outline = max(1, round(4 * width / 1080))
     hook_top_margin = round(height * .11)
     hook_lines: list[list[dict[str, Any]]] = []
     credit_text = _wrap_credit(creator_credit, credit_max_chars) if creator_credit else ""
@@ -1449,7 +1472,7 @@ Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackC
 Style: Caption,{preset["fontname"]},{fontsize},{preset["primary"]},{preset["highlight"]},{preset["outline_color"]},{preset["back_color"]},{preset["bold"]},{preset["italic"]},0,0,{preset.get("scale_x", 100)},100,{preset["spacing"]},0,{preset["border_style"]},{outline},{shadow},{caption_alignment},{margin_x},{margin_x},{margin_v},1
 {visual_style}
 Style: MusicTop,Barlow,{max(32, round(54 * visual_scale))},&H00FFFFFF,&H00FFFFFF,&H80000000,&H80000000,0,0,0,0,100,100,0,0,1,2,0,8,{margin_x},{margin_x},{max(100, round(170 * visual_scale))},1
-Style: Hook,Barlow,{hook_fontsize},&H00FFFFFF,&H00FFFFFF,&H99000000,&H80000000,-1,0,0,0,100,100,0,0,1,{max(1, round(3 * width / 1080))},{max(1, round(2 * width / 1080))},8,{hook_margin_x},{hook_margin_x},{hook_top_margin},1
+Style: Hook,Montserrat,{hook_fontsize},&H00FFFFFF,&H00FFFFFF,&H40000000,&H80000000,-1,0,0,0,100,100,0,0,1,{hook_outline},{max(1, round(3 * width / 1080))},8,{hook_margin_x},{hook_margin_x},{hook_top_margin},1
 Style: HookScrim,Arial,20,&H00000000,&H00000000,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1
 {credit_style}
 {scrim_style}
@@ -1472,16 +1495,30 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
             polygon = f"m 0 {y0} l {width} {y0} {width} {y1} 0 {y1}"
             events.append(f"Dialogue: 0,0,{_ass_time(duration)},HookScrim,,0,0,0,,{{\\p1\\an7\\pos(0,0)\\1c&H000000&\\1a&H{alpha:02X}&\\bord0\\shad0}}{polygon}{{\\p0}}")
         tokens = [{"text": word} for word in " ".join(hook_text.split()).split()]
-        usable_hook_width = max(1, width - 2 * hook_margin_x)
+        usable_hook_width = max(1, width - 2 * hook_margin_x - 2 * hook_outline)
+        hook_font = str(Path(__file__).parent / "fonts" / "montserrat" / "Montserrat-Bold.ttf")
+        units_per_em, glyph_advances = _font_advance_metrics(hook_font)
+        height_units = _libass_height_units(hook_font)
+
+        def hook_wrap(size: int) -> list[list[dict[str, Any]]]:
+            # Greedy word wrap on measured advances; an over-long word keeps its own line.
+            def line_px(items: list[dict[str, Any]]) -> float:
+                text = " ".join(str(item["text"]) for item in items)
+                return sum(glyph_advances.get(ord(char), units_per_em * .6) for char in text) * size / height_units
+
+            lines: list[list[dict[str, Any]]] = []
+            for token in tokens:
+                if lines and line_px(lines[-1] + [token]) <= usable_hook_width:
+                    lines[-1].append(token)
+                else:
+                    lines.append([token])
+            return lines
+
         hook_size = hook_fontsize
-        while hook_size > hook_floor:
-            chars_per_line = max(8, int(usable_hook_width / (.56 * hook_size)))
-            hook_lines = _wrap_caption_words(tokens, chars_per_line)
-            if len(hook_lines) <= 4:
-                break
+        hook_lines = hook_wrap(hook_size)
+        while len(hook_lines) > 4 and hook_size > hook_floor:
             hook_size -= 1
-        if len(hook_lines) > 4:
-            hook_lines = _wrap_caption_words(tokens, max(8, int(usable_hook_width / (.44 * hook_floor))))
+            hook_lines = hook_wrap(hook_size)
         hook_body = r"\N".join(" ".join(_ass_escape(str(item["text"])) for item in line) for line in hook_lines)
         end_time = max(0, min(duration, duration if hook_end_time is None else hook_end_time))
         events.append(f"Dialogue: 5,0,{_ass_time(end_time)},Hook,,0,0,0,,{{\\fs{hook_size}}}{hook_body}")
