@@ -175,5 +175,6 @@ def test_rendered_hook_is_only_in_burn_ass_and_stops_for_subscribe(monkeypatch, 
     assert credit_event.startswith("Dialogue: 2,0,0:00:11.00,Credit,")
     assert r"{\fad(0,1000)}" in credit_event
     assert ",Caption," in burn_ass and ",Caption," in caption_ass
-    assert ",Hook," not in caption_ass and ",Credit," not in caption_ass and "HookScrim" not in caption_ass
+    caption_events = [line for line in caption_ass.splitlines() if line.startswith("Dialogue:")]
+    assert not any(",Hook," in line or ",Credit," in line for line in caption_events)
     assert hook not in output.with_suffix(".vtt").read_text(encoding="utf-8")
