@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 import subprocess
 
+import pytest
+
 from engine.config import Settings
 from engine.media import (
     SUBTITLE_EMOJI_INSTRUCTIONS,
@@ -274,7 +276,7 @@ def test_word_by_word_highlighting_is_preserved(tmp_path: Path) -> None:
         assert (r"{\c&H0077D6FF&}" + str(words[index]["text"])) in event
 
 
-def test_youtube_creator_credit_is_full_duration_in_safe_corner(tmp_path: Path) -> None:
+def test_youtube_creator_credit_shows_ten_seconds_then_fades_in_safe_corner(tmp_path: Path) -> None:
     path = tmp_path / "credit.ass"
     write_ass(path, [], offset=0, duration=12.5, visuals=[], width=1080, height=1920, creator_credit="Source: Maker {One}")
     ass = path.read_text(encoding="utf-8")
@@ -282,7 +284,45 @@ def test_youtube_creator_credit_is_full_duration_in_safe_corner(tmp_path: Path) 
     assert credit["Alignment"] == "3"  # lower-right, outside centred captions
     assert credit["MarginR"] == credit["MarginL"]
     assert int(credit["MarginV"]) == _credit_margin(1920) == 24
-    assert "Dialogue: 2,0,0:00:12.50,Credit,,0,0,0,,Source: Maker \\{One\\}" in ass
+    assert "Dialogue: 2,0,0:00:11.00,Credit,,0,0,0,,{\\fad(0,1000)}Source: Maker \\{One\\}" in ass
+
+
+@pytest.mark.parametrize(
+    ("duration", "end", "fade"),
+    ((4, "0:00:04.00", ""), (10, "0:00:10.00", ""), (10.5, "0:00:10.50", r"{\fad(0,500)}"), (60, "0:00:11.00", r"{\fad(0,1000)}")),
+)
+def test_creator_credit_duration_and_fade_are_capped(duration: float, end: str, fade: str, tmp_path: Path) -> None:
+    path = tmp_path / "credit-duration.ass"
+    write_ass(path, [], offset=0, duration=duration, visuals=[], width=1080, height=1920, creator_credit="Source: Creator")
+    events = _dialogue_events(path.read_text(encoding="utf-8"), "Credit")
+    assert len(events) == 1
+    assert events[0] == f"Dialogue: 2,0,{end},Credit,,0,0,0,,{fade}Source: Creator"
+
+
+def test_youtube_creator_credit_does_not_change_caption_dialogues(tmp_path: Path) -> None:
+    words = [_word(f"word{index}", index * 2, index * 2 + 1) for index in range(30)]
+    plain_path = tmp_path / "plain.ass"
+    credited_path = tmp_path / "credited.ass"
+    for path, credit in ((plain_path, None), (credited_path, "Source: Creator")):
+        write_ass(path, words, offset=0, duration=60, visuals=[], width=1080, height=1920, creator_credit=credit)
+    assert _caption_events(plain_path.read_text(encoding="utf-8")) == _caption_events(credited_path.read_text(encoding="utf-8"))
+
+
+def test_credit_alignment_samples_only_near_the_clip_start(monkeypatch, tmp_path: Path) -> None:
+    source = tmp_path / "fixture.mp4"
+    source.write_bytes(b"fixture")
+    settings = Settings.from_env()
+    captured: list[list[str]] = []
+
+    def sample(command, **kwargs):
+        captured.append(command)
+        return subprocess.CompletedProcess(command, 0, bytes(160 * 284), b"")
+
+    monkeypatch.setattr("engine.media.subprocess.run", sample)
+    _credit_alignment(source, start=5, end=65, width=1080, height=1920, settings=settings)
+    seeks = [float(command[command.index("-ss") + 1]) for command in captured]
+    assert len(seeks) == 3
+    assert all(value <= 15 for value in seeks)
 
 
 def test_creator_credit_wraps_truncates_and_uses_subtle_contrast(tmp_path: Path) -> None:
@@ -313,7 +353,7 @@ def test_credit_stays_at_the_bottom_for_supported_canvas_sizes(tmp_path: Path) -
         assert int(credit["MarginL"]) >= 40 and int(credit["MarginR"]) >= 40
         assert int(credit["MarginL"]) < width // 2 and int(credit["MarginR"]) < width // 2
         event = next(line for line in text.splitlines() if line.startswith("Dialogue: 2,"))
-        assert "0:00:12.00" in event
+        assert "0:00:11.00" in event
         assert "Source: 频道" in event
         assert r"\N" not in event
 
