@@ -183,9 +183,9 @@ test.describe("YouTube creator credit workflow", () => {
       maximumDurationSeconds: 10,
       expectedWidth: 1080,
       expectedHeight: 1920,
-      // The renderer's persistent creator credit occupies this lower-left
-      // region. Sampling decoded pixels proves the dark plate and light text
-      // are in the MP4 rather than trusting matching DOM metadata alone.
+      // The renderer's opening creator credit occupies this lower-left
+      // region before its fade. Sampling decoded pixels proves the credit is
+      // in the MP4 rather than trusting matching DOM metadata alone.
       expectedOverlayRegion: { x: 0.05, y: 0.89, width: 0.32, height: 0.07 },
     });
     expect(videoEvidence.playbackAdvanced).toBe(true);
