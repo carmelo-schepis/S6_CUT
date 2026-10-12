@@ -39,9 +39,19 @@ def test_hook_text_is_opt_in_and_adds_only_an_enabled_job_step(monkeypatch) -> N
     monkeypatch.setattr(app_module.profiles, "smart_available", lambda: True)
     monkeypatch.setattr(app_module.db, "save_project", lambda project: saved.update(project=project))
     monkeypatch.setattr(app_module.db, "save_job", lambda job, private=None: saved.update(job=job, private=private))
+    provider_calls = 0
+
+    async def hook_provider(*_args, **_kwargs):
+        nonlocal provider_calls
+        provider_calls += 1
+        raise AssertionError("disabled hooks must never call the provider")
+
+    monkeypatch.setattr(app_module.profiles, "openrouter_json", hook_provider)
 
     async def enqueue(_: str) -> None:
-        return None
+        job = saved["job"]
+        if not job.hook_text_enabled:
+            app_module.manager._generate_hook_text(job, saved.get("private") or {}, [])
 
     monkeypatch.setattr(app_module.manager, "enqueue", enqueue)
     base = {"url": "https://www.youtube.com/watch?v=fixture", "processing_mode": "smart", "count": "2"}
@@ -49,6 +59,7 @@ def test_hook_text_is_opt_in_and_adds_only_an_enabled_job_step(monkeypatch) -> N
     assert response.status_code == 202, response.text
     assert response.json()["job"]["hookTextEnabled"] is False
     assert "hook_text" not in [step["id"] for step in response.json()["job"]["steps"]]
+    assert provider_calls == 0
 
     response = client.post("/api/v1/jobs/clip", data={**base, "hook_text": "true", "burn_subtitles": "false"})
     assert response.status_code == 202, response.text

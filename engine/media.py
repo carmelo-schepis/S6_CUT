@@ -1384,7 +1384,7 @@ def _scrim_events(look: "LookTreatment", width: int, height: int, duration: floa
     return style, events
 
 
-def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duration: float, visuals: Iterable[tuple[str, float, float]], width: int, height: int, style: str = "educational", creator_credit: str | None = None, credit_alignment: int = 3, content_format: str | None = None, music_theme: str | None = None, music_top_text: str | None = None, hook_text: str | None = None, hook_end_time: float | None = None, hook_top_band_height: int | None = None) -> None:
+def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duration: float, visuals: Iterable[tuple[str, float, float]], width: int, height: int, style: str = "educational", creator_credit: str | None = None, credit_alignment: int = 3, content_format: str | None = None, music_theme: str | None = None, music_top_text: str | None = None, hook_text: str | None = None, hook_end_time: float | None = None) -> None:
     preset = _subtitle_preset(style, content_format)
     if music_theme in {"clean", "warm", "serif"}:
         preset = dict(preset)
@@ -1429,8 +1429,6 @@ def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duratio
     hook_floor = max(1, round(44 * type_scale))
     hook_margin_x = max(1, round(90 * width / 1080))
     hook_top_margin = round(height * .11)
-    if hook_top_band_height:
-        hook_top_margin = min(hook_top_margin, max(12, hook_top_band_height - 4 * hook_floor - round(16 * vertical_scale)))
     hook_lines: list[list[dict[str, Any]]] = []
     credit_text = _wrap_credit(creator_credit, credit_max_chars) if creator_credit else ""
     # A translucent light face with a dark stroke stays legible over changing
@@ -1759,13 +1757,12 @@ def render_clip(source: Path, output: Path, *, start: float, end: float, aspect:
     width, height = dimensions(aspect)
     subscribe_schedule = schedule_subscribe_animation(duration, content_format=content_format or "short", config=subscribe_animation)
     hook_end_time = subscribe_schedule[0][0] if subscribe_schedule else duration
-    hook_top_band_height = round(height * .125) if centered_partial_fill else None
     source_meta = probe(source, settings)
     src_width, src_height = source_meta["width"], source_meta["height"]
     if source_meta["rotation"] % 180:
         src_width, src_height = src_height, src_width
     credit_alignment = _credit_alignment(source, start=start, end=end, width=width, height=height, settings=settings) if creator_credit else 3
-    write_ass(ass, words, offset=start, duration=duration, visuals=visuals, width=width, height=height, style=style, creator_credit=creator_credit, credit_alignment=credit_alignment, content_format=content_format, music_theme=music_theme, music_top_text=music_top_text, hook_text=hook_text, hook_end_time=hook_end_time, hook_top_band_height=hook_top_band_height)
+    write_ass(ass, words, offset=start, duration=duration, visuals=visuals, width=width, height=height, style=style, creator_credit=creator_credit, credit_alignment=credit_alignment, content_format=content_format, music_theme=music_theme, music_top_text=music_top_text, hook_text=hook_text, hook_end_time=hook_end_time)
     write_caption_sidecars(output, words, offset=start, duration=duration, style=style, music_theme=music_theme)
     if creator_credit or hook_text:
         # The downloadable ASS is caption-only; the internal burn script must
@@ -2048,7 +2045,6 @@ def render_fast_clip(
     music_theme: str | None = None,
     music_top_text: str | None = None,
     music_treatment: str | None = None,
-    hook_text: str | None = None,
 ) -> None:
     """Render a fast clip with optional captions and no overlays or visual beats.
 
@@ -2134,14 +2130,12 @@ def render_fast_clip(
     ass: Path | None = None
     if (subtitles_enabled or embed_subtitles) and words:
         write_caption_sidecars(output, words, offset=0, duration=duration, style=style)
-    if (subtitles_enabled and words) or creator_credit or hook_text:
-        ass = output.parent / (f"{output.stem}.burn.ass" if creator_credit or hook_text else f"{output.stem}.ass")
+    if (subtitles_enabled and words) or creator_credit:
+        ass = output.parent / (f"{output.stem}.burn.ass" if creator_credit else f"{output.stem}.ass")
         credit_alignment = _credit_alignment(source, start=start, end=end, width=width, height=height, settings=settings) if creator_credit else 3
-        animation_schedule = schedule_subscribe_animation(duration, content_format=content_format or "short", config=subscribe_animation)
-        hook_end_time = animation_schedule[0][0] if animation_schedule else duration
-        write_ass(ass, (words or []) if subtitles_enabled else [], offset=0, duration=duration, visuals=[], width=width, height=height, style=style, creator_credit=creator_credit, credit_alignment=credit_alignment, content_format=content_format, hook_text=hook_text, hook_end_time=hook_end_time, hook_top_band_height=round(height * .125) if centered_partial_fill else None)
-        if creator_credit or hook_text:
-            write_ass(output.with_suffix(".ass"), (words or []) if subtitles_enabled else [], offset=0, duration=duration, visuals=[], width=width, height=height, style=style, content_format=content_format)
+        write_ass(ass, words or [], offset=0, duration=duration, visuals=[], width=width, height=height, style=style, creator_credit=creator_credit, credit_alignment=credit_alignment, content_format=content_format)
+        if creator_credit:
+            write_ass(output.with_suffix(".ass"), words or [], offset=0, duration=duration, visuals=[], width=width, height=height, style=style, content_format=content_format)
     if look_before or look_after:
         # Return to delivery format after grading and before alpha compositing.
         vf = f"{vf},format=yuv420p"
