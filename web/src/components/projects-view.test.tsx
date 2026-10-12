@@ -215,6 +215,22 @@ describe("Projects create flow", () => {
     expect(screen.getByRole("heading", { name: "Processing mode" })).toBeInTheDocument();
   });
 
+  it.each([
+    { label: "Auto while profiles are pending", providersLoaded: false, hasSelectedProvider: false, mode: "Auto", expectedMode: "auto", burnSubtitles: true },
+    { label: "Auto without a provider", providersLoaded: true, hasSelectedProvider: false, mode: "Auto", expectedMode: "auto", burnSubtitles: false },
+    { label: "Auto with a connected provider", providersLoaded: true, hasSelectedProvider: true, mode: "Auto", expectedMode: "auto", burnSubtitles: true },
+    { label: "Fast with a connected provider", providersLoaded: true, hasSelectedProvider: true, mode: "Fast", expectedMode: "fast", burnSubtitles: false },
+    { label: "Smart without a provider", providersLoaded: true, hasSelectedProvider: false, mode: "Smart", expectedMode: "smart", burnSubtitles: true },
+  ])("submits $label with the expected processing and caption behavior", async ({ providersLoaded, hasSelectedProvider, mode, expectedMode, burnSubtitles }) => {
+    mockCreateClipJob.mockResolvedValue({ project, job: undefinedJob });
+    render(<ProjectsView health={health} providersLoaded={providersLoaded} hasSelectedProvider={hasSelectedProvider} onCreated={vi.fn()} />);
+    if (mode !== "Auto") fireEvent.click(screen.getByRole("button", { name: mode }));
+    fireEvent.click(screen.getByRole("tab", { name: "YouTube" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "YouTube URL" }), { target: { value: "https://www.youtube.com/watch?v=fixture" } });
+    fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
+    await waitFor(() => expect(mockCreateClipJob).toHaveBeenCalledWith(expect.objectContaining({ processingMode: expectedMode, burnSubtitles })));
+  });
+
   it("keeps the provider callout absent while /profiles is pending", () => {
     render(<ProjectsView health={health} providersLoaded={false} hasSelectedProvider={false} onCreated={vi.fn()} />);
     expect(screen.queryByText(/No provider is connected/i)).not.toBeInTheDocument();
