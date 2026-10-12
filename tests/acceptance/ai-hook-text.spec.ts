@@ -8,11 +8,32 @@ import { verifyHookTextMedia } from "./support/ai-hook-text-media";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const fixture = process.env.S6_AUTHENTICITY_FIXTURE || path.join(root, "tests/fixtures/youtube-credit-known.mp4");
 const artifacts = path.resolve(root, process.env.S6_AI_HOOK_TEXT_ARTIFACTS || "test-artifacts/ai-hook-text");
-// Public English TED talk, 263 seconds, reported public by yt-dlp in the
-// project engine image. Metadata reachability was checked without touching any
-// running stack; a real import remains an opt-in acceptance run.
-const liveUrl = process.env.S6_AI_HOOK_TEXT_YOUTUBE_URL || "https://www.youtube.com/watch?v=NiKtZgImdlY";
+// Public English 16:9 tutorial, 6:13, reported public/non-live by yt-dlp in
+// the isolated engine container. Metadata reachability is not an import; the
+// live acceptance remains opt-in.
+const liveUrl = process.env.S6_AI_HOOK_TEXT_YOUTUBE_URL || "https://www.youtube.com/watch?v=g99k86QzyDk";
 const failureMode = process.env.S6_TEST_MODE === "1" && process.env.S6_TEST_OPENROUTER_FAILURE === "timeout";
+const gateway = process.env.S6_ACCEPTANCE_URL || "http://127.0.0.1:8080";
+let liveProfileId: string | undefined;
+
+async function ensureConnectedProvider() {
+  if (liveProfileId) return;
+  const profileKey = process.env.S6_E2E_PROFILE_KEY;
+  if (!profileKey) throw new Error("Live AI hook acceptance requires S6_E2E_PROFILE_KEY; inject it through the secure environment, never a file or chat.");
+  const createdResponse = await fetch(`${gateway}/api/v1/profiles`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name: "AI hook acceptance provider", modelId: "openai/gpt-4.1-mini", openrouterKey: profileKey, persistence: "encrypted", selected: true }),
+  });
+  expect(createdResponse.ok(), "the isolated OpenRouter profile should be created").toBeTruthy();
+  const created = await createdResponse.json();
+  liveProfileId = created.id;
+  const testedResponse = await fetch(`${gateway}/api/v1/profiles/${encodeURIComponent(liveProfileId)}/test`, { method: "POST" });
+  expect(testedResponse.ok(), "the OpenRouter profile should connect before live jobs").toBeTruthy();
+  const tested = await testedResponse.json();
+  expect(tested.textStatus).toBe("connected");
+}
+
 
 async function verifyStoredHooksAndManifest(page, jobId: string, prefix: string) {
   const baseUrl = page.url();
@@ -98,6 +119,7 @@ async function waitForReady(page, expectedClips = 2) {
 async function startEligibleProject(page, name: string, source: "fixture" | "youtube", {
   style = "Serious", countTarget = 2, subscribeAnimation = false,
 } = {}) {
+  await ensureConnectedProvider();
   await openCreation(page);
   await chooseSpeechSource(page, source);
   await page.getByLabel("Project name").fill(name);
@@ -124,6 +146,12 @@ async function startEligibleProject(page, name: string, source: "fixture" | "you
 }
 
 test.describe("AI hook text acceptance", () => {
+  test.afterAll(async () => {
+    if (!liveProfileId) return;
+    await fetch(`${gateway}/api/v1/profiles/${encodeURIComponent(liveProfileId)}`, { method: "DELETE" });
+    liveProfileId = undefined;
+  });
+
   test("submits hook_text=true only after the checkbox is ticked", async ({ page }) => {
     await mockConnectedProvider(page);
     const submittedBodies: string[] = [];
@@ -191,6 +219,7 @@ test.describe("AI hook text acceptance", () => {
     test.skip(testInfo.project.name !== "Desktop Chromium", "live ingestion runs only on Desktop Chromium");
     test.skip(failureMode, "run the provider-timeout case separately");
     test.setTimeout(35 * 60_000);
+    await ensureConnectedProvider();
     await openCreation(page);
     const hook = page.getByRole("checkbox", { name: /AI hook text/i });
     await expect(hook, "Live opt-out verification requires an enabled connected provider").toBeEnabled();
