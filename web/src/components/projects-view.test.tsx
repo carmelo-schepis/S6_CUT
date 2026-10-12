@@ -200,7 +200,7 @@ describe("Projects create flow", () => {
     mockCreateClipJob.mockResolvedValue({ project: { ...project, sourceProfile: "music" }, job: { ...undefinedJob, sourceProfile: "music", processingMode: "smart" } });
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Music / sung vocals" }));
-    expect(screen.getByText(/always uses Smart transcription locally.*VAD disabled.*word timestamps retained/i)).toBeInTheDocument();
+    expect(screen.getByText(/Music \/ sung vocals always uses Smart transcription locally\. VAD disabled; word timestamps retained\./)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Auto" })).not.toBeInTheDocument();
     expect(screen.queryByRole("checkbox", { name: /Burn in subtitles/i })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "YouTube" }));
@@ -209,28 +209,24 @@ describe("Projects create flow", () => {
     await waitFor(() => expect(mockCreateClipJob).toHaveBeenCalledWith(expect.objectContaining({ sourceProfile: "music", processingMode: "smart", burnSubtitles: true, count: 5 })));
   });
 
-  it("defaults to Auto mode and resolves no-provider auto to a Fast local cut note", () => {
+  it("defaults to Auto mode and keeps the Processing mode controls visible", () => {
     render(<ProjectsView health={health} hasSelectedProvider={false} onCreated={vi.fn()} />);
-    expect(screen.getByRole("button", { name: "Auto" })).toHaveClass("active");
-    // Note text is split across icon and <strong> children, so inspect the .mode-note element's full textContent.
-    expect(screen.getByText(/No provider is connected, so Auto runs as a fast local cut\./i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Auto" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("heading", { name: "Processing mode" })).toBeInTheDocument();
   });
 
-  it("does not claim a provider is missing before /profiles has answered", () => {
+  it("keeps the provider callout absent while /profiles is pending", () => {
     render(<ProjectsView health={health} providersLoaded={false} hasSelectedProvider={false} onCreated={vi.fn()} />);
     expect(screen.queryByText(/No provider is connected/i)).not.toBeInTheDocument();
-    expect(screen.getByText(/Checking connected providers/i)).toBeInTheDocument();
-    // The "add a provider" callout is the same claim in another shape.
     expect(screen.queryByText(/Add optional AI providers/i)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Smart" }));
-    expect(screen.queryByText(/No provider is connected/i)).not.toBeInTheDocument();
-    expect(screen.getByText(/Checking connected providers/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Smart" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByText(/Add optional AI providers/i)).not.toBeInTheDocument();
   });
 
-  it("states the no-provider fallback only once /profiles confirms it", () => {
+  it("shows the optional-provider callout only after /profiles confirms disconnection", () => {
     render(<ProjectsView health={health} providersLoaded hasSelectedProvider={false} onCreated={vi.fn()} />);
-    expect(screen.getByText(/No provider is connected, so Auto runs as a fast local cut\./i)).toBeInTheDocument();
     expect(screen.getByText(/Add optional AI providers/i)).toBeInTheDocument();
   });
 
@@ -247,8 +243,8 @@ describe("Projects create flow", () => {
 
   it("reports a connected provider once /profiles confirms it", () => {
     render(<ProjectsView health={health} providersLoaded hasSelectedProvider onCreated={vi.fn()} />);
-    expect(screen.getByText(/Auto uses a connected provider, otherwise a fast local cut\./i)).toBeInTheDocument();
-    expect(screen.queryByText(/No provider is connected/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Add optional AI providers/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/No provider is connected|Auto uses a connected provider/i)).not.toBeInTheDocument();
   });
 
   it("holds back the local-tools badge and engine summary until health is known", () => {
@@ -266,7 +262,7 @@ describe("Projects create flow", () => {
   it("keeps explicit Smart as a local Whisper opt-in without a provider", () => {
     render(<ProjectsView health={health} hasSelectedProvider={false} onCreated={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Smart" }));
-    expect(screen.getByText(/local Whisper and deterministic planning/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Smart" })).toHaveAttribute("aria-pressed", "true");
   });
 
 });

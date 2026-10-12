@@ -61,7 +61,7 @@ test("Docker-served studio acceptance workflow", async ({ page, request }) => {
 
   await page.goto("/");
   await expect(page).toHaveTitle(/S6_cut/i);
-  await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Projects" })).toBeVisible();
   await expect(page.getByText("Local engine ready")).toBeVisible({ timeout: 60_000 });
   await capture(page, "desktop-projects");
 
@@ -118,7 +118,8 @@ test("Docker-served studio acceptance workflow", async ({ page, request }) => {
   // Shorts Editor: real source preview, local assistant proposal, and output list.
   await open(page, "Shorts Editor");
   await expect(page.getByRole("heading", { name: "Shorts Editor" })).toBeVisible();
-  await expect(page.getByText(/Trim an authorised video into a social-ready clip/)).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Shorts Editor" })).toBeVisible();
+  await expect(page.getByText("Trim an authorised video into a social-ready clip. Choose the section, output shape, and subtitles, then queue the render.")).toHaveCount(0);
   await page.setViewportSize({ width: 768, height: 1024 });
   const tabletMeasure = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth, innerWidth: window.innerWidth }));
   await fs.writeFile(path.join(artifactDir, "responsive-measurements.json"), JSON.stringify(tabletMeasure, null, 2));
