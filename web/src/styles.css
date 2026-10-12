@@ -480,8 +480,8 @@ select { line-height: var(--type-text-line); }
 .help-section { padding: var(--space-8) clamp(20px, 4vw, 42px) var(--space-8); border-bottom: 1px solid var(--border); scroll-margin-top: 0; }
 .help-section:last-child { border-bottom: 0; }
 .help-section-heading { margin-bottom: var(--space-6); }
-.help-section-heading h2 { margin: 0 0 var(--space-1); font-size: var(--type-heading-size); font-weight: var(--type-heading-weight); line-height: var(--type-heading-line); letter-spacing: var(--type-heading-tracking); }
-.help-section-heading p { max-width: 720px; margin: 0; color: var(--text-primary); }
+.help-section-heading h2 { margin: 0 0 var(--space-1); font-size: var(--type-heading-size); font-weight: var(--type-heading-weight); line-height: var(--type-heading-line); letter-spacing: var(--type-heading-tracking); text-wrap: balance; }
+.help-section-heading p { max-width: 60ch; margin: 0; color: var(--text-primary); line-height: var(--type-text-line); text-wrap: pretty; overflow-wrap: anywhere; }
 .help-steps, .help-mode-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: var(--space-3); }
 .help-steps article, .help-mode-grid article { min-width: 0; padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-2); }
 .help-steps article { display: grid; grid-template-columns: auto auto 1fr; align-items: center; gap: var(--space-2); }
@@ -490,7 +490,7 @@ select { line-height: var(--type-text-line); }
 .help-steps h3 { grid-column: 1 / -1; }
 .help-steps p, .help-mode-grid p, .help-editorial-list p { grid-column: 1 / -1; margin: 0; color: var(--text-primary); }
 .help-mode-grid { grid-template-columns: repeat(3, minmax(0,1fr)); }
-.help-mode-grid article { display: grid; align-content: start; gap: var(--space-2); }
+.help-mode-grid article { display: grid; align-content: start; gap: var(--space-2); overflow-wrap: anywhere; }
 .help-mode-grid article > svg { color: var(--copper-light); }
 .help-editorial-list { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: var(--space-3); }
 .help-editorial-list article { display: flex; gap: var(--space-3); padding: var(--space-4); border: 1px solid var(--border); background: var(--surface-2); }
