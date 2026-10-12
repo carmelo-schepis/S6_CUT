@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
@@ -45,13 +45,36 @@ async function verifyStoredHooksAndManifest(page, jobId: string, prefix: string)
   return { job, manifest, zipPath };
 }
 
+async function mockConnectedProvider(page: Page) {
+  await page.route("**/api/v1/profiles", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([{
+        id: "ui-only-connected-provider",
+        name: "UI-only connected profile",
+        textModelId: "openai/gpt-4.1-mini",
+        selected: true,
+        persistence: "encrypted",
+        openrouterConfigured: true,
+        textStatus: "connected",
+        status: "connected",
+        capabilities: [],
+        fallbacks: {},
+      }]),
+    });
+  });
+}
+
 async function openCreation(page) {
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await expect(page.getByText("Local engine ready")).toBeVisible({ timeout: 90_000 });
   await page.getByRole("button", { name: "Projects", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
-  const hook = page.getByRole("checkbox", { name: /Generate AI hook text/i });
+  const hook = page.getByRole("checkbox", { name: /AI hook text/i });
   await expect(hook).toBeVisible();
+  await expect(hook, "AI hook text must start unchecked for every new project").not.toBeChecked();
   await expect.poll(() => hook.locator("xpath=..").locator("small").textContent(), { timeout: 30_000 })
     .not.toBe("Checking connected providers…");
 }
@@ -85,9 +108,10 @@ async function startEligibleProject(page, name: string, source: "fixture" | "you
     await page.getByRole("button", { name: "Fewer clips", exact: true }).click();
   }
   await expect(count).toHaveText(String(countTarget));
-  const hookToggle = page.getByRole("checkbox", { name: /Generate AI hook text/i });
-  await expect(hookToggle).toBeEnabled();
-  await expect(hookToggle).toBeChecked();
+  const hookToggle = page.getByRole("checkbox", { name: /AI hook text/i });
+  await expect(hookToggle, "AI hook text must be available before a live job is submitted").toBeEnabled();
+  await hookToggle.check();
+  await expect(hookToggle, "Live AI hook text acceptance must explicitly enable the checkbox").toBeChecked();
   if (subscribeAnimation) {
     await page.getByLabel("Enable Subscribe animation").check();
     await page.getByLabel("Subscribe animation timing").selectOption("5");
@@ -100,35 +124,97 @@ async function startEligibleProject(page, name: string, source: "fixture" | "you
 }
 
 test.describe("AI hook text acceptance", () => {
-  test("shows eligibility reasons without enabling unsupported configurations", async ({ page }) => {
+  test("submits hook_text=true only after the checkbox is ticked", async ({ page }) => {
+    await mockConnectedProvider(page);
+    const submittedBodies: string[] = [];
+    await page.route("**/api/v1/jobs/clip", async (route) => {
+      submittedBodies.push(route.request().postData() || "");
+      await route.fulfill({ status: 400, json: { detail: "Acceptance payload capture" } });
+    });
     await openCreation(page);
-    const hook = page.getByRole("checkbox", { name: /Generate AI hook text/i });
+    await chooseSpeechSource(page);
+    await page.getByLabel("Project name").fill("AI hook payload acceptance");
+    const hook = page.getByRole("checkbox", { name: /AI hook text/i });
+    await expect(hook).toBeEnabled();
+    await expect(hook).not.toBeChecked();
+
+    const create = page.getByRole("button", { name: /Create \d+ short clips?/ });
+    await create.click();
+    await expect.poll(() => submittedBodies.length).toBe(1);
+    expect(submittedBodies[0]).not.toMatch(/name="hook_text"\s+true/i);
+
+    await hook.check();
+    await expect(hook).toBeChecked();
+    await create.click();
+    await expect.poll(() => submittedBodies.length).toBe(2);
+    expect(submittedBodies[1]).toMatch(/name="hook_text"\s+true/i);
+  });
+
+  test("shows eligibility reasons without enabling unsupported configurations", async ({ page }) => {
+    await mockConnectedProvider(page);
+    await openCreation(page);
+    const hook = page.getByRole("checkbox", { name: /AI hook text/i });
     await expect(hook).toBeVisible();
     await expect(hook).toHaveAttribute("type", "checkbox");
+    await expect(hook, "AI hook text must be unchecked initially").not.toBeChecked();
 
     await page.getByRole("button", { name: "Fast", exact: true }).click();
     await expect(hook).toBeDisabled();
+    await expect(hook).not.toBeChecked();
     await expect(page.getByText("Fast mode does not support AI hook text.")).toBeVisible();
 
     await page.getByRole("button", { name: "Smart", exact: true }).click();
+    await expect(hook).not.toBeChecked();
     if (await hook.isDisabled()) {
       await expect(page.getByText("No connected provider; AI hook text is unavailable.")).toBeVisible();
-    } else {
-      await expect(hook).toBeChecked();
     }
     await page.getByRole("button", { name: "Long form · 16:9" }).click();
     await expect(hook).toBeDisabled();
+    await expect(hook).not.toBeChecked();
     await expect(page.getByText("Long form does not support AI hook text.")).toBeVisible();
 
     await page.getByRole("button", { name: "Short form · 9:16" }).click();
     await page.getByRole("button", { name: "High-volume · up to 500" }).click();
     await expect(hook).toBeDisabled();
+    await expect(hook).not.toBeChecked();
     await expect(page.getByText("High-volume batches do not support AI hook text.")).toBeVisible();
 
     await page.getByRole("button", { name: "Standard · up to 30" }).click();
     await page.getByRole("button", { name: "Music / sung vocals" }).click();
     await expect(hook).toBeDisabled();
+    await expect(hook).not.toBeChecked();
     await expect(page.getByText("Music mode does not support AI hook text; Music keeps its manual Top text.", { exact: true })).toBeVisible();
+  });
+
+  test("an unticked Smart job creates no hook step or hook output", async ({ page }, testInfo) => {
+    test.skip(process.env.S6_RUN_LIVE_AI_HOOK_TEXT !== "1", "set S6_RUN_LIVE_AI_HOOK_TEXT=1 for live hook acceptance");
+    test.skip(testInfo.project.name !== "Desktop Chromium", "live ingestion runs only on Desktop Chromium");
+    test.skip(failureMode, "run the provider-timeout case separately");
+    test.setTimeout(35 * 60_000);
+    await openCreation(page);
+    const hook = page.getByRole("checkbox", { name: /AI hook text/i });
+    await expect(hook, "Live opt-out verification requires an enabled connected provider").toBeEnabled();
+    await expect(hook).not.toBeChecked();
+    await chooseSpeechSource(page, "fixture");
+    const projectName = `AI hook opt-out ${Date.now()}`;
+    await page.getByLabel("Project name").fill(projectName);
+    await page.getByRole("button", { name: "Smart", exact: true }).click();
+    const count = page.locator(".count-control strong");
+    while (Number(await count.textContent()) > 1) await page.getByRole("button", { name: "Fewer clips", exact: true }).click();
+    await expect(hook).not.toBeChecked();
+    const createdResponse = page.waitForResponse((response) => response.url().includes("/api/v1/jobs/clip") && response.status() === 202);
+    await page.getByRole("button", { name: /^Create 1 short clip$/ }).click();
+    const created = await (await createdResponse).json();
+    await waitForReady(page, 1);
+    const response = await page.request.get(new URL(`/api/v1/jobs/${encodeURIComponent(created.job.id)}`, page.url()).toString());
+    expect(response.ok()).toBeTruthy();
+    const job = await response.json();
+    expect(job.hookTextEnabled).toBe(false);
+    expect(job.steps.map((step) => step.id)).not.toContain("hook_text");
+    expect(job.clips.every((clip) => !clip.hookText)).toBe(true);
+    expect(job.warnings.some((warning: string) => warning.startsWith("AI hook text unavailable:"))).toBe(false);
+    await fs.mkdir(artifacts, { recursive: true });
+    await fs.writeFile(path.join(artifacts, `opt-out-${Date.now()}.json`), JSON.stringify({ projectName, jobId: job.id, hookTextEnabled: job.hookTextEnabled, steps: job.steps.map((step) => step.id), clips: job.clips.map((clip) => ({ id: clip.id, hookText: clip.hookText || null })) }, null, 2));
   });
 
   test("Serious style generates two transcript-grounded YouTube hooks, burn-in text, and an export manifest", async ({ page }, testInfo) => {
@@ -137,8 +223,8 @@ test.describe("AI hook text acceptance", () => {
     test.skip(failureMode, "run the provider-timeout case separately");
     test.setTimeout(35 * 60_000);
     await openCreation(page);
-    const eligible = page.getByRole("checkbox", { name: /Generate AI hook text/i });
-    if (await eligible.isDisabled()) test.skip(true, "requires a connected selected OpenRouter provider");
+    const eligible = page.getByRole("checkbox", { name: /AI hook text/i });
+    await expect(eligible, "Live AI hook text acceptance requires an enabled checkbox and connected selected provider").toBeEnabled();
     const projectName = `AI hook Serious ${Date.now()}`;
     const created = await startEligibleProject(page, projectName, "youtube", { style: "Serious", countTarget: 2 });
     await waitForReady(page, 2);
@@ -146,7 +232,7 @@ test.describe("AI hook text acceptance", () => {
     await expect(page.locator(".process-checklist li").filter({ hasText: "Hook text written" }))
       .toHaveClass(/status-complete/, { timeout: 180_000 });
     await page.getByRole("button", { name: "Captions", exact: true }).click();
-    const panel = page.locator(".inspector-section").filter({ has: page.getByText("Hook text · OpenRouter", { exact: true }) });
+    const panel = page.locator(".inspector-section").filter({ hasText: "AI hook text" });
     await expect(panel).not.toContainText("Not generated");
     const evidence = await verifyHookTextMedia(page, artifacts, `${testInfo.project.name}-serious-ai-hook-text`, jobId);
     const persistence = await verifyStoredHooksAndManifest(page, jobId, "serious-ai-hook-text");
@@ -159,7 +245,7 @@ test.describe("AI hook text acceptance", () => {
     await jobCard.getByRole("button", { name: "Open", exact: true }).click();
     await expect(page.locator(".clip-tile.complete")).toHaveCount(2, { timeout: 60_000 });
     await page.getByRole("button", { name: "Captions", exact: true }).click();
-    await expect(page.locator(".inspector-section").filter({ has: page.getByText("Hook text · OpenRouter", { exact: true }) }))
+    await expect(page.locator(".inspector-section").filter({ hasText: "AI hook text" }))
       .toContainText(persistence.job.clips[0].hookText);
   });
 
@@ -169,8 +255,8 @@ test.describe("AI hook text acceptance", () => {
     test.skip(failureMode, "run the provider-timeout case separately");
     test.setTimeout(35 * 60_000);
     await openCreation(page);
-    const eligible = page.getByRole("checkbox", { name: /Generate AI hook text/i });
-    if (await eligible.isDisabled()) test.skip(true, "requires a connected selected OpenRouter provider");
+    const eligible = page.getByRole("checkbox", { name: /AI hook text/i });
+    await expect(eligible, "Live AI hook text acceptance requires an enabled checkbox and connected selected provider").toBeEnabled();
     const projectName = `AI hook Educational ${Date.now()}`;
     const created = await startEligibleProject(page, projectName, "youtube", {
       style: "Educational", countTarget: 2, subscribeAnimation: true,
@@ -179,7 +265,7 @@ test.describe("AI hook text acceptance", () => {
     await expect(page.locator(".process-checklist li").filter({ hasText: "Hook text written" }))
       .toHaveClass(/status-complete/, { timeout: 180_000 });
     await page.getByRole("button", { name: "Captions", exact: true }).click();
-    const panel = page.locator(".inspector-section").filter({ has: page.getByText("Hook text · OpenRouter", { exact: true }) });
+    const panel = page.locator(".inspector-section").filter({ hasText: "AI hook text" });
     await expect(panel).not.toContainText("Not generated");
     const evidence = await verifyHookTextMedia(page, artifacts, `${testInfo.project.name}-educational-ai-hook-text`, created.job.id);
     const persistence = await verifyStoredHooksAndManifest(page, created.job.id, "educational-ai-hook-text");
@@ -191,8 +277,8 @@ test.describe("AI hook text acceptance", () => {
     test.skip(!failureMode, "requires an isolated deployment with S6_TEST_MODE=1 and S6_TEST_OPENROUTER_FAILURE=timeout");
     test.skip(testInfo.project.name !== "Desktop Chromium", "provider-timeout media check runs only on Desktop Chromium");
     await openCreation(page);
-    const eligible = page.getByRole("checkbox", { name: /Generate AI hook text/i });
-    if (await eligible.isDisabled()) test.skip(true, "requires a selected provider profile provisioned in the isolated stack");
+    const eligible = page.getByRole("checkbox", { name: /AI hook text/i });
+    await expect(eligible, "Provider-timeout acceptance requires an enabled checkbox and provisioned selected provider").toBeEnabled();
     const projectName = `AI hook text timeout ${Date.now()}`;
     const created = await startEligibleProject(page, projectName, "fixture");
     await waitForReady(page);
@@ -203,7 +289,7 @@ test.describe("AI hook text acceptance", () => {
       .toHaveClass(/status-failed/);
     await expect(page.getByText(/sk-or-v1-|openrouterKey|API key:/i)).toHaveCount(0);
     await page.getByRole("button", { name: "Captions", exact: true }).click();
-    const hookPanel = page.locator(".inspector-section").filter({ has: page.getByText("Hook text · OpenRouter", { exact: true }) });
+    const hookPanel = page.locator(".inspector-section").filter({ hasText: "AI hook text" });
     await expect(hookPanel).toContainText("Not generated");
     await expect(hookPanel).toContainText(/unavailable|timed out/i);
     const evidence = await verifyHookTextMedia(page, artifacts, `${testInfo.project.name}-ai-hook-text-timeout`, created.job.id, false);
