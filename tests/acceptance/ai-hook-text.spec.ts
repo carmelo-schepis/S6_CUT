@@ -18,18 +18,23 @@ let liveProfileId: string | undefined;
 
 async function ensureConnectedProvider() {
   if (liveProfileId) return;
+  const profilesResponse = await fetch(`${gateway}/api/v1/profiles`);
+  expect(profilesResponse.ok, "the isolated review stack should list provider profiles").toBeTruthy();
+  const profiles = await profilesResponse.json();
+  if (profiles.some((profile) => profile.selected && profile.textStatus === "connected")) return;
+
   const profileKey = process.env.S6_E2E_PROFILE_KEY;
-  if (!profileKey) throw new Error("Live AI hook acceptance requires S6_E2E_PROFILE_KEY; inject it through the secure environment, never a file or chat.");
+  if (!profileKey) throw new Error("Live AI hook acceptance requires a selected connected profile or S6_E2E_PROFILE_KEY injected through the secure environment; never use a key from chat or a file.");
   const createdResponse = await fetch(`${gateway}/api/v1/profiles`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ name: "AI hook acceptance provider", modelId: "openai/gpt-4.1-mini", openrouterKey: profileKey, persistence: "encrypted", selected: true }),
   });
-  expect(createdResponse.ok(), "the isolated OpenRouter profile should be created").toBeTruthy();
+  expect(createdResponse.ok, "the isolated OpenRouter profile should be created").toBeTruthy();
   const created = await createdResponse.json();
   liveProfileId = created.id;
   const testedResponse = await fetch(`${gateway}/api/v1/profiles/${encodeURIComponent(liveProfileId)}/test`, { method: "POST" });
-  expect(testedResponse.ok(), "the OpenRouter profile should connect before live jobs").toBeTruthy();
+  expect(testedResponse.ok, "the OpenRouter profile should connect before live jobs").toBeTruthy();
   const tested = await testedResponse.json();
   expect(tested.textStatus).toBe("connected");
 }
@@ -123,7 +128,7 @@ async function startEligibleProject(page, name: string, source: "fixture" | "you
   await openCreation(page);
   await chooseSpeechSource(page, source);
   await page.getByLabel("Project name").fill(name);
-  await page.getByRole("button", { name: style, exact: true }).click();
+  await page.getByRole("button", { name: style, exact: false }).click();
   await page.getByRole("button", { name: "Smart", exact: true }).click();
   const count = page.locator(".count-control strong");
   for (let attempts = 0; attempts < 30 && Number(await count.textContent()) > countTarget; attempts += 1) {
@@ -227,8 +232,8 @@ test.describe("AI hook text acceptance", () => {
     const hook = page.getByRole("checkbox", { name: /AI hook text/i });
     await expect(hook, "Live opt-out verification requires an enabled connected provider").toBeEnabled();
     await expect(hook).not.toBeChecked();
-    await chooseSpeechSource(page, "fixture");
-    const projectName = `AI hook opt-out ${Date.now()}`;
+    await chooseSpeechSource(page, "youtube");
+    const projectName = "Hook demo — off";
     await page.getByLabel("Project name").fill(projectName);
     await page.getByRole("button", { name: "Smart", exact: true }).click();
     const count = page.locator(".count-control strong");
@@ -257,7 +262,7 @@ test.describe("AI hook text acceptance", () => {
     await openCreation(page);
     const eligible = page.getByRole("checkbox", { name: /AI hook text/i });
     await expect(eligible, "Live AI hook text acceptance requires an enabled checkbox and connected selected provider").toBeEnabled();
-    const projectName = `AI hook Serious ${Date.now()}`;
+    const projectName = "Hook demo — on";
     const created = await startEligibleProject(page, projectName, "youtube", { style: "Serious", countTarget: 2 });
     await waitForReady(page, 2);
     const jobId = created.job.id;

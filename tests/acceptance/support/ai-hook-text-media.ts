@@ -41,7 +41,7 @@ export async function verifyHookTextMedia(page: Page, artifactDirectory: string,
     if (!response.ok()) throw new Error(`Unable to read job ${jobId} for engine media verification`);
     const job = await response.json();
     for (const clip of job.clips.filter((item) => item.state === "complete" && item.hookText)) {
-      const output = execFileSync("docker", ["exec", container, "python", "/app/engine/tests/verify_hook_text_media.py", jobId, clip.id], { encoding: "utf8", maxBuffer: 1024 * 1024 });
+      const output = execFileSync("docker", ["exec", "-w", "/app", container, "python", "-m", "engine.tests.verify_hook_text_media", jobId, clip.id], { encoding: "utf8", maxBuffer: 1024 * 1024 });
       engineEvidence.push(JSON.parse(output));
     }
     if (engineEvidence.length !== job.clips.filter((item) => item.state === "complete" && item.hookText).length || !engineEvidence.length) {
