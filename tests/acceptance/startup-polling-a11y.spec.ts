@@ -228,13 +228,17 @@ test.describe("provider availability", () => {
     await expect(page.getByText(/Add optional AI providers/i)).toBeVisible({ timeout: 20_000 });
   });
 
-  test("reports a connected provider once /profiles confirms one", async ({ page }) => {
-    await mockEngine(page, { profilesDelayMs: 3_000, profiles: [CONNECTED_PROFILE] });
-    const profilesResponse = page.waitForResponse(response => response.url().includes("/api/v1/profiles") && response.ok());
+  test("updates provider availability when Settings confirms a connected profile", async ({ page }) => {
+    const options = { profilesDelayMs: 3_000, profiles: [DISCONNECTED_PROFILE] };
+    await mockEngine(page, options);
     await page.goto("/", { waitUntil: "domcontentloaded" });
 
-    await expect(page.getByText(/Add optional AI providers/i)).toHaveCount(0);
-    await profilesResponse;
+    await expect(page.getByText(/Add optional AI providers/i)).toBeVisible({ timeout: 20_000 });
+    options.profiles = [CONNECTED_PROFILE];
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await expect(page.getByText("Active", { exact: true })).toBeVisible({ timeout: 20_000 });
+
+    await page.getByRole("button", { name: "Projects", exact: true }).click();
     await expect(page.getByText(/Add optional AI providers/i)).toHaveCount(0);
   });
 });
