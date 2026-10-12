@@ -157,10 +157,10 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
   const knownSourceDuration = sourceType === "file" && sourceDuration?.file === file ? sourceDuration.seconds : null;
   const hookTextDisabledReason = sourceProfile === "music" ? "Music mode does not support AI hook text; Music keeps its manual Top text."
     : processingMode === "fast" ? "Fast mode does not support AI hook text."
-      : !providersLoaded ? "Checking connected providers…"
-        : !hasSelectedProvider ? "No connected provider; AI hook text is unavailable."
-          : contentFormat === "long" ? "Long form does not support AI hook text."
-            : batchMode === "high_volume" ? "High-volume batches do not support AI hook text."
+      : contentFormat === "long" ? "Long form does not support AI hook text."
+        : batchMode === "high_volume" ? "High-volume batches do not support AI hook text."
+          : !providersLoaded ? "Checking connected providers…"
+            : !hasSelectedProvider ? "No connected provider; AI hook text is unavailable."
               : null;
   const hookTextEnabled = hookTextDisabledReason === null && hookTextChoice !== false;
   const musicConfigurationMessage = sourceProfile === "music" && contentFormat !== "short"

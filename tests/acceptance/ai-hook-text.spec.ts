@@ -52,7 +52,7 @@ async function openCreation(page) {
   await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
   const hook = page.getByRole("checkbox", { name: /Generate AI hook text/i });
   await expect(hook).toBeVisible();
-  await expect.poll(() => hook.locator("xpath=.. span small").textContent(), { timeout: 30_000 })
+  await expect.poll(() => hook.locator("xpath=..").locator("small").textContent(), { timeout: 30_000 })
     .not.toBe("Checking connected providers…");
 }
 
