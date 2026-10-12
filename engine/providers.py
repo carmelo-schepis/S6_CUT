@@ -282,7 +282,7 @@ class ProfileService:
         self.db.save_profile(profile)
         return profile
 
-    async def openrouter_json(self, messages: list[dict[str, str]], schema: dict[str, Any], *, require_saved_profile: bool = False, model_id: str | None = None) -> dict[str, Any] | None:
+    async def openrouter_json(self, messages: list[dict[str, str]], schema: dict[str, Any], *, require_saved_profile: bool = False, model_id: str | None = None, temperature: float = 0) -> dict[str, Any] | None:
         profile, secrets = self.selected_secrets(include_environment=not require_saved_profile)
         if require_saved_profile and (not profile or profile.text_status != "connected"):
             return None
@@ -296,7 +296,7 @@ class ProfileService:
             models = await self.openrouter_models()
             if not any(model.id == model_id for model in models):
                 raise ProviderError("unavailable", "The selected OpenRouter text model is no longer available. Choose another model in Settings.")
-        payload = {"model": model_id or profile.text_model_id, "messages": messages, "temperature": 0, "response_format": {"type": "json_schema", "json_schema": {"name": "s6_result", "strict": True, "schema": schema}}}
+        payload = {"model": model_id or profile.text_model_id, "messages": messages, "temperature": temperature, "response_format": {"type": "json_schema", "json_schema": {"name": "s6_result", "strict": True, "schema": schema}}}
         async with httpx.AsyncClient(timeout=45, follow_redirects=False) as client:
             for attempt in range(2):
                 try:

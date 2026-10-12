@@ -15,8 +15,8 @@ No source code was copied from the reference repositories during this build. The
 - **AI YouTube Shorts Generator** — reference-only because the supplied copy lacks a verified licence/revision. No code was copied.
 - **yt-dlp** — Unlicense/public-domain dedication and third-party component notices in the bundled project. S6_cut installs release `2026.7.4` as a constrained, user-authorised YouTube import dependency and does not vendor its source.
 
-- **Anton**, **Archivo Black**, **Barlow**, **Lora**, and **Bodoni Moda** — SIL Open Font License 1.1. Vendored under `engine/fonts/` (each family with its own `OFL.txt`) and installed into the engine image. Bodoni Moda is the upstream variable TTF; its default `opsz=14`, `wght=400` axes are retained until production libass confirms other static instances.
+- **Anton**, **Archivo Black**, **Barlow**, **Montserrat**, **Lora**, and **Bodoni Moda** — SIL Open Font License 1.1. Vendored under `engine/fonts/` (each family with its own `OFL.txt`) and installed into the engine image. Bodoni Moda is the upstream variable TTF; its default `opsz=14`, `wght=400` axes are retained until production libass confirms other static instances.
 - **Roboto Condensed Light** — Apache License 2.0, vendored as a pinned static `RobotoCondensed-Light.ttf` from `andreasf/Roboto` commit `199ca7fcf1f0606106f8a93d13e42245729f9fcb`. Static weight 300 avoids variable-axis ambiguity. The three reference web preview faces are served from local `web/public/fonts/`; there are no external font requests.
-- Barlow, Lora, Bodoni Moda, and Roboto Condensed files are unmodified upstream assets. Font names and Reserved Font Names are untouched. See `third_party_provenance.json` for source URLs, pinned revisions, and checksums.
+- Barlow, Montserrat, Lora, Bodoni Moda, and Roboto Condensed files are unmodified upstream assets. Font names and Reserved Font Names are untouched. See `third_party_provenance.json` for source URLs, pinned revisions, and checksums.
 
 Code licences do not grant rights to source media, downloaded media, models, voices, fonts, or the supplied S6_cut logo. Users must verify their own rights and provider terms.
