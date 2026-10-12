@@ -31,6 +31,13 @@ describe("ProcessChecklist – structure & semantics", () => {
     expect(container.firstChild).toBeNull();
   });
 
+  it("renders the hook_text processing step label supplied by the engine", () => {
+    const hookText: ProcessingStep = { id: "hook_text", label: "Hook text written", status: "active" };
+    render(<ProcessChecklist steps={[hookText]} />);
+    expect(screen.getByTestId("progress-step-hook_text")).toHaveAttribute("data-step-id", "hook_text");
+    expect(screen.getByText("Hook text written")).toBeInTheDocument();
+  });
+
   it("renders steps in API-reported order", () => {
     render(<ProcessChecklist steps={[complete, pending, active]} />);
     const items = screen.getAllByRole("listitem");

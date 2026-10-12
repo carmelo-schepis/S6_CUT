@@ -28,6 +28,7 @@ type VerifyVideoOutputOptions = {
   expectedWidth?: number;
   expectedHeight?: number;
   expectedOverlayRegion?: NormalizedRegion;
+  expectedOverlayTimestamp?: number;
 };
 
 type FrameSample = {
@@ -114,7 +115,7 @@ async function seekAndSample(video: Locator, timestamp: number, screenshotPath: 
 }
 
 export async function verifyVideoOutput(options: VerifyVideoOutputOptions): Promise<VideoOutputEvidence> {
-  const { video, artifactDirectory, artifactPrefix, maximumDurationSeconds, expectedWidth, expectedHeight, expectedOverlayRegion } = options;
+  const { video, artifactDirectory, artifactPrefix, maximumDurationSeconds, expectedWidth, expectedHeight, expectedOverlayRegion, expectedOverlayTimestamp } = options;
   await fs.mkdir(artifactDirectory, { recursive: true });
   await expect(video).toBeVisible();
   await waitUntilPlayable(video);
@@ -183,6 +184,10 @@ export async function verifyVideoOutput(options: VerifyVideoOutputOptions): Prom
     `all sampled frames appear frozen: ${JSON.stringify({ timestamps: samples.map((sample) => sample.time), frameDifferences })}`,
   ).toBe(true);
 
+  if (expectedOverlayRegion) {
+    const overlayTimestamp = expectedOverlayTimestamp ?? Math.max(0, metadata.duration - Math.min(0.5, metadata.duration * 0.2));
+    await seekAndSample(video, overlayTimestamp, path.join(artifactDirectory, `${artifactPrefix}-overlay.png`));
+  }
   const overlaySample = expectedOverlayRegion ? await video.evaluate((element, region) => {
     const media = element as HTMLVideoElement;
     const canvas = document.createElement("canvas");
@@ -219,9 +224,9 @@ export async function verifyVideoOutput(options: VerifyVideoOutputOptions): Prom
     };
   }, expectedOverlayRegion) : undefined;
   if (overlaySample) {
-    expect(overlaySample.variance, "creator-credit region is uniform").toBeGreaterThan(200);
-    expect(overlaySample.darkPixelRatio, "creator-credit backing plate is absent").toBeGreaterThan(0.05);
-    expect(overlaySample.brightPixelRatio, "creator-credit text is not visibly rendered").toBeGreaterThan(0.005);
+    expect(overlaySample.variance, "expected overlay region is uniform").toBeGreaterThan(200);
+    expect(overlaySample.darkPixelRatio, "expected overlay backing/scrim is absent").toBeGreaterThan(0.05);
+    expect(overlaySample.brightPixelRatio, "expected overlay text is not visibly rendered").toBeGreaterThan(0.005);
   }
 
   return {

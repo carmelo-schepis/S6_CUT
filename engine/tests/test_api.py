@@ -31,6 +31,74 @@ def test_clip_api_rejects_count_outside_opted_in_integer_limits(batch_mode, coun
     assert response.status_code == 422
 
 
+def test_hook_text_is_opt_in_and_adds_only_an_enabled_job_step(monkeypatch) -> None:
+    from engine import app as app_module
+
+    saved: dict[str, object] = {}
+    monkeypatch.setattr(app_module, "validate_youtube_url", lambda value: value)
+    monkeypatch.setattr(app_module.profiles, "smart_available", lambda: True)
+    monkeypatch.setattr(app_module.db, "save_project", lambda project: saved.update(project=project))
+    monkeypatch.setattr(app_module.db, "save_job", lambda job, private=None: saved.update(job=job, private=private))
+    provider_calls = 0
+
+    async def hook_provider(*_args, **_kwargs):
+        nonlocal provider_calls
+        provider_calls += 1
+        raise AssertionError("disabled hooks must never call the provider")
+
+    monkeypatch.setattr(app_module.profiles, "openrouter_json", hook_provider)
+
+    async def enqueue(_: str) -> None:
+        job = saved["job"]
+        if not job.hook_text_enabled:
+            app_module.manager._generate_hook_text(job, saved.get("private") or {}, [])
+
+    monkeypatch.setattr(app_module.manager, "enqueue", enqueue)
+    base = {"url": "https://www.youtube.com/watch?v=fixture", "processing_mode": "smart", "count": "2"}
+    response = client.post("/api/v1/jobs/clip", data=base)
+    assert response.status_code == 202, response.text
+    assert response.json()["job"]["hookTextEnabled"] is False
+    assert "hook_text" not in [step["id"] for step in response.json()["job"]["steps"]]
+    assert provider_calls == 0
+
+    response = client.post("/api/v1/jobs/clip", data={**base, "hook_text": "true", "burn_subtitles": "false"})
+    assert response.status_code == 202, response.text
+    assert response.json()["job"]["hookTextEnabled"] is True
+    assert response.json()["job"]["burnSubtitles"] is False
+    assert [step["id"] for step in response.json()["job"]["steps"]].index("hook_text") < [step["id"] for step in response.json()["job"]["steps"]].index("render")
+    assert saved["private"]["hook_text"]["enabled"] is True
+
+
+@pytest.mark.parametrize(("overrides", "reason"), [
+    ({"content_format": "long"}, "Long form"),
+    ({"batch_mode": "high_volume"}, "High-volume"),
+    ({"processing_mode": "fast"}, "Fast mode"),
+    ({"source_profile": "music"}, "Music"),
+])
+def test_hook_text_rejects_ineligible_jobs_with_specific_reason(monkeypatch, overrides, reason) -> None:
+    from engine import app as app_module
+
+    monkeypatch.setattr(app_module, "validate_youtube_url", lambda value: value)
+    monkeypatch.setattr(app_module.profiles, "smart_available", lambda: True)
+    response = client.post("/api/v1/jobs/clip", data={
+        "url": "https://www.youtube.com/watch?v=fixture", "hook_text": "true", **overrides,
+    })
+    assert response.status_code == 422
+    assert reason in response.json()["detail"]
+
+
+def test_hook_text_requires_connected_provider(monkeypatch) -> None:
+    from engine import app as app_module
+
+    monkeypatch.setattr(app_module, "validate_youtube_url", lambda value: value)
+    monkeypatch.setattr(app_module.profiles, "smart_available", lambda: False)
+    response = client.post("/api/v1/jobs/clip", data={
+        "url": "https://www.youtube.com/watch?v=fixture", "hook_text": "true", "processing_mode": "smart",
+    })
+    assert response.status_code == 422
+    assert "connected OpenRouter provider" in response.json()["detail"]
+
+
 def test_high_volume_clip_api_persists_requested_count_separately(monkeypatch) -> None:
     from engine import app as app_module
 

@@ -410,6 +410,7 @@ async def create_clip_job(
     subscribe_animation: Annotated[str, Form()] = "{}",
     music_presentation: Annotated[str, Form()] = "{}",
     music_top_text: Annotated[str, Form()] = "",
+    hook_text: Annotated[bool, Form()] = False,
 ) -> dict[str, object]:
     _rate_limit(request)
     selected_folder = db.get_folder(library_folder_id)
@@ -444,10 +445,24 @@ async def create_clip_job(
     cap_explanation: str | None = None
     smart_available = profiles.smart_available()
     mode = "smart" if source_profile == "music" else resolve_processing_mode(processing_mode, smart_available)
+    if hook_text:
+        if content_format != "short":
+            raise HTTPException(422, "AI hook text is unavailable for Long form.")
+        if source_profile == "music":
+            raise HTTPException(422, "AI hook text is unavailable for Music; Music keeps its manual Top text.")
+        if batch_mode == "high_volume":
+            raise HTTPException(422, "AI hook text is unavailable for High-volume jobs.")
+        if processing_mode == "fast":
+            raise HTTPException(422, "AI hook text is unavailable in Fast mode.")
+        if not smart_available:
+            raise HTTPException(422, "AI hook text requires a connected OpenRouter provider.")
+        if mode != "smart":
+            raise HTTPException(422, "AI hook text is unavailable in Fast mode.")
     private: dict[str, object] = {
         "count": count, "batch_mode": batch_mode, "min_duration": min_duration, "max_duration": max_duration,
         "aspect_ratio": aspect_ratio, "content_format": content_format, "processing_mode": mode,
         "burn_subtitles": True if source_profile == "music" else burn_subtitles, "embed_subtitles": embed_subtitles,
+        "hook_text": {"enabled": hook_text, "status": "pending" if hook_text else "disabled"},
         "use_openrouter": mode == "smart" and smart_available and source_profile == "speech" and batch_mode == "standard",
         "library_folder_id": library_folder_id,
         "subscribe_animation": _subscribe_animation_request(subscribe_animation).model_dump(),
@@ -493,7 +508,7 @@ async def create_clip_job(
         cap_explanation = "Effective target will be confirmed after YouTube download and FFprobe validation."
     project = Project(id=project_id, name=_project_name(name, Path(source_name).stem), mode="clip", style=style, state="queued", source_name=source_name, source_kind=source_kind, requested_count=count, batch_mode=batch_mode, effective_target=effective_target, cap_explanation=cap_explanation, content_format=content_format, source_profile=source_profile, latest_job_id=job_id, library_folder_id=library_folder_id)
     high_volume_smart_landscape = batch_mode == "high_volume" and content_format == "long" and mode == "smart"
-    steps = manager._fast_steps() if uses_fast_pipeline(mode, content_format) and not high_volume_smart_landscape else manager._smart_steps(bool(private["use_openrouter"]), source_profile)
+    steps = manager._fast_steps() if uses_fast_pipeline(mode, content_format) and not high_volume_smart_landscape else manager._smart_steps(bool(private["use_openrouter"]), source_profile, include_hook_text=hook_text)
     if batch_mode == "high_volume" and mode == "smart":
         provider_step = next((step for step in steps if step.id == "openrouter"), None)
         if provider_step:
@@ -507,7 +522,7 @@ async def create_clip_job(
             steps[1].status = "complete"
             steps[1].detail = f"Source validated - {float(source_metadata['duration']):.1f}s"
             steps[1].started_at = steps[1].completed_at = checkpoint_time
-    job = Job(id=job_id, project_id=project_id, library_folder_id=library_folder_id, mode="clip", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style=style, processing_mode=mode, content_format=content_format, source_profile=source_profile, music_presentation=music_config if source_profile == "music" else None, music_top_text=(music_top_text if music_top_text.strip() else None) if source_profile == "music" else None, requested_count=count, batch_mode=batch_mode, effective_target=effective_target, cap_explanation=cap_explanation, burn_subtitles=True if source_profile == "music" else burn_subtitles, embed_subtitles=embed_subtitles, steps=steps)
+    job = Job(id=job_id, project_id=project_id, library_folder_id=library_folder_id, mode="clip", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style=style, processing_mode=mode, content_format=content_format, source_profile=source_profile, music_presentation=music_config if source_profile == "music" else None, music_top_text=(music_top_text if music_top_text.strip() else None) if source_profile == "music" else None, requested_count=count, batch_mode=batch_mode, effective_target=effective_target, cap_explanation=cap_explanation, burn_subtitles=True if source_profile == "music" else burn_subtitles, embed_subtitles=embed_subtitles, hook_text_enabled=hook_text, steps=steps)
     db.save_project(project)
     db.save_job(job, private)
     try:
