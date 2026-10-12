@@ -27,7 +27,7 @@ from .media import (
 from .models import (
     Asset, CaptionCue, Clip, ContentFormat, Job, ProcessingMode, ProcessingStep, ProvenanceRecord, ScoreBreakdown, now_iso,
 )
-from .hook_text import hook_text_prompt, hook_text_schema, normalize_hook_text
+from .hook_text import HOOK_TEXT_RULES, hook_text_clips, hook_text_schema, normalize_hook_text
 from .providers import ProfileService, provider_runtime_message
 from .security import confined, redact, safe_archive_title, safe_filename
 from .selection import Candidate, _score, _timed_words, candidate_quality, clip_from_candidate, select_candidates, select_music_candidates
@@ -1551,7 +1551,8 @@ class JobManager:
         invalid_items = False
         try:
             result = asyncio.run(self.profiles.openrouter_json(
-                [{"role": "user", "content": hook_text_prompt(excerpts)}], hook_text_schema(len(excerpts)),
+                [{"role": "system", "content": HOOK_TEXT_RULES}, {"role": "user", "content": hook_text_clips(excerpts)}],
+                hook_text_schema(len(excerpts)), temperature=0.8,
             ))
             hooks = result.get("hooks") if isinstance(result, dict) else None
             if not isinstance(hooks, list):

@@ -7,7 +7,7 @@ def test_hook_prompt_contains_contract_and_clip_context():
         "index": 1, "style": "Serious", "duration": 24,
         "transcript_excerpt": "The answer was not what I expected.", "title": "A project",
     }])
-    for phrase in ("pattern-interrupting", "open loop", "70–140", "28 words", "sentence case", "do not reveal", "transcript's language", "No hashtags", "untrusted quoted source data"):
+    for phrase in ("stop the scroll", "pattern interrupt", "open a loop", "60–120", "22 words", "sentence case", "do not reveal", "transcript's language", "No hashtags", "untrusted quoted source data", "Discover", "different words"):
         assert phrase in prompt
     assert '"style": "Serious"' in prompt
     assert HOOK_TEXT_SCHEMA["properties"]["hooks"]["items"]["properties"]["text"]["maxLength"] == 150
@@ -43,8 +43,8 @@ def test_hook_ass_style_wrap_layer_and_end_time(tmp_path):
     write_ass(path, [], offset=0, duration=20, visuals=[], width=1080, height=1920,
               hook_text=hook, hook_end_time=15)
     ass = path.read_text(encoding="utf-8")
-    assert "Style: Hook,Barlow,52," in ass
-    assert ",8,90,90,211,1" in ass
+    assert "Style: Hook,Montserrat,72," in ass
+    assert ",8,60,60,211,1" in ass
     assert "Dialogue: 5,0,0:00:15.00,Hook" in ass
     assert "Dialogue: 0,0,0:00:20.00,HookScrim" in ass
     assert "Dialogue: 10," not in ass

@@ -97,6 +97,16 @@
       "licenceFile": "engine/fonts/barlow/OFL.txt"
     },
     {
+      "name": "Montserrat Bold",
+      "version": "Montserrat-Bold.ttf static TTF at JulietaUla/Montserrat commit 555facfb2a18c72c3c0380f0d9c0f060453a9058",
+      "licence": "SIL Open Font License 1.1",
+      "source": "https://github.com/JulietaUla/Montserrat/tree/555facfb2a18c72c3c0380f0d9c0f060453a9058/fonts/ttf/Montserrat-Bold.ttf",
+      "sha256": "bc6e854971cea46b463be6f9eef4d9cd52f51cfc1fc0dd90c9d3e6483dc0ec61",
+      "use": "Burned-in AI hook text face",
+      "vendoredAt": "engine/fonts/montserrat/Montserrat-Bold.ttf",
+      "licenceFile": "engine/fonts/montserrat/OFL.txt"
+    },
+    {
       "name": "Lora",
       "version": "3.007 (google/fonts ofl/lora; repository commit 7085eb89a950e85db5b166b7a58d414544b4140c)",
       "licence": "SIL Open Font License 1.1",
