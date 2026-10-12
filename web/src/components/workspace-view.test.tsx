@@ -454,9 +454,11 @@ describe("WorkspaceView – publication metadata, Details rename, read-only capt
     expect(screen.getByText(/Review and download finished clips here/)).toBeInTheDocument();
     // Read-only caption preset
     fireEvent.click(screen.getByRole("button", { name: /captions/i }));
-    expect(screen.getByText("Read-only")).toBeInTheDocument();
+    expect(screen.getAllByText("Read-only")).toHaveLength(2);
     expect(screen.getByText("Editorial highlight")).toBeInTheDocument();
     expect(screen.getByText("Minimal · High contrast box")).toBeInTheDocument();
+    expect(screen.getByText("Hook text · OpenRouter")).toBeInTheDocument();
+    expect(screen.getByText("Not generated")).toBeInTheDocument();
     // No select inside the inspector content
     const inspectorContent = document.querySelector(".inspector-content");
     expect(inspectorContent?.querySelector("select")).toBeNull();

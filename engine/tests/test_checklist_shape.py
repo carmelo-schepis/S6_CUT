@@ -76,6 +76,30 @@ def test_high_volume_long_form_smart_job_uses_transcript_planning_checklist(tmp_
     assert manager._required_step_ids(job, private) == smart_ids
 
 
+def test_opted_in_hook_step_is_recreated_and_preserved_during_recovery(tmp_path_local: Path) -> None:
+    db, manager = _cluster(tmp_path_local)
+    project = Project(id="p-hook-recovery", name="Hook recovery", mode="clip", style="serious", state="queued",
+                     source_name="source.mp4", source_kind="youtube", requested_count=2, content_format="short")
+    db.save_project(project)
+    job = Job(id="j-hook-recovery", project_id=project.id, mode="clip", state="queued", stage="queued",
+              stage_label="Queued", progress=0, style="serious", processing_mode="smart", content_format="short",
+              hook_text_enabled=True, steps=[])
+    private = {"content_format": "short", "processing_mode": "smart", "hook_text": {"enabled": True, "status": "pending"}}
+    db.save_job(job, private)
+
+    manager._reconcile_steps(job, private)
+
+    assert "hook_text" in {step.id for step in job.steps}
+    assert "hook_text" in manager._required_step_ids(job, private)
+
+    # A persisted Smart checklist predating the opt-in row is repaired without
+    # dropping the job's durable hook_text_enabled snapshot.
+    job.steps = manager._smart_steps(False)
+    manager._reconcile_steps(job, private)
+    assert "hook_text" in {step.id for step in job.steps}
+    assert "hook_text" in {step.id for step in db.get_job(job.id).steps}
+
+
 def test_persisted_smart_checklist_on_a_long_form_job_is_rebuilt_before_processing(tmp_path_local: Path) -> None:
     db, manager = _cluster(tmp_path_local)
     job = _long_smart_job(db, manager)

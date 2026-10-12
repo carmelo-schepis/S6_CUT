@@ -27,6 +27,7 @@ from .media import (
 from .models import (
     Asset, CaptionCue, Clip, ContentFormat, Job, ProcessingMode, ProcessingStep, ProvenanceRecord, ScoreBreakdown, now_iso,
 )
+from .hook_text import hook_text_prompt, hook_text_schema, normalize_hook_text
 from .providers import ProfileService, provider_runtime_message
 from .security import confined, redact, safe_archive_title, safe_filename
 from .selection import Candidate, _score, _timed_words, candidate_quality, clip_from_candidate, select_candidates, select_music_candidates
@@ -780,7 +781,7 @@ class JobManager:
             ProcessingStep(id="ready", label="Project ready"),
         ]
 
-    def _smart_steps(self, use_openrouter: bool = False, source_profile: str = "speech") -> list[ProcessingStep]:
+    def _smart_steps(self, use_openrouter: bool = False, source_profile: str = "speech", include_hook_text: bool = False) -> list[ProcessingStep]:
         music = source_profile == "music"
         provider_step = ProcessingStep(id="openrouter", label="Provider bypassed for music profile" if music else "OpenRouter planning")
         if not use_openrouter:
@@ -788,7 +789,7 @@ class JobManager:
             provider_step.status = "skipped"
             provider_step.detail = "Music profile stays local; provider planning skipped" if music else "No connected provider; used local planning"
             provider_step.started_at = provider_step.completed_at = timestamp
-        return [
+        steps = [
             ProcessingStep(id="source", label="Source received"),
             ProcessingStep(id="probe", label="Video validated"),
             ProcessingStep(id="audio", label="Audio prepared"),
@@ -801,6 +802,9 @@ class JobManager:
             ProcessingStep(id="verify", label="Outputs verified"),
             ProcessingStep(id="ready", label="Project ready"),
         ]
+        if include_hook_text:
+            steps.insert(steps.index(next(item for item in steps if item.id == "render")), ProcessingStep(id="hook_text", label="Hook text written"))
+        return steps
 
     @staticmethod
     def _mark_proven(step: ProcessingStep | None, as_of: str) -> None:
@@ -858,7 +862,7 @@ class JobManager:
         if job.steps or job.state == "complete":
             return
         as_of = job.updated_at
-        job.steps = self._fast_steps() if job_uses_fast_pipeline(job, private) else self._smart_steps(bool(private.get("use_openrouter")), job.source_profile)
+        job.steps = self._fast_steps() if job_uses_fast_pipeline(job, private) else self._smart_steps(bool(private.get("use_openrouter")), job.source_profile, include_hook_text=job.hook_text_enabled)
         self._restore_proven_steps(job, private, as_of)
         self._save(job, private)
 
@@ -888,7 +892,7 @@ class JobManager:
         """
         if job_uses_fast_pipeline(job, private):
             return {step.id for step in self._fast_steps()}
-        return {step.id for step in self._smart_steps(bool(private.get("use_openrouter")), job.source_profile)}
+        return {step.id for step in self._smart_steps(bool(private.get("use_openrouter")), job.source_profile, include_hook_text=job.hook_text_enabled)}
 
     def _repair_step_shape(self, job: Job, private: dict[str, Any]) -> None:
         """Rebuild a checklist persisted in the wrong shape for its pipeline.
@@ -908,7 +912,7 @@ class JobManager:
         if {step.id for step in job.steps} == self._required_step_ids(job, private):
             return
         as_of = job.updated_at
-        job.steps = self._fast_steps() if job_uses_fast_pipeline(job, private) else self._smart_steps(bool(private.get("use_openrouter")), job.source_profile)
+        job.steps = self._fast_steps() if job_uses_fast_pipeline(job, private) else self._smart_steps(bool(private.get("use_openrouter")), job.source_profile, include_hook_text=job.hook_text_enabled)
         # Replays nothing: published clips keep the render counters they earned.
         self._restore_proven_steps(job, private, as_of)
         self._save(job, private)
@@ -1334,14 +1338,18 @@ class JobManager:
                 clip.music_top_text or private.get("music_top_text"),
                 clip.music_treatment or (music_treatments.get(clip.id) if isinstance(music_treatments, dict) else None),
             ) if job.source_profile == "music" else {}
-            render(source, output, start=clip.start, end=clip.end, aspect=private["aspect_ratio"], settings=self.settings,
-                   has_audio=bool(metadata["audio"]), words=words, style=job.style,
-                   **_centered_partial_fill_kwargs(render, centered_partial_fill_eligible(job, private, metadata)),
-                   subtitles_enabled=bool(private.get("burn_subtitles", job.burn_subtitles)),
-                   embed_subtitles=bool(private.get("embed_subtitles", job.embed_subtitles)),
-                   **_subscribe_render_kwargs(render, private.get("subscribe_animation")),
-                   **_format_render_kwargs(render, job_content_format(job, private)),
-                   **_creator_render_kwargs(render, youtube_creator_credit(job, private)), **music_kwargs)
+            rerender_kwargs = {
+                "start": clip.start, "end": clip.end, "aspect": private["aspect_ratio"], "settings": self.settings,
+                "has_audio": bool(metadata["audio"]), "words": words, "style": job.style,
+                "hook_text": clip.hook_text,
+                **_centered_partial_fill_kwargs(render, centered_partial_fill_eligible(job, private, metadata)),
+                "subtitles_enabled": bool(private.get("burn_subtitles", job.burn_subtitles)),
+                "embed_subtitles": bool(private.get("embed_subtitles", job.embed_subtitles)),
+                **_subscribe_render_kwargs(render, private.get("subscribe_animation")),
+                **_format_render_kwargs(render, job_content_format(job, private)),
+                **_creator_render_kwargs(render, youtube_creator_credit(job, private)), **music_kwargs,
+            }
+            render(source, output, **_compatible_render_kwargs(render, rerender_kwargs))
             # publish_clip_output reuses the stable asset identity in its transaction.
             job, clip, _ = self._publish_output(job, clip, output, private)
             clip.caption_cues = [CaptionCue.model_validate(cue) for cue in cues]
@@ -1495,6 +1503,97 @@ class JobManager:
         self.skip_step(job, "local_planning", detail="OpenRouter planning succeeded", private=private)
         return chosen
 
+    def _generate_hook_text(self, job: Job, private: dict[str, Any], words: list[dict[str, Any]]) -> None:
+        step = next((item for item in job.steps if item.id == "hook_text"), None)
+        if not job.hook_text_enabled or not step:
+            return
+        state = private.get("hook_text")
+        state = state if isinstance(state, dict) else {"enabled": True, "status": "pending"}
+        if state.get("status") in {"complete", "failed"}:
+            return
+        if job.content_format != "short" or job.source_profile != "speech" or job.processing_mode != "smart" or job.batch_mode != "standard":
+            self.fail_step(job, "hook_text", detail="AI hook text is not eligible for this job", private=private)
+            return
+        planning_step = next((item for item in job.steps if item.id == "openrouter"), None)
+        if planning_step and planning_step.status == "failed":
+            reason = planning_step.detail or "OpenRouter planning failed"
+            warning = f"AI hook text unavailable: {reason.rstrip('.')} . Clips were rendered without hook text."
+            warning = warning.replace(" .", ".")
+            private["hook_text"] = {"enabled": True, "status": "failed", "reason": reason}
+            job.warnings.append(warning) if warning not in job.warnings else None
+            self.fail_step(job, "hook_text", detail=warning, private=private)
+            return
+        if state.get("status") == "generating":
+            reason = "previous hook generation was interrupted"
+            warning = f"AI hook text unavailable: {reason}. Clips were rendered without hook text."
+            private["hook_text"] = {"enabled": True, "status": "failed", "reason": reason}
+            job.warnings.append(warning) if warning not in job.warnings else None
+            self.fail_step(job, "hook_text", detail=warning, private=private)
+            return
+        self.start_step(job, "hook_text", detail="Writing transcript-grounded hooks", label="Writing hook text", progress=38, private=private)
+        private["hook_text"] = {"enabled": True, "status": "generating"}
+        self._save(job, private)
+        project = self.db.get_project(job.project_id)
+        title = (project.name if project else None) or str(private.get("source_name") or "")
+        excerpts = []
+        for clip in job.clips:
+            excerpt = " ".join(str(word.get("text", "")) for word in words if clip.start <= float(word.get("start", -1)) <= clip.end)
+            excerpts.append({
+                "index": clip.index,
+                "style": job.style.title(),
+                "duration": clip.duration,
+                "transcript_excerpt": excerpt[:800],
+                "title": title,
+            })
+        reason = None
+        invalid_items = False
+        try:
+            result = asyncio.run(self.profiles.openrouter_json(
+                [{"role": "user", "content": hook_text_prompt(excerpts)}], hook_text_schema(len(excerpts)),
+            ))
+            hooks = result.get("hooks") if isinstance(result, dict) else None
+            if not isinstance(hooks, list):
+                raise ValueError("provider returned malformed JSON")
+            values: dict[int, str] = {}
+            seen: set[int] = set()
+            valid_indexes = {clip.index for clip in job.clips}
+            for item in hooks:
+                if not isinstance(item, dict) or type(item.get("index")) is not int or item["index"] not in valid_indexes or item["index"] in seen:
+                    invalid_items = True
+                    continue
+                seen.add(item["index"])
+                normalized = normalize_hook_text(item.get("text"))
+                if normalized is None:
+                    invalid_items = True
+                    continue
+                values[item["index"]] = normalized
+            if seen != valid_indexes:
+                invalid_items = True
+            for clip in job.clips:
+                clip.hook_text = values.get(clip.index)
+            available = len(values)
+            if available == 0:
+                reason = "provider returned no valid hook text"
+            elif invalid_items:
+                reason = "some hook items were missing or invalid"
+        except Exception as exc:
+            reason = " ".join(redact(provider_runtime_message(exc, "OpenRouter")).split()).strip(" .") or "provider request failed"
+            for clip in job.clips:
+                clip.hook_text = None
+        if reason:
+            warning = f"AI hook text unavailable: {reason}. Clips were rendered without hook text."
+            if warning not in job.warnings:
+                job.warnings.append(warning)
+            private["hook_text"] = {"enabled": True, "status": "failed" if not any(clip.hook_text for clip in job.clips) else "complete", "reason": reason}
+            if any(clip.hook_text for clip in job.clips):
+                self.complete_step(job, "hook_text", detail=f"{sum(bool(clip.hook_text) for clip in job.clips)} of {len(job.clips)} clips", private=private)
+            else:
+                self.fail_step(job, "hook_text", detail=warning, private=private)
+        else:
+            private["hook_text"] = {"enabled": True, "status": "complete"}
+            self.complete_step(job, "hook_text", detail=f"{len(job.clips)} of {len(job.clips)} clips", private=private)
+        self._save(job, private)
+
     def _process_clip_smart(self, job: Job, private: dict[str, Any]) -> None:
         source = self._source(job, private)
         if not self._cooperate(job):
@@ -1625,6 +1724,7 @@ class JobManager:
                 if clip.start < 0 or clip.end > metadata["duration"] or clip.end <= clip.start:
                     raise MediaError(f"Clip {clip.index} falls outside the source timeline")
             self.complete_step(job, "boundaries", detail=f"{len(clips)} boundaries verified", private=private)
+        self._generate_hook_text(job, private, words if isinstance(private.get("transcript"), dict) else [])
         if profile == "music":
             _assign_music_treatments(job, private, self._save)
             minimum = float(private["min_duration"])
@@ -1686,6 +1786,7 @@ class JobManager:
                 render_kwargs = {
                     "start": clip.start, "end": clip.end, "aspect": private["aspect_ratio"],
                     "words": clip_words if subtitles_enabled or bool(private.get("embed_subtitles", job.embed_subtitles)) else [],
+                    **({"hook_text": clip.hook_text} if clip.hook_text else {}),
                     "visuals": [], "overlays": overlays, "settings": self.settings, "style": job.style,
                     **_centered_partial_fill_kwargs(render_clip, centered_partial_fill_eligible(job, private, metadata)),
                     **({"embed_subtitles": True} if private.get("embed_subtitles", job.embed_subtitles) else {}),
@@ -1699,7 +1800,7 @@ class JobManager:
                     ) if profile == "music" else {}),
                 }
                 try:
-                    render_clip(source, output, **render_kwargs)
+                    render_clip(source, output, **_compatible_render_kwargs(render_clip, render_kwargs))
                 except TypeError as exc:
                     if "unexpected keyword argument 'style'" not in str(exc):
                         raise
@@ -2253,6 +2354,7 @@ class JobManager:
                 "dimensions": {"width": clip.width, "height": clip.height},
                 "source_range_seconds": {"start": clip.start, "end": clip.end},
                 "creator_credit": clip.creator_credit,
+                "hook_text": clip.hook_text,
                 "library_asset_id": clip.library_asset_id,
                 "blob_id": clip.blob_id,
                 "provenance": [record.model_dump(mode="json") for record in clip.provenance],

@@ -113,6 +113,7 @@ class Clip(ApiModel):
     # Exact attribution passed to the renderer and recorded only on publication.
     creator_credit: str | None = Field(default=None, max_length=140)
     music_top_text: str | None = Field(default=None, max_length=100)
+    hook_text: str | None = Field(default=None, max_length=150)
     music_treatment: Literal["color", "grayscale"] | None = None
     # DO-NOT-CHANGE: engine-set only, after the publication transaction commits —
     # the UI never displays this from optimistic state
@@ -203,6 +204,7 @@ class Job(ApiModel):
     # Snapshot of the user's caption choice; legacy payloads default safely on.
     burn_subtitles: bool = True
     embed_subtitles: bool = False
+    hook_text_enabled: bool = False
     warnings: list[str] = Field(default_factory=list)
     queued_at: str | None = None
     queue_position: int | None = Field(default=None, ge=1)

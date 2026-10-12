@@ -132,10 +132,10 @@ export function ProcessChecklist({ steps, jobState, compact = false, label = "Sh
           const active = step.status === "active";
           const progress = itemProgress(step);
           return (
-            <li key={step.id} className={`checklist-step status-${step.status}${active ? " active-row" : ""}${step.status === "complete" && freshlyCompleted.has(step.id) ? " checkmark-new" : ""}`} aria-current={active ? "step" : undefined} data-testid={`progress-step-${step.id}`}>
+            <li key={step.id} className={`checklist-step status-${step.status}${active ? " active-row" : ""}${step.status === "complete" && freshlyCompleted.has(step.id) ? " checkmark-new" : ""}`} aria-current={active ? "step" : undefined} data-step-id={step.id} data-testid={`progress-step-${step.id}`}>
               <span className="checklist-icon" aria-hidden="true">{stepIcon(step.status)}</span>
               <div className="checklist-step-body">
-                <span className="checklist-label" title={step.label}>{step.label}</span>
+                <span className="checklist-label" title={step.label}>{step.id === "hook_text" && step.label === "hook_text" ? "AI hook text" : step.label}</span>
                 <span className="checklist-step-meta">
                   <span className="checklist-status-text">{statusLabel(step.status, paused)}</span>
                   {active && !paused && (step.detail || step.startedAt) && (

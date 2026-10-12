@@ -203,6 +203,7 @@ type ClipJobInput = {
   libraryFolderId?: string;
   musicPresentation?: MusicPresentationConfig;
   musicTopText?: string;
+  hookText?: boolean;
 };
 
 export async function createClipJob(input: ClipJobInput): Promise<{ project: Project; job: Job }> {
@@ -221,6 +222,7 @@ export async function createClipJob(input: ClipJobInput): Promise<{ project: Pro
   form.set("source_profile", input.sourceProfile ?? "speech");
   form.set("burn_subtitles", String(input.burnSubtitles ?? true));
   form.set("embed_subtitles", String(input.embedSubtitles ?? false));
+  if (input.hookText === true) form.set("hook_text", "true");
   if (input.libraryFolderId) form.set("library_folder_id", input.libraryFolderId);
   if (input.subscribeAnimation) form.set("subscribe_animation", JSON.stringify(input.subscribeAnimation));
   if (input.sourceProfile === "music") {
