@@ -65,7 +65,7 @@ async function verifyStoredHooksAndManifest(page, jobId: string, prefix: string)
   await fs.mkdir(artifacts, { recursive: true });
   const zipPath = path.join(artifacts, `${prefix}.zip`);
   await fs.writeFile(zipPath, await zipResponse.body());
-  const manifest = JSON.parse(execFileSync("python3", ["-c", "import json,sys,zipfile; z=zipfile.ZipFile(sys.argv[1]); print(z.read('manifest.json').decode())", zipPath], { encoding: "utf8" }));
+  const manifest = JSON.parse(execFileSync("python3", ["-c", "import json,sys,zipfile; z=zipfile.ZipFile(sys.argv[1]); name=next(n for n in z.namelist() if n == 'manifest.json' or n.endswith('/manifest.json')); print(z.read(name).decode())", zipPath], { encoding: "utf8" }));
   expect(manifest.outputs).toHaveLength(2);
   expect(manifest.outputs.map((output) => output.hook_text)).toEqual(job.clips.map((clip) => clip.hookText));
   return { job, manifest, zipPath };
@@ -128,7 +128,7 @@ async function startEligibleProject(page, name: string, source: "fixture" | "you
   await openCreation(page);
   await chooseSpeechSource(page, source);
   await page.getByLabel("Project name").fill(name);
-  await page.getByRole("button", { name: style, exact: false }).click();
+  await page.locator(".style-card").filter({ hasText: style }).click();
   await page.getByRole("button", { name: "Smart", exact: true }).click();
   const count = page.locator(".count-control strong");
   for (let attempts = 0; attempts < 30 && Number(await count.textContent()) > countTarget; attempts += 1) {
@@ -277,7 +277,7 @@ test.describe("AI hook text acceptance", () => {
     await fs.writeFile(path.join(artifacts, `serious-${Date.now()}.json`), JSON.stringify({ projectName, media: evidence, persistence }, null, 2));
     await page.reload({ waitUntil: "domcontentloaded" });
     await page.getByRole("button", { name: "Jobs", exact: true }).click();
-    const jobCard = page.locator(".job-card").filter({ hasText: projectName }).first();
+    const jobCard = page.locator(`.job-card[data-job-id="${jobId}"]`);
     await expect(jobCard).toBeVisible({ timeout: 60_000 });
     await jobCard.getByRole("button", { name: "Open", exact: true }).click();
     await expect(page.locator(".clip-tile.complete")).toHaveCount(2, { timeout: 60_000 });
