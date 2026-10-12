@@ -60,21 +60,21 @@ def _frame(path: Path, timestamp: float, settings: Settings) -> bytes:
     return result.stdout
 
 
-@pytest.mark.skipif(not shutil.which("ffmpeg") or not shutil.which("ffprobe"), reason="FFmpeg smoke test requires ffmpeg and ffprobe")
-def test_creator_credit_fades_out_of_the_encoded_frame(tmp_path: Path) -> None:
-    settings = Settings.from_env()
+def _credit_corner_differences(tmp_path: Path, settings: Settings, timestamps: tuple[float, ...]) -> dict[float, float]:
     source = tmp_path / "source.mp4"
-    subprocess.run([
-        settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi",
-        "-i", "testsrc2=size=1080x1920:rate=30:duration=14", "-c:v", "libx264", "-preset", "ultrafast", str(source),
-    ], check=True, capture_output=True)
+    if not source.exists():
+        subprocess.run([
+            settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi",
+            "-i", "testsrc2=size=1080x1920:rate=30:duration=14", "-c:v", "libx264", "-preset", "ultrafast", str(source),
+        ], check=True, capture_output=True)
     base_ass = tmp_path / "base.ass"
     credit_ass = tmp_path / "credit.ass"
+    # The baseline carries the same scrim, so only the credit differs.
     write_ass(base_ass, [], offset=0, duration=14, visuals=[], width=1080, height=1920)
     write_ass(credit_ass, [], offset=0, duration=14, visuals=[], width=1080, height=1920, creator_credit="Source: Fade Fixture", credit_alignment=3)
     crop = "crop=540:160:540:1760,format=gray"
     differences = {}
-    for timestamp in (1.0, 5.0, 9.5, 10.0, 10.25, 10.5, 10.75, 11.0, 11.5, 13.0):
+    for timestamp in timestamps:
         rendered = []
         for ass_path in (base_ass, credit_ass):
             result = subprocess.run([
@@ -84,16 +84,32 @@ def test_creator_credit_fades_out_of_the_encoded_frame(tmp_path: Path) -> None:
             rendered.append(result.stdout)
         assert len(rendered[0]) == len(rendered[1]) == 540 * 160
         differences[timestamp] = sum(abs(left - right) for left, right in zip(*rendered)) / (540 * 160)
+    return differences
 
-    full = min(differences[1.0], differences[5.0], differences[9.5], differences[10.0])
+
+@pytest.mark.skipif(not shutil.which("ffmpeg") or not shutil.which("ffprobe"), reason="FFmpeg smoke test requires ffmpeg and ffprobe")
+def test_creator_credit_fades_out_of_the_encoded_frame(tmp_path: Path) -> None:
+    settings = Settings.from_env()
+    differences = _credit_corner_differences(tmp_path, settings, (1.0, 4.0, 7.5, 8.0, 8.25, 8.5, 8.75, 9.0, 9.5, 11.0))
+
+    full = min(differences[1.0], differences[4.0], differences[7.5], differences[8.0])
     assert full > 3.0
-    assert 0.65 * full < differences[10.25] < 0.85 * full
-    assert 0.4 * full < differences[10.5] < 0.6 * full
-    assert 0.15 * full < differences[10.75] < 0.35 * full
-    assert differences[10.25] > differences[10.5] > differences[10.75]
+    assert 0.65 * full < differences[8.25] < 0.85 * full
+    assert 0.4 * full < differences[8.5] < 0.6 * full
+    assert 0.15 * full < differences[8.75] < 0.35 * full
+    assert differences[8.25] > differences[8.5] > differences[8.75]
+    assert differences[9.0] < 0.1 * full
+    assert differences[9.5] < 0.1 * full
     assert differences[11.0] < 0.1 * full
-    assert differences[11.5] < 0.1 * full
-    assert differences[13.0] < 0.1 * full
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg") or not shutil.which("ffprobe"), reason="FFmpeg smoke test requires ffmpeg and ffprobe")
+def test_creator_credit_is_drawn_larger_than_the_previous_26px_credit(monkeypatch, tmp_path: Path) -> None:
+    settings = Settings.from_env()
+    current = _credit_corner_differences(tmp_path, settings, (4.0,))[4.0]
+    monkeypatch.setattr("engine.media.CREDIT_REFERENCE_FONT_SIZE", 26)
+    previous = _credit_corner_differences(tmp_path, settings, (4.0,))[4.0]
+    assert current >= 1.5 * previous
 
 
 @pytest.mark.skipif(not shutil.which("ffmpeg") or not shutil.which("ffprobe"), reason="FFmpeg smoke test requires ffmpeg and ffprobe")

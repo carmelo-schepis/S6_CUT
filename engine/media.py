@@ -1330,8 +1330,11 @@ def write_caption_sidecars(path: Path, words: list[dict[str, Any]], *, offset: f
     path.with_suffix(".vtt").write_text(vtt, encoding="utf-8")
 
 
-CREDIT_VISIBLE_SECONDS = 10.0
+# Opening attribution, fully visible for the first 8 s, then a 1 s fade.
+CREDIT_VISIBLE_SECONDS = 8.0
 CREDIT_FADE_SECONDS = 1.0
+# Legible at Workspace-player and phone sizes; still well below caption size.
+CREDIT_REFERENCE_FONT_SIZE = 44
 
 
 def _wrap_credit(value: str | None, max_chars: int) -> str:
@@ -1442,7 +1445,7 @@ def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duratio
     visual_scale = vertical_scale
     usable = max(1, width - 2 * margin_x)
     max_chars = max(8, int(usable * _CAPTION_WRAP_FRACTION / (_CHAR_WIDTH_FACTOR * fontsize)))
-    credit_fontsize = max(20, round(26 * visual_scale))
+    credit_fontsize = max(20, round(CREDIT_REFERENCE_FONT_SIZE * visual_scale))
     # Keep the credit anchored to the bottom edge with only a small inset for
     # glyphs, outlines, and the translucent panel.
     credit_margin = _credit_margin(height)

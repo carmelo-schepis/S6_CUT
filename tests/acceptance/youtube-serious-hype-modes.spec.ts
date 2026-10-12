@@ -125,7 +125,7 @@ async function createAndInspect(page: import("@playwright/test").Page, testInfo:
   const chosen = page.locator(".style-card").filter({ hasText: settings.style }).first();
   await chosen.click();
   await expect(chosen).toHaveAttribute("aria-pressed", "true");
-  const subtitles = page.locator(".subtitle-toggle input");
+  const subtitles = page.locator(".subtitle-toggle").filter({ hasText: "Burn in subtitles" }).locator('input[type="checkbox"]');
   if (await subtitles.isEnabled() && await subtitles.isChecked() !== settings.captions) {
     await subtitles.setChecked(settings.captions);
   }

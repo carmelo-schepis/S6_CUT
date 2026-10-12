@@ -310,8 +310,10 @@ export async function createClipProject(page: Page, options: {
     await expect(card).toHaveAttribute("aria-pressed", "true");
   }
 
-  const subtitles = page.locator(".subtitle-toggle input");
-  if ((await subtitles.isChecked()) !== options.captions) await subtitles.setChecked(options.captions);
+  // The create panel has more than one .subtitle-toggle (AI hook text is the
+  // other); Fast mode disables this one because it never transcribes.
+  const subtitles = page.locator(".subtitle-toggle").filter({ hasText: "Burn in subtitles" }).locator('input[type="checkbox"]');
+  if (await subtitles.isEnabled() && (await subtitles.isChecked()) !== options.captions) await subtitles.setChecked(options.captions);
   expect(await subtitles.isChecked()).toBe(options.captions);
 
   await page.getByRole("button", { name: "Advanced controls", exact: true }).click();
