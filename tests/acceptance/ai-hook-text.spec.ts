@@ -128,7 +128,7 @@ test.describe("AI hook text acceptance", () => {
     await page.getByRole("button", { name: "Standard · up to 30" }).click();
     await page.getByRole("button", { name: "Music / sung vocals" }).click();
     await expect(hook).toBeDisabled();
-    await expect(page.getByText("Music mode does not support AI hook text.")).toBeVisible();
+    await expect(page.getByText("Music mode does not support AI hook text; Music keeps its manual Top text.", { exact: true })).toBeVisible();
   });
 
   test("Serious style generates two transcript-grounded YouTube hooks, burn-in text, and an export manifest", async ({ page }, testInfo) => {
