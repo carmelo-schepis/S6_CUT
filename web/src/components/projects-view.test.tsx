@@ -209,7 +209,66 @@ describe("Projects create flow", () => {
     await waitFor(() => expect(mockCreateClipJob).toHaveBeenCalledWith(expect.objectContaining({ sourceProfile: "music", processingMode: "smart", burnSubtitles: true, count: 5 })));
   });
 
-  it("defaults to Auto mode and keeps the Processing mode controls visible", () => {
+  it.each(["Auto", "Smart"])("keeps eligible %s hook text unchecked by default with a connected provider", (mode) => {
+    render(<ProjectsView health={health} hasSelectedProvider onCreated={vi.fn()} />);
+    if (mode === "Smart") fireEvent.click(screen.getByRole("button", { name: "Smart" }));
+    const hookText = screen.getByRole("checkbox", { name: /AI hook text/i });
+    expect(hookText).toBeEnabled();
+    expect(hookText).not.toBeChecked();
+    expect(hookText.parentElement).toHaveTextContent("Off by default. Tick to have OpenRouter write a short curiosity hook at the top of each short.");
+  });
+
+  it("sends hookText true only after an explicit opt-in", async () => {
+    mockCreateClipJob.mockResolvedValue({ project, job: undefinedJob });
+    render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Smart" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /AI hook text/i }));
+    fireEvent.click(screen.getByRole("tab", { name: "YouTube" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "YouTube URL" }), { target: { value: "https://www.youtube.com/watch?v=fixture" } });
+    fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
+    await waitFor(() => expect(mockCreateClipJob).toHaveBeenCalledWith(expect.objectContaining({ hookText: true })));
+  });
+
+  it("omits hookText when eligible but unticked", async () => {
+    mockCreateClipJob.mockResolvedValue({ project, job: undefinedJob });
+    render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    fireEvent.click(screen.getByRole("tab", { name: "YouTube" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "YouTube URL" }), { target: { value: "https://www.youtube.com/watch?v=fixture" } });
+    fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
+    await waitFor(() => expect(mockCreateClipJob).toHaveBeenCalled());
+    expect(mockCreateClipJob.mock.calls[0][0]).not.toHaveProperty("hookText");
+  });
+
+  it("resets hook text opt-in after eligibility is lost and regained", () => {
+    render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    const checkbox = screen.getByRole("checkbox", { name: /AI hook text/i });
+    fireEvent.click(checkbox);
+    expect(checkbox).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Fast" }));
+    expect(checkbox).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Smart" }));
+    expect(checkbox).toBeEnabled();
+    expect(checkbox).not.toBeChecked();
+  });
+
+  it.each([
+    ["Fast", "Fast mode does not support AI hook text."],
+    ["No provider", "No connected provider; AI hook text is unavailable."],
+    ["Long form", "Long form does not support AI hook text."],
+    ["High-volume", "High-volume batches do not support AI hook text."],
+    ["Music", "Music mode does not support AI hook text; Music keeps its manual Top text."],
+  ])("explains why hook text is unavailable for %s", (reason, message) => {
+    render(<ProjectsView health={health} hasSelectedProvider={reason !== "No provider"} onCreated={vi.fn()} />);
+    if (reason === "Fast") fireEvent.click(screen.getByRole("button", { name: "Fast" }));
+    if (reason === "Long form") fireEvent.click(screen.getByRole("button", { name: /Long form/ }));
+    if (reason === "High-volume") fireEvent.click(screen.getByRole("button", { name: /High-volume/ }));
+    if (reason === "Music") fireEvent.click(screen.getByRole("button", { name: "Music / sung vocals" }));
+    const checkbox = screen.getByRole("checkbox", { name: /AI hook text/i });
+    expect(checkbox).toBeDisabled();
+    expect(checkbox.parentElement).toHaveTextContent(message);
+  });
+
+  it("defaults to Auto mode and resolves no-provider auto to a Fast local cut note", () => {
     render(<ProjectsView health={health} hasSelectedProvider={false} onCreated={vi.fn()} />);
     expect(screen.getByRole("button", { name: "Auto" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("heading", { name: "Processing mode" })).toBeInTheDocument();
@@ -234,11 +293,14 @@ describe("Projects create flow", () => {
   it("keeps the provider callout absent while /profiles is pending", () => {
     render(<ProjectsView health={health} providersLoaded={false} hasSelectedProvider={false} onCreated={vi.fn()} />);
     expect(screen.queryByText(/No provider is connected/i)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/Checking connected providers/i).length).toBeGreaterThan(0);
+    // The "add a provider" callout is the same claim in another shape.
     expect(screen.queryByText(/Add optional AI providers/i)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Smart" }));
     expect(screen.getByRole("button", { name: "Smart" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.queryByText(/Add optional AI providers/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/No provider is connected/i)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/Checking connected providers/i).length).toBeGreaterThan(0);
   });
 
   it("shows the optional-provider callout only after /profiles confirms disconnection", () => {

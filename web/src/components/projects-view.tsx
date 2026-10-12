@@ -49,6 +49,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
   const [musicTopText, setMusicTopText] = useState("");
   const [sourceDuration, setSourceDuration] = useState<{ file: File; seconds: number } | null>(null);
   const [burnSubtitles, setBurnSubtitles] = useState(true);
+  const [hookTextChoice, setHookTextChoice] = useState(false);
   const [subscribeAnimation, setSubscribeAnimation] = useState<SubscribeAnimationConfig>(DEFAULT_SUBSCRIBE_ANIMATION);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -136,6 +137,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
           contentFormat, batchMode,
           processingMode: sourceProfile === "music" ? "smart" : processingMode,
           sourceProfile, burnSubtitles: fastMode ? false : burnSubtitles,
+          ...(hookTextEnabled ? { hookText: true } : {}),
           subscribeAnimation, libraryFolderId: libraryFolderId || undefined,
           ...(sourceProfile === "music" ? { musicPresentation: { version: 1 as const, subtitleTheme: musicTheme }, musicTopText } : {}),
         });
@@ -153,6 +155,20 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
   // claim was wrong for the whole of it whenever a provider was in fact set up.
   const fastMode = sourceProfile === "speech" && (processingMode === "fast" || (processingMode === "auto" && providersLoaded && !hasSelectedProvider));
   const knownSourceDuration = sourceType === "file" && sourceDuration?.file === file ? sourceDuration.seconds : null;
+  const hookTextDisabledReason = sourceProfile === "music" ? "Music mode does not support AI hook text; Music keeps its manual Top text."
+    : processingMode === "fast" ? "Fast mode does not support AI hook text."
+      : contentFormat === "long" ? "Long form does not support AI hook text."
+        : batchMode === "high_volume" ? "High-volume batches do not support AI hook text."
+          : !providersLoaded ? "Checking connected providers…"
+            : !hasSelectedProvider ? "No connected provider; AI hook text is unavailable."
+              : null;
+  const hookTextEligible = hookTextDisabledReason === null;
+  const [previousHookTextEligibility, setPreviousHookTextEligibility] = useState(hookTextEligible);
+  if (previousHookTextEligibility !== hookTextEligible) {
+    setPreviousHookTextEligibility(hookTextEligible);
+    if (!hookTextEligible) setHookTextChoice(false);
+  }
+  const hookTextEnabled = hookTextEligible && hookTextChoice;
   const musicConfigurationMessage = sourceProfile === "music" && contentFormat !== "short"
     ? "Music / sung vocals is currently available for short clips only. Choose Short form to continue."
     : null;
@@ -281,6 +297,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
           <SubscribeAnimationControl value={subscribeAnimation} onChange={setSubscribeAnimation} longForm={contentFormat === "long"} />
 
           {sourceProfile === "speech" && <label className="subtitle-toggle"><input type="checkbox" checked={fastMode ? false : burnSubtitles} disabled={fastMode} onChange={(event) => setBurnSubtitles(event.target.checked)} /> <span><strong>Burn in subtitles</strong><small>{fastMode ? "Fast mode skips transcription and captions. Choose Smart mode to enable them." : "Uses local word timing. Fast mode skips captions."}</small></span></label>}
+          <label className="subtitle-toggle"><input type="checkbox" aria-label="AI hook text" checked={hookTextEnabled} disabled={!hookTextEligible} onChange={(event) => setHookTextChoice(event.target.checked)} /> <span><strong>AI hook text</strong><small>{hookTextDisabledReason ?? "Off by default. Tick to have OpenRouter write a short curiosity hook at the top of each short."}</small></span></label>
 
           <button className="advanced-toggle" onClick={() => setAdvanced(!advanced)} aria-expanded={advanced}>Advanced controls <span aria-hidden="true">{advanced ? "−" : "+"}</span></button>
           {advanced && <div className="advanced-grid">

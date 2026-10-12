@@ -64,7 +64,7 @@ No-provider Auto jobs use Fast local cut and do not download Whisper. The first 
 
 ### High-volume batches
 
-Clip projects default to **Standard** (up to 30 outputs, using the existing planners). **High-volume** is an explicit Speech-mode option for 1–500 requested outputs and supports both vertical Shorts and landscape sources with Fast, Auto, or Smart processing. Its deterministic planners can overlap cuts but use distinct starts, real source/transcript timing, and duration-valid windows. Smart high-volume planning stays local rather than sending large candidate sets to a provider. Music retains its existing non-overlapping planner and Standard limit.
+Clip projects default to **Standard** (up to 30 outputs, using the existing planners). **High-volume** is an explicit Speech-mode option for 1–500 requested outputs and supports both vertical Shorts and landscape sources with Fast, Auto, or Smart processing. Its deterministic planners can overlap cuts but use distinct starts, real source/transcript timing, and duration-valid windows. AI hook text is optional and off by default. In Projects step 3, tick **AI hook text** to opt in to OpenRouter writing a short curiosity hook at the top of each Short; it works whether or not subtitles are burned. The choice is not persisted and starts unchecked every time Projects is mounted. Hook text is available only for eligible Smart, short-form, Standard Speech jobs with a connected OpenRouter provider, and appears read-only in the Workspace. It is unavailable in Fast, provider-less, Long form, High-volume, and Music jobs (Music keeps its manual Top text). If OpenRouter fails or returns unusable text, clips still render without hooks and the Workspace shows a warning. Smart high-volume planning stays local rather than sending large candidate sets to a provider. Music retains its existing non-overlapping planner and Standard limit.
 
 The requested count is preserved. The effective target is confirmed against FFprobe and, for Smart, the available timed transcript. Under 30 minutes the engine attempts the full request; if valid windows are short, the effective target falls back to at most 300 and never exceeds the number of valid windows. At or above 30 minutes it supports up to 500 where valid. The Workspace shows requested, effective, planned, and successful counts plus the reason for any reduction; YouTube sources show that FFprobe confirmation is pending until download completes. Export selection supports up to 500 clips and manifests/credits describe only files actually included in the archive.
 
@@ -248,6 +248,13 @@ Playwright retains a trace on failure; set `S6_ACCEPTANCE_TRACE=on` when a
 successful run also needs a trace artifact. The seam requires both
 `S6_TEST_MODE=1` and the harness-provided failure name,
 is disabled by default, and is never used by normal provider requests.
+
+The live AI hook YouTube acceptance is opt-in (`S6_RUN_LIVE_AI_HOOK_TEXT=1`)
+and runs against a separately provisioned isolated stack with a connected
+OpenRouter profile. Set `S6_AI_HOOK_TEXT_ENGINE_CONTAINER` to that stack's
+engine container ID; successful jobs use it for read-only FFmpeg control renders
+and pixel checks inside the engine container. The live tests are Desktop
+Chromium-only, skip by default, and never print provider credentials.
 
 See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for verified behavior, limitations, and exact evidence. See [ARCHITECTURE.md](ARCHITECTURE.md) for trust boundaries and durable processing. Third-party notices and the machine-readable provenance ledger are included.
 

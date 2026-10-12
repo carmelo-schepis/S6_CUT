@@ -20,6 +20,13 @@ describe("versioned UI contracts", () => {
     expect(() => clipSchema.parse({ id: "one", index: 1, state: "complete", start: 0, end: 5, duration: 5, openingLine: "Hello", score: { ...score, total: 102 }, selected: true, fallbackUsed: false, provenance: [] })).toThrow();
   });
 
+  it("accepts optional nullable clip hook text and an optional hookTextEnabled job flag", () => {
+    const clip = clipSchema.parse({ id: "c", index: 1, state: "complete", start: 0, end: 5, duration: 5, openingLine: "Hello", hookText: null, selected: true, fallbackUsed: false, provenance: [] });
+    const job = jobSchema.parse({ schemaVersion: 1, id: "j", projectId: "p", mode: "clip", state: "complete", stage: "done", stageLabel: "Done", progress: 100, style: "serious", hookTextEnabled: true, createdAt: "2026-01-01", updatedAt: "2026-01-01" });
+    expect(clip.hookText).toBeNull();
+    expect(job.hookTextEnabled).toBe(true);
+  });
+
   it("keeps exact beat spans explicit", () => {
     const script = "The Beatles changed popular music.";
     const beat = beatSchema.parse({ id: "beat", start: 0, end: 2.5, charStart: 0, charEnd: script.length, text: script, concept: "The Beatles", source: "text-card", confidence: .7, matchReason: "fallback" });
