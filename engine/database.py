@@ -549,6 +549,7 @@ class Database:
         cost_usd: float | None = None, cost_kind: str | None = None,
         metadata_status: Literal["generated", "fallback", "unavailable"] = "generated",
         metadata_reason: str | None = None,
+        title_source: Literal["auto", "ai", "user"] | None = None,
     ) -> tuple[Asset, Job, Clip]:
         """Atomically update a generated asset and its linked clip metadata."""
         with self._lock, self._connect() as db:
@@ -569,9 +570,10 @@ class Database:
             if clip.youtube_metadata_revision != expected_revision:
                 raise ValueError("YouTube metadata revision is stale")
             stamp = now_iso()
-            updated_asset = asset.model_copy(update={"title": title, "description": description})
+            source_update = {"title_source": title_source} if title_source else {}
+            updated_asset = asset.model_copy(update={"title": title, "description": description, **source_update})
             updated_clip = clip.model_copy(update={
-                "title": title, "youtube_description": description[:500],
+                "title": title, "youtube_description": description[:500], **source_update,
                 "youtube_metadata_revision": clip.youtube_metadata_revision + 1,
                 "youtube_metadata_status": metadata_status,
                 "youtube_metadata_reason": metadata_reason,

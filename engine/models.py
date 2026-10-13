@@ -165,6 +165,9 @@ class Clip(ApiModel):
     # the UI never displays this from optimistic state
     library_asset_id: str | None = None
     title: str | None = None
+    # Who wrote the title: rule-based publication, an AI suggestion, or the
+    # user. None means a legacy record (see seo_titles.clip_title_replaceable).
+    title_source: Literal["auto", "ai", "user"] | None = None
     width: int | None = Field(default=None, ge=1)
     height: int | None = Field(default=None, ge=1)
     folder_id: str | None = None
@@ -302,6 +305,9 @@ class Project(ApiModel):
     # the project so attribution remains truthful after refresh/restart.
     source_title: str | None = Field(default=None, max_length=200)
     source_creator: str | None = Field(default=None, max_length=120)
+    # True when the user left the project name blank, so the engine may replace
+    # its placeholder once the real source title is known.
+    name_is_auto: bool = False
     requested_count: int = Field(ge=1, le=500)
     batch_mode: BatchMode = "standard"
     effective_target: int | None = Field(default=None, ge=0, le=500)
@@ -382,6 +388,7 @@ class ProfileInput(ApiModel):
     name: str = Field(min_length=1, max_length=100)
     text_model_id: str = Field(default="openai/gpt-4.1-mini", max_length=200)
     youtube_metadata_model_id: str | None = Field(default=None, max_length=200)
+    auto_seo_titles: bool | None = None
     openrouter_key: str | None = Field(default=None, max_length=500)
     persistence: Literal["session", "encrypted"] = "encrypted"
     selected: bool = False
@@ -409,6 +416,7 @@ class ProviderProfile(ApiModel):
     name: str
     text_model_id: str
     youtube_metadata_model_id: str = "google/gemini-2.5-flash-lite"
+    auto_seo_titles: bool = True
     selected: bool
     persistence: Literal["session", "encrypted"]
     openrouter_configured: bool
@@ -483,6 +491,7 @@ class LibraryPurgeResult(ApiModel):
 class Asset(ApiModel):
     id: str
     title: str = Field(min_length=1, max_length=200)
+    title_source: Literal["auto", "ai", "user"] | None = None
     description: str = Field(default="", max_length=2_000)
     media_type: str
     filename: str
