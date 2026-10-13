@@ -232,6 +232,7 @@ def test_validated_youtube_source_and_outputs_register_once_across_recovery(monk
     assert source_asset.title == "Validated channel title"
     saved_project = test_db.get_project("youtube-project")
     assert saved_project is not None and saved_project.source_creator == "Known Channel"
+    assert saved_project.source_title == "Validated channel title"
     private = test_db.get_job_private(job.id)
     assert private["youtube_creator"] == "Known Channel"
     saved_job = test_db.get_job(job.id)
@@ -418,6 +419,7 @@ def test_switch_fast_reuses_source_and_cancels_smart(monkeypatch: pytest.MonkeyP
     private: dict[str, object] = {
         "source_path": str(source), "count": 2, "min_duration": 10, "max_duration": 30,
         "aspect_ratio": "9:16", "processing_mode": "smart",
+        "presentation": {"version": 1, "caption": "smart_speech_v1"},
     }
     old_job = Job(
         id="switch-old", project_id=project.id, mode="clip", processing_mode="smart",
@@ -451,6 +453,7 @@ def test_switch_fast_reuses_source_and_cancels_smart(monkeypatch: pytest.MonkeyP
     new_private = db.get_job_private(new_job.id)
     assert new_private["source_path"] == str(source)  # no duplicate upload
     assert new_private["processing_mode"] == "fast"
+    assert new_private["presentation"] == {"version": 1, "caption": "legacy"}
     assert "transcript" not in new_private
 
     assert enqueued == [new_job.id]

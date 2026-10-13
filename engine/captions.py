@@ -18,12 +18,22 @@ _CANVAS = {"9:16": (1080, 1920), "4:5": (1080, 1350), "1:1": (1080, 1080), "16:9
 _SAFE_INSET_FRACTION = .05
 
 
-def caption_box(aspect: str, lines: int, longest_line: int) -> tuple[float, float, float, float] | None:
-    """Estimate bottom-centred ASS caption bounds on the canonical canvas."""
+def caption_box(aspect: str, lines: int, longest_line: int, *, presentation: str | None = None) -> tuple[float, float, float, float] | None:
+    """Estimate caption bounds on the canonical canvas for its renderer."""
     canvas = _CANVAS.get(aspect)
     if not canvas:
         return None
     width, height = canvas
+    if presentation == "smart_speech_v1":
+        scale = min(width, height) / 1080
+        font = max(20, round(104 * scale))
+        outline = max(1, round(6 * scale))
+        margin_x = round(width * .06)
+        box_width = min(width - 2 * margin_x, longest_line * font * .60 + 2 * outline + 20)
+        box_height = max(1, lines) * font * 1.15 + 2 * outline + 16
+        center_y = height * .54
+        left = (width - box_width) / 2
+        return left, center_y - box_height / 2, left + box_width, center_y + box_height / 2
     scale = height / 1920
     font = max(28, round(64 * scale))
     outline = max(2, round(4 * scale))
@@ -68,7 +78,7 @@ def normalize_text(text: str) -> str:
     return re.sub(r"\s+", " ", text.replace("\r\n", "\n").replace("\r", "\n")).strip()
 
 
-def qa_cues(cues: list[dict[str, Any]], duration: float, *, aspect: str = "9:16", foreground: str = "#FFFFFF", background: str = "#000000") -> list[dict[str, Any]]:
+def qa_cues(cues: list[dict[str, Any]], duration: float, *, aspect: str = "9:16", foreground: str = "#FFFFFF", background: str = "#000000", presentation: str | None = None) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
     previous_end = 0.0
     for index, cue in enumerate(cues):
@@ -101,7 +111,7 @@ def qa_cues(cues: list[dict[str, Any]], duration: float, *, aspect: str = "9:16"
         lines = text.split("\n")
         if any(len(line) > _MAX_LINE for line in lines): add("line_too_long", "warning", "Caption line is too long.")
         if len(lines) > _MAX_LINES: add("too_many_lines", "warning", "Caption has too many lines.")
-        bounds = caption_box(aspect, len(lines), max((len(line) for line in lines), default=0))
+        bounds = caption_box(aspect, len(lines), max((len(line) for line in lines), default=0), presentation=presentation)
         if bounds:
             inset_x, inset_y = _CANVAS[aspect][0] * _SAFE_INSET_FRACTION, _CANVAS[aspect][1] * _SAFE_INSET_FRACTION
             left, top, right, bottom = bounds
@@ -120,6 +130,6 @@ def qa_cues(cues: list[dict[str, Any]], duration: float, *, aspect: str = "9:16"
     return findings
 
 
-def normalize_and_validate(cues: list[dict[str, Any]], duration: float) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def normalize_and_validate(cues: list[dict[str, Any]], duration: float, *, aspect: str = "9:16", presentation: str | None = None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     normalized = [{**cue, "text": normalize_text(str(cue.get("text", "")))} for cue in cues]
-    return normalized, qa_cues(normalized, duration)
+    return normalized, qa_cues(normalized, duration, aspect=aspect, presentation=presentation)

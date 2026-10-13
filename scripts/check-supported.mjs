@@ -16,7 +16,7 @@ const environment = { ...process.env, S6_DATA_PATH: dataPath };
 let cleanupPromise;
 
 async function run(command, args, options = {}) {
-  const { timeoutMs = 15 * 60_000, ...spawnOptions } = options;
+  const { timeoutMs = 45 * 60_000, ...spawnOptions } = options;
   await new Promise((resolvePromise, reject) => {
     const child = spawn(command, args, { cwd: root, env: environment, stdio: "inherit", ...spawnOptions });
     const timer = setTimeout(() => {

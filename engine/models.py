@@ -261,7 +261,8 @@ class Project(ApiModel):
     source_name: str
     source_kind: Literal["upload", "youtube", "script"]
     # Extracted from the immutable YouTube import sidecar and persisted with
-    # the project so the preview remains truthful after refresh/restart.
+    # the project so attribution remains truthful after refresh/restart.
+    source_title: str | None = Field(default=None, max_length=200)
     source_creator: str | None = Field(default=None, max_length=120)
     requested_count: int = Field(ge=1, le=500)
     batch_mode: BatchMode = "standard"

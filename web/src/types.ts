@@ -258,6 +258,7 @@ export const projectSchema = z.object({
   style: styleSchema,
   state: jobStateSchema,
   sourceName: z.string(),
+  sourceTitle: z.string().max(200).nullable().optional(),
   sourceKind: z.enum(["upload", "youtube", "script"]),
   sourceCreator: z.string().nullable().optional(),
   requestedCount: z.number().int().min(1).max(500),

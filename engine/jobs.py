@@ -444,6 +444,24 @@ def _centered_partial_fill_kwargs(render, enabled: bool) -> dict[str, bool]:
     return {}
 
 
+def _presentation_render_kwargs(render, private: dict[str, Any]) -> dict[str, str]:
+    """Pass a durable presentation choice only to compatible renderers.
+
+    Historical jobs have no snapshot and intentionally retain renderer defaults.
+    """
+    snapshot = private.get("presentation")
+    choice = snapshot.get("caption") if isinstance(snapshot, dict) and snapshot.get("version") == 1 else None
+    if choice != "smart_speech_v1":
+        return {}
+    try:
+        parameters = inspect.signature(render).parameters.values()
+    except (TypeError, ValueError):
+        return {}
+    if any(parameter.name == "presentation" or parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters):
+        return {"presentation": choice}
+    return {}
+
+
 def _format_render_kwargs(render, content_format: str) -> dict[str, str]:
     """Pass the content format only to renderers that accept it.
 
@@ -1240,8 +1258,11 @@ class JobManager:
                     creator = _youtube_creator_name(private.get("youtube_creator")) or (project.source_creator if project else None)
                     if creator:
                         private["youtube_creator"] = creator
-                    if project and project.source_creator != creator:
+                    title = str(private.get("youtube_title") or "").strip() or None
+                    if project and (project.source_creator != creator or (title and project.source_title != title)):
                         project.source_creator = creator
+                        if title:
+                            project.source_title = title[:200]
                         project.updated_at = now_iso()
                         self.db.save_project(project)
                 self._register_source(job, private, source)
@@ -1282,9 +1303,12 @@ class JobManager:
                 private["youtube_title"] = youtube_import_title(source) or "YouTube source"
             if private.get("url"):
                 project = self.db.get_project(job.project_id)
-                creator = _youtube_creator_name(private.get("youtube_creator"))
-                if project and project.source_creator != creator:
+                creator = _youtube_creator_name(private.get("youtube_creator")) or (project.source_creator if project else None)
+                title = str(private.get("youtube_title") or "").strip() or None
+                if project and (project.source_creator != creator or (title and project.source_title != title)):
                     project.source_creator = creator
+                    if title:
+                        project.source_title = title[:200]
                     project.updated_at = now_iso()
                     self.db.save_project(project)
             self._register_source(job, private, source)
@@ -1317,7 +1341,13 @@ class JobManager:
             return
         from .captions import normalize_and_validate
         from .models import CaptionCue
-        cues, issues = normalize_and_validate(list(override.get("cues") or []), clip.duration)
+        presentation_snapshot = private.get("presentation")
+        presentation = presentation_snapshot.get("caption") if isinstance(presentation_snapshot, dict) and presentation_snapshot.get("version") == 1 else None
+        cues, issues = normalize_and_validate(
+            list(override.get("cues") or []), clip.duration,
+            aspect=str(private.get("aspect_ratio") or "9:16"),
+            presentation=presentation if presentation == "smart_speech_v1" else None,
+        )
         if any(issue["severity"] == "error" for issue in issues):
             private["caption_rerender_error"] = "Reviewed captions are invalid"
             private.pop("caption_rerender", None)
@@ -1347,7 +1377,8 @@ class JobManager:
                 "embed_subtitles": bool(private.get("embed_subtitles", job.embed_subtitles)),
                 **_subscribe_render_kwargs(render, private.get("subscribe_animation")),
                 **_format_render_kwargs(render, job_content_format(job, private)),
-                **_creator_render_kwargs(render, youtube_creator_credit(job, private)), **music_kwargs,
+                **_creator_render_kwargs(render, youtube_creator_credit(job, private)),
+                **_presentation_render_kwargs(render, private), **music_kwargs,
             }
             render(source, output, **_compatible_render_kwargs(render, rerender_kwargs))
             # publish_clip_output reuses the stable asset identity in its transaction.
@@ -1796,6 +1827,8 @@ class JobManager:
                     **_subscribe_render_kwargs(render_clip, private.get("subscribe_animation")),
                     **_creator_render_kwargs(render_clip, youtube_creator_credit(job, private)),
                     **_format_render_kwargs(render_clip, job_content_format(job, private)),
+                    **_presentation_render_kwargs(render_clip, private),
+                    "subtitles_enabled": subtitles_enabled,
                     **(_music_render_kwargs(
                         render_clip,
                         (private.get("music_presentation") or {}).get("subtitle_theme", "clean"),
@@ -2016,6 +2049,7 @@ class JobManager:
                 render_kwargs.update({"words": words, "style": job.style, "subtitles_enabled": subtitles_enabled})
                 render_kwargs.update(_creator_render_kwargs(render, youtube_creator_credit(job, private)))
                 render_kwargs.update(_format_render_kwargs(render, job_content_format(job, private)))
+                render_kwargs.update(_presentation_render_kwargs(render, private))
                 render(source, output, **_compatible_render_kwargs(render, render_kwargs))
                 job, clip, _ = self._publish_output(job, clip, output, private)
             except Exception as exc:
@@ -2286,6 +2320,7 @@ class JobManager:
         self._save(job)
         new_private = dict(private)
         new_private["processing_mode"] = "fast"
+        new_private["presentation"] = {"version": 1, "caption": "legacy"}
         new_private["library_folder_id"] = job.library_folder_id
         new_private.pop("transcript", None)
         new_id = str(uuid.uuid4())

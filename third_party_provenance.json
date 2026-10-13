@@ -70,6 +70,23 @@
       "use": "Constrained user-authorised YouTube import"
     },
     {
+      "name": "Microsoft Fluent UI Emoji 3D assets",
+      "version": "Commit 1ffb34c752ecf5d402f04cfb4b392c77f57c54bc; 256x256 RGBA PNG",
+      "licence": "MIT",
+      "source": "https://github.com/microsoft/fluentui-emoji/tree/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets",
+      "sha256": {
+        "laughter.png": "8af20fb0c64c44a8d8c8d047c1410c5e529a37c3158d496832b380198ed2e9c3",
+        "surprise.png": "7b4fd7ff6da369b503ad95c4a33e984f6ba1fbd9e08f7851d9d5ad7e67c7c51d",
+        "success.png": "256e3dd950cf1705ab72511ab242472b4bd7db519aa402a6182c1aaf8c58def9",
+        "danger.png": "124ac1fc19f11512b0370197e6ddbd7b035f193df52c75e569f8e9059b7ccc13",
+        "idea.png": "df7b09aa18301507e6fb8c279df66d9afa465b6fed3e63d2efa84dacebdbbf79",
+        "excitement.png": "e01bd94de6b85468f6e59da55d380985c363f6bc300b412d18290f143f7e44a9"
+      },
+      "use": "Timed full-colour Smart speech overlays selected by deterministic transcript meaning; all source PNGs are 256x256 and contain transparency",
+      "vendoredAt": "engine/assets/smart-speech-emoji",
+      "licenceFile": "engine/assets/smart-speech-emoji/LICENSE"
+    },
+    {
       "name": "Anton",
       "version": "2.116 (google/fonts ofl/anton)",
       "licence": "SIL Open Font License 1.1",
@@ -104,6 +121,16 @@
       "sha256": "bc6e854971cea46b463be6f9eef4d9cd52f51cfc1fc0dd90c9d3e6483dc0ec61",
       "use": "Burned-in AI hook text face",
       "vendoredAt": "engine/fonts/montserrat/Montserrat-Bold.ttf",
+      "licenceFile": "engine/fonts/montserrat/OFL.txt"
+    },
+    {
+      "name": "Montserrat ExtraBold Italic",
+      "version": "Montserrat-ExtraBoldItalic.ttf static TTF at JulietaUla/Montserrat commit 555facfb2a18c72c3c0380f0d9c0f060453a9058",
+      "licence": "SIL Open Font License 1.1",
+      "source": "https://github.com/JulietaUla/Montserrat/tree/555facfb2a18c72c3c0380f0d9c0f060453a9058/fonts/ttf/Montserrat-ExtraBoldItalic.ttf",
+      "sha256": "0984784ee9883389e76bf2c7ceeeda848af26535ec111109fa92e18d448a4759",
+      "use": "Smart speech caption and creator-credit face (static weight 800, italic); existing Montserrat Bold remains the AI hook face",
+      "vendoredAt": "engine/fonts/montserrat/Montserrat-ExtraBoldItalic.ttf",
       "licenceFile": "engine/fonts/montserrat/OFL.txt"
     },
     {
