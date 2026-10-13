@@ -542,7 +542,12 @@ class Database:
             db.execute("UPDATE jobs SET updated_at=?,payload=?,private_payload=? WHERE id=?", (job.updated_at, self._json(job), json.dumps(private, separators=(",", ":")), job_id))
             return job, private, clip
 
-    def update_generated_clip_metadata(self, asset_id: str, title: str, description: str, expected_revision: int) -> tuple[Asset, Job, Clip]:
+    def update_generated_clip_metadata(
+        self, asset_id: str, title: str, description: str, expected_revision: int, *,
+        model_id: str | None = None, generated_at: str | None = None,
+        input_tokens: int | None = None, output_tokens: int | None = None,
+        cost_usd: float | None = None, cost_kind: str | None = None,
+    ) -> tuple[Asset, Job, Clip]:
         """Atomically update a generated asset and its linked clip metadata."""
         with self._lock, self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -567,6 +572,14 @@ class Database:
                 "title": title, "youtube_description": description[:500],
                 "youtube_metadata_revision": clip.youtube_metadata_revision + 1,
                 "youtube_metadata_status": "generated",
+                **({
+                    "youtube_metadata_model": model_id,
+                    "youtube_metadata_generated_at": generated_at,
+                    "youtube_metadata_input_tokens": input_tokens,
+                    "youtube_metadata_output_tokens": output_tokens,
+                    "youtube_metadata_cost_usd": cost_usd,
+                    "youtube_metadata_cost_kind": cost_kind,
+                } if generated_at is not None else {}),
             })
             job.clips = [updated_clip if item.id == clip.id else item for item in job.clips]
             job.updated_at = stamp

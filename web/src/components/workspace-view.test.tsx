@@ -704,6 +704,21 @@ describe("WorkspaceView – stable responsive media controls", () => {
     await waitFor(() => expect(updateYoutubeMetadata).toHaveBeenCalledWith("j1", clip.id, "My unsaved draft", "Saved description", 2));
   });
 
+  it("refreshes a clean metadata draft when publication fills its title at the same revision", async () => {
+    const clip = { ...responsiveJob.clips[0], title: null, youtubeMetadataRevision: 0 };
+    const job = { ...responsiveJob, clips: [clip] };
+    const published = { ...job, clips: [{ ...clip, title: "Published fallback title", libraryAssetId: "asset-1" }] };
+    mockGetJob.mockResolvedValue(job);
+    mockListAssets.mockResolvedValue([]);
+    mockListFolders.mockResolvedValue([]);
+    vi.mocked(setClipSelection).mockResolvedValue(published);
+    renderView();
+    fireEvent.click(await screen.findByRole("button", { name: "YouTube" }));
+    expect(await screen.findByLabelText("YouTube title")).toHaveValue("");
+    fireEvent.click(screen.getByLabelText("Include in export"));
+    await waitFor(() => expect(screen.getByLabelText("YouTube title")).toHaveValue("Published fallback title"));
+  });
+
   it("does not put a generated result into the editor after the user selects another clip", async () => {
     const first = { ...responsiveJob.clips[0], id: "clip-a", index: 1, title: null, transcriptExcerpt: "Transcript for the first completed clip." };
     const second = { ...responsiveJob.clips[0], id: "clip-b", index: 2, title: "Clip B title", transcriptExcerpt: "Transcript for the second completed clip." };

@@ -262,9 +262,9 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
   useEffect(() => {
     const current = metadataDraftRef.current;
     const revision = selectedClip?.youtubeMetadataRevision ?? 0;
-    if (current.clipId !== (selectedClip?.id ?? null) || (!current.dirty && current.revision !== revision)) {
-      const title = selectedClip?.title || "";
-      const description = selectedClip?.youtubeDescription || "";
+    const title = selectedClip?.title || "";
+    const description = selectedClip?.youtubeDescription || "";
+    if (current.clipId !== (selectedClip?.id ?? null) || (!current.dirty && (current.revision !== revision || current.title !== title || current.description !== description))) {
       metadataDraftRef.current = { clipId: selectedClip?.id ?? null, revision, title, description, dirty: false };
       queueMicrotask(() => { setMetadataTitle(title); setMetadataDescription(description); setMetadataStatus(null); });
     } else if (current.dirty && current.revision !== revision) {

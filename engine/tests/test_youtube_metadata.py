@@ -267,7 +267,18 @@ def test_metadata_generation_uses_small_output_budget_and_caps_paid_calls(monkey
         assert calls[0][2]["require_saved_profile"] is True
         assert calls[0][2]["provider"]["max_price"] == {"prompt": 0.10, "completion": 0.40}
         assert calls[0][2]["reasoning"] == {"enabled": False}
-        assert response.json()["clips"][0]["youtubeMetadataRevision"] == 1
+        generated_clip = response.json()["clips"][0]
+        assert generated_clip["youtubeMetadataRevision"] == 1
+        assert generated_clip["youtubeMetadataStatus"] == "generated"
+        assert generated_clip["youtubeMetadataModel"] == "cheap/model"
+        assert generated_clip["youtubeMetadataGeneratedAt"]
+        assert generated_clip["youtubeMetadataInputTokens"] == 80
+        assert generated_clip["youtubeMetadataOutputTokens"] == 40
+        assert generated_clip["youtubeMetadataCostUsd"] == pytest.approx(0.00001)
+        assert generated_clip["youtubeMetadataCostKind"] == "actual"
+        saved_clip = app_module.db.get_job(job.id).clips[0]
+        assert saved_clip.youtube_metadata_input_tokens == 80
+        assert saved_clip.youtube_metadata_cost_usd == pytest.approx(0.00001)
         assert app_module.db.get_asset("published-asset").title == "Grounded title"
         assert len(app_module.db.get_job_private(job.id)["youtube_metadata_cache"]) == 1
         private = app_module.db.get_job_private(job.id)
