@@ -2260,6 +2260,7 @@ def render_fast_clip(
     music_top_text: str | None = None,
     music_treatment: str | None = None,
     presentation: str | None = None,
+    hook_text: str | None = None,
 ) -> None:
     """Render a fast clip with optional captions and no overlays or visual beats.
 
@@ -2304,14 +2305,14 @@ def render_fast_clip(
         source_timed_words = [
             {**word, "start": start + float(word["start"]), "end": start + float(word["end"])}
             for word in (words or [])
-        ] if subtitles_enabled is not False else []
+        ]
         render_clip(
             source, output, start=start, end=end, aspect=aspect, words=source_timed_words,
             visuals=[], overlays=[], settings=settings, style=style, has_audio=has_audio,
             embed_subtitles=embed_subtitles, subtitle_language=subtitle_language,
             creator_credit=creator_credit, content_format=content_format,
             centered_partial_fill=centered_partial_fill, subscribe_animation=subscribe_animation,
-            presentation=presentation, subtitles_enabled=subtitles_enabled,
+            presentation=presentation, subtitles_enabled=subtitles_enabled, hook_text=hook_text,
         )
         return
 
