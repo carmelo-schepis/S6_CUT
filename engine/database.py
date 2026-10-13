@@ -7,7 +7,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, Literal, TypeVar
 
 from pydantic import BaseModel
 
@@ -547,6 +547,8 @@ class Database:
         model_id: str | None = None, generated_at: str | None = None,
         input_tokens: int | None = None, output_tokens: int | None = None,
         cost_usd: float | None = None, cost_kind: str | None = None,
+        metadata_status: Literal["generated", "fallback", "unavailable"] = "generated",
+        metadata_reason: str | None = None,
     ) -> tuple[Asset, Job, Clip]:
         """Atomically update a generated asset and its linked clip metadata."""
         with self._lock, self._connect() as db:
@@ -571,7 +573,8 @@ class Database:
             updated_clip = clip.model_copy(update={
                 "title": title, "youtube_description": description[:500],
                 "youtube_metadata_revision": clip.youtube_metadata_revision + 1,
-                "youtube_metadata_status": "generated",
+                "youtube_metadata_status": metadata_status,
+                "youtube_metadata_reason": metadata_reason,
                 **({
                     "youtube_metadata_model": model_id,
                     "youtube_metadata_generated_at": generated_at,

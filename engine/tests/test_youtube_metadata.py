@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from engine import app as app_module
 from engine.database import MetadataGenerationClaimError
 from engine.models import Asset, Clip, Job, OpenRouterModel, Project, YouTubeMetadataUpdate
-from engine.providers import ProfileService
+from engine.providers import ProfileService, ProviderError
 
 client = TestClient(app_module.app)
 
@@ -234,6 +234,38 @@ def test_metadata_generation_preserves_concurrent_manual_edit(monkeypatch):
         assert saved.youtube_description == "User's preserved description"
         assert saved.youtube_metadata_revision == 1
         assert asset.title == saved.title
+        assert asset.description == saved.youtube_description
+    finally:
+        app_module.db.delete_project(job.project_id)
+
+
+def test_provider_failure_keeps_fallback_status_after_persistence(monkeypatch):
+    job = _completed_job()
+    job.clips[0].transcript_excerpt = "A sufficiently long, grounded transcript excerpt for this completed clip."
+    job.youtube_metadata_enabled = True
+    job.youtube_metadata_model_id = "cheap/model"
+    _persist_job(job, {"youtube_metadata": {"enabled": True, "model_id": "cheap/model"}})
+
+    async def models():
+        return [OpenRouterModel(
+            id="cheap/model", name="Cheap", pricing={"prompt": "0.0000001", "completion": "0.0000004"},
+            supported_parameters=["response_format"],
+        )]
+
+    async def fail(*_args, **_kwargs):
+        raise ProviderError("provider_error", "Provider request failed")
+
+    monkeypatch.setattr(app_module.profiles, "openrouter_models", models)
+    monkeypatch.setattr(app_module.profiles, "openrouter_json", fail)
+    try:
+        path = f"/api/v1/jobs/{job.id}/clips/{job.clips[0].id}/youtube-metadata"
+        response = client.post(path)
+        assert response.status_code == 503
+        saved = app_module.db.get_job(job.id).clips[0]
+        assert saved.youtube_metadata_status == "fallback"
+        assert saved.youtube_metadata_reason == "Provider request failed"
+        assert saved.youtube_description
+        asset = app_module.db.get_asset("published-asset")
         assert asset.description == saved.youtube_description
     finally:
         app_module.db.delete_project(job.project_id)
