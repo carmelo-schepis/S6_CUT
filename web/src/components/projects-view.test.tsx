@@ -212,7 +212,7 @@ describe("Projects create flow", () => {
   it.each(["Auto", "Smart"])("keeps eligible %s hook text unchecked by default with a connected provider", (mode) => {
     render(<ProjectsView health={health} hasSelectedProvider onCreated={vi.fn()} />);
     if (mode === "Smart") fireEvent.click(screen.getByRole("button", { name: "Smart" }));
-    const hookText = screen.getByRole("checkbox", { name: /AI hook text/i });
+    const hookText = screen.getByRole("checkbox", { name: /Hook text/i });
     expect(hookText).toBeEnabled();
     expect(hookText).not.toBeChecked();
     expect(hookText.parentElement).toHaveTextContent("Off by default. Tick to have OpenRouter write a short curiosity hook at the top of each short.");
@@ -222,7 +222,7 @@ describe("Projects create flow", () => {
     mockCreateClipJob.mockResolvedValue({ project, job: undefinedJob });
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Smart" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: /AI hook text/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Hook text/i }));
     fireEvent.click(screen.getByRole("tab", { name: "YouTube" }));
     fireEvent.change(screen.getByRole("textbox", { name: "YouTube URL" }), { target: { value: "https://www.youtube.com/watch?v=fixture" } });
     fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
@@ -241,7 +241,7 @@ describe("Projects create flow", () => {
 
   it("resets hook text opt-in after eligibility is lost and regained", () => {
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
-    const checkbox = screen.getByRole("checkbox", { name: /AI hook text/i });
+    const checkbox = screen.getByRole("checkbox", { name: /Hook text/i });
     fireEvent.click(checkbox);
     expect(checkbox).toBeChecked();
     fireEvent.click(screen.getByRole("button", { name: "Fast" }));
@@ -263,7 +263,7 @@ describe("Projects create flow", () => {
     if (reason === "Long form") fireEvent.click(screen.getByRole("button", { name: /Long form/ }));
     if (reason === "High-volume") fireEvent.click(screen.getByRole("button", { name: /High-volume/ }));
     if (reason === "Music") fireEvent.click(screen.getByRole("button", { name: "Music / sung vocals" }));
-    const checkbox = screen.getByRole("checkbox", { name: /AI hook text/i });
+    const checkbox = screen.getByRole("checkbox", { name: /Hook text/i });
     expect(checkbox).toBeDisabled();
     expect(checkbox.parentElement).toHaveTextContent(message);
   });

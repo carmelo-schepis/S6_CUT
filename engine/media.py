@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import Settings
+from .hook_text import remove_hook_em_dashes
 from .recipes import CAPTION_REFERENCE_SHORT_EDGE, LookTreatment, caption_preset, known_styles, recipe_for
 from .subscribe_animation import (
     ANIMATION_ASSET,
@@ -1497,7 +1498,7 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
             alpha = round(255 * (1 - opacity))
             polygon = f"m 0 {y0} l {width} {y0} {width} {y1} 0 {y1}"
             events.append(f"Dialogue: 0,0,{_ass_time(duration)},HookScrim,,0,0,0,,{{\\p1\\an7\\pos(0,0)\\1c&H000000&\\1a&H{alpha:02X}&\\bord0\\shad0}}{polygon}{{\\p0}}")
-        tokens = [{"text": word} for word in " ".join(hook_text.split()).split()]
+        tokens = [{"text": word} for word in " ".join(remove_hook_em_dashes(hook_text).split()).split()]
         usable_hook_width = max(1, width - 2 * hook_margin_x - 2 * hook_outline)
         hook_font = str(Path(__file__).parent / "fonts" / "montserrat" / "Montserrat-Bold.ttf")
         units_per_em, glyph_advances = _font_advance_metrics(hook_font)

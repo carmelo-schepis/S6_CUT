@@ -9,6 +9,8 @@ def test_hook_prompt_contains_contract_and_clip_context():
     }])
     for phrase in ("stop the scroll", "pattern interrupt", "open a loop", "60–120", "22 words", "sentence case", "do not reveal", "transcript's language", "No hashtags", "untrusted quoted source data", "Discover", "different words"):
         assert phrase in prompt
+    assert "Never use em dashes" in prompt
+    assert "—" not in prompt
     assert '"style": "Serious"' in prompt
     assert HOOK_TEXT_SCHEMA["properties"]["hooks"]["items"]["properties"]["text"]["maxLength"] == 150
     assert hook_text_schema(2)["properties"]["hooks"]["minItems"] == 2
@@ -19,6 +21,20 @@ def test_hook_prompt_contains_contract_and_clip_context():
 def test_normalize_hook_nfc_whitespace_controls_and_ass_characters():
     assert normalize_hook_text(' “Cafe\u0301  changes\\ {the}  answer?” ') == "Café changes the answer?"
     assert normalize_hook_text("The truth\x00 changes what we thought.") == "The truth changes what we thought."
+
+
+def test_normalize_hook_replaces_spaced_and_unspaced_em_dashes():
+    for separator in ("—", " — ", "——"):
+        assert normalize_hook_text(f"You can't beat all three bosses in 24 hours{separator}so which one will you even try to fight?") == "You can't beat all three bosses in 24 hours, so which one will you even try to fight?"
+
+
+def test_hook_render_removes_em_dashes_from_saved_text(tmp_path):
+    path = tmp_path / "hook.ass"
+    write_ass(path, [], offset=0, duration=20, visuals=[], width=1080, height=1920,
+              hook_text="You can't beat all three bosses—so which one will you fight?")
+    ass = path.read_text(encoding="utf-8")
+    assert "—" not in ass
+    assert "bosses," in ass
 
 
 def test_normalize_hook_rejects_invalid_lengths_and_urls_or_tags():

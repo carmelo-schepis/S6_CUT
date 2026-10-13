@@ -297,7 +297,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
           <SubscribeAnimationControl value={subscribeAnimation} onChange={setSubscribeAnimation} longForm={contentFormat === "long"} />
 
           {sourceProfile === "speech" && <label className="subtitle-toggle"><input type="checkbox" checked={fastMode ? false : burnSubtitles} disabled={fastMode} onChange={(event) => setBurnSubtitles(event.target.checked)} /> <span><strong>Burn in subtitles</strong><small>{fastMode ? "Fast mode skips transcription and captions. Choose Smart mode to enable them." : "Uses local word timing. Fast mode skips captions."}</small></span></label>}
-          <label className="subtitle-toggle"><input type="checkbox" aria-label="AI hook text" checked={hookTextEnabled} disabled={!hookTextEligible} onChange={(event) => setHookTextChoice(event.target.checked)} /> <span><strong>AI hook text</strong><small>{hookTextDisabledReason ?? "Off by default. Tick to have OpenRouter write a short curiosity hook at the top of each short."}</small></span></label>
+          <label className="subtitle-toggle"><input type="checkbox" aria-label="Hook text" checked={hookTextEnabled} disabled={!hookTextEligible} onChange={(event) => setHookTextChoice(event.target.checked)} /> <span><strong>Hook text</strong><small>{hookTextDisabledReason ?? "Off by default. Tick to have OpenRouter write a short curiosity hook at the top of each short."}</small></span></label>
 
           <button className="advanced-toggle" onClick={() => setAdvanced(!advanced)} aria-expanded={advanced}>Advanced controls <span aria-hidden="true">{advanced ? "−" : "+"}</span></button>
           {advanced && <div className="advanced-grid">

@@ -46,7 +46,7 @@ HOOK_TEXT_RULES = (
     "Tone by style: Funny is cheeky and teases the viewer; Serious is a blunt uncomfortable truth; "
     "Educational is myth-busting (You've been told X. It's wrong.); Hype is a bold challenge or dare.\n"
     "Length: 60–120 characters, never over 150 characters, at most 22 words, one or two short "
-    "sentences, sentence case. One em dash is allowed.\n"
+    "sentences, sentence case. Never use em dashes; use commas or periods instead.\n"
     "Grounded: the stance must come from what is actually said in the clip. Invent no facts, numbers, "
     "quotes, results, or promises, and do not reveal the payoff.\n"
     "Controversial means challenging a belief. Never use insults, slurs, attacks on people or groups, "
@@ -63,7 +63,7 @@ HOOK_TEXT_RULES = (
     "Tone examples, for tone only; never copy them or reuse their wording:\n"
     "- This is too slow for social media, because most people just want quick dopamine, but can you "
     "resist the urge and enjoy this moment of peace?\n"
-    "- This snack is supposed to be crunchy. It's not — and nobody's talking about why.\n"
+    "- This snack is supposed to be crunchy. It's not, and nobody's talking about why.\n"
     "- Your first three seconds are killing your videos, and it's not the words you think."
 )
 
@@ -82,11 +82,16 @@ _URL_RE = re.compile(r"(?:https?://|www\.)\S+|\b[\w-]+\.(?:com|org|net|io|gov|ed
 _QUOTES = "\"'“”‘’«»‹›「」『』"
 
 
+def remove_hook_em_dashes(text: str) -> str:
+    """Replace em dashes with readable punctuation, including unspaced dashes."""
+    return re.sub(r"\s*—+\s*", ", ", text).strip()
+
+
 def normalize_hook_text(value: object):
     """Normalize and reject text that is unsafe or unsupported by bundled Barlow."""
     if not isinstance(value, str):
         return None
-    text = unicodedata.normalize("NFC", value)
+    text = remove_hook_em_dashes(unicodedata.normalize("NFC", value))
     text = "".join(char for char in text if not unicodedata.category(char).startswith("C"))
     text = " ".join(text.split())
     text = "".join(char for char in text if char not in "{}\\")
