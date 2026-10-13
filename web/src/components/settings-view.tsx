@@ -45,6 +45,15 @@ export function SettingsView({ health, onHealthRefresh, onProfilesChanged, onSki
       await load();
     } catch (cause) { setError(readableError(cause)); }
   };
+  const [savingAutoSeo, setSavingAutoSeo] = useState(false);
+  const setAutoSeoTitles = async (autoSeoTitles: boolean) => {
+    if (!selectedProfile) return;
+    setError(null); setSavingAutoSeo(true);
+    try {
+      await saveProfile({ name: selectedProfile.name, textModelId: selectedProfile.textModelId, youtubeMetadataModelId: selectedProfile.youtubeMetadataModelId, autoSeoTitles, persistence: selectedProfile.persistence, selected: true }, selectedProfile.id);
+      await load();
+    } catch (cause) { setError(readableError(cause)); } finally { setSavingAutoSeo(false); }
+  };
   useEffect(() => {
     if (purgeDialogOpen) {
       wasPurgeDialogOpen.current = true;
@@ -97,6 +106,7 @@ export function SettingsView({ health, onHealthRefresh, onProfilesChanged, onSki
             return <option key={model.id} value={model.id} disabled={!eligible}>{model.name} · {model.id} — {eligible ? `$${input.toFixed(3)}/M in · $${output.toFixed(3)}/M out` : "unavailable, unsupported, or above price cap"}</option>;
           })}
         </select></Field>
+        <label className="check-row auto-seo-titles-toggle"><input type="checkbox" data-testid="auto-seo-titles" checked={selectedProfile?.autoSeoTitles ?? true} disabled={!selectedProfile || savingAutoSeo} onChange={(event) => void setAutoSeoTitles(event.target.checked)} /><span><strong>Auto-write SEO titles for new clips</strong><small>Smart short clips get an AI title and description when OpenRouter is connected.</small></span></label>
         {!selectedProfile && <p className="form-hint">Select and connect an OpenRouter profile first.</p>}
         {metadataModelError && <p className="form-error" role="alert">Could not refresh model availability: {metadataModelError}</p>}
         {selectedProfile && <p className="form-hint" role="status">Configured: {selectedProfile.youtubeMetadataModelId || "google/gemini-2.5-flash-lite"}. Generation is unavailable if the model is missing, unknown-priced, or above the hard cap.</p>}

@@ -51,7 +51,9 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
   const [sourceDuration, setSourceDuration] = useState<{ file: File; seconds: number } | null>(null);
   const [burnSubtitles, setBurnSubtitles] = useState(true);
   const [hookTextChoice, setHookTextChoice] = useState(false);
-  const [youtubeMetadataEnabled, setYoutubeMetadataEnabled] = useState(false);
+  // null until the customer touches the toggle; until then it follows the
+  // profile's "Auto-write SEO titles" default as eligibility changes.
+  const [youtubeMetadataChoice, setYoutubeMetadataChoice] = useState<boolean | null>(null);
   const [subscribeAnimation, setSubscribeAnimation] = useState<SubscribeAnimationConfig>(DEFAULT_SUBSCRIBE_ANIMATION);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -140,7 +142,8 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
           processingMode: sourceProfile === "music" ? "smart" : processingMode,
           sourceProfile, burnSubtitles: fastMode ? false : burnSubtitles,
           ...(hookTextEnabled ? { hookText: true } : {}),
-          ...(youtubeMetadataActive ? { youtubeMetadata: true } : {}),
+          // Eligible: always send the explicit choice so an untick is respected.
+          ...(metadataDisabledReason === null ? { youtubeMetadata: youtubeMetadataActive } : {}),
           subscribeAnimation, libraryFolderId: libraryFolderId || undefined,
           ...(sourceProfile === "music" ? { musicPresentation: { version: 1 as const, subtitleTheme: musicTheme }, musicTopText } : {}),
         });
@@ -177,7 +180,9 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
         : !providersLoaded ? "Checking connected providers…"
           : !hasSelectedProvider ? "Connect an OpenRouter profile to enable this optional feature."
             : null;
-  const youtubeMetadataActive = youtubeMetadataEnabled && metadataDisabledReason === null;
+  // Mirrors the engine's own default: Smart-capable short, standard batches.
+  const youtubeMetadataDefault = hasSelectedProvider && selectedProfile?.autoSeoTitles !== false && batchMode !== "high_volume";
+  const youtubeMetadataActive = metadataDisabledReason === null && (youtubeMetadataChoice ?? youtubeMetadataDefault);
   const musicConfigurationMessage = sourceProfile === "music" && contentFormat !== "short"
     ? "Music / sung vocals is currently available for short clips only. Choose Short form to continue."
     : null;
@@ -258,7 +263,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
             <FieldGroup title="Format">
               <div className="segmented mode-tabs format-tabs" aria-label="Content format">
                 <button type="button" aria-pressed={contentFormat === "short"} className={contentFormat === "short" ? "active" : ""} onClick={() => { setContentFormat("short"); setAspectRatio("9:16"); }}>Short form · 9:16</button>
-                <button type="button" aria-pressed={contentFormat === "long"} className={contentFormat === "long" ? "active" : ""} disabled={sourceProfile === "music"} onClick={() => { setContentFormat("long"); setAspectRatio("16:9"); setYoutubeMetadataEnabled(false); }}>Long form · 16:9</button>
+                <button type="button" aria-pressed={contentFormat === "long"} className={contentFormat === "long" ? "active" : ""} disabled={sourceProfile === "music"} onClick={() => { setContentFormat("long"); setAspectRatio("16:9"); }}>Long form · 16:9</button>
               </div>
               <Field label={contentFormat === "long" ? "Scenes requested" : "Clips requested"} hint={batchMode === "high_volume" ? "1–500" : undefined}>
                 {batchMode === "standard" ? <div className="count-control"><button type="button" disabled={count <= 1} onClick={() => setCount(Math.max(1, count - 1))} aria-label="Fewer clips">−</button><strong aria-live="polite">{count}</strong><button type="button" disabled={count >= 30} onClick={() => setCount(Math.min(30, count + 1))} aria-label="More clips">+</button></div> : <div className="high-volume-count-field"><input className="high-volume-count-input" aria-label={contentFormat === "long" ? "Scenes requested" : "Clips requested"} type="text" inputMode="numeric" value={highVolumeCount} aria-invalid={highVolumeCount.trim() !== "" && !/^-?[0-9]+$/.test(highVolumeCount.trim())} onChange={(event) => {
@@ -285,7 +290,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
             {sourceProfile === "speech" && <FieldGroup title="Processing mode">
               <div className="segmented mode-tabs processing-mode-tabs" aria-label="Processing mode">
                 <button type="button" aria-pressed={processingMode === "auto"} className={processingMode === "auto" ? "active" : ""} onClick={() => setProcessingMode("auto")}><Sparkles size={13} /> <span>Auto</span></button>
-                <button type="button" aria-pressed={processingMode === "fast"} className={processingMode === "fast" ? "active" : ""} onClick={() => { setProcessingMode("fast"); setBurnSubtitles(false); setYoutubeMetadataEnabled(false); }}><Zap size={13} /> <span>Fast</span></button>
+                <button type="button" aria-pressed={processingMode === "fast"} className={processingMode === "fast" ? "active" : ""} onClick={() => { setProcessingMode("fast"); setBurnSubtitles(false); }}><Zap size={13} /> <span>Fast</span></button>
                 <button type="button" aria-pressed={processingMode === "smart"} className={processingMode === "smart" ? "active" : ""} onClick={() => setProcessingMode("smart")}><Sparkles size={13} /> <span>Smart</span></button>
               </div>
             </FieldGroup>}
@@ -307,7 +312,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
 
           {sourceProfile === "speech" && <label className="subtitle-toggle"><input type="checkbox" checked={fastMode ? false : burnSubtitles} disabled={fastMode} onChange={(event) => setBurnSubtitles(event.target.checked)} /> <span><strong>Burn in subtitles</strong><small>{fastMode ? "Fast mode skips transcription and captions. Choose Smart mode to enable them." : "Uses local word timing. Fast mode skips captions."}</small></span></label>}
           <label className="subtitle-toggle"><input type="checkbox" aria-label="Hook text" checked={hookTextEnabled} disabled={!hookTextEligible} onChange={(event) => setHookTextChoice(event.target.checked)} /> <span><strong>Hook text</strong><small>{hookTextDisabledReason ?? "Off by default. Tick to have OpenRouter write a short curiosity hook at the top of each short."}</small></span></label>
-          <label className="subtitle-toggle"><input type="checkbox" aria-label="YouTube metadata" checked={youtubeMetadataEnabled} disabled={metadataDisabledReason !== null} onChange={(event) => setYoutubeMetadataEnabled(event.target.checked)} /> <span><strong>Generate YouTube titles and descriptions</strong><small>{metadataDisabledReason ?? (processingMode === "fast" ? "Fast mode has no transcript and never calls providers. Choose Auto or Smart." : `Off by default. Uses ${selectedProfile?.youtubeMetadataModelId || "the configured Settings model"}; at most five small requests and $0.05 estimated per job. Editable and separate from burned-in text.`)}</small></span></label>
+          <label className="subtitle-toggle"><input type="checkbox" aria-label="Write SEO titles with AI (YouTube metadata)" data-testid="youtube-metadata-toggle" checked={youtubeMetadataActive} disabled={metadataDisabledReason !== null} onChange={(event) => setYoutubeMetadataChoice(event.target.checked)} /> <span><strong>Write SEO titles with AI</strong><small>{metadataDisabledReason ?? (processingMode === "fast" ? "Fast mode has no transcript and never calls providers. Choose Auto or Smart." : `${youtubeMetadataDefault ? "On by default (Settings › Auto-write SEO titles)" : "Off by default"}. Uses ${selectedProfile?.youtubeMetadataModelId || "the configured Settings model"} for each clip's YouTube title and description; at most five small requests and $0.05 estimated per job. Editable and separate from burned-in text.`)}</small></span></label>
 
           <button className="advanced-toggle" onClick={() => setAdvanced(!advanced)} aria-expanded={advanced}>Advanced controls <span aria-hidden="true">{advanced ? "−" : "+"}</span></button>
           {advanced && <div className="advanced-grid">

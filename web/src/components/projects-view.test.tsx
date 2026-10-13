@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Health, Job, Project } from "../types";
+import type { Health, Job, Project, ProviderProfile } from "../types";
 import { ProjectsView } from "./projects-view";
 
 // ---------------------------------------------------------------
@@ -243,7 +243,7 @@ describe("Projects create flow", () => {
     render(<ProjectsView health={health} providersLoaded hasSelectedProvider onCreated={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Fast" }));
     fireEvent.click(screen.getByRole("button", { name: "Music / sung vocals" }));
-    expect(screen.getByRole("checkbox", { name: "YouTube metadata" })).toBeEnabled();
+    expect(screen.getByRole("checkbox", { name: /YouTube metadata/ })).toBeEnabled();
   });
 
   it("resets hook text opt-in after eligibility is lost and regained", () => {
@@ -350,4 +350,70 @@ describe("Projects create flow", () => {
     expect(screen.getByRole("button", { name: "Smart" })).toHaveAttribute("aria-pressed", "true");
   });
 
+  describe("Write SEO titles with AI", () => {
+    const profile: ProviderProfile = { id: "p1", name: "Work", textModelId: "openai/gpt-4.1-mini", youtubeMetadataModelId: "google/gemini-2.5-flash-lite", selected: true, persistence: "encrypted", openrouterConfigured: true, textStatus: "connected", status: "connected", capabilities: [], fallbacks: {} };
+    const submitUrl = () => {
+      fireEvent.click(screen.getByRole("tab", { name: "YouTube" }));
+      fireEvent.change(screen.getByRole("textbox", { name: "YouTube URL" }), { target: { value: "https://www.youtube.com/watch?v=fixture" } });
+      fireEvent.click(screen.getByRole("button", { name: /Create \d+ (short|landscape) clips?/i }));
+    };
+    const toggle = () => screen.getByTestId("youtube-metadata-toggle");
+
+    it("defaults on for a connected profile with auto SEO titles and sends an explicit true", async () => {
+      mockCreateClipJob.mockResolvedValue({ project, job: undefinedJob });
+      render(<ProjectsView health={health} providersLoaded hasSelectedProvider selectedProfile={profile} onCreated={vi.fn()} />);
+      expect(screen.getByRole("checkbox", { name: /Write SEO titles with AI/ })).toBe(toggle());
+      expect(screen.getByText("Write SEO titles with AI")).toBeInTheDocument();
+      expect(toggle()).toBeChecked();
+      submitUrl();
+      await waitFor(() => expect(mockCreateClipJob).toHaveBeenCalledWith(expect.objectContaining({ youtubeMetadata: true })));
+    });
+
+    it("defaults off when the profile disables auto SEO titles and sends an explicit false", async () => {
+      mockCreateClipJob.mockResolvedValue({ project, job: undefinedJob });
+      render(<ProjectsView health={health} providersLoaded hasSelectedProvider selectedProfile={{ ...profile, autoSeoTitles: false }} onCreated={vi.fn()} />);
+      expect(toggle()).toBeEnabled();
+      expect(toggle()).not.toBeChecked();
+      submitUrl();
+      await waitFor(() => expect(mockCreateClipJob).toHaveBeenCalledWith(expect.objectContaining({ youtubeMetadata: false })));
+    });
+
+    it("follows the default as eligibility changes until touched", () => {
+      const { rerender } = render(<ProjectsView health={health} providersLoaded={false} hasSelectedProvider={false} selectedProfile={null} onCreated={vi.fn()} />);
+      expect(toggle()).toBeDisabled();
+      expect(toggle()).not.toBeChecked();
+      rerender(<ProjectsView health={health} providersLoaded hasSelectedProvider selectedProfile={profile} onCreated={vi.fn()} />);
+      expect(toggle()).toBeEnabled();
+      expect(toggle()).toBeChecked();
+      fireEvent.click(screen.getByRole("button", { name: /High-volume/ }));
+      expect(toggle()).not.toBeChecked();
+      fireEvent.click(screen.getByRole("button", { name: /Standard · up to 30/ }));
+      expect(toggle()).toBeChecked();
+    });
+
+    it("respects the customer's untick across eligibility changes", async () => {
+      mockCreateClipJob.mockResolvedValue({ project, job: undefinedJob });
+      render(<ProjectsView health={health} providersLoaded hasSelectedProvider selectedProfile={profile} onCreated={vi.fn()} />);
+      fireEvent.click(toggle());
+      expect(toggle()).not.toBeChecked();
+      fireEvent.click(screen.getByRole("button", { name: "Fast" }));
+      expect(toggle()).toBeDisabled();
+      fireEvent.click(screen.getByRole("button", { name: "Smart" }));
+      expect(toggle()).toBeEnabled();
+      expect(toggle()).not.toBeChecked();
+      submitUrl();
+      await waitFor(() => expect(mockCreateClipJob).toHaveBeenCalledWith(expect.objectContaining({ youtubeMetadata: false })));
+    });
+
+    it("omits the field when the toggle is ineligible", async () => {
+      mockCreateClipJob.mockResolvedValue({ project, job: undefinedJob });
+      render(<ProjectsView health={health} providersLoaded hasSelectedProvider selectedProfile={profile} onCreated={vi.fn()} />);
+      fireEvent.click(screen.getByRole("button", { name: /Long form · 16:9/i }));
+      expect(toggle()).toBeDisabled();
+      expect(toggle()).not.toBeChecked();
+      submitUrl();
+      await waitFor(() => expect(mockCreateClipJob).toHaveBeenCalled());
+      expect(mockCreateClipJob.mock.calls[0][0]).not.toHaveProperty("youtubeMetadata");
+    });
+  });
 });
