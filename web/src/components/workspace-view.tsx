@@ -497,6 +497,7 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
   // The empty Workspace renders nothing else, so this heading is the page's
   // <h1>; with a project loaded the project name carries that role below.
   if (!project) return <div className="page"><EmptyState headingLevel={1} icon={<SlidersHorizontal size={30} />} title="No project selected" action={<Button variant="primary" onClick={onGoProjects}>Choose a project</Button>}>Open a project to review its clips, score decisions, storyboard, and export state.</EmptyState></div>;
+  const sourceLabel = project.sourceTitle || project.sourceName;
 
   return <div className="workspace-page">
     {project.batchMode === "high_volume" && <section className="batch-summary" aria-label="High-volume batch counts">
@@ -504,7 +505,7 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
       {(job?.capExplanation || project.capExplanation) && <p>{job?.capExplanation || project.capExplanation}</p>}
     </section>}
     <div className="workspace-commandbar">
-      <div className="workspace-project-context"><span className="mode-chip">{project.mode === "clip" ? <Film size={13} /> : <FileText size={13} />} {project.mode === "clip" ? "Clip mode" : "Legacy video"}</span><div className="workspace-project-meta"><h1 className="workspace-project-name" title={project.name}>{project.name}</h1><span className="workspace-source-meta" title={project.sourceName}>{project.sourceName}</span><span className="workspace-secondary-meta">{project.style}{project.sourceProfile === "music" ? " · Music / sung vocals" : ""}{project.mode === "clip" && project.contentFormat === "long" ? " · 16:9 landscape" : ""}{job ? ` · ${job.processingMode} processing` : ""}</span></div></div>
+      <div className="workspace-project-context"><span className="mode-chip">{project.mode === "clip" ? <Film size={13} /> : <FileText size={13} />} {project.mode === "clip" ? "Clip mode" : "Legacy video"}</span><div className="workspace-project-meta"><h1 className="workspace-project-name" title={project.name}>{project.name}</h1><span className="workspace-source-meta" title={sourceLabel}>{sourceLabel}</span><span className="workspace-secondary-meta">{project.style}{project.sourceProfile === "music" ? " · Music / sung vocals" : ""}{project.mode === "clip" && project.contentFormat === "long" ? " · 16:9 landscape" : ""}{job ? ` · ${job.processingMode} processing` : ""}</span></div></div>
       <div className="workspace-controls">{folders.length > 0 && <div className="workspace-folder-field"><label htmlFor="workspace-business-folder">Business folder</label><select id="workspace-business-folder" value={project.libraryFolderId || folders.find((folder) => folder.system)?.id || ""} disabled={busy} onChange={(event) => void changeFolder(event.target.value)}>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></div>}
         {job && <StatusBadge state={job.state} label={job.stageLabel} />}
         {project.mode === "clip" && job && ["active", "queued", "recovered"].includes(job.state) && <Button disabled={busy} onClick={() => act("pause")}><Pause size={15} /> Pause</Button>}
@@ -537,7 +538,7 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
         </div>
         <div className="source-content">
           {sourceTab === "transcript" ? <div id="workspace-transcript-panel" role="tabpanel" aria-labelledby="workspace-transcript-tab" tabIndex={0}>
-            <div className="source-card"><div className="source-icon">{project.mode === "clip" ? <Film /> : <FileText />}</div><div><strong title={project.sourceName}>{project.sourceName}</strong><span>{project.mode === "clip" ? project.sourceKind : "legacy source"} · preserved</span></div></div>
+            <div className="source-card"><div className="source-icon">{project.mode === "clip" ? <Film /> : <FileText />}</div><div><strong title={sourceLabel}>{sourceLabel}</strong><span>{project.mode === "clip" ? project.sourceKind : "legacy source"} · preserved</span></div></div>
             {project.mode === "clip" ? <div className="transcript-placeholder">
               {selectedClip ? <><span className="timecode">{formatDuration(selectedClip.start)}</span><p>{selectedClip.openingLine}</p><span className="timecode">{formatDuration(selectedClip.end)}</span><p className="muted">Select another clip to inspect its source range. The full timed-word transcript stays in the project record.</p></> : <p className="muted">{jobLoaded ? "Timed words will appear when transcription completes." : "Loading transcript…"}</p>}
             </div> : <div className="beat-source-list">{job?.beats.map((beat) => <button key={beat.id}><span>{formatDuration(beat.start)}</span><p>{beat.text}</p></button>)}</div>}

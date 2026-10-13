@@ -458,9 +458,16 @@ async def create_clip_job(
             raise HTTPException(422, "AI hook text requires a connected OpenRouter provider.")
         if mode != "smart":
             raise HTTPException(422, "AI hook text is unavailable in Fast mode.")
+    presentation = {
+        "version": 1,
+        "caption": "smart_speech_v1"
+        if source_profile == "speech" and content_format == "short" and mode == "smart"
+        else "legacy",
+    }
     private: dict[str, object] = {
         "count": count, "batch_mode": batch_mode, "min_duration": min_duration, "max_duration": max_duration,
         "aspect_ratio": aspect_ratio, "content_format": content_format, "processing_mode": mode,
+        "presentation": presentation,
         "burn_subtitles": True if source_profile == "music" else burn_subtitles, "embed_subtitles": embed_subtitles,
         "hook_text": {"enabled": hook_text, "status": "pending" if hook_text else "disabled"},
         "use_openrouter": mode == "smart" and smart_available and source_profile == "speech" and batch_mode == "standard",
@@ -707,8 +714,15 @@ async def update_captions(job_id: str, clip_id: str, value: CaptionReviewInput) 
     if value.revision != clip.caption_revision:
         raise HTTPException(409, "Caption revision is stale")
     duration = clip.duration
+    private = db.get_job_private(job_id)
+    presentation_snapshot = private.get("presentation")
+    presentation = presentation_snapshot.get("caption") if isinstance(presentation_snapshot, dict) and presentation_snapshot.get("version") == 1 else None
     from .captions import normalize_and_validate
-    cues, findings = normalize_and_validate([cue.model_dump() for cue in value.cues], duration)
+    cues, findings = normalize_and_validate(
+        [cue.model_dump() for cue in value.cues], duration,
+        aspect=str(private.get("aspect_ratio") or "9:16"),
+        presentation=presentation if presentation == "smart_speech_v1" else None,
+    )
     fatal = [item for item in findings if item["severity"] == "error"]
     if fatal:
         raise HTTPException(422, {"message": "Caption cues are invalid", "issues": fatal})
@@ -716,7 +730,6 @@ async def update_captions(job_id: str, clip_id: str, value: CaptionReviewInput) 
     clip.caption_revision += 1
     clip.caption_qa_warnings = [item["message"] for item in findings if item["severity"] == "warning"]
     clip.review_required = bool(clip.caption_qa_warnings)
-    private = db.get_job_private(job_id)
     private.setdefault("caption_overrides", {})[clip_id] = {"revision": clip.caption_revision, "cues": cues}
     db.save_job(job, private)
     return public_job(job)
