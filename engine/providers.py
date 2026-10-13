@@ -321,7 +321,9 @@ class ProfileService:
                 raise ProviderError("unavailable", "The selected OpenRouter text model is no longer available. Choose another model in Settings.")
         payload = {"model": model_id or profile.text_model_id, "messages": messages, "temperature": temperature, "response_format": {"type": "json_schema", "json_schema": {"name": "s6_result", "strict": True, "schema": schema}}}
         if max_tokens is not None:
-            payload["max_tokens"] = max(1, min(max_tokens, 400))
+            # Callers bound their own budgets; this ceiling only stops runaway
+            # requests. Batched SEO metadata needs ~180 tokens per clip.
+            payload["max_tokens"] = max(1, min(max_tokens, 2000))
         if provider is not None:
             payload["provider"] = provider
         if reasoning is not None:

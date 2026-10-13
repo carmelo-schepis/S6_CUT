@@ -43,9 +43,6 @@ def _runtime(tmp_path: Path):
     lambda ids: [{"clip_id": ids[0], "title": "A grounded title", "description": "A grounded description."},
                  {"clip_id": ids[0], "title": "A repeated id", "description": "A repeated item."}],
     lambda ids: [{"clip_id": "unknown", "title": "A grounded title", "description": "A grounded description."}],
-    lambda ids: [{"clip_id": ids[0], "title": "A grounded title", "description": "A grounded description."}],
-    lambda ids: [{"clip_id": ids[0], "title": "Same title", "description": "A grounded description."},
-                 {"clip_id": ids[1], "title": "same title", "description": "Another grounded description."}],
 ])
 def test_auto_generation_requires_exact_distinct_ids_and_preserves_fallback(monkeypatch, tmp_path, bad_items):
     db, manager, job, private = _runtime(tmp_path)
@@ -70,6 +67,31 @@ def test_auto_generation_requires_exact_distinct_ids_and_preserves_fallback(monk
     assert db.get_job(job.id).clips[0].youtube_metadata_status == "fallback"
 
 
+@pytest.mark.parametrize("partial_items", [
+    lambda ids: [{"clip_id": ids[0], "title": "A grounded title", "description": "A grounded description."}],
+    lambda ids: [{"clip_id": ids[0], "title": "A grounded title", "description": "A grounded description."},
+                 {"clip_id": ids[1], "title": "a grounded title", "description": "Another grounded description."}],
+])
+def test_one_missing_or_repeated_title_keeps_only_that_clip_on_its_fallback(monkeypatch, tmp_path, partial_items):
+    db, manager, job, private = _runtime(tmp_path)
+    job.clips = job.clips[:2]
+    db.save_job(job, private)
+    monkeypatch.setattr(manager.profiles, "openrouter_models", lambda: _resolved([
+        OpenRouterModel(id="google/gemini-2.5-flash-lite", name="Gemini Flash Lite", context_length=4096,
+                       pricing={"prompt": "0.0000001", "completion": "0.0000004"},
+                       supported_parameters=["response_format"])
+    ]))
+    monkeypatch.setattr(manager.profiles, "openrouter_json", lambda *args, **kwargs: _resolved((
+        {"clips": partial_items([clip.id for clip in job.clips])}, {"prompt_tokens": 50, "completion_tokens": 50}
+    )))
+    words = [{"text": "A transcript sentence describing the exact clip content.", "start": clip.start + 1, "end": clip.start + 3} for clip in job.clips]
+    manager._generate_youtube_metadata(job, private, words)
+    first, second = job.clips
+    assert first.youtube_metadata_status == "generated" and first.title == "A grounded title" and first.title_source == "ai"
+    assert second.youtube_metadata_status == "fallback" and second.title is None
+    assert any("YouTube metadata unavailable" in warning for warning in job.warnings)
+
+
 def test_auto_generation_batches_stable_ids_persists_and_reuses_successes(monkeypatch, tmp_path):
     db, manager, job, private = _runtime(tmp_path)
     request_batches = []
@@ -89,20 +111,22 @@ def test_auto_generation_batches_stable_ids_persists_and_reuses_successes(monkey
     for index, clip in enumerate(job.clips, 1):
         words.append({"text": f"Clip {index} transcript explains a specific science topic accurately.", "start": clip.start + 1, "end": clip.start + 4})
     manager._generate_youtube_metadata(job, private, words)
-    assert [len(batch[0]["clips"]) for batch in request_batches] == [2, 2, 2, 2]
-    assert all(batch[2]["max_tokens"] == 400 for batch in request_batches)
+    # A 4,096-token context fits three clips per request (up to eight on larger models).
+    assert [len(batch[0]["clips"]) for batch in request_batches] == [3, 3, 2]
+    assert all(batch[2]["max_tokens"] == 120 + 180 * len(batch[0]["clips"]) for batch in request_batches)
     assert all(batch[2]["provider"]["max_price"] == {"prompt": 0.10, "completion": 0.40} for batch in request_batches)
     assert all(batch[2]["reasoning"] == {"enabled": False} for batch in request_batches)
-    assert all(batch[2]["temperature"] <= 0.2 for batch in request_batches)
+    assert all(batch[2]["temperature"] <= 0.4 for batch in request_batches)
     assert all(120 <= len(clip.youtube_description or "") <= 300 for clip in job.clips)
     assert all(clip.youtube_metadata_status == "generated" for clip in job.clips)
     assert all(clip.youtube_metadata_revision == 1 for clip in job.clips)
     assert all(clip.youtube_metadata_cost_kind == "actual" for clip in job.clips)
     assert db.get_job(job.id).clips[3].title == job.clips[3].title
-    assert private["youtube_metadata_generation_calls"] == 4
+    assert all(clip.title_source == "ai" for clip in job.clips)
+    assert private["youtube_metadata_generation_calls"] == 3
     manager._generate_youtube_metadata(job, private, words)
-    assert len(request_batches) == 4
-    assert private["youtube_metadata_generation_calls"] == 4
+    assert len(request_batches) == 3
+    assert private["youtube_metadata_generation_calls"] == 3
 
 
 def test_auto_generation_skips_when_budget_is_exhausted_and_requires_priced_supported_model(monkeypatch, tmp_path):

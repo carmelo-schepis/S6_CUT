@@ -404,7 +404,7 @@ def test_openrouter_metadata_controls_are_opt_in_and_return_usage(tmp_path: Path
     ))
     assert result == ({"clips": []}, {"prompt_tokens": 41, "completion_tokens": 17, "cost": 0.00001})
     request = CaptureClient.request
-    assert request["max_tokens"] == 400
+    assert request["max_tokens"] == 900
     assert request["temperature"] == 0.2
     assert request["provider"]["require_parameters"] is True
     assert request["provider"]["max_price"] == {"prompt": 0.10, "completion": 0.40}
