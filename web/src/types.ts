@@ -111,6 +111,9 @@ export type ProvenanceRecord = z.infer<typeof provenanceSchema>;
 export const captionDownloadSchema = z.object({ format: z.enum(["ass", "srt", "vtt"]), filename: z.string(), url: z.string() });
 export const captionCueSchema = z.object({ id: z.string(), start: z.number().nonnegative(), end: z.number().positive(), text: z.string().min(1), confidence: z.number().min(0).max(1).nullable().optional(), warnings: z.array(z.string()).default([]) });
 
+export const titleSourceSchema = z.enum(["auto", "ai", "user"]);
+export type TitleSource = z.infer<typeof titleSourceSchema>;
+
 export const clipSchema = z.object({
   id: z.string(),
   index: z.number().int().min(1),
@@ -146,6 +149,7 @@ export const clipSchema = z.object({
   // "Saved to Library" — the UI never shows it from optimistic state.
   libraryAssetId: z.string().nullable().optional(),
   title: z.string().nullable().optional(),
+  titleSource: titleSourceSchema.nullable().optional(),
   youtubeDescription: z.string().max(500).nullable().optional(),
   youtubeMetadataRevision: z.number().int().nonnegative().optional(),
   youtubeMetadataStatus: z.enum(["pending", "generated", "unavailable", "fallback"]).nullable().optional(),
@@ -266,6 +270,7 @@ export const projectSchema = z.object({
   schemaVersion: z.literal(1),
   id: z.string(),
   name: z.string(),
+  nameIsAuto: z.boolean().optional(),
   mode: z.enum(["clip", "script"]),
   style: styleSchema,
   state: jobStateSchema,
@@ -326,6 +331,7 @@ export const profileSchema = z.object({
   name: z.string(),
   textModelId: z.string(),
   youtubeMetadataModelId: z.string().optional(),
+  autoSeoTitles: z.boolean().optional(),
   selected: z.boolean(),
   persistence: z.enum(["session", "encrypted"]),
   openrouterConfigured: z.boolean(),
@@ -358,6 +364,7 @@ export type LibraryFolder = z.infer<typeof libraryFolderSchema>;
 export const assetSchema = z.object({
   id: z.string(),
   title: z.string(),
+  titleSource: titleSourceSchema.nullable().optional(),
   description: z.string(),
   mediaType: z.string(),
   filename: z.string(),
@@ -409,6 +416,33 @@ export const libraryPurgeResultSchema = z.object({
   warnings: z.array(z.string()),
 });
 export type LibraryPurgeResult = z.infer<typeof libraryPurgeResultSchema>;
+
+export const titleKindSchema = z.enum(["clip", "source", "project"]);
+export type TitleKind = z.infer<typeof titleKindSchema>;
+
+export const titleSuggestionSchema = z.object({
+  kind: titleKindSchema, assetId: z.string().nullable().optional(), projectId: z.string().nullable().optional(),
+  currentTitle: z.string(), suggestedTitle: z.string(), suggestedDescription: z.string().default(""), revision: z.number().int().nullable().optional(),
+});
+export type TitleSuggestion = z.infer<typeof titleSuggestionSchema>;
+
+export const titleSuggestionResponseSchema = z.object({
+  suggestions: z.array(titleSuggestionSchema).default([]),
+  skipped: z.array(z.object({ assetId: z.string().nullable().optional(), projectId: z.string().nullable().optional(), title: z.string(), reason: z.string() })).default([]),
+  costUsd: z.number().nonnegative().default(0),
+  costKind: z.enum(["actual", "estimated"]).default("estimated"),
+  model: z.string().nullable().optional(),
+  requests: z.number().int().nonnegative().default(0),
+  aiAvailable: z.boolean().default(false),
+  warning: z.string().nullable().optional(),
+});
+export type TitleSuggestionResponse = z.infer<typeof titleSuggestionResponseSchema>;
+
+export type TitleApplyItem = { kind: TitleKind; assetId: string | null; projectId: string | null; currentTitle: string; title: string; description: string; revision: number | null; edited: boolean };
+
+const titleApplyResultSchema = z.object({ kind: titleKindSchema, assetId: z.string().nullable().optional(), projectId: z.string().nullable().optional(), title: z.string(), reason: z.string().nullable().optional() });
+export const titleApplyResponseSchema = z.object({ applied: z.array(titleApplyResultSchema).default([]), conflicts: z.array(titleApplyResultSchema).default([]) });
+export type TitleApplyResponse = z.infer<typeof titleApplyResponseSchema>;
 
 export type MatchExplanation = {
   query: string;

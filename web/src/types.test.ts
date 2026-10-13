@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { beatSchema, clipSchema, jobSchema, musicPresentationSchema, processingModeSchema, processingStepSchema, sourceProfileSchema } from "./types";
+import { assetSchema, beatSchema, clipSchema, jobSchema, profileSchema, projectSchema, titleSuggestionResponseSchema, musicPresentationSchema, processingModeSchema, processingStepSchema, sourceProfileSchema } from "./types";
 
 const score = {
   hook: 80, coherence: 82, ending: 79, energy: 70, practicalValue: 75,
@@ -169,5 +169,24 @@ describe("versioned UI contracts", () => {
     expect(clip.folderName).toBeUndefined();
     expect(clip.publishedAt).toBeUndefined();
     expect(clip.previewUrl).toBeUndefined();
+  });
+
+  it("parses SEO title fields while legacy payloads without them still parse", () => {
+    const clipBase = { id: "c", index: 1, state: "complete", start: 0, end: 5, duration: 5, openingLine: "Hi", selected: true, fallbackUsed: false, provenance: [] };
+    expect(clipSchema.parse({ ...clipBase, titleSource: "ai" }).titleSource).toBe("ai");
+    expect(clipSchema.parse(clipBase).titleSource).toBeUndefined();
+    const projectBase = { schemaVersion: 1, id: "p", name: "P", mode: "clip", style: "serious", state: "complete", sourceName: "s", sourceKind: "upload", requestedCount: 1, createdAt: "2026-01-01", updatedAt: "2026-01-01" };
+    expect(projectSchema.parse({ ...projectBase, nameIsAuto: true }).nameIsAuto).toBe(true);
+    expect(projectSchema.parse(projectBase).nameIsAuto).toBeUndefined();
+    const profileBase = { id: "p", name: "P", textModelId: "m", selected: true, persistence: "encrypted", openrouterConfigured: true, status: "connected", capabilities: [], fallbacks: {} };
+    expect(profileSchema.parse({ ...profileBase, autoSeoTitles: false }).autoSeoTitles).toBe(false);
+    expect(profileSchema.parse(profileBase).autoSeoTitles).toBeUndefined();
+    const assetBase = { id: "a", title: "T", description: "", mediaType: "video/mp4", filename: "a.mp4", tags: [], triggers: [], aliases: [], negativeTriggers: [], policy: "neutral", protected: false, minSpacingSeconds: 0, maxUsesPerProject: 1, licence: "Owned", attribution: "", contentHash: "h", createdAt: "2026-01-01" };
+    expect(assetSchema.parse({ ...assetBase, titleSource: null }).titleSource).toBeNull();
+    expect(assetSchema.parse(assetBase).titleSource).toBeUndefined();
+    expect(() => assetSchema.parse({ ...assetBase, titleSource: "robot" })).toThrow();
+    const response = titleSuggestionResponseSchema.parse({ suggestions: [{ kind: "project", assetId: null, projectId: "p", currentTitle: "YouTube import — x", suggestedTitle: "Better", suggestedDescription: "", revision: null }], skipped: [{ assetId: "a", projectId: null, title: "T", reason: "Already reviewed" }], costUsd: 0, costKind: "estimated", model: null, requests: 0, aiAvailable: false, warning: null });
+    expect(response.suggestions[0].kind).toBe("project");
+    expect(response.skipped[0].reason).toBe("Already reviewed");
   });
 });
