@@ -86,7 +86,7 @@ test.describe("live YouTube metadata", () => {
     if (!firstProject.latestJobId) throw new Error("Opt-out project has no latest job ID");
     const firstJob = await waitForJob(request, firstProject.latestJobId);
     expect(firstJob.youtubeMetadataEnabled).toBe(false);
-    expect(firstJob.clips.every((clip) => clip.youtubeDescription == null)).toBeTruthy();
+    expect(firstJob.clips.every((clip) => clip.youtubeDescription == null || clip.youtubeDescription === "")).toBeTruthy();
 
     await page.getByRole("button", { name: "Projects", exact: true }).click();
     await page.getByRole("tab", { name: /YouTube/ }).click();

@@ -1658,14 +1658,14 @@ class JobManager:
                 clip.youtube_metadata_cost_usd = cached.get("cost_usd")
                 clip.youtube_metadata_cost_kind = cached.get("cost_kind", "estimated")
                 clip.youtube_metadata_revision += 1
-                state[clip.id] = {"status": "generated", "cache_key": cache_key}
+                state[clip.id] = {"status": "generated", "cache_key": cache_key, "updated_at": time.time()}
                 continue
             current = state.get(clip.id)
             if isinstance(current, dict) and current.get("status") == "in_flight":
                 # A crash/timeout is ambiguous. Never replay a paid request blindly.
                 clip.youtube_metadata_status = "unavailable"
                 clip.youtube_metadata_reason = "A previous generation attempt was interrupted; explicitly retry to try again."
-                state[clip.id] = {"status": "unavailable", "reason": clip.youtube_metadata_reason, "cache_key": cache_key}
+                state[clip.id] = {"status": "unavailable", "reason": clip.youtube_metadata_reason, "cache_key": cache_key, "updated_at": time.time()}
                 continue
             pending.append((clip, excerpt, cache_key))
 
@@ -1714,10 +1714,10 @@ class JobManager:
         spent = float(private["youtube_metadata_spend_estimate_usd"])
         title_set = {str(clip.title).casefold() for clip in job.clips if clip.title}
         failed_reason = None
-        # Each excerpt is at most 400 estimated tokens; leave room for the
-        # system/schema overhead and the bounded 400-token response. Smaller
-        # advertised contexts reduce the batch rather than truncating IDs.
-        batch_size = max(1, min(7, ((selected.context_length or 4096) - 600) // 500))
+        # Keep each batch small enough for two realistic IDs, titles, and
+        # 120–300 character descriptions to fit the fixed response budget.
+        # Smaller advertised contexts reduce it rather than truncating IDs.
+        batch_size = max(1, min(2, ((selected.context_length or 4096) - 600) // 500))
         for offset in range(0, len(pending), batch_size):
             batch = pending[offset:offset + batch_size]
             if calls >= 5:
@@ -1742,7 +1742,8 @@ class JobManager:
                 failed_reason = "The conservative $0.05 estimated metadata budget for this job is exhausted."
                 break
             for clip, _, cache_key in batch:
-                state[clip.id] = {"status": "in_flight", "cache_key": cache_key, "model": model_id, "prompt_version": prompt_version, "started_at": time.time()}
+                started_at = time.time()
+                state[clip.id] = {"status": "in_flight", "cache_key": cache_key, "model": model_id, "prompt_version": prompt_version, "started_at": started_at, "updated_at": started_at}
                 clip.youtube_metadata_status = "pending"
                 clip.youtube_metadata_model = model_id
             # Durable reservation before network I/O; ambiguous work is not replayed.
@@ -1766,6 +1767,7 @@ class JobManager:
                     raise ValueError("Provider returned malformed structured output")
                 wanted = {clip.id for clip, _, _ in batch}
                 seen: set[str] = set()
+                batch_titles: set[str] = set()
                 valid: dict[str, YouTubeMetadataUpdate] = {}
                 for item in returned:
                     if not isinstance(item, dict) or not isinstance(item.get("clip_id"), str) or item["clip_id"] not in wanted or item["clip_id"] in seen:
@@ -1773,8 +1775,10 @@ class JobManager:
                     seen.add(item["clip_id"])
                     clip = next(entry[0] for entry in batch if entry[0].id == item["clip_id"])
                     metadata = YouTubeMetadataUpdate(revision=clip.youtube_metadata_revision, title=item.get("title", ""), description=item.get("description", ""))
-                    if metadata.title.casefold() in title_set:
+                    normalized_title = metadata.title.casefold()
+                    if normalized_title in title_set or normalized_title in batch_titles:
                         raise ValueError("Provider returned repetitive titles")
+                    batch_titles.add(normalized_title)
                     valid[clip.id] = metadata
                 if seen != wanted:
                     raise ValueError("Provider omitted a requested clip identifier")
@@ -1799,7 +1803,7 @@ class JobManager:
                     clip.youtube_metadata_revision += 1
                     title_set.add(value.title.casefold())
                     cache[cache_key] = {"title": value.title, "description": value.description, "generated_at": now, "cost_usd": float(actual_cost) / len(batch), "cost_kind": clip.youtube_metadata_cost_kind, "model": model_id}
-                    state[clip.id] = {"status": "generated", "cache_key": cache_key, "model": model_id}
+                    state[clip.id] = {"status": "generated", "cache_key": cache_key, "model": model_id, "updated_at": time.time()}
                 self._save(job, private)
             except Exception as exc:
                 failed_reason = " ".join(redact(provider_runtime_message(exc, "OpenRouter")).split()).strip(" .") or "Provider request failed"
@@ -1816,7 +1820,7 @@ class JobManager:
             clip.youtube_metadata_reason = reason[:300]
             state = private.setdefault("youtube_metadata_generation", {})
             if isinstance(state, dict):
-                state[clip.id] = {"status": clip.youtube_metadata_status, "cache_key": cache_key, "reason": reason[:300]}
+                state[clip.id] = {"status": clip.youtube_metadata_status, "cache_key": cache_key, "reason": reason[:300], "updated_at": time.time()}
         warning = f"YouTube metadata unavailable: {reason}. Clips remain playable with deterministic titles."
         if warning not in job.warnings:
             job.warnings.append(warning)

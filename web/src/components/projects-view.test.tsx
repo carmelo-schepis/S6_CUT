@@ -239,6 +239,13 @@ describe("Projects create flow", () => {
     expect(mockCreateClipJob.mock.calls[0][0]).not.toHaveProperty("hookText");
   });
 
+  it("uses Music mode's effective Smart processing after Fast was selected", () => {
+    render(<ProjectsView health={health} providersLoaded hasSelectedProvider onCreated={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Fast" }));
+    fireEvent.click(screen.getByRole("button", { name: "Music / sung vocals" }));
+    expect(screen.getByRole("checkbox", { name: "YouTube metadata" })).toBeEnabled();
+  });
+
   it("resets hook text opt-in after eligibility is lost and regained", () => {
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
     const checkbox = screen.getByRole("checkbox", { name: /Hook text/i });

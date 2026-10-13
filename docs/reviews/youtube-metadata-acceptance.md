@@ -10,8 +10,8 @@
 
 ## Automated coverage
 
-- `engine/tests/test_youtube_metadata.py`: metadata validation, stale revisions, linked Asset persistence, Fast-mode refusal, bounded provider parameters, paid-call limit, and a concurrent-edit preservation case.
-- `engine/tests/test_youtube_metadata_pipeline.py`: transcript time-range grounding, malformed/duplicate/missing/unknown IDs, deterministic fallback, batching, persistence/cache reuse, model price ceiling, output-token limit, and exhausted-budget behavior.
+- `engine/tests/test_youtube_metadata.py`: metadata validation, stale revisions, linked Asset persistence, the existing Library 200/2,000-character edit contract, Fast-mode refusal, bounded provider parameters, paid-call limit, overlapping reservation preservation, and stale worker-checkpoint protection.
+- `engine/tests/test_youtube_metadata_pipeline.py`: transcript time-range grounding, malformed/duplicate/missing/unknown IDs and repeated titles, deterministic fallback, two-item output-bounded batching with realistic IDs/descriptions, persistence/cache reuse, model price ceiling, output-token limit, and exhausted-budget behavior.
 - Frontend component/API/type tests cover Settings model persistence, opt-in eligibility, editor behavior, Library presentation, and API contracts.
 - `tests/acceptance/youtube-metadata-live.spec.ts` is deliberately non-mocked. It requires `S6_RUN_LIVE_YOUTUBE_METADATA=1`, `S6_ACCEPTANCE_ISOLATED=1`, an authorized public `S6_YOUTUBE_METADATA_URL`, and a selected/connected provider profile configured only in disposable review data. It exercises real provider generation, edits, reload, and export. Do not use the owner’s deployment/data for this test.
 

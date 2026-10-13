@@ -86,6 +86,9 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
   const [detailsTab, setDetailsTab] = useState<"score" | "captions" | "asset" | "metadata" | "info">("score");
   const [metadataTitle, setMetadataTitle] = useState("");
   const [metadataDescription, setMetadataDescription] = useState("");
+  const metadataDraftRef = useRef({ clipId: null as string | null, revision: 0, title: "", description: "", dirty: false });
+  const selectedClipIdRef = useRef(selectedClipId);
+  useEffect(() => { selectedClipIdRef.current = selectedClipId; }, [selectedClipId]);
   const [metadataBusy, setMetadataBusy] = useState(false);
   const [metadataStatus, setMetadataStatus] = useState<string | null>(null);
   const [boardFilter, setBoardFilter] = useState<"all" | "selected" | "failed">("all");
@@ -256,7 +259,18 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
   const jobLoaded = jobFetched || !project?.latestJobId;
 
   const selectedClip = useMemo(() => job?.clips.find((clip) => clip.id === selectedClipId) || null, [job, selectedClipId]);
-  useEffect(() => { queueMicrotask(() => { setMetadataTitle(selectedClip?.title || ""); setMetadataDescription(selectedClip?.youtubeDescription || ""); setMetadataStatus(null); }); }, [selectedClip?.id, selectedClip?.title, selectedClip?.youtubeDescription]);
+  useEffect(() => {
+    const current = metadataDraftRef.current;
+    const revision = selectedClip?.youtubeMetadataRevision ?? 0;
+    if (current.clipId !== (selectedClip?.id ?? null) || (!current.dirty && current.revision !== revision)) {
+      const title = selectedClip?.title || "";
+      const description = selectedClip?.youtubeDescription || "";
+      metadataDraftRef.current = { clipId: selectedClip?.id ?? null, revision, title, description, dirty: false };
+      queueMicrotask(() => { setMetadataTitle(title); setMetadataDescription(description); setMetadataStatus(null); });
+    } else if (current.dirty && current.revision !== revision) {
+      setMetadataStatus("Saved metadata changed elsewhere. Your draft is preserved; saving it will detect the revision conflict.");
+    }
+  }, [selectedClip?.id, selectedClip?.title, selectedClip?.youtubeDescription, selectedClip?.youtubeMetadataRevision]);
   // "Selected" means the export selection the Include-in-export checkbox drives,
   // so the filter reads the same flag the ZIP builder does.
   const boardClips = useMemo(() => (job?.clips || []).filter((clip) => (
@@ -450,21 +464,49 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
 
   const runMetadata = async (regenerate: boolean) => {
     if (!job || !selectedClip || selectedClip.state !== "complete" || metadataBusy) return;
+    const requestedClipId = selectedClip.id;
     setMetadataBusy(true); setMetadataStatus(null);
     try {
-      const next = await generateYoutubeMetadata(job.id, selectedClip.id, regenerate);
-      setJob(next); setMetadataTitle(next.clips.find((clip) => clip.id === selectedClip.id)?.title || "");
-      setMetadataDescription(next.clips.find((clip) => clip.id === selectedClip.id)?.youtubeDescription || "");
-      setMetadataStatus("Metadata generated. Review and save any edits.");
-    } catch (cause) { setMetadataStatus(readableError(cause)); }
-    finally { setMetadataBusy(false); }
+      const next = await generateYoutubeMetadata(job.id, requestedClipId, regenerate);
+      setJob(next);
+      if (selectedClipIdRef.current === requestedClipId) {
+        const generatedClip = next.clips.find((clip) => clip.id === requestedClipId);
+        const title = generatedClip?.title || "";
+        const description = generatedClip?.youtubeDescription || "";
+        metadataDraftRef.current = { clipId: requestedClipId, revision: generatedClip?.youtubeMetadataRevision ?? 0, title, description, dirty: false };
+        setMetadataTitle(title);
+        setMetadataDescription(description);
+        setMetadataStatus("Metadata generated. Review and save any edits.");
+      }
+    } catch (cause) {
+      if (selectedClipIdRef.current === requestedClipId) setMetadataStatus(readableError(cause));
+    } finally { setMetadataBusy(false); }
   };
   const saveMetadata = async () => {
     if (!job || !selectedClip || metadataBusy) return;
+    const requestedClipId = selectedClip.id;
+    const draft = metadataDraftRef.current;
     setMetadataBusy(true); setMetadataStatus(null);
-    try { const next = await updateYoutubeMetadata(job.id, selectedClip.id, metadataTitle, metadataDescription, selectedClip.youtubeMetadataRevision ?? 0); setJob(next); setMetadataStatus("Metadata saved."); }
-    catch (cause) { setMetadataStatus(readableError(cause)); }
-    finally { setMetadataBusy(false); }
+    try {
+      const next = await updateYoutubeMetadata(job.id, requestedClipId, metadataTitle, metadataDescription, draft.clipId === requestedClipId ? draft.revision : selectedClip.youtubeMetadataRevision ?? 0);
+      setJob(next);
+      if (selectedClipIdRef.current === requestedClipId) {
+        const savedClip = next.clips.find((clip) => clip.id === requestedClipId);
+        metadataDraftRef.current = { clipId: requestedClipId, revision: savedClip?.youtubeMetadataRevision ?? draft.revision, title: metadataTitle, description: metadataDescription, dirty: false };
+        setMetadataStatus("Metadata saved.");
+      }
+    } catch (cause) {
+      if (selectedClipIdRef.current === requestedClipId) setMetadataStatus(readableError(cause));
+    } finally { setMetadataBusy(false); }
+  };
+  const changeMetadataDraft = (field: "title" | "description", value: string) => {
+    if (!selectedClip) return;
+    const current = metadataDraftRef.current;
+    const next = { ...current, clipId: selectedClip.id, [field]: value };
+    next.dirty = next.title !== (selectedClip.title || "") || next.description !== (selectedClip.youtubeDescription || "");
+    metadataDraftRef.current = next;
+    if (field === "title") setMetadataTitle(value);
+    else setMetadataDescription(value);
   };
   const retryOneClip = async (clip: Clip) => {
     if (!job || clip.state !== "failed") return;
@@ -620,7 +662,7 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
           {detailsTab === "score" && (selectedClip ? <ScoreInspector clip={selectedClip} /> : <p className="muted">Select a clip to inspect its auditable score.</p>)}
           {detailsTab === "captions" && <><div className="inspector-section"><label>Preset</label><span className="readonly-preset">Editorial highlight<span className="readonly-tag">Read-only</span></span><span className="preset-options">Minimal · High contrast box</span></div>{job?.hookTextEnabled && <div className="inspector-section"><label>AI hook text <span className="readonly-tag">Read-only</span></label>{selectedClip?.hookText ? <span>{selectedClip.hookText}</span> : <><span className="form-hint" role="note">Not generated</span>{job.warnings.filter((warning) => warning.startsWith("AI hook text unavailable:")).map((warning) => <span className="form-hint" role="note" key={warning}>{warning}</span>)}</>}</div>}<div className="inspector-note"><Captions size={15} /><span>Caption style and timing are fixed when the job is created and burned in from local word timestamps.</span></div></>}
           {detailsTab === "asset" && <><div className="inspector-section"><label>{project.mode === "clip" ? "Visual intention" : "Historical visual"}</label><strong>{selectedClip?.visualLabel || job?.beats[0]?.concept || (project.mode === "clip" ? "No visual beat selected" : "No visual metadata")}</strong></div><div className="inspector-section"><label>Source</label><span>{selectedClip?.provenance[0]?.provider || job?.beats[0]?.source || (project.mode === "clip" ? "No source recorded" : "Legacy source")}</span></div>{project.mode === "clip" && <div className="inspector-note"><Sparkles size={15} /><span>{selectedClip?.provenance[0]?.matchReason || job?.beats[0]?.matchReason || "No additional visual metadata."}</span></div>}</>}
-          {detailsTab === "metadata" && <section className="youtube-metadata-editor" aria-label="YouTube metadata editor">{!selectedClip ? <p className="muted">Select a clip to edit its YouTube metadata.</p> : <><Field label="YouTube title"><input aria-label="YouTube title" maxLength={100} value={metadataTitle} onChange={(event) => setMetadataTitle(event.target.value)} placeholder={selectedClip.openingLine || `Cut ${selectedClip.index}`} /></Field><Field label="Short description"><textarea aria-label="YouTube short description" rows={4} maxLength={500} value={metadataDescription} onChange={(event) => setMetadataDescription(event.target.value)} placeholder={selectedClip.openingLine || "Add a concise clip description"} /></Field><div className="metadata-actions"><Button disabled={metadataBusy || selectedClip.state !== "complete" || job?.processingMode === "fast" || job?.contentFormat !== "short" || !selectedClip.transcriptExcerpt?.trim()} onClick={() => void runMetadata(Boolean(selectedClip.youtubeMetadataStatus === "generated" || metadataTitle || metadataDescription))}><Sparkles size={14} />{metadataBusy ? "Generating…" : selectedClip.youtubeMetadataStatus === "generated" || metadataTitle || metadataDescription ? "Regenerate" : "Generate metadata"}</Button><Button disabled={metadataBusy || selectedClip.state !== "complete"} onClick={() => void saveMetadata()}>Save edits</Button><Button disabled={!metadataTitle} onClick={() => void navigator.clipboard?.writeText(metadataTitle).then(() => setMetadataStatus("Title copied."))}><Copy size={14} /> Copy title</Button><Button disabled={!metadataDescription} onClick={() => void navigator.clipboard?.writeText(metadataDescription).then(() => setMetadataStatus("Description copied."))}><Copy size={14} /> Copy description</Button></div>{selectedClip.youtubeMetadataStatus === "pending" && <p className="form-hint" role="status">Metadata generation is pending.</p>}{selectedClip.youtubeMetadataStatus === "generated" && <p className="form-hint" role="status">Suggested metadata generated{selectedClip.youtubeMetadataModel ? ` with ${selectedClip.youtubeMetadataModel}` : ""}.</p>}{typeof selectedClip.youtubeMetadataCostUsd === "number" && <p className="form-hint">Provider cost {selectedClip.youtubeMetadataCostKind || "estimated"}: ${selectedClip.youtubeMetadataCostUsd.toFixed(6)}{selectedClip.youtubeMetadataInputTokens || selectedClip.youtubeMetadataOutputTokens ? ` · ${selectedClip.youtubeMetadataInputTokens || 0} in / ${selectedClip.youtubeMetadataOutputTokens || 0} out tokens` : ""}</p>}{selectedClip.youtubeMetadataStatus === "fallback" && <p className="form-hint" role="status">Transcript-based fallback description; provider metadata was unavailable. {selectedClip.youtubeMetadataReason || ""}</p>}{selectedClip.youtubeMetadataStatus === "unavailable" && <p className="form-hint" role="status">Metadata unavailable. {selectedClip.youtubeMetadataReason || ""}</p>}{job?.processingMode === "fast" && <p className="form-hint" role="note">Fast mode does not transcribe or call providers. Metadata generation is disabled.</p>}{!selectedClip.transcriptExcerpt?.trim() && selectedClip.state === "complete" && <p className="form-hint" role="note">Insufficient saved transcript context to generate metadata.</p>}{metadataStatus && <p role="status" className="form-hint">{metadataStatus}</p>}<p className="inspector-note"><Sparkles size={15} /><span>Optional suggested YouTube metadata. It is separate from burned-in hook text and Music Top text, and never changes rendered video.</span></p></>}</section>}
+          {detailsTab === "metadata" && <section className="youtube-metadata-editor" aria-label="YouTube metadata editor">{!selectedClip ? <p className="muted">Select a clip to edit its YouTube metadata.</p> : <><Field label="YouTube title"><input aria-label="YouTube title" maxLength={100} value={metadataTitle} onChange={(event) => changeMetadataDraft("title", event.target.value)} placeholder={selectedClip.openingLine || `Cut ${selectedClip.index}`} /></Field><Field label="Short description"><textarea aria-label="YouTube short description" rows={4} maxLength={500} value={metadataDescription} onChange={(event) => changeMetadataDraft("description", event.target.value)} placeholder={selectedClip.openingLine || "Add a concise clip description"} /></Field><div className="metadata-actions"><Button disabled={metadataBusy || selectedClip.state !== "complete" || job?.processingMode === "fast" || job?.contentFormat !== "short" || !selectedClip.transcriptExcerpt?.trim()} onClick={() => void runMetadata(Boolean(selectedClip.youtubeMetadataStatus === "generated" || metadataTitle || metadataDescription))}><Sparkles size={14} />{metadataBusy ? "Generating…" : selectedClip.youtubeMetadataStatus === "generated" || metadataTitle || metadataDescription ? "Regenerate" : "Generate metadata"}</Button><Button disabled={metadataBusy || selectedClip.state !== "complete"} onClick={() => void saveMetadata()}>Save edits</Button><Button disabled={!metadataTitle} onClick={() => void navigator.clipboard?.writeText(metadataTitle).then(() => setMetadataStatus("Title copied."))}><Copy size={14} /> Copy title</Button><Button disabled={!metadataDescription} onClick={() => void navigator.clipboard?.writeText(metadataDescription).then(() => setMetadataStatus("Description copied."))}><Copy size={14} /> Copy description</Button></div>{selectedClip.youtubeMetadataStatus === "pending" && <p className="form-hint" role="status">Metadata generation is pending.</p>}{selectedClip.youtubeMetadataStatus === "generated" && <p className="form-hint" role="status">Suggested metadata generated{selectedClip.youtubeMetadataModel ? ` with ${selectedClip.youtubeMetadataModel}` : ""}.</p>}{typeof selectedClip.youtubeMetadataCostUsd === "number" && <p className="form-hint">Provider cost {selectedClip.youtubeMetadataCostKind || "estimated"}: ${selectedClip.youtubeMetadataCostUsd.toFixed(6)}{selectedClip.youtubeMetadataInputTokens || selectedClip.youtubeMetadataOutputTokens ? ` · ${selectedClip.youtubeMetadataInputTokens || 0} in / ${selectedClip.youtubeMetadataOutputTokens || 0} out tokens` : ""}</p>}{selectedClip.youtubeMetadataStatus === "fallback" && <p className="form-hint" role="status">Transcript-based fallback description; provider metadata was unavailable. {selectedClip.youtubeMetadataReason || ""}</p>}{selectedClip.youtubeMetadataStatus === "unavailable" && <p className="form-hint" role="status">Metadata unavailable. {selectedClip.youtubeMetadataReason || ""}</p>}{job?.processingMode === "fast" && <p className="form-hint" role="note">Fast mode does not transcribe or call providers. Metadata generation is disabled.</p>}{!selectedClip.transcriptExcerpt?.trim() && selectedClip.state === "complete" && <p className="form-hint" role="note">Insufficient saved transcript context to generate metadata.</p>}{metadataStatus && <p role="status" className="form-hint">{metadataStatus}</p>}<p className="inspector-note"><Sparkles size={15} /><span>Optional suggested YouTube metadata. It is separate from burned-in hook text and Music Top text, and never changes rendered video.</span></p></>}</section>}
           {detailsTab === "info" && <dl className="info-list"><dt>Project</dt><dd>{project.id.slice(0, 8)}</dd><dt>Job</dt><dd>{job?.id.slice(0, 8) || "—"}</dd><dt>Mode</dt><dd>{project.mode === "clip" ? "Clip" : "Legacy video"}</dd><dt>Style</dt><dd>{project.style}</dd><dt>Source</dt><dd>{project.mode === "clip" ? project.sourceKind : "Legacy source"}</dd><dt>Storage</dt><dd>Mounted local data</dd></dl>}
         </div>
       </aside>

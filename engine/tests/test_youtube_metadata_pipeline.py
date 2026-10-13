@@ -22,7 +22,7 @@ def _runtime(tmp_path: Path):
     profiles = ProfileService(db, SecretVault(tmp_path / "secrets" / "instance.key"))
     manager = JobManager(db, LibraryRules(db, tmp_path / "library"), profiles, runtime)
     clips = [
-        Clip(id=f"clip-{index}", index=index, state="queued", start=(index - 1) * 20, end=index * 20,
+        Clip(id=f"00000000-0000-4000-8000-{index:012d}", index=index, state="queued", start=(index - 1) * 20, end=index * 20,
              duration=20, opening_line=f"opening {index}")
         for index in range(1, 9)
     ]
@@ -44,6 +44,8 @@ def _runtime(tmp_path: Path):
                  {"clip_id": ids[0], "title": "A repeated id", "description": "A repeated item."}],
     lambda ids: [{"clip_id": "unknown", "title": "A grounded title", "description": "A grounded description."}],
     lambda ids: [{"clip_id": ids[0], "title": "A grounded title", "description": "A grounded description."}],
+    lambda ids: [{"clip_id": ids[0], "title": "Same title", "description": "A grounded description."},
+                 {"clip_id": ids[1], "title": "same title", "description": "Another grounded description."}],
 ])
 def test_auto_generation_requires_exact_distinct_ids_and_preserves_fallback(monkeypatch, tmp_path, bad_items):
     db, manager, job, private = _runtime(tmp_path)
@@ -80,26 +82,27 @@ def test_auto_generation_batches_stable_ids_persists_and_reuses_successes(monkey
     async def generate(messages, schema, **kwargs):
         request = json.loads(messages[1]["content"])
         request_batches.append((request, schema, kwargs))
-        return ({"clips": [{"clip_id": item["clip_id"], "title": f"Clip {item['clip_id']} explains the science", "description": f"A concise transcript-grounded explanation of {item['clip_id']} and its specific science topic."} for item in request["clips"]]}, {"prompt_tokens": 200, "completion_tokens": 120, "cost": 0.00002})
+        return ({"clips": [{"clip_id": item["clip_id"], "title": f"Clip {item['clip_id']} explains the science", "description": (f"A concise transcript-grounded explanation of {item['clip_id']} and its specific science topic, including the concrete context and supporting detail from the timed excerpt.").ljust(240, ".")} for item in request["clips"]]}, {"prompt_tokens": 200, "completion_tokens": 120, "cost": 0.00002})
 
     monkeypatch.setattr(manager.profiles, "openrouter_json", generate)
     words = []
     for index, clip in enumerate(job.clips, 1):
         words.append({"text": f"Clip {index} transcript explains a specific science topic accurately.", "start": clip.start + 1, "end": clip.start + 4})
     manager._generate_youtube_metadata(job, private, words)
-    assert [len(batch[0]["clips"]) for batch in request_batches] == [6, 2]
+    assert [len(batch[0]["clips"]) for batch in request_batches] == [2, 2, 2, 2]
     assert all(batch[2]["max_tokens"] == 400 for batch in request_batches)
     assert all(batch[2]["provider"]["max_price"] == {"prompt": 0.10, "completion": 0.40} for batch in request_batches)
     assert all(batch[2]["reasoning"] == {"enabled": False} for batch in request_batches)
     assert all(batch[2]["temperature"] <= 0.2 for batch in request_batches)
+    assert all(120 <= len(clip.youtube_description or "") <= 300 for clip in job.clips)
     assert all(clip.youtube_metadata_status == "generated" for clip in job.clips)
     assert all(clip.youtube_metadata_revision == 1 for clip in job.clips)
     assert all(clip.youtube_metadata_cost_kind == "actual" for clip in job.clips)
     assert db.get_job(job.id).clips[3].title == job.clips[3].title
-    assert private["youtube_metadata_generation_calls"] == 2
+    assert private["youtube_metadata_generation_calls"] == 4
     manager._generate_youtube_metadata(job, private, words)
-    assert len(request_batches) == 2
-    assert private["youtube_metadata_generation_calls"] == 2
+    assert len(request_batches) == 4
+    assert private["youtube_metadata_generation_calls"] == 4
 
 
 def test_auto_generation_skips_when_budget_is_exhausted_and_requires_priced_supported_model(monkeypatch, tmp_path):

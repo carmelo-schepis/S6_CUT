@@ -173,7 +173,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
   }
   const hookTextEnabled = hookTextEligible && hookTextChoice;
   const metadataDisabledReason = contentFormat !== "short" ? "Available for Short form only."
-      : processingMode === "fast" ? "Fast mode does not support metadata generation. Choose Auto or Smart."
+      : sourceProfile === "speech" && processingMode === "fast" ? "Fast mode does not support metadata generation. Choose Auto or Smart."
         : !providersLoaded ? "Checking connected providers…"
           : !hasSelectedProvider ? "Connect an OpenRouter profile to enable this optional feature."
             : null;
