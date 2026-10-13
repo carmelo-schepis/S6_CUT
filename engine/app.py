@@ -774,13 +774,9 @@ def _record_youtube_metadata_failure(job_id: str, clip_id: str, revision: int, r
             linked_asset = db.get_asset(clip.library_asset_id)
             _, latest, clip = db.update_generated_clip_metadata(
                 clip.library_asset_id, clip.title or (linked_asset.title if linked_asset else "Suggested title"), fallback_description,
-                clip.youtube_metadata_revision,
+                clip.youtube_metadata_revision, metadata_status="fallback" if fallback_description else "unavailable",
+                metadata_reason=reason[:300],
             )
-            latest_clip = next(item for item in latest.clips if item.id == clip_id)
-            latest_clip.youtube_metadata_status = "fallback" if fallback_description else "unavailable"
-            latest_clip.youtube_metadata_reason = reason[:300]
-            latest = latest.model_copy(update={"clips": [latest_clip if item.id == clip_id else item for item in latest.clips]})
-            clip = latest_clip
         except (ValueError, KeyError):
             clip.youtube_metadata_status = "unavailable"
             clip.youtube_metadata_reason = reason[:300]
