@@ -11,14 +11,17 @@ const assets: LibraryAsset[] = [
 ];
 
 vi.mock("../api", () => ({
-  listAssets: vi.fn(async () => assets), listFolders: vi.fn(async () => folders), getHealth: vi.fn().mockRejectedValue(new Error("offline")), updateAsset: vi.fn(), deleteAsset: vi.fn(), uploadAsset: vi.fn(), createFolder: vi.fn(), updateFolder: vi.fn(), archiveFolder: vi.fn(), removeFolder: vi.fn(), moveFolder: vi.fn(), moveAssets: vi.fn(), renewAssetThumbnail: vi.fn(), readableError: () => "Error",
+  listAssets: vi.fn(async () => assets), listFolders: vi.fn(async () => folders), getHealth: vi.fn().mockRejectedValue(new Error("offline")), updateAsset: vi.fn(), deleteAsset: vi.fn(), uploadAsset: vi.fn(), createFolder: vi.fn(), updateFolder: vi.fn(), archiveFolder: vi.fn(), removeFolder: vi.fn(), moveFolder: vi.fn(), moveAssets: vi.fn(), renewAssetThumbnail: vi.fn(), suggestLibraryTitles: vi.fn(), applyLibraryTitles: vi.fn(), readableError: (cause: unknown) => cause instanceof Error ? cause.message : "Error",
 }));
 
-import { deleteAsset, listAssets, listFolders, renewAssetThumbnail } from "../api";
+import { applyLibraryTitles, deleteAsset, listAssets, listFolders, renewAssetThumbnail, suggestLibraryTitles, updateAsset } from "../api";
 const mockDeleteAsset = vi.mocked(deleteAsset);
 const mockListAssets = vi.mocked(listAssets);
 const mockListFolders = vi.mocked(listFolders);
 const mockRenewAssetThumbnail = vi.mocked(renewAssetThumbnail);
+const mockSuggestTitles = vi.mocked(suggestLibraryTitles);
+const mockApplyTitles = vi.mocked(applyLibraryTitles);
+const mockUpdateAsset = vi.mocked(updateAsset);
 
 describe("LibraryView", () => {
   beforeEach(() => {
@@ -316,5 +319,81 @@ describe("LibraryView – bounded revalidation", () => {
     await waitFor(() => expect(mockListAssets.mock.calls.length).toBeGreaterThan(callsBefore), { timeout: 2000 });
     // The debounce window collapses the burst — at most one extra reload
     expect(mockListAssets.mock.calls.length - callsBefore).toBeLessThanOrEqual(2);
+  });
+});
+
+describe("LibraryView – SEO titles", () => {
+  const suggestion = { suggestions: [{ kind: "clip" as const, assetId: "a1", projectId: null, currentTitle: "Acme launch", suggestedTitle: "Acme Launch Day Highlights", suggestedDescription: "Launch recap.", revision: 1 }], skipped: [], costUsd: 0.0004, costKind: "estimated" as const, model: "m", requests: 1, aiAvailable: true, warning: null };
+  beforeEach(() => {
+    mockListAssets.mockResolvedValue(assets);
+    mockListFolders.mockResolvedValue(folders);
+    mockSuggestTitles.mockReset(); mockApplyTitles.mockReset(); mockUpdateAsset.mockReset();
+  });
+
+  it("suggests auto-titled items, shows progress, applies the reviewed rows, and reloads the Library", async () => {
+    let resolveSuggest: (value: typeof suggestion) => void = () => undefined;
+    mockSuggestTitles.mockReturnValue(new Promise((resolve) => { resolveSuggest = resolve; }));
+    mockApplyTitles.mockResolvedValue({ applied: [{ kind: "clip", assetId: "a1", projectId: null, title: "Acme Launch Day Highlights", reason: null }], conflicts: [{ kind: "project", assetId: null, projectId: "p", title: "Old project", reason: "Renamed since suggestion" }] });
+    render(<LibraryView />);
+    await screen.findByText("Acme launch");
+    const button = screen.getByTestId("suggest-seo-titles");
+    expect(button).toHaveTextContent("Suggest SEO titles");
+    fireEvent.click(button);
+    expect(mockSuggestTitles).toHaveBeenCalledWith({ scope: "auto-titled" });
+    expect(button).toHaveTextContent("Writing titles…");
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("aria-busy", "true");
+    resolveSuggest(suggestion);
+    const dialog = await screen.findByTestId("seo-title-review");
+    const loadsBefore = mockListAssets.mock.calls.length;
+    fireEvent.click(within(dialog).getByRole("button", { name: "Apply selected (1)" }));
+    await waitFor(() => expect(screen.queryByTestId("seo-title-review")).not.toBeInTheDocument());
+    expect(mockApplyTitles).toHaveBeenCalledWith([{ kind: "clip", assetId: "a1", projectId: null, currentTitle: "Acme launch", title: "Acme Launch Day Highlights", description: "Launch recap.", revision: 1, edited: false }]);
+    const feedback = await screen.findByTestId("seo-title-feedback");
+    expect(feedback).toHaveTextContent("Updated 1 title · 1 conflict");
+    expect(feedback).toHaveTextContent("Old project: Renamed since suggestion");
+    await waitFor(() => expect(mockListAssets.mock.calls.length).toBeGreaterThan(loadsBefore));
+  });
+
+  it("sends checkbox-selected asset IDs, keeps the selection, and reports request errors", async () => {
+    mockSuggestTitles.mockRejectedValue(new Error("A title job is already running."));
+    render(<LibraryView />);
+    await screen.findByText("Acme launch");
+    fireEvent.click(screen.getByLabelText("Select Acme launch"));
+    const button = screen.getByTestId("suggest-seo-titles");
+    expect(button).toHaveTextContent("Suggest SEO titles (1)");
+    fireEvent.click(button);
+    expect(mockSuggestTitles).toHaveBeenCalledWith({ assetIds: ["a1"] });
+    expect(await screen.findByRole("alert")).toHaveTextContent("A title job is already running.");
+    expect(screen.queryByTestId("seo-title-review")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Select Acme launch")).toBeChecked();
+  });
+
+  it("closes the review on Cancel without writing anything", async () => {
+    mockSuggestTitles.mockResolvedValue(suggestion);
+    render(<LibraryView />);
+    await screen.findByText("Acme launch");
+    fireEvent.click(screen.getByTestId("suggest-seo-titles"));
+    fireEvent.click(within(await screen.findByTestId("seo-title-review")).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByTestId("seo-title-review")).not.toBeInTheDocument();
+    expect(mockApplyTitles).not.toHaveBeenCalled();
+  });
+
+  it("saves inspector title and description only when they changed", async () => {
+    mockUpdateAsset.mockImplementation(async (_id, patch) => ({ ...assets[0], ...patch }));
+    render(<LibraryView />);
+    await screen.findByText("Acme launch");
+    fireEvent.click(screen.getByRole("button", { name: "Select Acme launch for Rule Inspector" }));
+    const title = screen.getByDisplayValue("Acme launch");
+    fireEvent.focus(title); fireEvent.blur(title);
+    const description = screen.getByLabelText("Full description");
+    fireEvent.focus(description); fireEvent.blur(description);
+    expect(mockUpdateAsset).not.toHaveBeenCalled();
+    fireEvent.change(title, { target: { value: "Acme launch recap" } });
+    fireEvent.blur(title);
+    await waitFor(() => expect(mockUpdateAsset).toHaveBeenCalledWith("a1", { title: "Acme launch recap" }));
+    fireEvent.blur(screen.getByDisplayValue("Acme launch recap"));
+    fireEvent.blur(screen.getByLabelText("Full description"));
+    await waitFor(() => expect(mockUpdateAsset).toHaveBeenCalledTimes(1));
   });
 });
