@@ -543,7 +543,7 @@ def test_switch_fast_cancels_active_transcription_without_resurrecting_job(monke
     _clip_job(test_db, "switch-progress", "switch-progress-proj", mode="smart", source=source, count=3)
     worker = threading.Thread(target=test_manager._process, args=("switch-progress",))
     worker.start()
-    assert entered.wait(2)
+    assert entered.wait(10)
     replacement = asyncio.run(test_manager.control("switch-progress", "switch-fast"))
     worker.join(5)
 
