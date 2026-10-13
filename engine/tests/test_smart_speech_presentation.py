@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from engine.config import Settings
-from engine.media import render_clip, write_ass
+from engine.media import render_clip, render_fast_clip, write_ass
 
 
 def _word(text: str, start: float, end: float) -> dict[str, object]:
@@ -42,7 +42,7 @@ def _caption_events(ass: str) -> list[str]:
 
 
 def _visible_text(event: str) -> str:
-    text = event.split(",,", 1)[-1]
+    text = event.split(",", 9)[-1]
     return re.sub(r"\{[^}]*\}", "", text).replace(r"\N", " ")
 
 
@@ -139,6 +139,48 @@ def test_smart_speech_wrap_retains_words_and_existing_emoji(tmp_path: Path) -> N
     assert all(token in text for token in tokens)
     assert all(_visible_text(event).count(r"\N") <= 1 for event in events)
     assert "😂 😂" not in ass
+
+
+def test_fast_smart_speech_render_preserves_hook_and_words_when_burn_in_is_off(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import engine.media as media
+
+    captured = {}
+
+    def capture_render_clip(source, output, **kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(media, "render_clip", capture_render_clip)
+    words = [_word("Transcript", 0.2, 0.7)]
+
+    render_fast_clip(
+        tmp_path / "source.mp4", tmp_path / "clip.mp4", start=4, end=8, aspect="9:16",
+        settings=Settings.from_env(), words=words, presentation="smart_speech_v1",
+        subtitles_enabled=False, embed_subtitles=True, hook_text="A clear opening hook",
+    )
+
+    assert captured["words"] == [{"text": "Transcript", "start": 4.2, "end": 4.7}]
+    assert captured["hook_text"] == "A clear opening hook"
+    assert captured["subtitles_enabled"] is False
+    assert captured["embed_subtitles"] is True
+
+
+def test_smart_speech_transcript_words_and_timing_survive_phrase_grouping(tmp_path: Path) -> None:
+    words = [
+        _word("First,", 0.1, 0.3), _word("second", 0.35, 0.6), _word("third!", 0.65, 0.9),
+        _word("fourth", 1.2, 1.5), _word("fifth.", 1.55, 1.9),
+    ]
+    events = _caption_events(_write(tmp_path / "transcript.ass", words))
+
+    assert len(events) == len(words)
+    for index, (event, word) in enumerate(zip(events, words)):
+        fields = event.split(",", 3)
+        assert fields[1] == f"0:{int(word['start'] // 60):02d}:{word['start'] % 60:05.2f}"
+        assert fields[2] == f"0:{int(word['end'] // 60):02d}:{word['end'] % 60:05.2f}"
+        group_start = index // 3 * 3
+        group = words[group_start:group_start + 3]
+        assert _visible_text(event).split() == [str(item["text"]) for item in group]
 
 
 def test_smart_speech_creator_credit_keeps_opening_fade_and_empty_captions(tmp_path: Path) -> None:

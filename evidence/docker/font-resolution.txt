@@ -1,0 +1,2 @@
+Montserrat,Montserrat ExtraBold|ExtraBold Italic,Italic|/usr/share/fonts/truetype/s6cut/montserrat/Montserrat-ExtraBoldItalic.ttf
+Montserrat,Montserrat ExtraBold|ExtraBold Italic,Italic
