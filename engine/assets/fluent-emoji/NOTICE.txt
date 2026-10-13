@@ -1,0 +1,2 @@
+Fluent Emoji artwork © Microsoft Corporation. All selected artwork is from microsoft/fluentui-emoji at revision 1ffb34c752ecf5d402f04cfb4b392c77f57c54bc.
+Licensed under the MIT License; see LICENSE. Source paths and per-file SHA-256 digests are recorded in manifest.json. Only the curated 3D PNG files listed there are redistributed.

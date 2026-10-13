@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import Settings
+from .emoji_assets import find_emoji_sequences, resolve_emoji
 from .hook_text import remove_hook_em_dashes
 from .recipes import CAPTION_REFERENCE_SHORT_EDGE, LookTreatment, caption_preset, known_styles, recipe_for
 from .subscribe_animation import (
@@ -932,12 +933,16 @@ def _subtitle_preset(style: str, content_format: str | None = None) -> dict[str,
 
 
 def _is_emoji(character: str) -> bool:
+    """Recognize common emoji codepoint blocks, including unsupported assets."""
     codepoint = ord(character)
-    return any(start <= codepoint <= end for start, end in _EMOJI_RANGES)
+    if codepoint in {0x20E3, 0xFE0F} or 0x1F000 <= codepoint <= 0x1FAFF or 0x2600 <= codepoint <= 0x27FF:
+        return True
+    name_words = set(unicodedata.name(character, "").casefold().split())
+    return bool(name_words & {"face", "hand", "heart", "emoji", "person", "woman", "man", "flag"})
 
 
 def _has_emoji(text: str) -> bool:
-    return any(_is_emoji(character) for character in text)
+    return bool(find_emoji_sequences(text)) or any(_is_emoji(character) for character in text)
 
 
 def _emoji_kind(text: str) -> str | None:
@@ -1450,13 +1455,17 @@ def _smart_speech_group(words: list[dict[str, Any]], index: int) -> list[dict[st
     return words[start:start + 3]
 
 
+_SMART_SPEECH_EMOJI_SEQUENCES = {
+    "laughter": "😂",
+    "surprise": "😮",
+    "success": "😎",
+    "danger": "😬",
+    "idea": "😏",
+    "excitement": "😄",
+}
 _SMART_SPEECH_EMOJI_ASSETS = {
-    "laughter": Path(__file__).parent / "assets" / "smart-speech-emoji" / "laughter.png",
-    "surprise": Path(__file__).parent / "assets" / "smart-speech-emoji" / "surprise.png",
-    "success": Path(__file__).parent / "assets" / "smart-speech-emoji" / "success.png",
-    "danger": Path(__file__).parent / "assets" / "smart-speech-emoji" / "danger.png",
-    "idea": Path(__file__).parent / "assets" / "smart-speech-emoji" / "idea.png",
-    "excitement": Path(__file__).parent / "assets" / "smart-speech-emoji" / "excitement.png",
+    kind: resolve_emoji(sequence)
+    for kind, sequence in _SMART_SPEECH_EMOJI_SEQUENCES.items()
 }
 _SMART_SPEECH_EMOJI_WORDS = {
     "laughter": {"laugh", "laughing", "hilarious", "funny", "joke", "joking", "haha"},
@@ -1478,37 +1487,131 @@ def _smart_speech_emoji_kind(texts: Iterable[str]) -> str | None:
     return None
 
 
-def _smart_speech_emoji_plan(words: list[dict[str, Any]], width: int, height: int, duration: float, *, offset: float = 0.0) -> list[tuple[Path, float, float, int, int, int]]:
-    """Create an independent, deterministic phrase-to-local-image plan."""
-    plan: list[tuple[Path, float, float, int, int, int]] = []
-    cooldown_until = -1.0
+_UNSUPPORTED_EMOJI_WARNED: set[str] = set()
+
+
+def _caption_emoji_plan(words: list[dict[str, Any]], width: int, height: int, duration: float, *, offset: float, style: str, presentation: str | None, music_theme: str | None) -> list[tuple[Path, float, float, int, int, int]]:
+    """Plan exact local image slots for Smart Speech caption events only.
+
+    Slot geometry follows the shared phrase layout. Visibility uses the union
+    of word-event intervals, so images neither linger through pauses nor alter
+    unrelated legacy/music caption treatments.
+    """
+    local = caption_words_for_clip(words, offset, offset + duration)
+    if not local:
+        return []
     scale = min(width, height) / 1080
     size = max(48, round(112 * scale))
-    x = round((width - size) / 2)
     y = max(round(height * .34), round(height * .54 - 104 * scale - size - 18 * scale))
-    for index in range(0, len(words), 3):
-        group = words[index:index + 3]
-        texts = [str(word.get("text", "")) for word in group]
-        kind = _smart_speech_emoji_kind(texts)
-        if not kind:
+    plan: list[tuple[Path, float, float, int, int, int]] = []
+    if presentation != "smart_speech_v1" or music_theme:
+        return plan
+    enriched_local = local
+    cooldown_until = -1.0
+    for group_start in range(0, len(local), 3):
+        group = local[group_start:group_start + 3]
+        enriched_group = enriched_local[group_start:group_start + 3]
+        sequences = [(sequence, asset) for word in enriched_group for _, _, sequence, asset in find_emoji_sequences(str(word.get("text", "")))]
+        automatic = False
+        if not sequences:
+            detected = _smart_speech_emoji_kind(str(word.get("text", "")) for word in group)
+            sequence = _SMART_SPEECH_EMOJI_SEQUENCES.get(detected or "")
+            asset = resolve_emoji(sequence) if sequence else None
+            if sequence and asset:
+                sequences = [(sequence, asset)]
+                automatic = True
+        if not sequences:
+            for word in group:
+                text = str(word.get("text", ""))
+                if _has_emoji(text) and not find_emoji_sequences(text) and text not in _UNSUPPORTED_EMOJI_WARNED and len(_UNSUPPORTED_EMOJI_WARNED) < 8:
+                    _UNSUPPORTED_EMOJI_WARNED.add(text)
+                    logger.warning("Unsupported subtitle emoji sequence retained as text: %s", text[:24])
             continue
-        try:
-            asset = _SMART_SPEECH_EMOJI_ASSETS[kind]
-            if not asset.is_file():
-                raise FileNotFoundError(asset)
-        except FileNotFoundError:
-            logger.warning("Smart speech emoji asset missing for %s; captions will render without that decoration", kind)
+        start = max(0.0, float(group[0]["start"]))
+        end = min(duration, float(group[-1]["end"]))
+        if end <= start or (automatic and start < cooldown_until):
             continue
-        try:
-            start = max(0.0, float(group[0]["start"]) - offset)
-            end = min(duration, max(start, float(group[-1]["end"]) - offset))
-        except (KeyError, TypeError, ValueError):
-            continue
-        if start < cooldown_until or end <= start:
-            continue
-        plan.append((asset, start, end, x, y, size))
-        cooldown_until = end + 5.0
+        if automatic:
+            cooldown_until = end + 5.0
+        intervals = [
+            (max(0.0, float(word["start"])), min(duration, max(float(word["start"]) + .05, float(word["end"]))))
+            for word in group
+            if float(word.get("end", 0)) > float(word.get("start", 0))
+        ]
+        active_intervals: list[tuple[float, float]] = []
+        for interval_start, interval_end in intervals:
+            if interval_end <= interval_start:
+                continue
+            if active_intervals and interval_start <= active_intervals[-1][1] + .001:
+                active_intervals[-1] = (active_intervals[-1][0], max(active_intervals[-1][1], interval_end))
+            else:
+                active_intervals.append((interval_start, interval_end))
+        if not automatic:
+            inline_slots = _smart_inline_emoji_slots(group, width, height)
+            if inline_slots:
+                plan.extend((asset, interval_start, interval_end, x, slot_y, slot_size) for asset, x, slot_y, slot_size in inline_slots for interval_start, interval_end in active_intervals)
+                continue
+        unique: list[tuple[str, Path]] = []
+        for sequence, asset in sequences:
+            if all(sequence != previous for previous, _ in unique):
+                unique.append((sequence, asset))
+        for index, (_, asset) in enumerate(unique[:2]):
+            x = round(width / 2 - size / 2 - (len(unique[:2]) - 1) * size * .58 + index * size * 1.16)
+            plan.extend((asset, interval_start, interval_end, x, y, size) for interval_start, interval_end in active_intervals)
     return plan
+
+
+def _smart_inline_emoji_slots(group: list[dict[str, Any]], width: int, height: int) -> list[tuple[Path, int, int, int]]:
+    """Position image slots from the same pinned-font line layout as ASS."""
+    font_path = str(Path(__file__).parent / "fonts" / "montserrat" / "Montserrat-ExtraBoldItalic.ttf")
+    units_per_em, advances = _font_advance_metrics(font_path)
+    height_units = _libass_height_units(font_path)
+    base_size = max(28, round(104 * min(width, height) / 1080))
+    layout_group = [{**word, "_emoji_text": str(word.get("text", "")), "text": _emoji_layout_text(str(word.get("text", "")))} for word in group]
+    font_size = _smart_speech_fontsize(layout_group, width, base_size)
+    lines = _smart_speech_lines(layout_group, width, font_size)
+    space_width = advances.get(ord(" "), units_per_em * .25) * font_size / height_units
+    line_height = font_size * 1.2
+    block_center_y = height * .54
+    output = []
+    for row, line in enumerate(lines):
+        text_widths = [sum(advances.get(ord(char), units_per_em * .6) for char in _emoji_layout_text(str(item.get("text", ""))).upper()) * font_size / height_units for item in line]
+        line_width = sum(text_widths) + space_width * max(0, len(line) - 1)
+        cursor = (width - line_width) / 2
+        center_y = block_center_y + (row - (len(lines) - 1) / 2) * line_height
+        for item, item_width in zip(line, text_widths):
+            text = str(item.get("_emoji_text", item.get("text", "")))
+            matches = find_emoji_sequences(text)
+            for start, end, _, asset in matches:
+                prefix = _emoji_layout_text(text[:start]).upper()
+                prefix_width = sum(advances.get(ord(char), units_per_em * .6) for char in prefix) * font_size / height_units
+                slot_width = space_width * 4
+                size = max(36, round(font_size * .92))
+                output.append((asset, round(cursor + prefix_width + slot_width / 2 - size / 2), round(center_y - size / 2), size))
+            cursor += item_width + space_width
+    return output
+
+
+def _emoji_layout_text(text: str) -> str:
+    """Reserve four actual font-space advances for each verified image slot."""
+    for start, end, _, _ in reversed(find_emoji_sequences(text)):
+        text = text[:start] + "    " + text[end:]
+    return text
+
+
+def _emoji_ass_text(text: str) -> str:
+    """Escape text while replacing verified glyphs with inline ASS space slots."""
+    matches = find_emoji_sequences(text)
+    if not matches:
+        return _ass_escape(text)
+    parts = []
+    cursor = 0
+    for start, end, _, _ in matches:
+        parts.append(_ass_escape(text[cursor:start]))
+        parts.append(r"\h\h\h\h")
+        cursor = end
+    parts.append(_ass_escape(text[cursor:]))
+    return "".join(parts)
 
 
 def _smart_speech_lines(group: list[dict[str, Any]], width: int, fontsize: int) -> list[list[dict[str, Any]]]:
@@ -1531,7 +1634,7 @@ def _smart_speech_lines(group: list[dict[str, Any]], width: int, fontsize: int) 
     return lines
 
 
-def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duration: float, visuals: Iterable[tuple[str, float, float]], width: int, height: int, style: str = "educational", creator_credit: str | None = None, credit_alignment: int = 3, content_format: str | None = None, music_theme: str | None = None, music_top_text: str | None = None, hook_text: str | None = None, hook_end_time: float | None = None, presentation: str | None = None) -> None:
+def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duration: float, visuals: Iterable[tuple[str, float, float]], width: int, height: int, style: str = "educational", creator_credit: str | None = None, credit_alignment: int = 3, content_format: str | None = None, music_theme: str | None = None, music_top_text: str | None = None, hook_text: str | None = None, hook_end_time: float | None = None, presentation: str | None = None, burn_emoji_images: bool = False) -> None:
     # Unknown additive presentation values intentionally project to the legacy
     # renderer, keeping newer callers forward/backward compatible.
     smart_speech = presentation == "smart_speech_v1"
@@ -1672,6 +1775,8 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
     # Speech presentation intentionally suppresses recipe emoji and uses only
     # local text glyphs, so rendering remains deterministic and offline.
     local = selected_words if music_theme or smart_speech else _caption_words_with_emojis(selected_words, style)
+    if burn_emoji_images:
+        local = [{**word, "_emoji_text": str(word.get("text", "")), "text": _emoji_layout_text(str(word.get("text", "")))} for word in local]
     if music_theme in reference_presets:
         for group in _reference_music_groups(local, max_words=3 if music_theme == "reference_white_sans" else 7):
             events.extend(_reference_music_events(group, music_theme, width=width, height=height, duration=duration, content_format=content_format))
@@ -1697,8 +1802,9 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
                 # Casing is a burn-in treatment: write_caption_sidecars writes
                 # the same words with their true casing, so a downloaded .srt
                 # is never shouted at the reader.
-                raw = str(item["text"])
-                text = _ass_escape(raw.upper() if preset.get("uppercase") else raw)
+                raw = str(item.get("_emoji_text", item["text"]))
+                display_text = raw.upper() if preset.get("uppercase") else raw
+                text = _emoji_ass_text(display_text) if burn_emoji_images else _ass_escape(display_text)
                 bits.append(f"{{\\c{preset['highlight']}}}{text}{{\\c{preset['primary']}}}" if item is word else text)
             line_bits.append(" ".join(bits))
         start = max(0, float(word["start"]))
@@ -1943,21 +2049,32 @@ def _filters(
 
 # DO-NOT-CHANGE: atomic render (.partial.mp4 + os.replace) with structural output
 # validation (dimensions/audio) before the output is publishable
-def _smart_speech_emoji_filters(plan: list[tuple[Path, float, float, int, int, int]], first_input: int) -> str:
+def _smart_speech_emoji_filters(plan: list[tuple[Path, float, float, int, int, int]], first_input: int, input_paths: list[Path] | None = None) -> str:
     filters = []
     current = "outv"
-    for index, (_, start, end, x, y, size) in enumerate(plan):
+    paths = input_paths or list(dict.fromkeys(entry[0] for entry in plan))
+    input_index = {path: first_input + index for index, path in enumerate(paths)}
+    occurrences: dict[Path, list[int]] = {}
+    for index, (path, *_rest) in enumerate(plan):
+        occurrences.setdefault(path, []).append(index)
+    for path, indices in occurrences.items():
+        labels = [f"emoji_src{index}" for index in indices]
+        split = f"split={len(labels)}" if len(labels) > 1 else "null"
+        filters.append(f"[{input_index[path]}:v]{split}" + "".join(f"[{label}]" for label in labels))
+    for index, (path, start, end, x, y, size) in enumerate(plan):
         label = f"emoji{index}"
         output = f"emojiout{index}"
-        filters.append(f"[{first_input + index}:v]format=rgba,scale={size}:{size}:flags=lanczos[{label}]")
-        filters.append(f"[{current}][{label}]overlay={x}:{y}:format=auto:eof_action=pass:enable='between(t,{start:.3f},{end:.3f})'[{output}]")
+        filters.append(f"[emoji_src{index}]format=rgba,scale={size}:{size}:flags=lanczos[{label}]")
+        filters.append(f"[{current}][{label}]overlay={x}:{y}:format=auto:eof_action=pass:enable='gte(t,{start:.6f})*lt(t,{end:.6f})'[{output}]")
         current = output
     return ";".join(filters)
 
 
 def render_clip(source: Path, output: Path, *, start: float, end: float, aspect: str, words: list[dict[str, Any]], visuals: list[tuple[str, float, float]], overlays: list[tuple[Path, float, float]], settings: Settings, style: str = "educational", has_audio: bool = True, embed_subtitles: bool = False, subtitle_language: str = "und", creator_credit: str | None = None, content_format: str | None = None, centered_partial_fill: bool = False, subscribe_animation: dict[str, Any] | None = None, music_theme: str | None = None, music_top_text: str | None = None, music_treatment: str | None = None, hook_text: str | None = None, presentation: str | None = None, subtitles_enabled: bool = True) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
-    ass = output.parent / (f"{output.stem}.burn.ass" if creator_credit or hook_text or not subtitles_enabled else f"{output.stem}.ass")
+    has_supported_emoji = presentation == "smart_speech_v1" and any(find_emoji_sequences(str(word.get("text", ""))) for word in words)
+    separate_burn_script = bool(creator_credit or hook_text or not subtitles_enabled or has_supported_emoji)
+    ass = output.parent / (f"{output.stem}.burn.ass" if separate_burn_script else f"{output.stem}.ass")
     duration = end - start
     width, height = dimensions(aspect)
     subscribe_schedule = schedule_subscribe_animation(duration, content_format=content_format or "short", config=subscribe_animation)
@@ -1968,21 +2085,22 @@ def render_clip(source: Path, output: Path, *, start: float, end: float, aspect:
         src_width, src_height = src_height, src_width
     credit_alignment = _credit_alignment(source, start=start, end=end, width=width, height=height, settings=settings) if creator_credit else 3
     caption_words = words if subtitles_enabled else []
-    write_ass(ass, caption_words, offset=start, duration=duration, visuals=visuals, width=width, height=height, style=style, creator_credit=creator_credit, credit_alignment=credit_alignment, content_format=content_format, music_theme=music_theme, music_top_text=music_top_text, hook_text=hook_text, hook_end_time=hook_end_time, presentation=presentation)
+    write_ass(ass, caption_words, offset=start, duration=duration, visuals=visuals, width=width, height=height, style=style, creator_credit=creator_credit, credit_alignment=credit_alignment, content_format=content_format, music_theme=music_theme, music_top_text=music_top_text, hook_text=hook_text, hook_end_time=hook_end_time, presentation=presentation, burn_emoji_images=presentation == "smart_speech_v1")
     # Downloadable sidecars remain independent of the burn-in toggle; the
     # internal ASS and MP4 overlay receive no speech captions when disabled.
     write_caption_sidecars(output, words, offset=start, duration=duration, style=style, music_theme=music_theme, presentation=presentation)
-    if creator_credit or hook_text or not subtitles_enabled:
-        # The downloadable ASS is caption-only; the internal burn script must
-        # never be applied a second time to an already credited MP4.
+    if separate_burn_script:
+        # Downloadable ASS remains plain Unicode text. The internal burn script
+        # can contain image-layout placeholders and is never substituted for it.
         write_ass(output.with_suffix(".ass"), words, offset=start, duration=duration, visuals=visuals, width=width, height=height, style=style, content_format=content_format, music_theme=music_theme, music_top_text=music_top_text, presentation=presentation)
     temp = output.with_suffix(".partial.mp4")
     command = [settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{start:.3f}", "-i", str(source)]
     _overlay_inputs(command, overlays)
     subscribe_animations = _subscribe_animation_inputs(command, subscribe_animation, duration, content_format, width, height, 1 + len(overlays))
-    emoji_plan = _smart_speech_emoji_plan(words, width, height, duration, offset=start) if presentation == "smart_speech_v1" and subtitles_enabled else []
-    _overlay_inputs(command, [(path, cue_start, cue_end) for path, cue_start, cue_end, _, _, _ in emoji_plan])
-    subtitle_index = 1 + len(overlays) + len(subscribe_animations) + len(emoji_plan)
+    emoji_plan = _caption_emoji_plan(words, width, height, duration, offset=start, style=style, presentation=presentation, music_theme=music_theme) if subtitles_enabled and presentation == "smart_speech_v1" and not music_theme else []
+    emoji_inputs = list(dict.fromkeys(path for path, *_ in emoji_plan))
+    _overlay_inputs(command, [(path, 0, duration) for path in emoji_inputs])
+    subtitle_index = 1 + len(overlays) + len(subscribe_animations) + len(emoji_inputs)
     if embed_subtitles:
         command.extend(["-i", str(output.with_suffix(".srt"))])
     source_dimensions = (src_width, src_height)
@@ -1991,7 +2109,7 @@ def render_clip(source: Path, output: Path, *, start: float, end: float, aspect:
         sample_aspect_ratio = 1.0 / sample_aspect_ratio
     filters, mapped = _filters(width, height, overlays, 1, ass.name, source_dimensions, subscribe_animations, music_treatment, centered_partial_fill, sample_aspect_ratio)
     if emoji_plan:
-        emoji_filters = _smart_speech_emoji_filters(emoji_plan, 1 + len(overlays) + len(subscribe_animations))
+        emoji_filters = _smart_speech_emoji_filters(emoji_plan, 1 + len(overlays) + len(subscribe_animations), emoji_inputs)
         filters = f"{filters};{emoji_filters}"
         mapped = f"emojiout{len(emoji_plan) - 1}"
     command.extend(["-t", f"{duration:.3f}", "-filter_complex", filters, "-map", f"[{mapped}]"])
