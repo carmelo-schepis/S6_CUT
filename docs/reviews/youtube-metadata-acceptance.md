@@ -15,6 +15,10 @@
 - Frontend component/API/type tests cover Settings model persistence, opt-in eligibility, editor behavior, Library presentation, and API contracts.
 - `tests/acceptance/youtube-metadata-live.spec.ts` is deliberately non-mocked. It requires `S6_RUN_LIVE_YOUTUBE_METADATA=1`, `S6_ACCEPTANCE_ISOLATED=1`, an authorized public `S6_YOUTUBE_METADATA_URL`, and a selected/connected provider profile configured only in disposable review data. It exercises real provider generation, edits, reload, and export. Do not use the owner’s deployment/data for this test.
 
+## Independent review follow-up
+
+The independent acceptance review's source findings were checked against the current implementation (`b4b9ea8`): the metadata option starts unchecked and is disabled/reset for speech Fast mode; the YouTube inspector tab is rendered for Clip jobs; metadata edit requests require a revision; request/budget reservation is atomic under `BEGIN IMMEDIATE`; and the selected-clip ZIP manifest includes metadata title and description. The review's finding describes an earlier snapshot and does not apply to this revision. Live acceptance remains blocked as noted below.
+
 ## Provider evidence and review deployment
 
 The OpenRouter Gemini 2.5 Flash Lite model page reports $0.10/M input and $0.40/M output. `OPENROUTER_API_KEY` is not available and the isolated review deployment has no configured provider profile, so no real credential test, provider request, or live generation has passed. The Playwright provider spec is therefore blocked/skipped, not a passing acceptance result. No secret is added to the repository or review deployment.
@@ -23,8 +27,9 @@ An isolated Docker review stack is running at **http://100.81.131.14:18880/** (T
 
 ## Verification performed
 
-- `npm run lint`, `npm run typecheck`, `npm test` (322 passed), `npm run build`, `npm run check:providers`, `python3 -m compileall -q engine`, and `git diff --check` passed.
-- Isolated Docker backend metadata/provider tests passed: 65 passed (one upstream Starlette deprecation warning).
-- `npm run check:supported` passed its frontend gate but the complete backend suite exceeded the script's 15-minute Docker timeout (no backend assertion failure was reported before timeout); it is not counted as a pass.
+- Frontend lint, typecheck, production build, and tests passed; latest frontend result was 325 tests passed. The retired-provider check, Python compile, and diff check also passed.
+- Isolated Docker backend metadata/provider suites passed: 69 tests on the preceding revision; the metadata regression suite passed 11 tests on `b4b9ea8` (including failed-provider fallback persistence).
+- `npm run check:supported`, started before `b4b9ea8`, passed its frontend gate but the full backend suite reported 656 passed and one failure: `engine/tests/test_steps.py::test_switch_fast_cancels_active_transcription_without_resurrecting_job`. The failure reproduced when run alone. The full suite has not been rerun on `b4b9ea8`; this is a failing/incomplete verification, not a pass.
+- Greptile reviewed `b4b9ea8`: 25 files reviewed, 0 comments.
 - `docker compose config`, the isolated review-stack health endpoints, and a browser UI smoke check passed.
 - Live Playwright/provider verification remains blocked: credentials and an authorized source URL are unavailable. Skipped live coverage is not counted as a pass.
