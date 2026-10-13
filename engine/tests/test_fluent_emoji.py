@@ -19,6 +19,21 @@ from engine.media import (
 )
 
 
+def test_import_failure_preserves_existing_bundle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from scripts import import_fluent_emoji
+
+    destination = tmp_path / "fluent-emoji"
+    destination.mkdir()
+    marker = destination / "existing.txt"
+    marker.write_text("keep", encoding="utf-8")
+    monkeypatch.setattr(import_fluent_emoji, "DEST", destination)
+    monkeypatch.setattr(import_fluent_emoji, "SELECTIONS", (("😂", "Face with tears of joy", None),))
+    monkeypatch.setattr(import_fluent_emoji, "download", lambda _url: (_ for _ in ()).throw(OSError("offline")))
+    with pytest.raises(OSError, match="offline"):
+        import_fluent_emoji.main()
+    assert marker.read_text(encoding="utf-8") == "keep"
+
+
 def test_manifest_covers_existing_candidates_and_common_complete_sequences() -> None:
     candidates = {emoji for groups in _EMOJI_CANDIDATES.values() for values in groups.values() for emoji in values}
     required = candidates | {"😩", "❤️", "👍🏽", "👩\u200d💻", "👩🏽\u200d💻"}
@@ -33,10 +48,21 @@ def test_sequences_are_matched_whole_and_unsupported_text_is_retained(tmp_path: 
     text = "Hi ❤️ 👩🏽\u200d💻 🤷🏽\u200d♀️ 😂\ufe0f"
     found = find_emoji_sequences(text)
     assert [item[2] for item in found] == ["❤️", "👩🏽\u200d💻"]
+    adjacent = find_emoji_sequences("❤️👍")
+    assert [item[2] for item in adjacent] == ["❤️", "👍"]
     path = tmp_path / "captions.ass"
     write_ass(path, [{"text": text, "start": 0, "end": 1}], offset=0, duration=2,
               visuals=[], width=1080, height=1920, presentation="smart_speech_v1")
     assert text in path.read_text(encoding="utf-8")
+
+
+def test_legacy_caption_ass_keeps_unicode_emoji_without_fluent_placeholders(tmp_path: Path) -> None:
+    path = tmp_path / "legacy.ass"
+    write_ass(path, [{"text": "wow", "start": 0, "end": 1}], offset=0, duration=2,
+              visuals=[], width=1080, height=1920, style="funny")
+    ass = path.read_text(encoding="utf-8")
+    assert "wow 😂" in ass
+    assert r"\h\h\h\h" not in ass
 
 
 def test_missing_or_corrupt_bundle_asset_uses_safe_lookup_fallback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -59,10 +85,14 @@ def test_missing_or_corrupt_bundle_asset_uses_safe_lookup_fallback(tmp_path: Pat
     assert resolve_emoji("😂") is not None
 
 
-def test_existing_emoji_is_not_duplicated_and_transcript_is_immutable() -> None:
+def test_existing_or_unsupported_emoji_is_not_duplicated_and_transcript_is_immutable() -> None:
     words = [{"text": "great 😩!", "start": 1.25, "end": 1.75, "confidence": .9}]
     enriched = _caption_words_with_emojis(words, "funny")
     assert enriched[0]["text"] == words[0]["text"]
+    unsupported = _caption_words_with_emojis([{"text": "wow 💩"}], "funny")
+    assert unsupported[0]["text"] == "wow 💩"
+    ordinary = _caption_words_with_emojis([{"text": "Roman"}, {"text": "numeral"}], "funny")
+    assert [word["text"] for word in ordinary] == ["Roman", "numeral"]
     assert enriched is not words and enriched[0] is not words[0]
     assert words[0] == {"text": "great 😩!", "start": 1.25, "end": 1.75, "confidence": .9}
 
@@ -71,16 +101,37 @@ def test_emoji_group_plan_uses_clip_local_half_open_intervals_and_bounded_assets
     words = [
         {"text": "We", "start": 10.0, "end": 10.2},
         {"text": "love", "start": 10.2, "end": 10.5},
-        {"text": "❤️", "start": 10.5, "end": 10.8},
+        {"text": "❤️", "start": 10.6, "end": 10.8},
         {"text": "again", "start": 11.0, "end": 11.4},
     ]
     plan = _caption_emoji_plan(words, 1080, 1920, 2.0, offset=10.0, style="funny", presentation="smart_speech_v1", music_theme=None)
-    assert len(plan) == 1
-    assert plan[0][1:3] == pytest.approx((0.0, .8))
+    assert [value for _, start, end, *_ in plan for value in (start, end)] == pytest.approx([0.0, .5, .6, .8])
+    assert len(_caption_emoji_plan(words[:3], 1080, 1920, 2.0, offset=10.0, style="funny", presentation=None, music_theme=None)) == 0
     graph = _smart_speech_emoji_filters(plan * 20, 3, [plan[0][0]])
     assert graph.count("[3:v]") == 1  # all occurrences reuse one split looped image input
-    assert "[3:v]split=20" in graph
-    assert "gte(t,0.000000)*lt(t,0.800000)" in graph
+    assert "[3:v]split=40" in graph
+    assert "gte(t,0.600000)*lt(t,0.800000)" in graph
+    assert "gte(t,0.000000)*lt(t,0.500000)" in graph
+
+
+def test_automatic_smart_reactions_keep_cooldown_in_active_planner() -> None:
+    words = [
+        {"text": text, "start": start + index * .2, "end": start + (index + 1) * .2}
+        for texts, start in [(("Wow", "that", "happened"), 0), (("A", "huge", "success"), 3), (("Imagine", "this", "idea"), 7)]
+        for index, text in enumerate(texts)
+    ]
+    plan = _caption_emoji_plan(words, 1080, 1920, 10, offset=0, style="funny", presentation="smart_speech_v1", music_theme=None)
+    assert [value for _, start, end, *_ in plan for value in (start, end)] == pytest.approx([0, .6, 7, 7.6])
+
+
+def test_smart_inline_images_do_not_drift_across_multiple_sequences_in_one_word() -> None:
+    plan = _caption_emoji_plan(
+        [{"text": "❤️👍", "start": .1, "end": .5}], 1080, 1920, 2,
+        offset=0, style="funny", presentation="smart_speech_v1", music_theme=None,
+    )
+    assert len(plan) == 2
+    assert plan[1][3] > plan[0][3]
+    assert plan[1][3] - plan[0][3] > plan[0][5] * .8
 
 
 def _run(command: list[str]) -> None:

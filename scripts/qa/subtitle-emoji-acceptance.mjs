@@ -71,7 +71,7 @@ const environment = {
   S6_DATA_PATH: dataRoot,
 };
 const yamlQuoted = JSON.stringify(transcript);
-await writeFile(override, `services:\n  engine:\n    environment:\n      S6_TEST_TRANSCRIPT_JSON: ${yamlQuoted}\nnetworks:\n  private:\n    ipam:\n      config:\n        - subnet: 10.253.231.0/24\n`);
+await writeFile(override, `services:\n  engine:\n    environment:\n      S6_TEST_TRANSCRIPT_JSON: ${yamlQuoted}\n`);
 let passed = false;
 try {
   console.log(`Starting isolated ${project} at ${gateway}; dataset=${dataRoot}`);

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-import urllib.error
+import tempfile
 import urllib.request
 from pathlib import Path
 
@@ -62,54 +62,63 @@ def download(url: str) -> bytes:
 
 
 def main() -> None:
-    DEST.mkdir(parents=True, exist_ok=True)
-    for previous in DEST.glob("emoji-*.png"):
-        previous.unlink()
-    entries = []
-    for index, (emoji, title, tone) in enumerate(SELECTIONS, start=1):
-        filename = f"emoji-{index:02d}.png"
-        variant = f"{tone}/" if tone else ""
-        upstream = f"assets/{title}/{variant}3D/"
-        # Fluent's 3D names are generated from the title directory and tone.
-        slug = title.lower().replace(":", "").replace(",", "").replace(" ", "_")
-        suffix = f"_{tone.lower().replace('-', '_')}" if tone else ""
-        source_name = f"{slug}_3d{suffix}.png"
-        source_path = upstream + source_name
-        url = f"https://raw.githubusercontent.com/{REPOSITORY}/{REVISION}/{urllib.request.pathname2url(source_path)}"
-        content = download(url)
-        if not content.startswith(b"\x89PNG\r\n\x1a\n"):
-            raise ValueError(f"Upstream asset is not PNG: {source_path}")
-        (DEST / filename).write_bytes(content)
-        asset_id = "u" + "_".join(f"{ord(character):x}" for character in emoji)
-        entries.append({
-            "emoji": emoji,
-            "assetId": asset_id,
-            "name": title,
-            "relativePath": filename,
-            "file": filename,
-            "source": source_path,
-            "width": int.from_bytes(content[16:20], "big"),
-            "height": int.from_bytes(content[20:24], "big"),
-            "sha256": hashlib.sha256(content).hexdigest(),
-        })
-    manifest = {
-        "upstream": f"https://github.com/{REPOSITORY}",
-        "revision": REVISION,
-        "assets": entries,
-    }
-    (DEST / "manifest.json").write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
-    license_url = f"https://raw.githubusercontent.com/{REPOSITORY}/{REVISION}/LICENSE"
-    (DEST / "LICENSE").write_bytes(download(license_url))
-    (DEST / "NOTICE.txt").write_text(
-        "Fluent Emoji artwork © Microsoft Corporation. All selected artwork is from "
-        "microsoft/fluentui-emoji at revision " + REVISION + ".\n"
-        "Licensed under the MIT License; see LICENSE. Source paths and per-file "
-        "SHA-256 digests are recorded in manifest.json. Only the curated 3D PNG "
-        "files listed there are redistributed.\n",
-        encoding="utf-8",
-    )
+    DEST.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=DEST.parent, prefix=".fluent-emoji-import-") as temporary:
+        stage = Path(temporary) / "bundle"
+        stage.mkdir()
+        entries = []
+        for index, (emoji, title, tone) in enumerate(SELECTIONS, start=1):
+            filename = f"emoji-{index:02d}.png"
+            variant = f"{tone}/" if tone else ""
+            source_path = f"assets/{title}/{variant}3D/"
+            # Fluent's 3D names are generated from the title directory and tone.
+            slug = title.lower().replace(":", "").replace(",", "").replace(" ", "_")
+            suffix = f"_{tone.lower().replace('-', '_')}" if tone else ""
+            source_path += f"{slug}_3d{suffix}.png"
+            url = f"https://raw.githubusercontent.com/{REPOSITORY}/{REVISION}/{urllib.request.pathname2url(source_path)}"
+            content = download(url)
+            if len(content) < 24 or not content.startswith(b"\x89PNG\r\n\x1a\n"):
+                raise ValueError(f"Upstream asset is not PNG: {source_path}")
+            (stage / filename).write_bytes(content)
+            asset_id = "u" + "_".join(f"{ord(character):x}" for character in emoji)
+            entries.append({
+                "emoji": emoji,
+                "assetId": asset_id,
+                "name": title,
+                "relativePath": filename,
+                "file": filename,
+                "source": source_path,
+                "width": int.from_bytes(content[16:20], "big"),
+                "height": int.from_bytes(content[20:24], "big"),
+                "sha256": hashlib.sha256(content).hexdigest(),
+            })
+        manifest = {
+            "upstream": f"https://github.com/{REPOSITORY}",
+            "revision": REVISION,
+            "assets": entries,
+        }
+        (stage / "manifest.json").write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        license_url = f"https://raw.githubusercontent.com/{REPOSITORY}/{REVISION}/LICENSE"
+        (stage / "LICENSE").write_bytes(download(license_url))
+        (stage / "NOTICE.txt").write_text(
+            "Fluent Emoji artwork © Microsoft Corporation. All selected artwork is from "
+            "microsoft/fluentui-emoji at revision " + REVISION + ".\n"
+            "Licensed under the MIT License; see LICENSE. Source paths and per-file "
+            "SHA-256 digests are recorded in manifest.json. Only the curated 3D PNG "
+            "files listed there are redistributed.\n",
+            encoding="utf-8",
+        )
+        backup = Path(temporary) / "previous"
+        if DEST.exists():
+            DEST.rename(backup)
+        try:
+            stage.rename(DEST)
+        except Exception:
+            if backup.exists():
+                backup.rename(DEST)
+            raise
     print(f"Imported {len(entries)} Fluent Emoji PNGs at {REVISION}")
 
 

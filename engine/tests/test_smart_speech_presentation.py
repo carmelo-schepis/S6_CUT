@@ -202,7 +202,7 @@ def test_smart_speech_without_words_does_not_emit_caption_events(tmp_path: Path)
 
 
 def test_local_emoji_mapping_plan_is_deterministic_and_respects_period_and_cooldown() -> None:
-    from engine.media import _SMART_SPEECH_EMOJI_ASSETS, _smart_speech_emoji_plan
+    from engine.media import _SMART_SPEECH_EMOJI_ASSETS, _caption_emoji_plan
 
     def group(texts: tuple[str, str, str], start: float) -> list[dict[str, object]]:
         return [
@@ -218,17 +218,18 @@ def test_local_emoji_mapping_plan_is_deterministic_and_respects_period_and_coold
         *group(("Wow", "so", "unexpected"), 14),
         *group(("😂", "win", "success"), 21),  # existing emoji suppresses image mapping
     ]
-    first = _smart_speech_emoji_plan(words, 1080, 1920, 30)
-    second = _smart_speech_emoji_plan(words, 1080, 1920, 30)
+    first = _caption_emoji_plan(words, 1080, 1920, 30, offset=0, style="funny", presentation="smart_speech_v1", music_theme=None)
+    second = _caption_emoji_plan(words, 1080, 1920, 30, offset=0, style="funny", presentation="smart_speech_v1", music_theme=None)
     assert first == second
     assert [entry[0] for entry in first] == [
         _SMART_SPEECH_EMOJI_ASSETS["laughter"],
         _SMART_SPEECH_EMOJI_ASSETS["idea"],
         _SMART_SPEECH_EMOJI_ASSETS["surprise"],
+        _SMART_SPEECH_EMOJI_ASSETS["laughter"],
     ]
-    assert [value for _, start, end, *_ in first for value in (start, end)] == pytest.approx([0, .6, 7, 7.6, 14, 14.6])
+    assert [value for _, start, end, *_ in first for value in (start, end)] == pytest.approx([0, .6, 7, 7.6, 14, 14.6, 21, 21.6])
     assert all(path.is_file() and path.suffix == ".png" for path, *_ in first)
-    assert all((x, y, size) == (484, 803, 112) for _, _, _, x, y, size in first)
+    assert all((x, y, size) == (484, 803, 112) for _, _, _, x, y, size in first[:3])
     for path in _SMART_SPEECH_EMOJI_ASSETS.values():
         png = path.read_bytes()
         assert png.startswith(b"\x89PNG\r\n\x1a\n")

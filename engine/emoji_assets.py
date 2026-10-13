@@ -78,6 +78,7 @@ def find_emoji_sequences(text: str) -> list[tuple[int, int, str, Path]]:
     sequences = sorted(_manifest(), key=len, reverse=True)
     found: list[tuple[int, int, str, Path]] = []
     index = 0
+    consumed_end = -1
     while index < len(text):
         match = next((sequence for sequence in sequences if text.startswith(sequence, index)), None)
         # Never split an unlisted grapheme into a supported base component.
@@ -88,7 +89,8 @@ def find_emoji_sequences(text: str) -> list[tuple[int, int, str, Path]]:
             next_character = text[end:end + 1]
             previous_character = text[index - 1:index] if index else ""
             structural = lambda character: character == "\u200d" or "\ufe00" <= character <= "\ufe0f" or "\U0001f3fb" <= character <= "\U0001f3ff"
-            if (next_character and structural(next_character)) or (previous_character and structural(previous_character)):
+            previous_was_unmatched_structural = previous_character and structural(previous_character) and index - 1 >= consumed_end
+            if (next_character and structural(next_character)) or previous_was_unmatched_structural:
                 match = None
         if match is None:
             index += 1
@@ -96,5 +98,6 @@ def find_emoji_sequences(text: str) -> list[tuple[int, int, str, Path]]:
         asset = resolve_emoji(match)
         if asset is not None:
             found.append((index, index + len(match), match, asset))
+            consumed_end = index + len(match)
         index += len(match)
     return found

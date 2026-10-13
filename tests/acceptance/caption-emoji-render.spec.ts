@@ -67,7 +67,9 @@ async function compareVideoRegion(page: Page, captionPath: string, controlPath: 
 test("Smart captions render bundled color emoji and keep Unicode caption downloads", async ({ page }, testInfo) => {
   test.setTimeout(25 * 60_000);
   expect(process.env.S6_ACCEPTANCE_ISOLATED, "run only against the isolated emoji acceptance stack").toBe("1");
-  expect(dataRoot, "the dataset must be a unique disposable branch-local path").toMatch(/\/git_branches\/S6_CUT-subtitle-emoji-[^/]+\//);
+  const dataRelativeToCheckout = path.relative(root, dataRoot);
+  expect(path.isAbsolute(dataRoot), "the isolated dataset path is absolute").toBe(true);
+  expect([".run-artifacts", "test-artifacts"]).toContain(dataRelativeToCheckout.split(path.sep)[0]);
   expect(["127.0.0.1", "localhost", "::1"], "never mutate a shared deployment").toContain(new URL(gateway).hostname);
   expect(transcriptJson, "the isolated engine must receive the deterministic transcript hook").not.toBe("");
   const transcript = JSON.parse(transcriptJson) as { words?: { text: string; start: number; end: number }[] };
@@ -132,7 +134,10 @@ test("Smart captions render bundled color emoji and keep Unicode caption downloa
     const localStart = Math.max(0, group[0].start - clip.start);
     const localEnd = Math.min(clip.end - clip.start, group[group.length - 1].end - clip.start);
     expect(localEnd).toBeGreaterThan(localStart);
-    const times = [Math.max(0, localStart - .25), (localStart + localEnd) / 2, Math.min(clip.end - clip.start - .05, localEnd + .25)];
+    const emojiWord = words[emojiWordIndex];
+    const emojiStart = emojiWord.start - clip.start;
+    const emojiEnd = emojiWord.end - clip.start;
+    const times = [Math.max(0, localStart - .25), (emojiStart + emojiEnd) / 2, Math.min(clip.end - clip.start - .05, localEnd + .25)];
 
     // Exercise the no-subtitles path through the UI as a pixel-matched control.
     const controlName = `No subtitles control ${Date.now()}`;
