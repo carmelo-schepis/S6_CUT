@@ -379,6 +379,39 @@ def test_test_failure_seam_requires_explicit_test_mode(monkeypatch: pytest.Monke
     assert test_openrouter_failure() is None
 
 
+def test_openrouter_metadata_controls_are_opt_in_and_return_usage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    database = Database(tmp_path / "s6-cut.sqlite3")
+    service = ProfileService(database, SecretVault(tmp_path / "secrets" / "instance.key"))
+    profile = service.save(ProfileInput(name="Metadata request", openrouter_key="test-key", selected=True))
+    profile.text_status = "connected"
+    database.save_profile(profile)
+
+    class CaptureClient:
+        request: dict[str, Any] = {}
+
+        def __init__(self, **_: Any): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *_: Any): return None
+        async def post(self, _url: str, *, json: dict[str, Any], **_: Any):
+            type(self).request = json
+            return _ProviderResponse(200, {"choices": [{"message": {"content": '{"clips": []}'}}], "usage": {"prompt_tokens": 41, "completion_tokens": 17, "cost": 0.00001}})
+
+    monkeypatch.setattr("engine.providers.httpx.AsyncClient", CaptureClient)
+    result = asyncio.run(service.openrouter_json(
+        [], {"type": "object"}, max_tokens=900, temperature=0.2,
+        provider={"require_parameters": True, "max_price": {"prompt": 0.10, "completion": 0.40}},
+        reasoning={"enabled": False}, include_usage=True,
+    ))
+    assert result == ({"clips": []}, {"prompt_tokens": 41, "completion_tokens": 17, "cost": 0.00001})
+    request = CaptureClient.request
+    assert request["max_tokens"] == 400
+    assert request["temperature"] == 0.2
+    assert request["provider"]["require_parameters"] is True
+    assert request["provider"]["max_price"] == {"prompt": 0.10, "completion": 0.40}
+    assert request["reasoning"] == {"enabled": False}
+    assert "tools" not in request
+
+
 def test_test_failure_seam_is_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("S6_TEST_MODE", raising=False)
     monkeypatch.delenv("S6_TEST_OPENROUTER_FAILURE", raising=False)

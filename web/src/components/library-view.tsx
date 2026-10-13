@@ -221,6 +221,8 @@ export function LibraryView({ selectedAssetId }: { selectedAssetId?: string | nu
       <aside className="asset-inspector panel" aria-label="Rule Inspector"><div className="panel-title"><strong>Rule Inspector</strong>{selected && <span>{formatAge(selected.createdAt)}</span>}</div>{selected ? <div className="asset-fields">
         <FieldGroup title="Identity" headingLevel={2}>
           <Field label="Title"><input value={selected.title} onChange={(event) => setSelected({ ...selected, title: event.target.value })} onBlur={() => saveSelected({ title: selected.title })} /></Field>
+          <Field label="Filename"><input readOnly value={selected.filename} /></Field>
+          <Field label="Description"><textarea value={selected.description} onChange={(event) => setSelected({ ...selected, description: event.target.value })} onBlur={() => saveSelected({ description: selected.description })} rows={4} aria-label="Full description" /></Field>
           <Field label="Policy" hint="Controls whether this asset may be chosen automatically."><select value={selected.policy} onChange={(event) => saveSelected({ policy: event.target.value })}><option value="required">Required</option><option value="prefer">Prefer</option><option value="neutral">Neutral</option><option value="never">Never</option></select></Field>
         </FieldGroup>
         <FieldGroup title="Matching" headingLevel={2}>
@@ -288,7 +290,9 @@ function LibraryAssetCard({ asset, isSelected, isInspected, onPreview, onInspect
     event.stopPropagation();
     onToggleSelected(asset.id, event.currentTarget.checked);
   };
-  const details = <div className="asset-card-details-content" aria-hidden="true"><strong title={asset.title}>{asset.title}</strong><span>{asset.tags.slice(0, 3).join(" · ") || asset.filename}</span><span className="origin-badge">{originLabels[asset.origin]}</span><StatusBadge state={asset.policy === "never" ? "failed" : asset.policy === "required" ? "fallback" : "local"} label={asset.policy} /></div>;
+  const descriptionOnCard = asset.origin === "generated-clip" && asset.description.trim().length > 0;
+  const secondaryLine = descriptionOnCard ? asset.description : asset.tags.slice(0, 3).join(" · ") || asset.filename;
+  const details = <div className="asset-card-details-content" aria-hidden="true"><strong title={asset.title}>{asset.title}</strong><span className={descriptionOnCard ? "asset-card-description" : undefined} title={descriptionOnCard ? undefined : secondaryLine}>{secondaryLine}</span><span className="origin-badge">{originLabels[asset.origin]}</span><StatusBadge state={asset.policy === "never" ? "failed" : asset.policy === "required" ? "fallback" : "local"} label={asset.policy} /></div>;
 
   return <article className={`asset-card ${isInspected ? "active" : ""}`} data-asset-id={asset.id}>
     <label className="asset-select"><input aria-label={`Select ${asset.title}`} type="checkbox" checked={isSelected} onChange={handleToggleSelected} /></label>

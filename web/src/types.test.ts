@@ -27,6 +27,15 @@ describe("versioned UI contracts", () => {
     expect(job.hookTextEnabled).toBe(true);
   });
 
+  it("parses optional YouTube metadata fields while preserving legacy responses", () => {
+    const legacy = clipSchema.parse({ id: "old", index: 1, state: "complete", start: 0, end: 5, duration: 5, openingLine: "Source line", selected: true, fallbackUsed: false, provenance: [] });
+    const current = clipSchema.parse({ id: "new", index: 1, state: "complete", start: 0, end: 5, duration: 5, openingLine: "Source line", title: "A title", youtubeDescription: "A description", selected: true, fallbackUsed: false, provenance: [] });
+    const job = jobSchema.parse({ schemaVersion: 1, id: "j", projectId: "p", mode: "clip", state: "complete", stage: "done", stageLabel: "Done", progress: 100, style: "serious", youtubeMetadataEnabled: true, youtubeMetadataModelId: "openai/gpt-4.1-mini", createdAt: "2026-01-01", updatedAt: "2026-01-01" });
+    expect(legacy.youtubeDescription).toBeUndefined();
+    expect(current.youtubeDescription).toBe("A description");
+    expect(job.youtubeMetadataEnabled).toBe(true);
+  });
+
   it("keeps exact beat spans explicit", () => {
     const script = "The Beatles changed popular music.";
     const beat = beatSchema.parse({ id: "beat", start: 0, end: 2.5, charStart: 0, charEnd: script.length, text: script, concept: "The Beatles", source: "text-card", confidence: .7, matchReason: "fallback" });

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 import threading
+import time
 import uuid
 from pathlib import Path
 from typing import Any, TypeVar
@@ -18,6 +20,12 @@ UNSORTED_FOLDER_ID = UNSORTED_LIBRARY_FOLDER_ID
 MAX_FOLDER_DEPTH = 3
 
 T = TypeVar("T", bound=BaseModel)
+
+
+class MetadataGenerationClaimError(ValueError):
+    def __init__(self, category: str, message: str):
+        super().__init__(message)
+        self.category = category
 
 
 class _ClosingSQLiteConnection(sqlite3.Connection):
@@ -454,6 +462,77 @@ class Database:
             row = db.execute("SELECT * FROM assets WHERE id=?", (asset_id,)).fetchone()
         return self._asset_from_row(row) if row else None
 
+    def claim_youtube_metadata_generation(self, job_id: str, clip_id: str, expected_revision: int, model_id: str, reserve_usd: float):
+        """Atomically reserve a bounded provider request and claim one clip."""
+        with self._lock, self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT payload,library_folder_id,private_payload FROM jobs WHERE id=?", (job_id,)).fetchone()
+            if not row:
+                raise MetadataGenerationClaimError("missing", "The job is no longer available")
+            job = Job.model_validate_json(row["payload"]).model_copy(update={"library_folder_id": row["library_folder_id"] or UNSORTED_FOLDER_ID})
+            clip = next((item for item in job.clips if item.id == clip_id), None)
+            if not clip or clip.youtube_metadata_revision != expected_revision:
+                raise MetadataGenerationClaimError("stale", "Metadata changed before generation could start")
+            private = json.loads(row["private_payload"])
+            state = private.setdefault("youtube_metadata_generation", {})
+            if not isinstance(state, dict):
+                state = private["youtube_metadata_generation"] = {}
+            prior = state.get(clip_id)
+            if isinstance(prior, dict) and prior.get("status") == "in_flight":
+                started_at = prior.get("started_at")
+                if not isinstance(started_at, (int, float)) or time.time() - started_at < 120:
+                    raise MetadataGenerationClaimError("in_flight", "Metadata generation is already in flight")
+            calls = private.get("youtube_metadata_generation_calls", 0)
+            if type(calls) is not int or calls < 0 or calls >= 5:
+                raise MetadataGenerationClaimError("limit", "The five-request per-job metadata limit was reached")
+            try:
+                spent = float(private.get("youtube_metadata_spend_estimate_usd", 0) or 0)
+            except (TypeError, ValueError):
+                spent = 0.05
+            if not math.isfinite(spent) or spent < 0 or spent + reserve_usd > 0.05:
+                raise MetadataGenerationClaimError("budget", "The conservative $0.05 metadata budget is exhausted")
+            private["youtube_metadata_generation_calls"] = calls + 1
+            private["youtube_metadata_spend_estimate_usd"] = spent + reserve_usd
+            state[clip_id] = {"status": "in_flight", "model": model_id, "revision": expected_revision, "started_at": time.time()}
+            clip.youtube_metadata_status = "pending"
+            clip.youtube_metadata_model = model_id
+            job.updated_at = now_iso()
+            db.execute("UPDATE jobs SET updated_at=?,payload=?,private_payload=? WHERE id=?", (job.updated_at, self._json(job), json.dumps(private, separators=(",", ":")), job_id))
+            return job, private, clip
+
+    def update_generated_clip_metadata(self, asset_id: str, title: str, description: str, expected_revision: int) -> tuple[Asset, Job, Clip]:
+        """Atomically update a generated asset and its linked clip metadata."""
+        with self._lock, self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            asset_row = db.execute("SELECT * FROM assets WHERE id=?", (asset_id,)).fetchone()
+            if not asset_row:
+                raise KeyError(asset_id)
+            asset = self._asset_from_row(asset_row)
+            if asset.origin != "generated-clip" or not asset.source_job_id or not asset.source_clip_id:
+                raise ValueError("Metadata edits require a linked generated clip")
+            job_row = db.execute("SELECT payload,library_folder_id,private_payload FROM jobs WHERE id=?", (asset.source_job_id,)).fetchone()
+            if not job_row:
+                raise ValueError("The linked job is unavailable")
+            job = Job.model_validate_json(job_row["payload"]).model_copy(update={"library_folder_id": job_row["library_folder_id"] or UNSORTED_FOLDER_ID})
+            clip = next((item for item in job.clips if item.id == asset.source_clip_id), None)
+            if not clip or clip.library_asset_id != asset.id:
+                raise ValueError("The generated clip and Library asset link is inconsistent")
+            if clip.youtube_metadata_revision != expected_revision:
+                raise ValueError("YouTube metadata revision is stale")
+            stamp = now_iso()
+            updated_asset = asset.model_copy(update={"title": title, "description": description})
+            updated_clip = clip.model_copy(update={
+                "title": title, "youtube_description": description,
+                "youtube_metadata_revision": clip.youtube_metadata_revision + 1,
+                "youtube_metadata_status": "generated",
+            })
+            job.clips = [updated_clip if item.id == clip.id else item for item in job.clips]
+            job.updated_at = stamp
+            db.execute("UPDATE assets SET updated_at=?,payload=? WHERE id=?", (stamp, self._json(updated_asset), asset.id))
+            db.execute("UPDATE jobs SET updated_at=?,payload=? WHERE id=?", (stamp, self._json(job), job.id))
+            self.validate_clip_asset_relationship(updated_clip, updated_asset)
+            return updated_asset, job, updated_clip
+
     def get_asset_by_hash(self, content_hash: str) -> Asset | None:
         with self._connect() as db:
             row = db.execute("SELECT * FROM assets WHERE content_hash=? ORDER BY updated_at LIMIT 1", (content_hash,)).fetchone()
@@ -643,6 +722,10 @@ class Database:
             db.execute("DELETE FROM media_blob_refs WHERE ref_type='clip-output' AND ref_id=?", (clip.id,))
             for ref_type, ref_id in [("asset", asset.id), ("clip-output", clip.id)]:
                 db.execute("INSERT OR IGNORE INTO media_blob_refs(blob_id,ref_type,ref_id,created_at) VALUES(?,?,?,?)", (asset.blob_id, ref_type, ref_id, stamp))
+
+            # A stable-identity republication retains prior user metadata in both
+            # linked records, just as it already does for the Library Asset.
+            clip = clip.model_copy(update={"title": asset.title, "youtube_description": asset.description})
 
             # 4. Update Clip fields with library_asset_id
             clip = clip.model_copy(update={
