@@ -100,6 +100,32 @@ class MusicPresentationConfig(ApiModel):
     subtitle_theme: Literal["clean", "warm", "serif", "reference_white_sans", "reference_yellow_sans", "reference_white_serif"] = "clean"
 
 
+class YouTubeMetadataUpdate(ApiModel):
+    revision: int = Field(ge=0)
+    title: str = Field(min_length=1, max_length=100)
+    description: str = Field(default="", max_length=500)
+
+    @field_validator("title")
+    @classmethod
+    def clean_metadata_title(cls, value: str) -> str:
+        if any(ord(char) < 32 or ord(char) == 127 for char in value):
+            raise ValueError("Title contains unsupported control characters")
+        cleaned = " ".join(value.split())
+        if not cleaned:
+            raise ValueError("Title cannot be blank")
+        if any(char in "<>" for char in cleaned):
+            raise ValueError("Title contains unsupported angle brackets")
+        return cleaned
+
+    @field_validator("description")
+    @classmethod
+    def clean_metadata_description(cls, value: str) -> str:
+        cleaned = value.strip()
+        if any((ord(char) < 32 and char not in "\n\t") or ord(char) == 127 or char in "<>" for char in cleaned):
+            raise ValueError("Description contains unsupported control characters or angle brackets")
+        return cleaned
+
+
 class Clip(ApiModel):
     id: str
     index: int = Field(ge=1)
@@ -124,6 +150,16 @@ class Clip(ApiModel):
     creator_credit: str | None = Field(default=None, max_length=140)
     music_top_text: str | None = Field(default=None, max_length=100)
     hook_text: str | None = Field(default=None, max_length=150)
+    youtube_description: str | None = Field(default=None, max_length=500)
+    youtube_metadata_revision: int = Field(default=0, ge=0)
+    youtube_metadata_status: Literal["pending", "generated", "unavailable", "fallback"] | None = None
+    youtube_metadata_reason: str | None = Field(default=None, max_length=300)
+    youtube_metadata_model: str | None = Field(default=None, max_length=200)
+    youtube_metadata_generated_at: str | None = None
+    youtube_metadata_input_tokens: int | None = Field(default=None, ge=0)
+    youtube_metadata_output_tokens: int | None = Field(default=None, ge=0)
+    youtube_metadata_cost_usd: float | None = Field(default=None, ge=0)
+    youtube_metadata_cost_kind: Literal["actual", "estimated"] | None = None
     music_treatment: Literal["color", "grayscale"] | None = None
     # DO-NOT-CHANGE: engine-set only, after the publication transaction commits —
     # the UI never displays this from optimistic state
@@ -215,6 +251,8 @@ class Job(ApiModel):
     burn_subtitles: bool = True
     embed_subtitles: bool = False
     hook_text_enabled: bool = False
+    youtube_metadata_enabled: bool = False
+    youtube_metadata_model_id: str | None = Field(default=None, max_length=200)
     warnings: list[str] = Field(default_factory=list)
     queued_at: str | None = None
     queue_position: int | None = Field(default=None, ge=1)
@@ -343,6 +381,7 @@ class ProjectFolderUpdate(ApiModel):
 class ProfileInput(ApiModel):
     name: str = Field(min_length=1, max_length=100)
     text_model_id: str = Field(default="openai/gpt-4.1-mini", max_length=200)
+    youtube_metadata_model_id: str | None = Field(default=None, max_length=200)
     openrouter_key: str | None = Field(default=None, max_length=500)
     persistence: Literal["session", "encrypted"] = "encrypted"
     selected: bool = False
@@ -360,13 +399,16 @@ class OpenRouterModel(ApiModel):
     name: str = Field(min_length=1, max_length=300)
     context_length: int | None = Field(default=None, ge=1)
     output_modalities: list[str] = Field(default_factory=list, max_length=10)
+    supported_parameters: list[str] = Field(default_factory=list, max_length=100)
     free: bool = False
+    pricing: dict[str, str] | None = None
 
 
 class ProviderProfile(ApiModel):
     id: str
     name: str
     text_model_id: str
+    youtube_metadata_model_id: str = "google/gemini-2.5-flash-lite"
     selected: bool
     persistence: Literal["session", "encrypted"]
     openrouter_configured: bool

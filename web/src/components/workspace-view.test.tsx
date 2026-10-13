@@ -9,10 +9,10 @@ import { WorkspaceView } from "./workspace-view";
 vi.mock("../api", () => {
   const readableError = (e: unknown) =>
     e instanceof Error ? e.message : "Something went wrong. Try again.";
-  return { readableError, getJob: vi.fn(), controlJob: vi.fn(), jobEventsUrl: vi.fn(() => ""), createZip: vi.fn(), retryClip: vi.fn(), setClipSelection: vi.fn(), listAssets: vi.fn(), listFolders: vi.fn().mockResolvedValue([]), changeProjectFolder: vi.fn() };
+  return { readableError, getJob: vi.fn(), controlJob: vi.fn(), jobEventsUrl: vi.fn(() => ""), createZip: vi.fn(), retryClip: vi.fn(), setClipSelection: vi.fn(), listAssets: vi.fn(), listFolders: vi.fn().mockResolvedValue([]), changeProjectFolder: vi.fn(), generateYoutubeMetadata: vi.fn(), updateYoutubeMetadata: vi.fn() };
 });
 
-import { controlJob, createZip, getJob, listAssets, listFolders } from "../api";
+import { controlJob, createZip, generateYoutubeMetadata, getJob, listAssets, listFolders, updateYoutubeMetadata } from "../api";
 const mockGetJob = vi.mocked(getJob);
 const mockControlJob = vi.mocked(controlJob);
 const mockListAssets = vi.mocked(listAssets);
@@ -659,6 +659,32 @@ describe("WorkspaceView – stable responsive media controls", () => {
     fireEvent.playing(video);
     view.unmount();
     await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+  });
+
+  it("exposes editable metadata, separate copy actions, and generation state in the inspector", async () => {
+    const clip = { ...responsiveJob.clips[0], title: "An accurate title", youtubeDescription: "A concise description of the clip's actual subject.", youtubeMetadataRevision: 2, youtubeMetadataStatus: "generated" as const, transcriptExcerpt: "This is the saved transcript content for this completed clip." };
+    const job = { ...responsiveJob, clips: [clip] };
+    mockGetJob.mockResolvedValue(job);
+    mockListAssets.mockResolvedValue([]);
+    mockListFolders.mockResolvedValue([]);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    const updated = { ...job, clips: [{ ...clip, title: "Edited title", youtubeMetadataRevision: 3 }] };
+    vi.mocked(updateYoutubeMetadata).mockResolvedValue(updated);
+    vi.mocked(generateYoutubeMetadata).mockResolvedValue(job);
+    renderView();
+    fireEvent.click(await screen.findByRole("button", { name: "YouTube" }));
+    expect(await screen.findByLabelText("YouTube title")).toHaveValue("An accurate title");
+    expect(screen.getByLabelText("YouTube short description")).toHaveValue("A concise description of the clip's actual subject.");
+    expect(screen.getByText(/Suggested metadata generated/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Copy title" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("An accurate title"));
+    fireEvent.click(screen.getByRole("button", { name: "Copy description" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("A concise description of the clip's actual subject."));
+    fireEvent.change(screen.getByLabelText("YouTube title"), { target: { value: "Edited title" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save edits" }));
+    await waitFor(() => expect(updateYoutubeMetadata).toHaveBeenCalledWith("j1", clip.id, "Edited title", clip.youtubeDescription, 2));
+    expect(screen.getByRole("button", { name: "Regenerate" })).toBeInTheDocument();
   });
 
   it("uses the main player's play, pause, and mute controls", async () => {

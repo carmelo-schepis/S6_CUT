@@ -45,6 +45,17 @@ describe("LibraryView", () => {
     expect(screen.getByRole("dialog", { name: "Acme launch video preview" }).querySelector("video")).toHaveAttribute("src", assets[0].previewUrl);
   });
 
+  it("shows generated descriptions on cards while keeping full metadata in the inspector", async () => {
+    const generated = { ...assets[0], description: "A short summary of the specific transcript-grounded clip, with useful topic context." };
+    mockListAssets.mockResolvedValueOnce([generated, assets[1]]);
+    render(<LibraryView />);
+    expect(await screen.findAllByText(generated.description)).toHaveLength(2);
+    expect(screen.queryByText("campaign")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Select Acme launch for Rule Inspector" }));
+    expect(screen.getByLabelText("Full description")).toHaveValue(generated.description);
+    expect(screen.getByDisplayValue("launch.mp4")).toBeInTheDocument();
+    expect(screen.getByLabelText("Tags")).toHaveValue("campaign");
+  });
   it("selects the exact requested Library asset ID, including archived-folder assets", async () => {
     const archivedAsset = { ...assets[0], id: "archived-duplicate", title: assets[0].title, folderId: "archived-folder" };
     mockListAssets.mockResolvedValueOnce([...assets, archivedAsset]);

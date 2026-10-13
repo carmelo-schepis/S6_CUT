@@ -146,6 +146,16 @@ export const clipSchema = z.object({
   // "Saved to Library" — the UI never shows it from optimistic state.
   libraryAssetId: z.string().nullable().optional(),
   title: z.string().nullable().optional(),
+  youtubeDescription: z.string().max(500).nullable().optional(),
+  youtubeMetadataRevision: z.number().int().nonnegative().optional(),
+  youtubeMetadataStatus: z.enum(["pending", "generated", "unavailable", "fallback"]).nullable().optional(),
+  youtubeMetadataReason: z.string().max(300).nullable().optional(),
+  youtubeMetadataModel: z.string().nullable().optional(),
+  youtubeMetadataGeneratedAt: z.string().nullable().optional(),
+  youtubeMetadataInputTokens: z.number().int().nonnegative().nullable().optional(),
+  youtubeMetadataOutputTokens: z.number().int().nonnegative().nullable().optional(),
+  youtubeMetadataCostUsd: z.number().nonnegative().nullable().optional(),
+  youtubeMetadataCostKind: z.enum(["actual", "estimated"]).nullable().optional(),
   width: z.number().int().positive().nullable().optional(),
   height: z.number().int().positive().nullable().optional(),
   folderId: z.string().nullable().optional(),
@@ -221,6 +231,8 @@ export const jobSchema = z.object({
   musicPresentation: musicPresentationSchema.nullable().optional(),
   musicTopText: z.string().max(100).nullable().optional(),
   hookTextEnabled: z.boolean().optional(),
+  youtubeMetadataEnabled: z.boolean().optional(),
+  youtubeMetadataModelId: z.string().nullable().optional(),
   burnSubtitles: z.boolean().optional(),
   embedSubtitles: z.boolean().optional(),
   warnings: z.array(z.string()).default([]),
@@ -297,7 +309,9 @@ export const openRouterModelSchema = z.object({
   name: z.string().min(1),
   contextLength: z.number().int().positive().nullable().optional(),
   outputModalities: z.array(z.string()).optional(),
+  supportedParameters: z.array(z.string()).optional(),
   free: z.boolean().optional(),
+  pricing: z.object({ prompt: z.string().optional(), completion: z.string().optional() }).optional(),
 });
 export type OpenRouterModel = z.infer<typeof openRouterModelSchema>;
 
@@ -311,6 +325,7 @@ export const profileSchema = z.object({
   id: z.string(),
   name: z.string(),
   textModelId: z.string(),
+  youtubeMetadataModelId: z.string().optional(),
   selected: z.boolean(),
   persistence: z.enum(["session", "encrypted"]),
   openrouterConfigured: z.boolean(),

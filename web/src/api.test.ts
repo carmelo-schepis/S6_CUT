@@ -89,6 +89,24 @@ describe("engine API boundary", () => {
     expect(bodies[1].has("hook_text")).toBe(false);
   });
 
+  it("sends YouTube metadata options only when explicitly enabled", async () => {
+    const bodies: FormData[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      bodies.push(init?.body as FormData);
+      return new Response(JSON.stringify({
+        project: { schemaVersion: 1, id: "p", name: "P", mode: "clip", style: "serious", state: "queued", sourceName: "s", sourceKind: "upload", requestedCount: 1, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" },
+        job: { schemaVersion: 1, id: "j", projectId: "p", mode: "clip", state: "queued", stage: "q", stageLabel: "Q", progress: 0, style: "serious", warnings: [], clips: [], beats: [], createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" },
+      }), { status: 202, headers: { "Content-Type": "application/json" } });
+    }));
+    const input = { style: "serious" as const, count: 1, minDuration: 8, maxDuration: 20, aspectRatio: "9:16" };
+    await createClipJob({ ...input });
+    await createClipJob({ ...input, youtubeMetadata: true, youtubeMetadataModelId: "anthropic/claude-3.5-haiku" });
+    expect(bodies[0].has("youtube_metadata")).toBe(false);
+    expect(bodies[0].has("youtube_metadata_model_id")).toBe(false);
+    expect(bodies[1].get("youtube_metadata")).toBe("true");
+    expect(bodies[1].get("youtube_metadata_model_id")).toBe("anthropic/claude-3.5-haiku");
+  });
+
   it("serializes the opted-in music profile as source_profile and preserves Smart", async () => {
     vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
       const body = init?.body as FormData;

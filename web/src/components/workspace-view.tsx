@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
-import { AlertTriangle, Captions, Check, Clock, Download, Eye, FileText, Film, Pause, Play, RefreshCw, RotateCcw, RotateCw, SlidersHorizontal, Sparkles, Square, Volume2, Zap } from "lucide-react";
-import { changeProjectFolder, controlJob, createZip, getJob, jobEventsUrl, listAssets, listFolders, readableError, retryClip, setClipSelection } from "../api";
+import { AlertTriangle, Captions, Check, Clock, Copy, Download, Eye, FileText, Film, Pause, Play, RefreshCw, RotateCcw, RotateCw, SlidersHorizontal, Sparkles, Square, Volume2, Zap } from "lucide-react";
+import { changeProjectFolder, controlJob, createZip, generateYoutubeMetadata, getJob, jobEventsUrl, listAssets, listFolders, readableError, retryClip, setClipSelection, updateYoutubeMetadata } from "../api";
 import { emitLibraryChanged } from "../library-sync";
 import { jobSchema, type Clip, type Job, type LibraryAsset, type LibraryFolder, type Project } from "../types";
-import { Button, EmptyState, IconButton, Progress, Skeleton, StatusBadge, WarningList, formatBytes, formatDimensions, formatDuration, resolveOutputAspectRatio, useSingleFlight } from "./common";
+import { Button, EmptyState, Field, IconButton, Progress, Skeleton, StatusBadge, WarningList, formatBytes, formatDimensions, formatDuration, resolveOutputAspectRatio, useSingleFlight } from "./common";
 import { jobFacts } from "../status-format";
 import { isTerminalJob, ProcessingState } from "./processing-state";
 import { LazyVideoThumbnail } from "./lazy-video-thumbnail";
@@ -26,7 +26,7 @@ type ViewerFrameStyle = CSSProperties & {
   "--viewer-aspect-height": number;
 };
 
-const detailsTabLabels = { score: "Score", captions: "Captions", asset: "Asset", info: "Info" } as const;
+const detailsTabLabels = { score: "Score", captions: "Captions", asset: "Asset", metadata: "YouTube", info: "Info" } as const;
 
 /** Moves the playhead within the clip and reports where it landed. */
 function seekBy(player: HTMLVideoElement | null, seconds: number): number | null {
@@ -83,7 +83,11 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
   const [mediaAssets, setMediaAssets] = useState<LibraryAsset[]>([]);
   const [mediaLoading, setMediaLoading] = useState(false);
   const [mediaError, setMediaError] = useState<string | null>(null);
-  const [detailsTab, setDetailsTab] = useState<"score" | "captions" | "asset" | "info">("score");
+  const [detailsTab, setDetailsTab] = useState<"score" | "captions" | "asset" | "metadata" | "info">("score");
+  const [metadataTitle, setMetadataTitle] = useState("");
+  const [metadataDescription, setMetadataDescription] = useState("");
+  const [metadataBusy, setMetadataBusy] = useState(false);
+  const [metadataStatus, setMetadataStatus] = useState<string | null>(null);
   const [boardFilter, setBoardFilter] = useState<"all" | "selected" | "failed">("all");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -252,6 +256,7 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
   const jobLoaded = jobFetched || !project?.latestJobId;
 
   const selectedClip = useMemo(() => job?.clips.find((clip) => clip.id === selectedClipId) || null, [job, selectedClipId]);
+  useEffect(() => { queueMicrotask(() => { setMetadataTitle(selectedClip?.title || ""); setMetadataDescription(selectedClip?.youtubeDescription || ""); setMetadataStatus(null); }); }, [selectedClip?.id, selectedClip?.title, selectedClip?.youtubeDescription]);
   // "Selected" means the export selection the Include-in-export checkbox drives,
   // so the filter reads the same flag the ZIP builder does.
   const boardClips = useMemo(() => (job?.clips || []).filter((clip) => (
@@ -443,6 +448,24 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
     try { setJob(await setClipSelection(job.id, next)); } catch (cause) { setError(readableError(cause)); }
   };
 
+  const runMetadata = async (regenerate: boolean) => {
+    if (!job || !selectedClip || selectedClip.state !== "complete" || metadataBusy) return;
+    setMetadataBusy(true); setMetadataStatus(null);
+    try {
+      const next = await generateYoutubeMetadata(job.id, selectedClip.id, regenerate);
+      setJob(next); setMetadataTitle(next.clips.find((clip) => clip.id === selectedClip.id)?.title || "");
+      setMetadataDescription(next.clips.find((clip) => clip.id === selectedClip.id)?.youtubeDescription || "");
+      setMetadataStatus("Metadata generated. Review and save any edits.");
+    } catch (cause) { setMetadataStatus(readableError(cause)); }
+    finally { setMetadataBusy(false); }
+  };
+  const saveMetadata = async () => {
+    if (!job || !selectedClip || metadataBusy) return;
+    setMetadataBusy(true); setMetadataStatus(null);
+    try { const next = await updateYoutubeMetadata(job.id, selectedClip.id, metadataTitle, metadataDescription, selectedClip.youtubeMetadataRevision ?? 0); setJob(next); setMetadataStatus("Metadata saved."); }
+    catch (cause) { setMetadataStatus(readableError(cause)); }
+    finally { setMetadataBusy(false); }
+  };
   const retryOneClip = async (clip: Clip) => {
     if (!job || clip.state !== "failed") return;
     setBusy(true);
@@ -590,7 +613,7 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
       <aside className="inspector-panel panel" aria-label="Clip inspector">
         <div className="panel-title"><strong>Details</strong>{selectedClip && <span>Clip {selectedClip.index}</span>}</div>
         <div className="inspector-tabs">
-          {(["score", "captions", "asset", "info"] as const).map((tab) => <button key={tab} type="button" aria-pressed={detailsTab === tab} className={detailsTab === tab ? "active" : ""} onClick={() => setDetailsTab(tab)}>{detailsTabLabels[tab]}</button>)}
+          {(["score", "captions", "asset", ...(job?.mode === "clip" ? ["metadata"] as const : []), "info"] as const).map((tab) => <button key={tab} type="button" aria-pressed={detailsTab === tab} className={detailsTab === tab ? "active" : ""} onClick={() => setDetailsTab(tab)}>{detailsTabLabels[tab]}</button>)}
         </div>
         <div className="inspector-content">
           <p className="review-hint" role="note">{project.mode === "clip" ? "Review and download finished clips here. To change a cut, adjust the project settings and generate a new version." : "This is a historical output. Existing media remains available to preview, download, and export."}</p>
@@ -598,6 +621,7 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
           {detailsTab === "score" && (selectedClip ? <ScoreInspector clip={selectedClip} /> : <p className="muted">Select a clip to inspect its auditable score.</p>)}
           {detailsTab === "captions" && <><div className="inspector-section"><label>Preset</label><span className="readonly-preset">Editorial highlight<span className="readonly-tag">Read-only</span></span><span className="preset-options">Minimal · High contrast box</span></div>{job?.hookTextEnabled && <div className="inspector-section"><label>AI hook text <span className="readonly-tag">Read-only</span></label>{selectedClip?.hookText ? <span>{selectedClip.hookText}</span> : <><span className="form-hint" role="note">Not generated</span>{job.warnings.filter((warning) => warning.startsWith("AI hook text unavailable:")).map((warning) => <span className="form-hint" role="note" key={warning}>{warning}</span>)}</>}</div>}<div className="inspector-note"><Captions size={15} /><span>Caption style and timing are fixed when the job is created and burned in from local word timestamps.</span></div></>}
           {detailsTab === "asset" && <><div className="inspector-section"><label>{project.mode === "clip" ? "Visual intention" : "Historical visual"}</label><strong>{selectedClip?.visualLabel || job?.beats[0]?.concept || (project.mode === "clip" ? "No visual beat selected" : "No visual metadata")}</strong></div><div className="inspector-section"><label>Source</label><span>{selectedClip?.provenance[0]?.provider || job?.beats[0]?.source || (project.mode === "clip" ? "No source recorded" : "Legacy source")}</span></div>{project.mode === "clip" && <div className="inspector-note"><Sparkles size={15} /><span>{selectedClip?.provenance[0]?.matchReason || job?.beats[0]?.matchReason || "No additional visual metadata."}</span></div>}</>}
+          {detailsTab === "metadata" && <section className="youtube-metadata-editor" aria-label="YouTube metadata editor">{!selectedClip ? <p className="muted">Select a clip to edit its YouTube metadata.</p> : <><Field label="YouTube title"><input aria-label="YouTube title" maxLength={100} value={metadataTitle} onChange={(event) => setMetadataTitle(event.target.value)} placeholder={selectedClip.openingLine || `Cut ${selectedClip.index}`} /></Field><Field label="Short description"><textarea aria-label="YouTube short description" rows={4} maxLength={500} value={metadataDescription} onChange={(event) => setMetadataDescription(event.target.value)} placeholder={selectedClip.openingLine || "Add a concise clip description"} /></Field><div className="metadata-actions"><Button disabled={metadataBusy || selectedClip.state !== "complete" || job?.processingMode === "fast" || job?.contentFormat !== "short" || !selectedClip.transcriptExcerpt?.trim()} onClick={() => void runMetadata(Boolean(selectedClip.youtubeMetadataStatus === "generated" || metadataTitle || metadataDescription))}><Sparkles size={14} />{metadataBusy ? "Generating…" : selectedClip.youtubeMetadataStatus === "generated" || metadataTitle || metadataDescription ? "Regenerate" : "Generate metadata"}</Button><Button disabled={metadataBusy || selectedClip.state !== "complete"} onClick={() => void saveMetadata()}>Save edits</Button><Button disabled={!metadataTitle} onClick={() => void navigator.clipboard?.writeText(metadataTitle).then(() => setMetadataStatus("Title copied."))}><Copy size={14} /> Copy title</Button><Button disabled={!metadataDescription} onClick={() => void navigator.clipboard?.writeText(metadataDescription).then(() => setMetadataStatus("Description copied."))}><Copy size={14} /> Copy description</Button></div>{selectedClip.youtubeMetadataStatus === "pending" && <p className="form-hint" role="status">Metadata generation is pending.</p>}{selectedClip.youtubeMetadataStatus === "generated" && <p className="form-hint" role="status">Suggested metadata generated{selectedClip.youtubeMetadataModel ? ` with ${selectedClip.youtubeMetadataModel}` : ""}.</p>}{typeof selectedClip.youtubeMetadataCostUsd === "number" && <p className="form-hint">Provider cost {selectedClip.youtubeMetadataCostKind || "estimated"}: ${selectedClip.youtubeMetadataCostUsd.toFixed(6)}{selectedClip.youtubeMetadataInputTokens || selectedClip.youtubeMetadataOutputTokens ? ` · ${selectedClip.youtubeMetadataInputTokens || 0} in / ${selectedClip.youtubeMetadataOutputTokens || 0} out tokens` : ""}</p>}{selectedClip.youtubeMetadataStatus === "fallback" && <p className="form-hint" role="status">Transcript-based fallback description; provider metadata was unavailable. {selectedClip.youtubeMetadataReason || ""}</p>}{selectedClip.youtubeMetadataStatus === "unavailable" && <p className="form-hint" role="status">Metadata unavailable. {selectedClip.youtubeMetadataReason || ""}</p>}{job?.processingMode === "fast" && <p className="form-hint" role="note">Fast mode does not transcribe or call providers. Metadata generation is disabled.</p>}{!selectedClip.transcriptExcerpt?.trim() && selectedClip.state === "complete" && <p className="form-hint" role="note">Insufficient saved transcript context to generate metadata.</p>}{metadataStatus && <p role="status" className="form-hint">{metadataStatus}</p>}<p className="inspector-note"><Sparkles size={15} /><span>Optional suggested YouTube metadata. It is separate from burned-in hook text and Music Top text, and never changes rendered video.</span></p></>}</section>}
           {detailsTab === "info" && <dl className="info-list"><dt>Project</dt><dd>{project.id.slice(0, 8)}</dd><dt>Job</dt><dd>{job?.id.slice(0, 8) || "—"}</dd><dt>Mode</dt><dd>{project.mode === "clip" ? "Clip" : "Legacy video"}</dd><dt>Style</dt><dd>{project.style}</dd><dt>Source</dt><dd>{project.mode === "clip" ? project.sourceKind : "Legacy source"}</dd><dt>Storage</dt><dd>Mounted local data</dd></dl>}
         </div>
       </aside>
@@ -607,7 +631,7 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
       <div className="board-header"><div><strong>{project.mode === "clip" ? "Clip board" : "Legacy visual timeline"}</strong><span>{!jobLoaded ? "Loading…" : project.mode === "clip" ? `${job?.clips.length || 0} planned · ${job?.clips.filter((clip) => clip.state === "complete").length || 0} ready${savedCount ? ` · ${savedCount} saved to Library` : ""}` : `${job?.beats.length || 0} visual beats`}</span></div>{project.mode === "clip" && <div className="board-filters" role="group" aria-label="Filter clips">{([["all", "All", "All clips"], ["selected", "Selected", "Selected clips"], ["failed", "Failed", "Failed clips"]] as const).map(([filter, label, accessibleLabel]) => <button key={filter} type="button" className={boardFilter === filter ? "active" : ""} aria-label={accessibleLabel} aria-pressed={boardFilter === filter} onClick={() => setBoardFilter(filter)}>{label}</button>)}</div>}</div>
       {project.mode === "clip" ? <div className="clip-board">{boardClips.map((clip) => <article key={clip.id} className={`clip-tile ${selectedClipId === clip.id ? "active" : ""} ${clip.state}`} onClick={() => setSelectedClipId(clip.id)}>
         <div className="clip-thumb"><span className="clip-number">{String(clip.index).padStart(2, "0")}</span>{clip.state === "complete" ? <><ClipThumb clip={clip} /><span className="score-ring">{clip.score ? Math.round(clip.score.total) : "–"}</span></> : clip.state === "failed" ? <AlertTriangle size={24} /> : <RefreshCw size={24} className="spin" />}</div>
-        <div className="clip-tile-body"><strong className="clip-title" title={clip.title || `Cut ${String(clip.index).padStart(2, "0")}`}>{clip.title || `Cut ${String(clip.index).padStart(2, "0")}`}</strong><span className="clip-line" title={clip.openingLine || undefined}>{clip.openingLine || "Candidate clip"}</span><span className="clip-meta">{formatDuration(clip.duration)} · {formatDimensions(outputAspectRatio, clip.width, clip.height)} · {folderName(clip.folderId, folders, project)}</span>{clip.state === "complete" && clip.libraryAssetId && <span className="saved-badge"><Check size={11} /> Saved to Library</span>}{clip.state === "failed" && project.mode === "clip" ? <Button disabled={busy} onClick={(event) => { event.stopPropagation(); void retryOneClip(clip); }}><RefreshCw size={12} /> Retry clip</Button> : <div className="clip-actions"><Button className="clip-action" disabled={clip.state !== "complete"} onClick={(event) => { event.stopPropagation(); selectClipForPreview(clip); }}><Eye size={12} /> Preview</Button>{clip.state === "complete" && clip.downloadUrl && <a className="button button-secondary clip-action" href={clip.downloadUrl} download onClick={(event) => event.stopPropagation()}><Download size={12} /> Download</a>}<label onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={clip.selected} disabled={clip.state !== "complete"} onChange={() => toggleClip(clip)} /> Include in export</label></div>}</div>
+        <div className="clip-tile-body"><strong className="clip-title" title={clip.title || `Cut ${String(clip.index).padStart(2, "0")}`}>{clip.title || `Cut ${String(clip.index).padStart(2, "0")}`}</strong><span className="clip-line" title={clip.youtubeDescription || clip.openingLine || undefined}>{clip.youtubeDescription || clip.openingLine || "Candidate clip"}</span><span className="clip-meta">{formatDuration(clip.duration)} · {formatDimensions(outputAspectRatio, clip.width, clip.height)} · {folderName(clip.folderId, folders, project)}</span>{clip.state === "complete" && clip.libraryAssetId && <span className="saved-badge"><Check size={11} /> Saved to Library</span>}{clip.state === "failed" && project.mode === "clip" ? <Button disabled={busy} onClick={(event) => { event.stopPropagation(); void retryOneClip(clip); }}><RefreshCw size={12} /> Retry clip</Button> : <div className="clip-actions"><Button className="clip-action" disabled={clip.state !== "complete"} onClick={(event) => { event.stopPropagation(); selectClipForPreview(clip); }}><Eye size={12} /> Preview</Button>{clip.state === "complete" && clip.downloadUrl && <a className="button button-secondary clip-action" href={clip.downloadUrl} download onClick={(event) => event.stopPropagation()}><Download size={12} /> Download</a>}<label onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={clip.selected} disabled={clip.state !== "complete"} onChange={() => toggleClip(clip)} /> Include in export</label></div>}</div>
       </article>)}{!boardClips.length && (jobLoaded ? <div className="board-placeholder" role="status">{job?.clips.length ? boardFilter === "failed" ? "No failed clips." : boardFilter === "selected" ? "No selected clips." : "No clips match this filter." : "Candidates appear here after local transcription and selection."}</div> : <><Skeleton rows={3} className="skeleton-tile" /><Skeleton rows={3} className="skeleton-tile" /><Skeleton rows={3} className="skeleton-tile" /></>)}</div>
         : <div className="beat-board">{job?.beats.map((beat, index) => <article key={beat.id} className="beat-tile"><div className="beat-visual"><span>{String(index + 1).padStart(2, "0")}</span><Sparkles size={22} /></div><div><strong>{beat.concept}</strong><p>{beat.text}</p><span>{formatDuration(beat.start)}–{formatDuration(beat.end)} · {beat.source} · {Math.round(beat.confidence * 100)}%</span></div><StatusBadge state={beat.source === "library" ? "ready" : "fallback"} label={beat.ruleState || beat.source} /></article>)}</div>}
     </section>
