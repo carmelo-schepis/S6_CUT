@@ -935,21 +935,20 @@ async def generate_youtube_metadata(job_id: str, clip_id: str, regenerate: bool 
             raise HTTPException(409, "Metadata changed while generation was running; the newer edit was preserved")
         if latest_clip.library_asset_id is None:
             raise HTTPException(409, "The completed clip has no linked Library asset")
-        asset, saved_job, updated_clip = db.update_generated_clip_metadata(
-            latest_clip.library_asset_id, metadata.title, metadata.description, snapshot_revision,
-        )
-        updated_clip.youtube_metadata_status = "generated"
-        updated_clip.youtube_metadata_model = model_id
-        updated_clip.youtube_metadata_generated_at = now_iso()
         input_tokens = usage.get("prompt_tokens") if isinstance(usage.get("prompt_tokens"), int) else estimate_input
         output_tokens = usage.get("completion_tokens") if isinstance(usage.get("completion_tokens"), int) else estimate_output
         actual = usage.get("cost")
-        if not isinstance(actual, (int, float)) or actual < 0:
-            actual = (input_tokens * float(model.pricing["prompt"]) + output_tokens * float(model.pricing["completion"]))
-        updated_clip.youtube_metadata_input_tokens = input_tokens
-        updated_clip.youtube_metadata_output_tokens = output_tokens
-        updated_clip.youtube_metadata_cost_usd = float(actual)
-        updated_clip.youtube_metadata_cost_kind = "actual" if usage.get("cost") is not None else "estimated"
+        has_actual_cost = isinstance(actual, (int, float)) and actual >= 0
+        if not has_actual_cost:
+            actual = input_tokens * float(model.pricing["prompt"]) + output_tokens * float(model.pricing["completion"])
+        generated_at = now_iso()
+        cost_usd = float(actual)
+        cost_kind = "actual" if has_actual_cost else "estimated"
+        asset, saved_job, updated_clip = db.update_generated_clip_metadata(
+            latest_clip.library_asset_id, metadata.title, metadata.description, snapshot_revision,
+            model_id=model_id, generated_at=generated_at, input_tokens=input_tokens,
+            output_tokens=output_tokens, cost_usd=cost_usd, cost_kind=cost_kind,
+        )
         saved_job.clips = [updated_clip if item.id == clip_id else item for item in saved_job.clips]
         if isinstance(metadata_cache, dict):
             metadata_cache[cache_key] = {"title": metadata.title, "description": metadata.description, "generated_at": updated_clip.youtube_metadata_generated_at, "cost_usd": updated_clip.youtube_metadata_cost_usd, "cost_kind": updated_clip.youtube_metadata_cost_kind, "model": model_id}
