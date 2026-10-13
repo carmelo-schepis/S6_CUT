@@ -12,7 +12,7 @@ vi.mock("../api", () => {
   return { readableError, getJob: vi.fn(), controlJob: vi.fn(), jobEventsUrl: vi.fn(() => ""), createZip: vi.fn(), retryClip: vi.fn(), setClipSelection: vi.fn(), listAssets: vi.fn(), listFolders: vi.fn().mockResolvedValue([]), changeProjectFolder: vi.fn(), generateYoutubeMetadata: vi.fn(), updateYoutubeMetadata: vi.fn() };
 });
 
-import { controlJob, createZip, generateYoutubeMetadata, getJob, listAssets, listFolders, updateYoutubeMetadata } from "../api";
+import { controlJob, createZip, generateYoutubeMetadata, getJob, listAssets, listFolders, setClipSelection, updateYoutubeMetadata } from "../api";
 const mockGetJob = vi.mocked(getJob);
 const mockControlJob = vi.mocked(controlJob);
 const mockListAssets = vi.mocked(listAssets);
@@ -685,6 +685,43 @@ describe("WorkspaceView – stable responsive media controls", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save edits" }));
     await waitFor(() => expect(updateYoutubeMetadata).toHaveBeenCalledWith("j1", clip.id, "Edited title", clip.youtubeDescription, 2));
     expect(screen.getByRole("button", { name: "Regenerate" })).toBeInTheDocument();
+  });
+
+  it("preserves a dirty draft across server updates and saves against its original revision", async () => {
+    const clip = { ...responsiveJob.clips[0], title: "Saved title", youtubeDescription: "Saved description", youtubeMetadataRevision: 2, transcriptExcerpt: "Saved transcript." };
+    const job = { ...responsiveJob, clips: [clip] };
+    mockGetJob.mockResolvedValue(job);
+    mockListAssets.mockResolvedValue([]);
+    mockListFolders.mockResolvedValue([]);
+    vi.mocked(setClipSelection).mockResolvedValue({ ...job, clips: [{ ...clip, selected: false, title: "Remote title", youtubeMetadataRevision: 3 }] });
+    vi.mocked(updateYoutubeMetadata).mockResolvedValue(job);
+    renderView();
+    fireEvent.click(await screen.findByRole("button", { name: "YouTube" }));
+    fireEvent.change(await screen.findByLabelText("YouTube title"), { target: { value: "My unsaved draft" } });
+    fireEvent.click(screen.getByLabelText("Include in export"));
+    await waitFor(() => expect(screen.getByLabelText("YouTube title")).toHaveValue("My unsaved draft"));
+    fireEvent.click(screen.getByRole("button", { name: "Save edits" }));
+    await waitFor(() => expect(updateYoutubeMetadata).toHaveBeenCalledWith("j1", clip.id, "My unsaved draft", "Saved description", 2));
+  });
+
+  it("does not put a generated result into the editor after the user selects another clip", async () => {
+    const first = { ...responsiveJob.clips[0], id: "clip-a", index: 1, title: null, transcriptExcerpt: "Transcript for the first completed clip." };
+    const second = { ...responsiveJob.clips[0], id: "clip-b", index: 2, title: "Clip B title", transcriptExcerpt: "Transcript for the second completed clip." };
+    const job = { ...responsiveJob, processingMode: "smart" as const, contentFormat: "short" as const, clips: [first, second] };
+    let resolveGeneration!: (value: Job) => void;
+    vi.mocked(generateYoutubeMetadata).mockReturnValue(new Promise((resolve) => { resolveGeneration = resolve; }));
+    mockGetJob.mockResolvedValue(job);
+    mockListAssets.mockResolvedValue([]);
+    mockListFolders.mockResolvedValue([]);
+    renderView();
+    fireEvent.click(await screen.findByRole("button", { name: "YouTube" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Generate metadata" }));
+    await waitFor(() => expect(generateYoutubeMetadata).toHaveBeenCalledWith("j1", first.id, false));
+    const tiles = document.querySelectorAll(".clip-tile");
+    fireEvent.click(tiles[1]);
+    await waitFor(() => expect(screen.getByLabelText("YouTube title")).toHaveValue("Clip B title"));
+    await act(async () => resolveGeneration({ ...job, clips: [{ ...first, title: "Generated A title", youtubeDescription: "Generated A description", youtubeMetadataRevision: 1 }, second] }));
+    expect(screen.getByLabelText("YouTube title")).toHaveValue("Clip B title");
   });
 
   it("uses the main player's play, pause, and mute controls", async () => {

@@ -765,7 +765,7 @@ async def update_youtube_metadata(job_id: str, clip_id: str, value: YouTubeMetad
         raise HTTPException(409, str(exc)) from exc
     private = db.get_job_private(job_id)
     private.setdefault("youtube_metadata_generation", {})[clip_id] = {
-        "status": "generated", "manual_edit": True,
+        "status": "generated", "manual_edit": True, "updated_at": time.time(),
     }
     manager._save(saved_job, private)
     return public_job(saved_job)
@@ -780,7 +780,7 @@ def _record_youtube_metadata_failure(job_id: str, clip_id: str, revision: int, r
     state = private.setdefault("youtube_metadata_generation", {})
     if not isinstance(state, dict):
         state = private["youtube_metadata_generation"] = {}
-    state[clip_id] = {"status": "unavailable", "reason": reason[:300]}
+    state[clip_id] = {"status": "unavailable", "reason": reason[:300], "updated_at": time.time()}
     fallback_description = clip.youtube_description or (excerpt[:500] if len(excerpt) >= 40 else "")
     if clip.library_asset_id:
         try:
@@ -824,7 +824,7 @@ async def generate_youtube_metadata(job_id: str, clip_id: str, regenerate: bool 
     if isinstance(prior, dict) and prior.get("status") == "in_flight":
         started_at = prior.get("started_at")
         if isinstance(started_at, (int, float)) and time.time() - started_at >= 120:
-            generation_state[clip_id] = {"status": "unavailable", "reason": "A previous generation attempt timed out; explicitly retrying is now allowed."}
+            generation_state[clip_id] = {"status": "unavailable", "reason": "A previous generation attempt timed out; explicitly retrying is now allowed.", "updated_at": time.time()}
             clip.youtube_metadata_status = "unavailable"
             clip.youtube_metadata_reason = "A previous generation attempt timed out; explicitly retrying is now allowed."
             manager._save(job, private)
@@ -906,7 +906,7 @@ async def generate_youtube_metadata(job_id: str, clip_id: str, regenerate: bool 
         latest_private = db.get_job_private(job_id)
         latest_state = latest_private.setdefault("youtube_metadata_generation", {})
         if isinstance(latest_state, dict):
-            latest_state[clip_id] = {"status": "generated", "cache_key": cache_key}
+            latest_state[clip_id] = {"status": "generated", "cache_key": cache_key, "updated_at": time.time()}
         manager._save(saved_job, latest_private)
         return public_job(saved_job)
     schema = {"type": "object", "additionalProperties": False, "properties": {
@@ -920,6 +920,7 @@ async def generate_youtube_metadata(job_id: str, clip_id: str, regenerate: bool 
     snapshot_revision = clip.youtube_metadata_revision
     try:
         job, private, clip = db.claim_youtube_metadata_generation(job_id, clip_id, snapshot_revision, model_id, reserve)
+        metadata_cache = private.setdefault("youtube_metadata_cache", {})
         generation_state = private.setdefault("youtube_metadata_generation", {})
         if not isinstance(generation_state, dict):
             generation_state = private["youtube_metadata_generation"] = {}
@@ -965,7 +966,7 @@ async def generate_youtube_metadata(job_id: str, clip_id: str, regenerate: bool 
         saved_job.clips = [updated_clip if item.id == clip_id else item for item in saved_job.clips]
         if isinstance(metadata_cache, dict):
             metadata_cache[cache_key] = {"title": metadata.title, "description": metadata.description, "generated_at": updated_clip.youtube_metadata_generated_at, "cost_usd": updated_clip.youtube_metadata_cost_usd, "cost_kind": updated_clip.youtube_metadata_cost_kind, "model": model_id}
-        generation_state[clip_id] = {"status": "generated", "model": model_id, "cache_key": cache_key}
+        generation_state[clip_id] = {"status": "generated", "model": model_id, "cache_key": cache_key, "updated_at": time.time()}
         manager._save(saved_job, private)
         return public_job(saved_job)
     except HTTPException:
@@ -1580,11 +1581,7 @@ async def update_asset(asset_id: str, value: AssetUpdate) -> Asset:
         title = str(update.get("title", asset.title))
         description = str(update.get("description", asset.description))
         try:
-            metadata = YouTubeMetadataUpdate(revision=clip.youtube_metadata_revision, title=title, description=description)
-        except ValueError as exc:
-            raise HTTPException(422, str(exc)) from exc
-        try:
-            asset, saved_job, _ = db.update_generated_clip_metadata(asset.id, metadata.title, metadata.description, clip.youtube_metadata_revision)
+            asset, saved_job, _ = db.update_generated_clip_metadata(asset.id, title, description, clip.youtube_metadata_revision)
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
         other_updates = {key: value for key, value in update.items() if key not in {"title", "description"}}

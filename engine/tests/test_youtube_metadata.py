@@ -85,6 +85,25 @@ def test_metadata_updates_are_revision_checked_and_persisted():
         app_module.db.delete_project(job.project_id)
 
 
+def test_generated_library_edits_keep_the_existing_2000_character_contract():
+    job = _completed_job()
+    _persist_job(job)
+    long_title = "A" * 150
+    long_description = "Useful library notes. " * 65
+    path = "/api/v1/library/assets/published-asset"
+    try:
+        response = client.put(path, json={"title": long_title, "description": long_description})
+        assert response.status_code == 200, response.text
+        asset = app_module.db.get_asset("published-asset")
+        saved = app_module.db.get_job(job.id)
+        assert asset.title == long_title
+        assert asset.description == long_description
+        assert len(saved.clips[0].youtube_description) == 500
+        assert saved.clips[0].title == long_title
+    finally:
+        app_module.db.delete_project(job.project_id)
+
+
 def test_metadata_generation_is_bounded_and_never_runs_for_fast_jobs(monkeypatch):
     job = _completed_job(processing_mode="fast")
     _persist_job(job)
@@ -130,6 +149,59 @@ def test_generation_request_claim_is_atomic_and_enforces_per_job_budget():
         private = app_module.db.get_job_private(job.id)
         assert private["youtube_metadata_generation_calls"] == 1
         assert private["youtube_metadata_spend_estimate_usd"] == pytest.approx(0.001)
+    finally:
+        app_module.db.delete_project(job.project_id)
+
+
+def test_stale_job_saves_preserve_overlapping_generation_reservations():
+    job = _completed_job()
+    second = Clip(
+        id=f"clip-two-{uuid.uuid4().hex}", index=2, state="complete", start=20, end=40, duration=20,
+        opening_line="Another opening", transcript_excerpt="Another grounded transcript excerpt.",
+        output_name="clip-two.mp4", library_asset_id="published-asset-two", title="Second fallback title",
+    )
+    job.clips.append(second)
+    _persist_job(job)
+    app_module.db.save_asset(Asset(
+        id="published-asset-two", title=second.title, description="", media_type="video/mp4", filename="clip-two.mp4",
+        content_hash=f"hash-{job.id}-two", origin="generated-clip", source_project_id=job.project_id,
+        source_job_id=job.id, source_clip_id=second.id,
+    ))
+    private = app_module.db.get_job_private(job.id)
+    private["youtube_metadata_generation"] = {second.id: {"status": "generated", "updated_at": 10}}
+    app_module.db.save_job(app_module.db.get_job(job.id), private)
+    try:
+        first_claim = app_module.db.claim_youtube_metadata_generation(job.id, job.clips[0].id, 0, "cheap/model", 0.001)
+        second_claim = app_module.db.claim_youtube_metadata_generation(job.id, second.id, 0, "cheap/model", 0.001)
+        app_module.db.save_job(second_claim[0], second_claim[1])
+        app_module.db.save_job(first_claim[0], first_claim[1])
+        saved = app_module.db.get_job(job.id)
+        private = app_module.db.get_job_private(job.id)
+        states = private["youtube_metadata_generation"]
+        assert private["youtube_metadata_generation_calls"] == 2
+        assert private["youtube_metadata_spend_estimate_usd"] == pytest.approx(0.002)
+        assert states[job.clips[0].id]["status"] == "in_flight"
+        assert states[second.id]["status"] == "in_flight"
+        assert all(clip.youtube_metadata_status == "pending" for clip in saved.clips)
+    finally:
+        app_module.db.delete_project(job.project_id)
+
+
+def test_worker_checkpoint_cannot_overwrite_a_concurrent_edit_at_the_same_revision():
+    job = _completed_job()
+    _persist_job(job)
+    try:
+        stale_worker_snapshot = app_module.db.get_job(job.id)
+        app_module.db.update_generated_clip_metadata("published-asset", "User's title", "User's description", 0)
+        stale_clip = stale_worker_snapshot.clips[0]
+        stale_clip.title = "Worker's late title"
+        stale_clip.youtube_description = "Worker's late description"
+        stale_clip.youtube_metadata_revision = 1
+        app_module.db.save_job(stale_worker_snapshot, {})
+        saved = app_module.db.get_job(job.id).clips[0]
+        assert saved.title == "User's title"
+        assert saved.youtube_description == "User's description"
+        assert saved.youtube_metadata_revision == 1
     finally:
         app_module.db.delete_project(job.project_id)
 
@@ -197,6 +269,7 @@ def test_metadata_generation_uses_small_output_budget_and_caps_paid_calls(monkey
         assert calls[0][2]["reasoning"] == {"enabled": False}
         assert response.json()["clips"][0]["youtubeMetadataRevision"] == 1
         assert app_module.db.get_asset("published-asset").title == "Grounded title"
+        assert len(app_module.db.get_job_private(job.id)["youtube_metadata_cache"]) == 1
         private = app_module.db.get_job_private(job.id)
         private["youtube_metadata_generation_calls"] = 5
         app_module.db.save_job(app_module.db.get_job(job.id), private)
