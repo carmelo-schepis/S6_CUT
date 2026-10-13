@@ -19,9 +19,6 @@ WORKDIR /app
 COPY engine/requirements.lock /app/engine/requirements.lock
 RUN python -m pip install --upgrade pip==26.0.1 \
     && python -m pip install --requirement /app/engine/requirements.lock
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends fonts-noto-color-emoji \
-    && rm -rf /var/lib/apt/lists/*
 # Display faces for burned-in captions. Vendored rather than apt-installed so
 # the render is reproducible: without them every style resolved to DejaVu Sans
 # and libass emboldened it synthetically, which smears the outline. Each family

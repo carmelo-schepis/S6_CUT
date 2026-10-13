@@ -21,6 +21,7 @@
     "test:e2e:content-authenticity": "node scripts/qa/content-authenticity.mjs",
     "test:e2e:youtube": "node scripts/qa/youtube-import.mjs",
     "test:e2e:youtube-openrouter": "node scripts/qa/youtube-openrouter-fallback.mjs",
+    "test:e2e:subtitle-emoji": "node scripts/qa/subtitle-emoji-acceptance.mjs",
     "qa:help-screenshots": "node scripts/qa/generate-help-screenshots.mjs"
   },
   "dependencies": {
