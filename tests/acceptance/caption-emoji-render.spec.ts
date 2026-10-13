@@ -166,8 +166,10 @@ test("Smart captions render bundled color emoji and keep Unicode caption downloa
     expect(samples[2].meanAbsoluteDifference, "emoji is absent after the half-open interval").toBeLessThan(5);
     await fs.writeFile(testInfo.outputPath("emoji-frame-samples.json"), JSON.stringify(samples, null, 2));
   } finally {
-    for (const projectId of createdProjectIds) {
-      await page.request.delete(`${gateway}/api/v1/projects/${encodeURIComponent(projectId)}?delete_assets=true`, { timeout: 30_000 }).catch(() => undefined);
+    if (process.env.S6_KEEP_EMOJI_DEMO !== "1") {
+      for (const projectId of createdProjectIds) {
+        await page.request.delete(`${gateway}/api/v1/projects/${encodeURIComponent(projectId)}?delete_assets=true`, { timeout: 30_000 }).catch(() => undefined);
+      }
     }
   }
 });
