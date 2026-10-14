@@ -1551,8 +1551,6 @@ def select_ironic_reactions(words: list[dict[str, Any]], offset: float, duration
                     continue
                 if any(normalized[index][3] for index in range(word_start, word_end + 1)):
                     continue
-                if any(start <= phrase_end + .25 and end >= phrase_start - .25 for start, end in manual_emoji_times):
-                    continue
                 if any(normalized[index][4] for index in range(word_start, word_end)):
                     continue
                 if any(normalized[index + 1][1] - normalized[index][2] > 1.25 for index in range(word_start, word_end)):
@@ -1565,7 +1563,10 @@ def select_ironic_reactions(words: list[dict[str, Any]], offset: float, duration
     for phrase_start, _, _, phrase_end, emoji in sorted(matches):
         cue_start = max(0.0, phrase_end - clip_start - .15)
         cue_end = min(clip_duration, cue_start + _IRONIC_REACTION_DURATION)
+        absolute_cue_start, absolute_cue_end = clip_start + cue_start, clip_start + cue_end
         if cue_end <= cue_start or cue_start < cooldown_until:
+            continue
+        if any(start < absolute_cue_end and end > absolute_cue_start for start, end in manual_emoji_times):
             continue
         selected.append((emoji, cue_start, cue_end))
         cooldown_until = cue_start + _IRONIC_REACTION_COOLDOWN

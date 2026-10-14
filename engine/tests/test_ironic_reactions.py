@@ -65,6 +65,13 @@ def test_manual_emoji_suppresses_automatic_match_without_mutating_transcript() -
     assert words == before
 
 
+def test_manual_emoji_suppresses_reaction_when_it_overlaps_the_cue_tail() -> None:
+    from engine.media import select_ironic_reactions
+
+    words = [*_phrase_words("that was hilarious"), {"text": "😂", "start": 1.2, "end": 1.3}]
+    assert select_ironic_reactions(words, 0, 5) == []
+
+
 def test_ironic_selector_normalizes_case_punctuation_and_preserves_timing() -> None:
     from engine.media import select_ironic_reactions
 
