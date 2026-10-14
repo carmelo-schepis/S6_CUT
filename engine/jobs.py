@@ -450,8 +450,8 @@ def _presentation_render_kwargs(render, private: dict[str, Any]) -> dict[str, st
     Historical jobs have no snapshot and intentionally retain renderer defaults.
     """
     snapshot = private.get("presentation")
-    choice = snapshot.get("caption") if isinstance(snapshot, dict) and snapshot.get("version") == 1 else None
-    if choice != "smart_speech_v1":
+    choice = snapshot.get("caption") if isinstance(snapshot, dict) and snapshot.get("version") in {1, 2} else None
+    if choice not in {"smart_speech_v1", "smart_speech_v2"}:
         return {}
     try:
         parameters = inspect.signature(render).parameters.values()
@@ -1342,11 +1342,12 @@ class JobManager:
         from .captions import normalize_and_validate
         from .models import CaptionCue
         presentation_snapshot = private.get("presentation")
-        presentation = presentation_snapshot.get("caption") if isinstance(presentation_snapshot, dict) and presentation_snapshot.get("version") == 1 else None
+        presentation = presentation_snapshot.get("caption") if isinstance(presentation_snapshot, dict) and presentation_snapshot.get("version") in {1, 2} else None
         cues, issues = normalize_and_validate(
             list(override.get("cues") or []), clip.duration,
             aspect=str(private.get("aspect_ratio") or "9:16"),
-            presentation=presentation if presentation == "smart_speech_v1" else None,
+            presentation=presentation if presentation in {"smart_speech_v1", "smart_speech_v2"} else None,
+            style=job.style,
         )
         if any(issue["severity"] == "error" for issue in issues):
             private["caption_rerender_error"] = "Reviewed captions are invalid"
@@ -1819,7 +1820,9 @@ class JobManager:
             try:
                 render_kwargs = {
                     "start": clip.start, "end": clip.end, "aspect": private["aspect_ratio"],
-                    "words": clip_words if subtitles_enabled or bool(private.get("embed_subtitles", job.embed_subtitles)) else [],
+                    # Keep transcript words available to render_clip so it can write
+                    # downloadable SRT/VTT sidecars even when visual burn-in is off.
+                    "words": clip_words,
                     **({"hook_text": clip.hook_text} if clip.hook_text else {}),
                     "visuals": [], "overlays": overlays, "settings": self.settings, "style": job.style,
                     **_centered_partial_fill_kwargs(render_clip, centered_partial_fill_eligible(job, private, metadata)),

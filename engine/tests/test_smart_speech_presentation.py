@@ -63,6 +63,9 @@ def test_historical_private_payload_keeps_renderer_presentation_default() -> Non
     assert _presentation_render_kwargs(compatible_renderer, {
         "presentation": {"version": 1, "caption": "smart_speech_v1"},
     }) == {"presentation": "smart_speech_v1"}
+    assert _presentation_render_kwargs(compatible_renderer, {
+        "presentation": {"version": 2, "caption": "smart_speech_v2"},
+    }) == {"presentation": "smart_speech_v2"}
 
 
 def test_caption_rerender_forwards_saved_presentation_and_subtitle_flag(tmp_path: Path, monkeypatch) -> None:

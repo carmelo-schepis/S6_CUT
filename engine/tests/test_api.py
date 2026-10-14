@@ -122,7 +122,7 @@ def test_short_smart_speech_api_persists_durable_presentation_choice(monkeypatch
         "count": "2", "burn_subtitles": "false",
     })
     assert response.status_code == 202, response.text
-    assert saved["private"]["presentation"] == {"version": 1, "caption": "smart_speech_v1"}
+    assert saved["private"]["presentation"] == {"version": 2, "caption": "smart_speech_v2"}
     assert saved["private"]["burn_subtitles"] is False
     assert response.json()["job"]["burnSubtitles"] is False
 

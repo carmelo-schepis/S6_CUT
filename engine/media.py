@@ -870,7 +870,8 @@ def caption_font_mismatches() -> dict[str, str]:
     a badly tuned preset. Naming the substitution makes it a reportable fault.
     """
     mismatches: dict[str, str] = {}
-    for requested in sorted({str(preset["fontname"]) for preset in _SUBTITLE_PRESETS.values()}):
+    requested_families = {str(preset["fontname"]) for preset in _SUBTITLE_PRESETS.values()} | {"Barlow", "Archivo Black"}
+    for requested in sorted(requested_families):
         resolved = resolve_font_family(requested)
         families = {part.strip().casefold() for part in resolved.split(",") if part.strip()}
         if requested.casefold() not in families:
@@ -1348,7 +1349,7 @@ def _srt_time(seconds: float) -> str:
 
 
 def write_caption_sidecars(path: Path, words: list[dict[str, Any]], *, offset: float, duration: float, style: str = "educational", music_theme: str | None = None, presentation: str | None = None) -> None:
-    cues = _caption_cues(words, offset, duration, style, music_presentation=music_theme is not None, local_text_only=presentation == "smart_speech_v1")
+    cues = _caption_cues(words, offset, duration, style, music_presentation=music_theme is not None, local_text_only=presentation in {"smart_speech_v1", "smart_speech_v2"})
     srt = "\n\n".join(f"{index}\n{_srt_time(start)} --> {_srt_time(end)}\n{text}" for index, (start, end, text) in enumerate(cues, 1)) + ("\n" if cues else "")
     path.with_suffix(".srt").write_text(srt, encoding="utf-8")
     vtt = "WEBVTT\n\n" + "\n\n".join(f"{_srt_time(start).replace(',', '.')} --> {_srt_time(end).replace(',', '.')}\n{text}" for start, end, text in cues) + ("\n" if cues else "")
@@ -1434,15 +1435,20 @@ def _scrim_events(look: "LookTreatment", width: int, height: int, duration: floa
     return style, events
 
 
-def _smart_speech_fontsize(group: list[dict[str, Any]], width: int, fontsize: int) -> int:
-    """Shrink a phrase until its measured Montserrat advances fit the canvas."""
+def _speech_layout_text(text: str, *, uppercase: bool = False) -> str:
+    text = _emoji_layout_text(text)
+    return text.upper() if uppercase else text
+
+
+def _smart_speech_fontsize(group: list[dict[str, Any]], width: int, fontsize: int, font_path: str | None = None, *, uppercase: bool = False) -> int:
+    """Shrink a phrase until advances from its actual bundled face fit the canvas."""
     size = fontsize
     max_width = width * .88 - 24  # outline, shadow, and italic overhang safety allowance
-    font_path = str(Path(__file__).parent / "fonts" / "montserrat" / "Montserrat-ExtraBoldItalic.ttf")
+    font_path = font_path or str(Path(__file__).parent / "fonts" / "montserrat" / "Montserrat-ExtraBoldItalic.ttf")
     units_per_em, advances = _font_advance_metrics(font_path)
     height_units = _libass_height_units(font_path)
     while size > 20:
-        text = " ".join(str(item["text"]) for item in group)
+        text = " ".join(str(item["text"]).upper() if uppercase else str(item["text"]) for item in group)
         measured = sum(advances.get(ord(char), units_per_em * .6) for char in text) * size / height_units
         if measured <= max_width:
             break
@@ -1453,6 +1459,32 @@ def _smart_speech_fontsize(group: list[dict[str, Any]], width: int, fontsize: in
 def _smart_speech_group(words: list[dict[str, Any]], index: int) -> list[dict[str, Any]]:
     start = (index // 3) * 3
     return words[start:start + 3]
+
+
+def _speech_phrase_group(words: list[dict[str, Any]], index: int, max_words: int, max_chars: int, *, allow_backtrack: bool = True) -> list[dict[str, Any]]:
+    """Build readable speech phrases at transcript punctuation and pauses."""
+    start = index
+    while allow_backtrack and start > 0 and index - start < max_words - 1:
+        previous, current = words[start - 1], words[start]
+        if (float(current["start"]) - float(previous["end"]) > .65
+                or str(previous["text"]).rstrip().endswith((".", "!", "?", ",", ";", ":"))):
+            break
+        start -= 1
+    end = start
+    chars = 0
+    while end < len(words) and end - start < max_words:
+        item = words[end]
+        text = str(item["text"])
+        proposed = chars + (1 if end > start else 0) + len(text)
+        if end > start and (proposed > max_chars * 2
+                or float(item["start"]) - float(words[end - 1]["end"]) > .65
+                or str(words[end - 1]["text"]).rstrip().endswith((".", "!", "?", ",", ";", ":"))):
+            break
+        chars = proposed
+        end += 1
+        if text.rstrip().endswith((".", "!", "?", ",", ";", ":")):
+            break
+    return words[start:max(index + 1, end)]
 
 
 _SMART_SPEECH_EMOJI_SEQUENCES = {
@@ -1502,9 +1534,11 @@ def _caption_emoji_plan(words: list[dict[str, Any]], width: int, height: int, du
         return []
     scale = min(width, height) / 1080
     size = max(48, round(112 * scale))
-    y = max(round(height * .34), round(height * .54 - 104 * scale - size - 18 * scale))
+    y = (max(round(height * .34), round(height * .54 - 104 * scale - size - 18 * scale))
+         if presentation == "smart_speech_v1" or style == "hype"
+         else round(height * .60 - size))
     plan: list[tuple[Path, float, float, int, int, int]] = []
-    if presentation != "smart_speech_v1" or music_theme:
+    if presentation not in {"smart_speech_v1", "smart_speech_v2"} or music_theme:
         return plan
     enriched_local = local
     cooldown_until = -1.0
@@ -1547,7 +1581,7 @@ def _caption_emoji_plan(words: list[dict[str, Any]], width: int, height: int, du
             else:
                 active_intervals.append((interval_start, interval_end))
         if not automatic:
-            inline_slots = _smart_inline_emoji_slots(group, width, height)
+            inline_slots = _smart_inline_emoji_slots(group, width, height, style=style, presentation=presentation)
             if inline_slots:
                 plan.extend((asset, interval_start, interval_end, x, slot_y, slot_size) for asset, x, slot_y, slot_size in inline_slots for interval_start, interval_end in active_intervals)
                 continue
@@ -1561,21 +1595,27 @@ def _caption_emoji_plan(words: list[dict[str, Any]], width: int, height: int, du
     return plan
 
 
-def _smart_inline_emoji_slots(group: list[dict[str, Any]], width: int, height: int) -> list[tuple[Path, int, int, int]]:
+def _smart_inline_emoji_slots(group: list[dict[str, Any]], width: int, height: int, *, style: str = "hype", presentation: str | None = None) -> list[tuple[Path, int, int, int]]:
     """Position image slots from the same pinned-font line layout as ASS."""
-    font_path = str(Path(__file__).parent / "fonts" / "montserrat" / "Montserrat-ExtraBoldItalic.ttf")
+    relative_font = ({"hype": "montserrat/Montserrat-ExtraBoldItalic.ttf", "funny": "archivoblack/ArchivoBlack-Regular.ttf", "educational": "barlow/Barlow-Bold.ttf", "serious": "barlow/Barlow-Regular.ttf"}.get(style, "barlow/Barlow-Bold.ttf")
+                     if presentation == "smart_speech_v2"
+                     else "montserrat/Montserrat-ExtraBoldItalic.ttf")
+    font_path = str(Path(__file__).parent / "fonts" / relative_font)
     units_per_em, advances = _font_advance_metrics(font_path)
     height_units = _libass_height_units(font_path)
-    base_size = max(28, round(104 * min(width, height) / 1080))
-    layout_group = [{**word, "_emoji_text": str(word.get("text", "")), "text": _emoji_layout_text(str(word.get("text", "")))} for word in group]
-    font_size = _smart_speech_fontsize(layout_group, width, base_size)
-    lines = _smart_speech_lines(layout_group, width, font_size)
+    reference_size = {"hype": 104, "funny": 86, "educational": 68, "serious": 60}.get(style, 104) if presentation == "smart_speech_v2" else 104
+    base_size = max(28, round(reference_size * min(width, height) / 1080))
+    uppercase = False  # v2 is short form; retain its existing non-uppercase Hype casing.
+    layout_group = [{**word, "_emoji_text": str(word.get("text", "")), "text": _speech_layout_text(str(word.get("text", "")), uppercase=uppercase)} for word in group]
+    font_size = _smart_speech_fontsize(layout_group, width, base_size, font_path)
+    lines = _smart_speech_lines(layout_group, width, font_size, font_path)
     space_width = advances.get(ord(" "), units_per_em * .25) * font_size / height_units
     line_height = font_size * 1.2
-    block_center_y = height * .54
+    block_center_y = height * (.54 if presentation == "smart_speech_v1" or style == "hype" else .78)
     output = []
     for row, line in enumerate(lines):
-        text_widths = [sum(advances.get(ord(char), units_per_em * .6) for char in _emoji_layout_text(str(item.get("text", ""))).upper()) * font_size / height_units for item in line]
+        uppercase = presentation == "smart_speech_v1"
+        text_widths = [sum(advances.get(ord(char), units_per_em * .6) for char in _speech_layout_text(str(item.get("text", "")), uppercase=uppercase)) * font_size / height_units for item in line]
         line_width = sum(text_widths) + space_width * max(0, len(line) - 1)
         cursor = (width - line_width) / 2
         center_y = block_center_y + (row - (len(lines) - 1) / 2) * line_height
@@ -1583,7 +1623,7 @@ def _smart_inline_emoji_slots(group: list[dict[str, Any]], width: int, height: i
             text = str(item.get("_emoji_text", item.get("text", "")))
             matches = find_emoji_sequences(text)
             for start, end, _, asset in matches:
-                prefix = _emoji_layout_text(text[:start]).upper()
+                prefix = _speech_layout_text(text[:start], uppercase=uppercase)
                 prefix_width = sum(advances.get(ord(char), units_per_em * .6) for char in prefix) * font_size / height_units
                 slot_width = space_width * 4
                 size = max(36, round(font_size * .92))
@@ -1614,16 +1654,16 @@ def _emoji_ass_text(text: str) -> str:
     return "".join(parts)
 
 
-def _smart_speech_lines(group: list[dict[str, Any]], width: int, fontsize: int) -> list[list[dict[str, Any]]]:
-    """Wrap a short phrase at word boundaries using pinned Montserrat advances."""
-    font_path = str(Path(__file__).parent / "fonts" / "montserrat" / "Montserrat-ExtraBoldItalic.ttf")
+def _smart_speech_lines(group: list[dict[str, Any]], width: int, fontsize: int, font_path: str | None = None, *, uppercase: bool = False) -> list[list[dict[str, Any]]]:
+    """Wrap a short phrase at word boundaries using its pinned bundled face."""
+    font_path = font_path or str(Path(__file__).parent / "fonts" / "montserrat" / "Montserrat-ExtraBoldItalic.ttf")
     units_per_em, advances = _font_advance_metrics(font_path)
     height_units = _libass_height_units(font_path)
     max_width = width * .88 - 24  # outline, shadow, and italic overhang safety allowance
     lines: list[list[dict[str, Any]]] = []
     for word in group:
         candidate = (lines[-1] + [word]) if lines else [word]
-        text = " ".join(str(item["text"]) for item in candidate)
+        text = " ".join(str(item["text"]).upper() if uppercase else str(item["text"]) for item in candidate)
         measured = sum(advances.get(ord(char), units_per_em * .6) for char in text) * fontsize / height_units
         if lines and measured > max_width:
             lines.append([word])
@@ -1638,7 +1678,17 @@ def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duratio
     # Unknown additive presentation values intentionally project to the legacy
     # renderer, keeping newer callers forward/backward compatible.
     smart_speech = presentation == "smart_speech_v1"
+    styled_speech = presentation == "smart_speech_v2"
+    speech_presentation = smart_speech or styled_speech
     preset = _subtitle_preset(style, content_format)
+    if styled_speech:
+        speech_presets = {
+            "hype": {"fontname": "Montserrat ExtraBold", "font": 104, "bold": -1, "italic": -1, "primary": "&H00FFFFFF&", "highlight": "&H0000D7FF&", "outline_color": "&H00000000&", "outline": 6, "shadow": 2, "spacing": 0, "group": 3, "margin_v": 0, "border_style": 1},
+            "funny": {"fontname": "Archivo Black", "font": 86, "bold": 0, "italic": 0, "primary": "&H00FFFFFF&", "highlight": "&H0000D7FF&", "outline_color": "&H00000000&", "outline": 6, "shadow": 2, "spacing": 0, "group": 3, "margin_v": 370, "border_style": 1},
+            "educational": {"fontname": "Barlow", "font": 68, "bold": -1, "italic": 0, "primary": "&H00FFFFFF&", "highlight": "&H0000D7FF&", "outline_color": "&H00101010&", "outline": 3, "shadow": 1, "spacing": 0, "group": 4, "margin_v": 370, "border_style": 1},
+            "serious": {"fontname": "Barlow", "font": 60, "bold": 0, "italic": 0, "primary": "&H00F4F5F7&", "highlight": "&H00F4F5F7&", "outline_color": "&H00201810&", "outline": 1, "shadow": 0, "spacing": 0, "group": 6, "margin_v": 370, "border_style": 1},
+        }
+        preset = {**preset, **speech_presets.get(style, speech_presets["educational"])}
     if smart_speech:
         # Use the bundled Montserrat face independently of recipe/style settings.
         # ASS applies synthetic bold/italic to this locally available face.
@@ -1656,7 +1706,7 @@ def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duratio
         preset = dict(preset)
         preset.update({**reference_presets[music_theme], "bold": 0, "italic": 0, "group": 1, "highlight": reference_presets[music_theme]["primary"]})
     scrim_style, scrim_events = _scrim_events(recipe_for(style, content_format).look, width, height, duration)
-    if smart_speech:
+    if speech_presentation:
         scrim_style, scrim_events = "", []
     if music_theme in reference_presets:
         scrim_style, scrim_events = "", []
@@ -1664,9 +1714,12 @@ def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duratio
     type_scale = min(width, height) / _CAPTION_REFERENCE_SHORT_EDGE
     vertical_scale = height / _CAPTION_REFERENCE_HEIGHT
     fontsize = max(28, round(preset["font"] * type_scale))
-    if content_format == "short" and not smart_speech:
+    if content_format == "short" and not speech_presentation:
         fontsize = round(fontsize * SHORT_FORM_SUBTITLE_SIZE_MULTIPLIER)
     if music_theme in reference_presets:
+        outline = round(preset["outline"] * type_scale)
+        shadow = round(preset["shadow"] * type_scale)
+    elif styled_speech:
         outline = round(preset["outline"] * type_scale)
         shadow = round(preset["shadow"] * type_scale)
     else:
@@ -1685,7 +1738,7 @@ def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duratio
     # glyphs, outlines, and the translucent panel.
     credit_margin = _credit_margin(height)
     credit_max_chars = max(12, int(usable * .92 / (_CHAR_WIDTH_FACTOR * credit_fontsize)))
-    if smart_speech:
+    if speech_presentation:
         credit_alignment = 2
         credit_margin = max(1, round(height * .14))
         credit_max_chars = max(12, int(usable * .9 / (_CHAR_WIDTH_FACTOR * credit_fontsize)))
@@ -1696,19 +1749,19 @@ def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duratio
     hook_top_margin = round(height * .11)
     hook_lines: list[list[dict[str, Any]]] = []
     credit_label = creator_credit
-    if smart_speech and credit_label:
+    if speech_presentation and credit_label:
         credit_label = re.sub(r"^Source:\s*", "", credit_label, flags=re.IGNORECASE)
     credit_text = _wrap_credit(credit_label, credit_max_chars) if credit_label else ""
     # A translucent light face with a dark stroke stays legible over changing
     # footage without competing with the much larger caption treatment.
-    credit_alignment = 2 if smart_speech else (1 if credit_alignment == 1 else 3)
-    credit_primary = "&H66F1F2F4" if smart_speech else "&H22F1F2F4"
-    credit_font = "Montserrat ExtraBold" if smart_speech else "Arial"
-    credit_bold, credit_italic = (-1, -1) if smart_speech else (0, 0)
-    credit_border = 1 if smart_speech else 3
+    credit_alignment = 2 if speech_presentation else (1 if credit_alignment == 1 else 3)
+    credit_primary = "&H66F1F2F4" if speech_presentation else "&H22F1F2F4"
+    credit_font = "Montserrat ExtraBold" if speech_presentation else "Arial"
+    credit_bold, credit_italic = (-1, -1) if speech_presentation else (0, 0)
+    credit_border = 1 if speech_presentation else 3
     credit_style = f"Style: Credit,{credit_font},{credit_fontsize},{credit_primary},{credit_primary},&H6608080A,&H9908080A,{credit_bold},{credit_italic},0,0,100,100,0,0,{credit_border},{max(1, round(2 * visual_scale))},{max(1, round(1 * visual_scale))},{credit_alignment},{margin_x},{margin_x},{credit_margin},1\n" if credit_text else ""
     visual_style = f"Style: Visual,Arial,{max(28, round(56 * visual_scale))},&H008FA8DD,&H000000FF,&H00110B0C,&HCC110B0C,-1,0,0,0,100,100,1,0,3,{max(1, round(2 * visual_scale))},0,8,{margin_x},{margin_x},{max(80, round(400 * visual_scale))},1" if not music_theme else ""
-    caption_alignment = 5 if music_theme or smart_speech else 2
+    caption_alignment = 5 if music_theme or smart_speech or (styled_speech and style == "hype") else 2
     header = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {width}
@@ -1774,12 +1827,13 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
     selected_words = caption_words_for_clip(words, offset, offset + duration)
     # Speech presentation intentionally suppresses recipe emoji and uses only
     # local text glyphs, so rendering remains deterministic and offline.
-    local = selected_words if music_theme or smart_speech else _caption_words_with_emojis(selected_words, style)
+    local = selected_words if music_theme or speech_presentation else _caption_words_with_emojis(selected_words, style)
     if burn_emoji_images:
         local = [{**word, "_emoji_text": str(word.get("text", "")), "text": _emoji_layout_text(str(word.get("text", "")))} for word in local]
     if music_theme in reference_presets:
         for group in _reference_music_groups(local, max_words=3 if music_theme == "reference_white_sans" else 7):
             events.extend(_reference_music_events(group, music_theme, width=width, height=height, duration=duration, content_format=content_format))
+    serious_next_index = 0
     for index, word in enumerate(local):
         if music_theme in reference_presets:
             continue
@@ -1789,12 +1843,35 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
             group_size = int(preset["group"])
             group = _caption_group_for_index(local, index, group_size, max_chars)
         smart_fontsize = fontsize
-        if smart_speech:
-            group = _smart_speech_group(local, index)
-            smart_fontsize = _smart_speech_fontsize(group, width, fontsize)
+        speech_font_path = None
+        if styled_speech:
+            speech_font_path = str(Path(__file__).parent / "fonts" / {"hype": "montserrat/Montserrat-ExtraBoldItalic.ttf", "funny": "archivoblack/ArchivoBlack-Regular.ttf", "educational": "barlow/Barlow-Bold.ttf", "serious": "barlow/Barlow-Regular.ttf"}.get(style, "barlow/Barlow-Bold.ttf"))
+        phrase_start = phrase_end = None
+        if speech_presentation:
+            hype_uppercase = styled_speech and style == "hype" and bool(preset.get("uppercase"))
+            if styled_speech and style != "hype":
+                group = _speech_phrase_group(
+                    local, index, int(preset["group"]), max_chars,
+                    allow_backtrack=style != "serious",
+                )
+                if style == "serious":
+                    if index < serious_next_index:
+                        continue
+                    serious_next_index = index + len(group)
+                    phrase_start, phrase_end = float(group[0]["start"]), float(group[-1]["end"])
+            else:
+                group = _smart_speech_group(local, index) if smart_speech or style == "hype" else _caption_group_for_index(local, index, int(preset["group"]), max_chars)
+            smart_fontsize = (_smart_speech_fontsize(group, width, fontsize, speech_font_path, uppercase=hype_uppercase)
+                              if smart_speech or style == "hype" else min(
+                                  (_smart_speech_fontsize([item], width, fontsize, speech_font_path) for item in group),
+                                  default=fontsize,
+                              ))
         lines = _wrap_caption_words(group, max_chars) if music_theme else _wrap_caption_words(group, max_chars)[:2]
-        if smart_speech:
-            lines = _smart_speech_lines(group, width, smart_fontsize)
+        if speech_presentation:
+            lines = _smart_speech_lines(group, width, smart_fontsize, speech_font_path, uppercase=hype_uppercase)
+            while styled_speech and style != "hype" and len(lines) > 2 and smart_fontsize > 20:
+                smart_fontsize -= 1
+                lines = _smart_speech_lines(group, width, smart_fontsize, speech_font_path, uppercase=hype_uppercase)
         line_bits = []
         for line in lines:
             bits = []
@@ -1805,13 +1882,17 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
                 raw = str(item.get("_emoji_text", item["text"]))
                 display_text = raw.upper() if preset.get("uppercase") else raw
                 text = _emoji_ass_text(display_text) if burn_emoji_images else _ass_escape(display_text)
-                bits.append(f"{{\\c{preset['highlight']}}}{text}{{\\c{preset['primary']}}}" if item is word else text)
+                bits.append(f"{{\\c{preset['highlight']}}}{text}{{\\c{preset['primary']}}}" if item is word and (not styled_speech or style != "serious") else text)
             line_bits.append(" ".join(bits))
-        start = max(0, float(word["start"]))
-        end = min(duration, max(start + .05, float(word["end"])))
+        start = max(0, phrase_start if phrase_start is not None else float(word["start"]))
+        end = min(duration, max(start + .05, phrase_end if phrase_end is not None else float(word["end"])))
         event_text = r"\N".join(line_bits)
         if smart_speech:
             event_text = f"{{\\fs{smart_fontsize}\\pos({width // 2},{round(height * .54)})}}" + event_text
+        elif styled_speech and style == "hype":
+            event_text = f"{{\\fs{smart_fontsize}\\pos({width // 2},{round(height * .54)})}}" + event_text
+        elif styled_speech:
+            event_text = f"{{\\fs{smart_fontsize}}}" + event_text
         events.append(f"Dialogue: 10,{_ass_time(start)},{_ass_time(end)},Caption,,0,0,0,,{event_text}")
     for label, start, end in visuals:
         events.append(f"Dialogue: 5,{_ass_time(start)},{_ass_time(end)},Visual,,0,0,0,,{_ass_escape(label)}")
@@ -2072,7 +2153,7 @@ def _smart_speech_emoji_filters(plan: list[tuple[Path, float, float, int, int, i
 
 def render_clip(source: Path, output: Path, *, start: float, end: float, aspect: str, words: list[dict[str, Any]], visuals: list[tuple[str, float, float]], overlays: list[tuple[Path, float, float]], settings: Settings, style: str = "educational", has_audio: bool = True, embed_subtitles: bool = False, subtitle_language: str = "und", creator_credit: str | None = None, content_format: str | None = None, centered_partial_fill: bool = False, subscribe_animation: dict[str, Any] | None = None, music_theme: str | None = None, music_top_text: str | None = None, music_treatment: str | None = None, hook_text: str | None = None, presentation: str | None = None, subtitles_enabled: bool = True) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
-    has_supported_emoji = presentation == "smart_speech_v1" and any(find_emoji_sequences(str(word.get("text", ""))) for word in words)
+    has_supported_emoji = presentation in {"smart_speech_v1", "smart_speech_v2"} and any(find_emoji_sequences(str(word.get("text", ""))) for word in words)
     separate_burn_script = bool(creator_credit or hook_text or not subtitles_enabled or has_supported_emoji)
     ass = output.parent / (f"{output.stem}.burn.ass" if separate_burn_script else f"{output.stem}.ass")
     duration = end - start
@@ -2085,7 +2166,7 @@ def render_clip(source: Path, output: Path, *, start: float, end: float, aspect:
         src_width, src_height = src_height, src_width
     credit_alignment = _credit_alignment(source, start=start, end=end, width=width, height=height, settings=settings) if creator_credit else 3
     caption_words = words if subtitles_enabled else []
-    write_ass(ass, caption_words, offset=start, duration=duration, visuals=visuals, width=width, height=height, style=style, creator_credit=creator_credit, credit_alignment=credit_alignment, content_format=content_format, music_theme=music_theme, music_top_text=music_top_text, hook_text=hook_text, hook_end_time=hook_end_time, presentation=presentation, burn_emoji_images=presentation == "smart_speech_v1")
+    write_ass(ass, caption_words, offset=start, duration=duration, visuals=visuals, width=width, height=height, style=style, creator_credit=creator_credit, credit_alignment=credit_alignment, content_format=content_format, music_theme=music_theme, music_top_text=music_top_text, hook_text=hook_text, hook_end_time=hook_end_time, presentation=presentation, burn_emoji_images=presentation in {"smart_speech_v1", "smart_speech_v2"})
     # Downloadable sidecars remain independent of the burn-in toggle; the
     # internal ASS and MP4 overlay receive no speech captions when disabled.
     write_caption_sidecars(output, words, offset=start, duration=duration, style=style, music_theme=music_theme, presentation=presentation)
@@ -2097,7 +2178,7 @@ def render_clip(source: Path, output: Path, *, start: float, end: float, aspect:
     command = [settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{start:.3f}", "-i", str(source)]
     _overlay_inputs(command, overlays)
     subscribe_animations = _subscribe_animation_inputs(command, subscribe_animation, duration, content_format, width, height, 1 + len(overlays))
-    emoji_plan = _caption_emoji_plan(words, width, height, duration, offset=start, style=style, presentation=presentation, music_theme=music_theme) if subtitles_enabled and presentation == "smart_speech_v1" and not music_theme else []
+    emoji_plan = _caption_emoji_plan(words, width, height, duration, offset=start, style=style, presentation=presentation, music_theme=music_theme) if subtitles_enabled and presentation in {"smart_speech_v1", "smart_speech_v2"} and not music_theme else []
     emoji_inputs = list(dict.fromkeys(path for path, *_ in emoji_plan))
     _overlay_inputs(command, [(path, 0, duration) for path in emoji_inputs])
     subtitle_index = 1 + len(overlays) + len(subscribe_animations) + len(emoji_inputs)

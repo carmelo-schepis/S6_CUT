@@ -134,6 +134,44 @@ def test_smart_inline_images_do_not_drift_across_multiple_sequences_in_one_word(
     assert plan[1][3] - plan[0][3] > plan[0][5] * .8
 
 
+@pytest.mark.parametrize(("style", "relative_font"), [
+    ("hype", "montserrat/Montserrat-ExtraBoldItalic.ttf"),
+    ("funny", "archivoblack/ArchivoBlack-Regular.ttf"),
+    ("educational", "barlow/Barlow-Bold.ttf"),
+    ("serious", "barlow/Barlow-Regular.ttf"),
+])
+def test_smart_speech_v2_emoji_layout_uses_style_font(
+    style: str, relative_font: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import engine.media as media
+
+    font_size_paths = []
+    line_layout_paths = []
+    original_fontsize = media._smart_speech_fontsize
+    original_lines = media._smart_speech_lines
+
+    def track_fontsize(group, width, fontsize, font_path=None, *, uppercase=False):
+        font_size_paths.append(font_path)
+        return original_fontsize(group, width, fontsize, font_path, uppercase=uppercase)
+
+    def track_lines(group, width, fontsize, font_path=None, *, uppercase=False):
+        line_layout_paths.append(font_path)
+        return original_lines(group, width, fontsize, font_path, uppercase=uppercase)
+
+    monkeypatch.setattr(media, "_smart_speech_fontsize", track_fontsize)
+    monkeypatch.setattr(media, "_smart_speech_lines", track_lines)
+    expected_font_path = str(Path(media.__file__).parent / "fonts" / relative_font)
+
+    slots = media._smart_inline_emoji_slots(
+        [{"text": "A surprising result ❤️", "start": .1, "end": .8}],
+        1080, 1920, style=style, presentation="smart_speech_v2",
+    )
+
+    assert slots
+    assert font_size_paths == [expected_font_path]
+    assert line_layout_paths == [expected_font_path]
+
+
 def _run(command: list[str]) -> None:
     subprocess.run(command, capture_output=True, check=True)
 
