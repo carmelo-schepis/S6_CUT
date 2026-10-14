@@ -65,6 +65,21 @@ def test_historical_private_payload_keeps_renderer_presentation_default() -> Non
     }) == {"presentation": "smart_speech_v1"}
 
 
+def test_reaction_policy_render_kwargs_require_speech_and_enabled_subtitles() -> None:
+    from engine.jobs import _reaction_policy_render_kwargs
+
+    def renderer(*, words, style, reaction_policy=None, source_profile=None):
+        return None
+
+    private = {"reaction_policy": {"version": 1, "name": "ironic_v1"}}
+    expected = {"reaction_policy": "ironic_v1", "source_profile": "speech"}
+
+    assert _reaction_policy_render_kwargs(renderer, private, "speech", True) == expected
+    assert _reaction_policy_render_kwargs(renderer, private, "music", True) == {}
+    assert _reaction_policy_render_kwargs(renderer, private, None, True) == {}
+    assert _reaction_policy_render_kwargs(renderer, private, "speech", False) == {}
+
+
 def test_caption_rerender_forwards_saved_presentation_and_subtitle_flag(tmp_path: Path, monkeypatch) -> None:
     from types import SimpleNamespace
 

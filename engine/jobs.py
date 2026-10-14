@@ -462,6 +462,20 @@ def _presentation_render_kwargs(render, private: dict[str, Any]) -> dict[str, st
     return {}
 
 
+def _reaction_policy_render_kwargs(render, private: dict[str, Any], source_profile: str, subtitles_enabled: bool) -> dict[str, str]:
+    """Enable the versioned automatic reaction policy only for eligible new speech jobs."""
+    policy = private.get("reaction_policy")
+    if source_profile != "speech" or not subtitles_enabled or policy != {"version": 1, "name": "ironic_v1"}:
+        return {}
+    try:
+        parameters = inspect.signature(render).parameters.values()
+    except (TypeError, ValueError):
+        return {}
+    if any(parameter.name == "reaction_policy" or parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters):
+        return {"reaction_policy": "ironic_v1", "source_profile": source_profile}
+    return {}
+
+
 def _format_render_kwargs(render, content_format: str) -> dict[str, str]:
     """Pass the content format only to renderers that accept it.
 
@@ -1374,6 +1388,7 @@ class JobManager:
                 "hook_text": clip.hook_text,
                 **_centered_partial_fill_kwargs(render, centered_partial_fill_eligible(job, private, metadata)),
                 "subtitles_enabled": bool(private.get("burn_subtitles", job.burn_subtitles)),
+                **_reaction_policy_render_kwargs(render, private, job.source_profile, bool(private.get("burn_subtitles", job.burn_subtitles))),
                 "embed_subtitles": bool(private.get("embed_subtitles", job.embed_subtitles)),
                 **_subscribe_render_kwargs(render, private.get("subscribe_animation")),
                 **_format_render_kwargs(render, job_content_format(job, private)),
@@ -1829,6 +1844,7 @@ class JobManager:
                     **_format_render_kwargs(render_clip, job_content_format(job, private)),
                     **_presentation_render_kwargs(render_clip, private),
                     "subtitles_enabled": subtitles_enabled,
+                    **_reaction_policy_render_kwargs(render_clip, private, job.source_profile, subtitles_enabled),
                     **(_music_render_kwargs(
                         render_clip,
                         (private.get("music_presentation") or {}).get("subtitle_theme", "clean"),
@@ -2050,6 +2066,7 @@ class JobManager:
                 render_kwargs.update(_creator_render_kwargs(render, youtube_creator_credit(job, private)))
                 render_kwargs.update(_format_render_kwargs(render, job_content_format(job, private)))
                 render_kwargs.update(_presentation_render_kwargs(render, private))
+                render_kwargs.update(_reaction_policy_render_kwargs(render, private, job.source_profile, subtitles_enabled))
                 render(source, output, **_compatible_render_kwargs(render, render_kwargs))
                 job, clip, _ = self._publish_output(job, clip, output, private)
             except Exception as exc:

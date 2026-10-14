@@ -149,6 +149,12 @@ def test_fast_pipeline_skips_smart_components(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(media_module, "render_fast_clip", _fake_render)
 
     called: list[str] = []
+
+    async def forbidden_provider(*_args, **_kwargs):
+        called.append("provider")
+        raise AssertionError("Fast mode must not call a provider")
+
+    monkeypatch.setattr(test_manager.profiles, "openrouter_json", forbidden_provider)
     monkeypatch.setattr("engine.jobs.transcribe", lambda *a, **kw: called.append("transcribe"))
     monkeypatch.setattr("engine.media.transcribe", lambda *a, **kw: called.append("transcribe"))
     monkeypatch.setattr("engine.selection.select_candidates", lambda *a, **kw: called.append("select"))

@@ -100,10 +100,10 @@ def test_hook_text_requires_connected_provider(monkeypatch) -> None:
 
 
 @pytest.mark.parametrize(
-    ("aspect_ratio", "batch_mode"),
-    [("9:16", "standard"), ("16:9", "standard"), ("4:5", "high_volume")],
+    "aspect_ratio",
+    ["9:16", "16:9", "4:5"],
 )
-def test_short_smart_speech_api_persists_durable_presentation_choice(monkeypatch, aspect_ratio, batch_mode) -> None:
+def test_short_smart_speech_api_persists_durable_presentation_choice(monkeypatch, aspect_ratio) -> None:
     from engine import app as app_module
 
     saved: dict[str, object] = {}
@@ -118,11 +118,12 @@ def test_short_smart_speech_api_persists_durable_presentation_choice(monkeypatch
     monkeypatch.setattr(app_module.manager, "enqueue", enqueue)
     response = client.post("/api/v1/jobs/clip", data={
         "url": "https://www.youtube.com/watch?v=fixture", "processing_mode": "smart",
-        "content_format": "short", "aspect_ratio": aspect_ratio, "batch_mode": batch_mode,
+        "content_format": "short", "aspect_ratio": aspect_ratio, "batch_mode": "standard",
         "count": "2", "burn_subtitles": "false",
     })
     assert response.status_code == 202, response.text
     assert saved["private"]["presentation"] == {"version": 1, "caption": "smart_speech_v1"}
+    assert saved["private"]["reaction_policy"] is None
     assert saved["private"]["burn_subtitles"] is False
     assert response.json()["job"]["burnSubtitles"] is False
 
@@ -150,6 +151,34 @@ def test_ineligible_jobs_persist_legacy_presentation(monkeypatch, fields) -> Non
     })
     assert response.status_code == 202, response.text
     assert saved["private"]["presentation"] == {"version": 1, "caption": "legacy"}
+    expected_policy = None if fields.get("source_profile") == "music" else {"version": 1, "name": "ironic_v1"}
+    assert saved["private"]["reaction_policy"] == expected_policy
+
+
+@pytest.mark.parametrize("fields", [
+    {"processing_mode": "smart", "content_format": "short", "batch_mode": "standard"},
+    {"processing_mode": "smart", "content_format": "long", "batch_mode": "standard"},
+    {"processing_mode": "fast", "content_format": "short", "batch_mode": "standard"},
+    {"processing_mode": "smart", "content_format": "short", "batch_mode": "high_volume"},
+])
+def test_speech_reaction_policy_snapshot_is_independent_of_presentation_eligibility(monkeypatch, fields) -> None:
+    from engine import app as app_module
+
+    saved: dict[str, object] = {}
+    monkeypatch.setattr(app_module, "validate_youtube_url", lambda value: value)
+    monkeypatch.setattr(app_module.profiles, "smart_available", lambda: True)
+    monkeypatch.setattr(app_module.db, "save_project", lambda project: saved.update(project=project))
+    monkeypatch.setattr(app_module.db, "save_job", lambda job, private=None: saved.update(job=job, private=private))
+
+    async def enqueue(_: str) -> None:
+        return None
+
+    monkeypatch.setattr(app_module.manager, "enqueue", enqueue)
+    response = client.post("/api/v1/jobs/clip", data={
+        "url": "https://www.youtube.com/watch?v=fixture", "count": "2", "burn_subtitles": "true", **fields,
+    })
+    assert response.status_code == 202, response.text
+    assert saved["private"]["reaction_policy"] == {"version": 1, "name": "ironic_v1"}
 
 
 def test_high_volume_clip_api_persists_requested_count_separately(monkeypatch) -> None:
@@ -276,6 +305,8 @@ def test_music_clip_request_forces_smart_and_persists_source_profile(monkeypatch
     body = response.json()
     assert body["project"]["sourceProfile"] == "music"
     assert body["job"]["sourceProfile"] == "music"
+    assert saved["job"].source_profile == "music"
+    assert saved["private"]["presentation"] == {"version": 1, "caption": "legacy"}
     assert body["job"]["processingMode"] == "smart"
     assert saved["private"]["use_openrouter"] is False
     assert saved["private"]["subscribe_animation"] == {"version": 1, "enabled": True, "short_form_lead_seconds": 10}
