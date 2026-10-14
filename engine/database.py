@@ -382,51 +382,59 @@ class Database:
             """).fetchall()
         return [Project.model_validate_json(row["payload"]).model_copy(update={"library_folder_id": self.resolve_folder_id(row["library_folder_id"])}) for row in rows]
 
+    # Merge durable metadata that another writer (Library/Workspace edit, bulk
+    # retitle, per-clip generation) committed after this writer loaded its job.
+    # Used by save_job and publish_clip_output so a worker's stale in-memory job
+    # never reverts a title edit or resets the metadata budget counters.
+    @staticmethod
+    def _merge_saved_metadata(existing: sqlite3.Row, job: Job, private: dict[str, Any] | None, skip_clip_id: str | None = None) -> None:
+        if private is not None:
+            saved_private = json.loads(existing["private_payload"])
+            for key in ("youtube_metadata_generation_calls", "youtube_metadata_spend_estimate_usd"):
+                try:
+                    old_value = saved_private.get(key, 0) or 0
+                    new_value = private.get(key, 0) or 0
+                    private[key] = max(int(old_value), int(new_value)) if key.endswith("_calls") else max(float(old_value), float(new_value))
+                except (TypeError, ValueError):
+                    private[key] = saved_private.get(key, private.get(key, 0))
+            for key in ("youtube_metadata_cache",):
+                saved_values = saved_private.get(key)
+                new_values = private.get(key)
+                if isinstance(saved_values, dict) or isinstance(new_values, dict):
+                    private[key] = {**(saved_values if isinstance(saved_values, dict) else {}), **(new_values if isinstance(new_values, dict) else {})}
+            key = "youtube_metadata_generation"
+            saved_states = saved_private.get(key)
+            new_states = private.get(key)
+            if isinstance(saved_states, dict) or isinstance(new_states, dict):
+                merged_states = dict(saved_states) if isinstance(saved_states, dict) else {}
+                priority = {"in_flight": 0, "unavailable": 1, "fallback": 1, "generated": 2}
+                for clip_id, state in (new_states.items() if isinstance(new_states, dict) else ()):
+                    saved_state = merged_states.get(clip_id)
+                    saved_stamp = saved_state.get("updated_at", saved_state.get("started_at", 0)) if isinstance(saved_state, dict) else 0
+                    new_stamp = state.get("updated_at", state.get("started_at", 0)) if isinstance(state, dict) else 0
+                    if not isinstance(saved_stamp, (int, float)):
+                        saved_stamp = 0
+                    if not isinstance(new_stamp, (int, float)):
+                        new_stamp = 0
+                    if not isinstance(saved_state, dict) or not isinstance(state, dict) or new_stamp > saved_stamp or (new_stamp == saved_stamp and priority.get(state.get("status"), 0) >= priority.get(saved_state.get("status"), 0)):
+                        merged_states[clip_id] = state
+                private[key] = merged_states
+        saved_job = Job.model_validate_json(existing["payload"])
+        saved_clips = {clip.id: clip for clip in saved_job.clips}
+        for clip in job.clips:
+            saved_clip = saved_clips.get(clip.id)
+            if not saved_clip or clip.id == skip_clip_id:
+                continue
+            saved_priority = {None: 0, "pending": 1, "unavailable": 2, "fallback": 2, "generated": 3}
+            if saved_clip.youtube_metadata_revision > clip.youtube_metadata_revision or (saved_clip.youtube_metadata_revision > 0 and saved_clip.youtube_metadata_revision == clip.youtube_metadata_revision) or saved_priority.get(saved_clip.youtube_metadata_status, 0) > saved_priority.get(clip.youtube_metadata_status, 0):
+                for field in ("title", "title_source", "youtube_description", "youtube_metadata_revision", "youtube_metadata_status", "youtube_metadata_reason", "youtube_metadata_model", "youtube_metadata_generated_at", "youtube_metadata_input_tokens", "youtube_metadata_output_tokens", "youtube_metadata_cost_usd", "youtube_metadata_cost_kind"):
+                    setattr(clip, field, getattr(saved_clip, field))
+
     def save_job(self, job: Job, private: dict[str, Any] | None = None) -> None:
         with self._lock, self._connect() as db:
             existing = db.execute("SELECT payload,private_payload FROM jobs WHERE id=?", (job.id,)).fetchone()
-            if existing and private is not None:
-                saved_private = json.loads(existing["private_payload"])
-                for key in ("youtube_metadata_generation_calls", "youtube_metadata_spend_estimate_usd"):
-                    try:
-                        old_value = saved_private.get(key, 0) or 0
-                        new_value = private.get(key, 0) or 0
-                        private[key] = max(int(old_value), int(new_value)) if key.endswith("_calls") else max(float(old_value), float(new_value))
-                    except (TypeError, ValueError):
-                        private[key] = saved_private.get(key, private.get(key, 0))
-                for key in ("youtube_metadata_cache",):
-                    saved_values = saved_private.get(key)
-                    new_values = private.get(key)
-                    if isinstance(saved_values, dict) or isinstance(new_values, dict):
-                        private[key] = {**(saved_values if isinstance(saved_values, dict) else {}), **(new_values if isinstance(new_values, dict) else {})}
-                key = "youtube_metadata_generation"
-                saved_states = saved_private.get(key)
-                new_states = private.get(key)
-                if isinstance(saved_states, dict) or isinstance(new_states, dict):
-                    merged_states = dict(saved_states) if isinstance(saved_states, dict) else {}
-                    priority = {"in_flight": 0, "unavailable": 1, "fallback": 1, "generated": 2}
-                    for clip_id, state in (new_states.items() if isinstance(new_states, dict) else ()):
-                        saved_state = merged_states.get(clip_id)
-                        saved_stamp = saved_state.get("updated_at", saved_state.get("started_at", 0)) if isinstance(saved_state, dict) else 0
-                        new_stamp = state.get("updated_at", state.get("started_at", 0)) if isinstance(state, dict) else 0
-                        if not isinstance(saved_stamp, (int, float)):
-                            saved_stamp = 0
-                        if not isinstance(new_stamp, (int, float)):
-                            new_stamp = 0
-                        if not isinstance(saved_state, dict) or not isinstance(state, dict) or new_stamp > saved_stamp or (new_stamp == saved_stamp and priority.get(state.get("status"), 0) >= priority.get(saved_state.get("status"), 0)):
-                            merged_states[clip_id] = state
-                    private[key] = merged_states
             if existing:
-                saved_job = Job.model_validate_json(existing["payload"])
-                saved_clips = {clip.id: clip for clip in saved_job.clips}
-                for clip in job.clips:
-                    saved_clip = saved_clips.get(clip.id)
-                    if not saved_clip:
-                        continue
-                    saved_priority = {None: 0, "pending": 1, "unavailable": 2, "fallback": 2, "generated": 3}
-                    if saved_clip.youtube_metadata_revision > clip.youtube_metadata_revision or (saved_clip.youtube_metadata_revision > 0 and saved_clip.youtube_metadata_revision == clip.youtube_metadata_revision) or saved_priority.get(saved_clip.youtube_metadata_status, 0) > saved_priority.get(clip.youtube_metadata_status, 0):
-                        for field in ("title", "youtube_description", "youtube_metadata_revision", "youtube_metadata_status", "youtube_metadata_reason", "youtube_metadata_model", "youtube_metadata_generated_at", "youtube_metadata_input_tokens", "youtube_metadata_output_tokens", "youtube_metadata_cost_usd", "youtube_metadata_cost_kind"):
-                            setattr(clip, field, getattr(saved_clip, field))
+                self._merge_saved_metadata(existing, job, private)
             private_json = json.dumps(private, separators=(",", ":")) if private is not None else (existing["private_payload"] if existing else "{}")
             folder_id = job.library_folder_id or UNSORTED_FOLDER_ID
             db.execute("INSERT INTO jobs(id,project_id,state,updated_at,payload,private_payload,library_folder_id) VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET project_id=excluded.project_id,state=excluded.state,updated_at=excluded.updated_at,payload=excluded.payload,private_payload=excluded.private_payload,library_folder_id=excluded.library_folder_id", (job.id, job.project_id, job.state, job.updated_at, self._json(job), private_json, folder_id))
@@ -674,6 +682,7 @@ class Database:
                     "max_uses_per_project": existing.max_uses_per_project,
                     "active_from": existing.active_from, "active_until": existing.active_until,
                     "licence": existing.licence, "attribution": existing.attribution,
+                    "title_source": existing.title_source,
                     "source_project_id": existing.source_project_id,
                     "source_job_id": existing.source_job_id,
                     "source_clip_id": existing.source_clip_id,
@@ -765,6 +774,7 @@ class Database:
                     "max_uses_per_project": existing.max_uses_per_project,
                     "active_from": existing.active_from, "active_until": existing.active_until,
                     "licence": existing.licence, "attribution": existing.attribution,
+                    "title_source": existing.title_source,
                     "source_project_id": existing.source_project_id,
                     "source_job_id": existing.source_job_id,
                     "source_clip_id": existing.source_clip_id,
@@ -785,7 +795,7 @@ class Database:
 
             # A stable-identity republication retains prior user metadata in both
             # linked records, just as it already does for the Library Asset.
-            clip = clip.model_copy(update={"title": asset.title, "youtube_description": asset.description[:500]})
+            clip = clip.model_copy(update={"title": asset.title, "title_source": asset.title_source, "youtube_description": asset.description[:500]})
 
             # 4. Update Clip fields with library_asset_id
             clip = clip.model_copy(update={
@@ -810,7 +820,10 @@ class Database:
             # 6. Save updated job payload
             folder_id = job.library_folder_id or UNSORTED_FOLDER_ID
             private_json = json.dumps(private, separators=(",", ":")) if private is not None else None
-            existing_private = db.execute("SELECT private_payload FROM jobs WHERE id=?", (job.id,)).fetchone()
+            existing_private = db.execute("SELECT payload,private_payload FROM jobs WHERE id=?", (job.id,)).fetchone()
+            if existing_private:
+                self._merge_saved_metadata(existing_private, job, private, skip_clip_id=clip.id)
+                private_json = json.dumps(private, separators=(",", ":")) if private is not None else None
             if private_json is None:
                 private_json = existing_private["private_payload"] if existing_private else "{}"
 

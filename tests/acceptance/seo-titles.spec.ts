@@ -165,11 +165,11 @@ test.describe("SEO titles", () => {
       expect(clip.titleSource).toBe("ai");
       expect(clip.title, "title leads with the source entity, proving source context reached the model").toMatch(/^Americans Try Vietnamese/);
       expect(clip.youtubeDescription).toContain("#Shorts");
-      const asset = await api(`/api/v1/library/assets/page?page=1&page_size=200`).then((page: any) => page.items?.find((item: any) => item.id === clip.libraryAssetId));
-      if (asset) {
-        expect(asset.title).toBe(clip.title);
-        expect(asset.tags).toEqual([]);
-      }
+      const asset = (await api<any[]>("/api/v1/library/assets")).find((item) => item.id === clip.libraryAssetId);
+      expect(asset, "clip has its Library asset").toBeTruthy();
+      expect(asset.title).toBe(clip.title);
+      expect(asset.titleSource).toBe("ai");
+      expect(asset.tags).toEqual([]);
     }
     if (mockUrl) {
       const calls = await (await fetch(`${mockUrl}/__calls`)).json();
@@ -311,7 +311,8 @@ test.describe("SEO titles", () => {
     const job = await api(`/api/v1/jobs/${finished.id}`);
     await openWorkspace(page, finished.id);
     for (const clip of job.clips.filter((item: any) => item.state === "complete")) {
-      expect(clip.title, "Workspace clip and Library asset share the title").toBe(byId.get(clip.libraryAssetId).title === handEdited.title ? clip.title : byId.get(clip.libraryAssetId).title);
+      if (clip.libraryAssetId === handEdited.assetId) continue; // legacy data: only the Library copy was hand-edited
+      expect(clip.title, "Workspace clip and Library asset share the title").toBe(byId.get(clip.libraryAssetId).title);
     }
     const tileTitles = await page.locator(".clip-tile.complete .clip-title").allTextContents();
     expect(tileTitles).toContain(editedTitle);
@@ -361,11 +362,15 @@ test.describe("SEO titles", () => {
     for (const box of titleBoxes) expect(box.height, `title clamps to two lines: ${box.text}`).toBeLessThanOrEqual(box.line * 2 + 2);
     await page.screenshot({ path: testInfo.outputPath("library-cards.png"), fullPage: true });
 
-    // Explicitly selected AI-titled clips can be re-suggested; Cancel writes nothing.
-    const aiCards = page.locator(".asset-card").filter({ hasText: /Americans Try Vietnamese/ });
-    expect(await aiCards.count()).toBeGreaterThanOrEqual(2);
+    // Select the still-legacy clip (left unticked in the backfill test) plus an
+    // AI-titled one; the legacy row must appear. Cancel writes nothing.
+    const legacyCard = page.locator(".asset-card").filter({ has: page.locator(".asset-card-details-content strong", { hasText: /^YouTube import — / }) }).first();
+    const aiCard = page.locator(".asset-card").filter({ has: page.locator(".asset-card-details-content strong", { hasText: /^Americans Try Vietnamese Street:/ }) }).first();
+    await expect(legacyCard).toBeVisible();
+    await expect(aiCard).toBeVisible();
     const before = await api<any[]>("/api/v1/library/assets");
-    for (let index = 0; index < 2; index += 1) await aiCards.nth(index).locator(".asset-select input").check();
+    await legacyCard.locator(".asset-select input").check();
+    await aiCard.locator(".asset-select input").check();
     const button = page.getByTestId("suggest-seo-titles");
     await expect(button).toContainText("(2)");
     await button.click();
@@ -376,7 +381,7 @@ test.describe("SEO titles", () => {
     expect(box.x).toBeGreaterThanOrEqual(-1);
     expect(box.x + box.width).toBeLessThanOrEqual(viewport.width + 1);
     const rows = dialog.getByTestId("seo-title-row");
-    expect(await rows.count()).toBeGreaterThanOrEqual(1);
+    await expect(rows.first()).toBeVisible();
     const input = rows.first().getByRole("textbox", { name: /^New title for/ });
     await input.scrollIntoViewIfNeeded();
     await expect(input).toBeVisible();

@@ -458,6 +458,10 @@ async def create_clip_job(
             selected_profile and selected_profile.auto_seo_titles and smart_available
             and content_format == "short" and mode == "smart" and processing_mode != "fast" and batch_mode != "high_volume"
         )
+    if youtube_metadata and processing_mode == "auto" and (mode != "smart" or not smart_available):
+        # The default-on SEO toggle must not block an Auto job that resolved to
+        # Fast because OpenRouter is not reachable right now.
+        youtube_metadata = False
     if youtube_metadata:
         if content_format != "short" or processing_mode == "fast" or mode != "smart":
             raise HTTPException(422, "YouTube metadata is unavailable in Fast or Long form jobs.")
@@ -767,10 +771,19 @@ async def update_youtube_metadata(job_id: str, clip_id: str, value: YouTubeMetad
         raise _not_found("Clip")
     if clip.library_asset_id is None:
         raise HTTPException(409, "This completed clip has no linked Library asset")
+    linked = db.get_asset(clip.library_asset_id)
+    title, description = value.title, value.description
+    if linked and title == (clip.title or "") and linked.title != title:
+        # The Workspace draft was seeded from an older clip title (legacy data
+        # where only the Library copy was edited); an unchanged field must not
+        # revert the Library title.
+        title = linked.title
+    if linked and description == (clip.youtube_description or "") and linked.description and linked.description[:500] != description:
+        description = linked.description[:500]
     try:
         asset, saved_job, _ = db.update_generated_clip_metadata(
-            clip.library_asset_id, value.title, value.description, value.revision,
-            title_source="user" if value.title != (clip.title or "") else None,
+            clip.library_asset_id, title, description, value.revision,
+            title_source="user" if linked is None or title != linked.title else None,
         )
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
@@ -796,8 +809,12 @@ def _record_youtube_metadata_failure(job_id: str, clip_id: str, revision: int, r
     if clip.library_asset_id:
         try:
             linked_asset = db.get_asset(clip.library_asset_id)
+            # A failed generation records status only: the Library title and any
+            # description already there (possibly hand-written) stay as they are.
+            if linked_asset and linked_asset.description:
+                fallback_description = linked_asset.description[:500]
             _, latest, clip = db.update_generated_clip_metadata(
-                clip.library_asset_id, clip.title or (linked_asset.title if linked_asset else "Suggested title"), fallback_description,
+                clip.library_asset_id, (linked_asset.title if linked_asset else None) or clip.title or "Suggested title", fallback_description,
                 clip.youtube_metadata_revision, metadata_status="fallback" if fallback_description else "unavailable",
                 metadata_reason=reason[:300],
             )

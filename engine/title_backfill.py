@@ -334,14 +334,21 @@ class TitleBackfill:
                 raise _Conflict("The linked clip is unavailable")
             if item.revision is None or clip.youtube_metadata_revision != item.revision:
                 raise _Conflict("Title changed since the suggestion")
+            replaceable, reason = clip_title_replaceable(asset, clip, allow_ai=True)
+            if not replaceable:
+                raise _Conflict(reason or "Title was edited by hand")
+            # An empty suggestion never blanks an existing description.
+            description = clean.description or asset.description[:500]
             try:
-                _, saved_job, _ = self.db.update_generated_clip_metadata(asset.id, clean.title, clean.description, item.revision, title_source=source)
+                _, saved_job, _ = self.db.update_generated_clip_metadata(asset.id, clean.title, description, item.revision, title_source=source)
             except (ValueError, KeyError) as exc:
                 raise _Conflict(str(exc)) from None
             self._save_job(saved_job, self.db.get_job_private(saved_job.id))
             return
         if asset.origin != "project-source":
             raise _Conflict("Only generated clips and imported sources are retitled")
+        if asset.title_source == "user":
+            raise _Conflict("Title was edited by hand")
         update: dict[str, Any] = {"title": clean.title, "title_source": source}
         if clean.description:
             update["description"] = clean.description

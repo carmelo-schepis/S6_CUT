@@ -388,3 +388,105 @@ def test_rule_inspector_blur_without_change_keeps_title_source():
 
 def test_suggest_endpoint_requires_scope_or_ids():
     assert client.post("/api/v1/library/title-suggestions", json={}).status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Verify-review regressions: hand-edited titles survive every write path
+# ---------------------------------------------------------------------------
+
+def _published_pair(db: Database, *, job_id: str, title: str, title_source: str | None, clip_count: int = 2):
+    project = Project(id=f"p-{job_id}", name="Typed name", mode="clip", style="funny", state="active", source_name="x.mp4", source_kind="upload", requested_count=clip_count)
+    db.save_project(project)
+    clips = [Clip(id=f"{job_id}-c{index}", index=index, state="complete" if index == 1 else "rendering", start=0, end=10, duration=10, opening_line="Opening words here",
+                  output_name=f"{index:02d}.mp4", library_asset_id=f"{job_id}-a1" if index == 1 else None, title=title if index == 1 else None,
+                  title_source=title_source if index == 1 else None) for index in range(1, clip_count + 1)]
+    db.save_asset(Asset(id=f"{job_id}-a1", title=title, title_source=title_source, media_type="video/mp4", filename="01.mp4", content_hash=f"h-{job_id}-1",
+                        origin="generated-clip", source_project_id=project.id, source_job_id=job_id, source_clip_id=clips[0].id))
+    job = Job(id=job_id, project_id=project.id, mode="clip", state="active", stage="render", stage_label="Rendering", progress=50, style="funny", processing_mode="smart", clips=clips)
+    db.save_job(job, {})
+    return project, job
+
+
+def test_republication_keeps_a_user_title_source():
+    db, _ = _cluster(Path(tempfile.mkdtemp(prefix="s6-seo-pub-")))
+    project, job = _published_pair(db, job_id="repub", title="My hand title", title_source="user", clip_count=1)
+    clip = job.clips[0]
+    incoming = Asset(id="new-id", title="Rule title – Typed name", title_source="auto", media_type="video/mp4", filename="01.mp4", content_hash="h-repub-2",
+                     origin="generated-clip", source_project_id=project.id, source_job_id=job.id, source_clip_id=clip.id)
+    _, published_clip, asset = db.publish_clip_output(job, clip.model_copy(update={"title": "Rule title – Typed name", "title_source": "auto"}), incoming, "blobs/x.mp4", 10, private={})
+    assert asset.title == "My hand title" and asset.title_source == "user"
+    assert published_clip.title == "My hand title" and published_clip.title_source == "user"
+    assert clip_title_replaceable(asset, published_clip, allow_ai=True)[0] is False
+
+
+def test_publishing_the_next_clip_does_not_revert_an_edit_made_mid_job():
+    db, _ = _cluster(Path(tempfile.mkdtemp(prefix="s6-seo-race-")))
+    project, job = _published_pair(db, job_id="race", title="Auto title – Typed name", title_source="auto")
+    stale = Job.model_validate_json(job.model_dump_json(by_alias=True))  # the worker's in-memory copy
+    db.update_generated_clip_metadata("race-a1", "Edited while rendering", "", 0, title_source="user")
+    second = stale.clips[1]
+    incoming = Asset(id="race-a2", title="Second – Typed name", title_source="auto", media_type="video/mp4", filename="02.mp4", content_hash="h-race-2",
+                     origin="generated-clip", source_project_id=project.id, source_job_id=job.id, source_clip_id=second.id)
+    db.publish_clip_output(stale, second.model_copy(update={"title": "Second – Typed name", "title_source": "auto", "output_name": "02.mp4"}), incoming, "blobs/y.mp4", 10, private={"youtube_metadata_generation_calls": 0})
+    saved = db.get_job("race")
+    first = next(clip for clip in saved.clips if clip.id == "race-c1")
+    assert first.title == "Edited while rendering" and first.title_source == "user"
+    assert first.youtube_metadata_revision == 1
+    assert db.get_asset("race-a1").title == first.title
+
+
+def test_apply_api_refuses_to_overwrite_a_user_title():
+    job_id = f"apply-user-{uuid.uuid4().hex[:8]}"
+    project, job = _published_pair(app_module.db, job_id=job_id, title="Hand written", title_source="user", clip_count=1)
+    try:
+        response = client.post("/api/v1/library/title-suggestions/apply", json={"items": [{"kind": "clip", "assetId": f"{job_id}-a1", "currentTitle": "Hand written", "title": "AI replacement title", "description": "", "revision": 0, "edited": False}]})
+        assert response.status_code == 200, response.text
+        assert response.json()["applied"] == [] and response.json()["conflicts"][0]["reason"] == "Title was edited by hand"
+        assert app_module.db.get_asset(f"{job_id}-a1").title == "Hand written"
+    finally:
+        app_module.db.delete_project(project.id)
+
+
+def test_failed_generation_keeps_the_library_title_and_description():
+    job_id = f"fail-keep-{uuid.uuid4().hex[:8]}"
+    project, job = _published_pair(app_module.db, job_id=job_id, title="YouTube import — Old words · Cut 01", title_source=None, clip_count=1)
+    asset = app_module.db.get_asset(f"{job_id}-a1")
+    app_module.db.save_asset(asset.model_copy(update={"title": "Library-only hand title", "description": "My own description"}))
+    try:
+        app_module._record_youtube_metadata_failure(job_id, f"{job_id}-c1", 0, "Provider timed out", "a long enough transcript excerpt for a fallback description")
+        after = app_module.db.get_asset(f"{job_id}-a1")
+        assert after.title == "Library-only hand title"
+        assert after.description == "My own description"
+        clip = app_module.db.get_job(job_id).clips[0]
+        assert clip.title == after.title and clip.youtube_metadata_status == "fallback"
+    finally:
+        app_module.db.delete_project(project.id)
+
+
+def test_workspace_save_with_a_stale_seeded_title_keeps_the_library_title():
+    job_id = f"stale-draft-{uuid.uuid4().hex[:8]}"
+    project, job = _published_pair(app_module.db, job_id=job_id, title="YouTube import — Old words · Cut 01", title_source=None, clip_count=1)
+    asset = app_module.db.get_asset(f"{job_id}-a1")
+    app_module.db.save_asset(asset.model_copy(update={"title": "Library-only hand title"}))
+    try:
+        response = client.put(f"/api/v1/jobs/{job_id}/clips/{job_id}-c1/youtube-metadata", json={"revision": 0, "title": "YouTube import — Old words · Cut 01", "description": "New description only"})
+        assert response.status_code == 200, response.text
+        after = app_module.db.get_asset(f"{job_id}-a1")
+        assert after.title == "Library-only hand title" and after.description == "New description only"
+    finally:
+        app_module.db.delete_project(project.id)
+
+
+def test_default_on_seo_toggle_never_blocks_an_auto_job_that_resolved_to_fast(monkeypatch):
+    async def enqueue(job_id: str) -> None:
+        return None
+
+    monkeypatch.setattr(app_module.manager, "enqueue", enqueue)
+    monkeypatch.setattr(app_module.profiles, "smart_available", lambda: False)
+    created = client.post("/api/v1/jobs/clip", data={"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "processing_mode": "auto", "youtube_metadata": "true"})
+    assert created.status_code == 202, created.text
+    try:
+        assert created.json()["job"]["processingMode"] == "fast"
+        assert created.json()["job"]["youtubeMetadataEnabled"] is False
+    finally:
+        app_module.db.delete_project(created.json()["project"]["id"])

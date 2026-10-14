@@ -134,7 +134,9 @@ def legacy_title_is_auto(title: str | None) -> bool:
 
 def clip_title_replaceable(asset: Asset, clip: Clip | None, *, allow_ai: bool) -> tuple[bool, str | None]:
     """Whether bulk retitling may offer a new title for this generated clip."""
-    source = asset.title_source or (clip.title_source if clip else None)
+    # The Library asset is authoritative: republishing copies its title (and
+    # source) onto the clip, never the other way round.
+    source = asset.title_source
     if source == "user":
         return False, "Title was edited by hand"
     if source == "ai":
