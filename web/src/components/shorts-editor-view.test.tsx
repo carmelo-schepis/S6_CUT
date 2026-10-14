@@ -11,7 +11,7 @@ vi.mock("../api", () => ({
 const asset: LibraryAsset = { id: "asset-1", title: "Library clip", description: "", mediaType: "video/mp4", filename: "clip.mp4", tags: [], triggers: [], aliases: [], negativeTriggers: [], policy: "neutral", protected: false, minSpacingSeconds: 0, maxUsesPerProject: 0, licence: "User", attribution: "", contentHash: "hash", brands: [], people: [], folderId: "folder", origin: "manual-import", blobId: "blob", createdAt: "2026-01-01T00:00:00Z" };
 
 describe("ShortsEditorView", () => {
-  beforeEach(() => { vi.mocked(listAssets).mockImplementation(async () => [asset]); vi.mocked(listJobs).mockResolvedValue([]); vi.mocked(createShortsJob).mockResolvedValue({ project: {} as never, job: {} as never }); vi.mocked(createShortsSourceJob).mockResolvedValue({ project: {} as never, job: {} as never }); });
+  beforeEach(() => { vi.clearAllMocks(); vi.mocked(listAssets).mockImplementation(async () => [asset]); vi.mocked(listJobs).mockResolvedValue([]); vi.mocked(createShortsJob).mockResolvedValue({ project: {} as never, job: {} as never }); vi.mocked(createShortsSourceJob).mockResolvedValue({ project: {} as never, job: {} as never }); });
   afterEach(() => vi.useRealTimers());
   it("explains the accepted source, editing controls, and queued output", async () => {
     render(<ShortsEditorView onJobCreated={vi.fn()} />);
@@ -72,6 +72,98 @@ describe("ShortsEditorView", () => {
     const parsed = parseAssistantRequest("Change the aspect ratio to 1:1 now.", { start: 0, end: 4, aspect: "9:16", subtitles: true });
     expect(parsed.edit).toEqual({ aspect: "1:1" });
     expect(parsed.proposal).toBeUndefined();
+  });
+
+  it("queues the selected Library asset with its clip-relative trim settings", async () => {
+    vi.mocked(listAssets).mockResolvedValue([{ ...asset, previewUrl: "/api/v1/library/assets/asset-1/preview" }]);
+    render(<ShortsEditorView onJobCreated={vi.fn()} />);
+    await waitFor(() => expect(screen.getByRole("tab", { name: /Library/ })).toBeEnabled());
+    fireEvent.click(screen.getByRole("tab", { name: /Library/ }));
+    fireEvent.change(screen.getByLabelText("Library video"), { target: { value: asset.id } });
+    await waitFor(() => expect(screen.getByLabelText("Library video")).toHaveValue(asset.id));
+    fireEvent.change(screen.getByLabelText("Start seconds"), { target: { value: "12.5" } });
+    fireEvent.change(screen.getByLabelText("End seconds"), { target: { value: "18" } });
+    fireEvent.click(screen.getByRole("button", { name: "Queue short" }));
+
+    await waitFor(() => expect(createShortsJob).toHaveBeenCalledWith(expect.objectContaining({
+      assetId: asset.id, start: 12.5, end: 18, aspectRatio: "9:16",
+    })));
+    expect(createShortsSourceJob).not.toHaveBeenCalled();
+  });
+
+  it("does not create a job while the Library source list is still loading", async () => {
+    let finishLoading!: (assets: LibraryAsset[]) => void;
+    vi.mocked(listAssets).mockReturnValue(new Promise((resolve) => { finishLoading = resolve; }));
+    render(<ShortsEditorView onJobCreated={vi.fn()} />);
+    fireEvent.click(screen.getByRole("tab", { name: /Library/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Queue short" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Choose a Library video first.");
+    expect(createShortsJob).not.toHaveBeenCalled();
+    expect(createShortsSourceJob).not.toHaveBeenCalled();
+    await act(async () => finishLoading([asset]));
+  });
+
+  it("loads a published clip from the same Library asset using clip-relative trim bounds", async () => {
+    const job: Job = {
+      schemaVersion: 1, id: "job-same-source", projectId: "project-same-source", mode: "clip", state: "complete", stage: "complete", stageLabel: "Ready", progress: 100,
+      currentItem: 1, totalItems: 1, style: "educational", processingMode: "fast", warnings: [], error: null, beats: [], steps: [],
+      clips: [{ id: "clip-same-source", index: 1, state: "complete", start: 12, end: 16, duration: 4, openingLine: "", score: null, selected: true, fallbackUsed: false, provenance: [], title: "Published cut", libraryAssetId: asset.id }],
+      createdAt: "2026-09-12T00:00:00Z", updatedAt: "2026-09-12T00:00:00Z",
+    };
+    vi.mocked(listJobs).mockResolvedValue([job]);
+    vi.mocked(listAssets).mockResolvedValue([{ ...asset, previewUrl: "/api/v1/library/assets/asset-1/preview", origin: "generated-clip", sourceClipId: "clip-same-source", sourceJobId: job.id, sourceProjectId: job.projectId }]);
+    render(<ShortsEditorView onJobCreated={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Published cut/ }));
+
+    await waitFor(() => expect(listAssets).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByLabelText("End seconds")).toHaveValue(4));
+    expect(screen.getByLabelText("Start seconds")).toHaveValue(0);
+    expect(screen.getByLabelText("End seconds")).toHaveValue(4);
+    fireEvent.click(screen.getByRole("button", { name: "Queue short" }));
+    await waitFor(() => expect(createShortsJob).toHaveBeenCalledWith(expect.objectContaining({ assetId: asset.id, start: 0, end: 4 })));
+  });
+
+  it("drops an eligible clip into the editor and loads its linked asset", async () => {
+    const job: Job = {
+      schemaVersion: 1, id: "job-drag", projectId: "project-drag", mode: "clip", state: "complete", stage: "complete", stageLabel: "Ready", progress: 100,
+      currentItem: 1, totalItems: 1, style: "educational", processingMode: "fast", warnings: [], error: null, beats: [], steps: [],
+      clips: [{ id: "clip-drag", index: 1, state: "complete", start: 9, end: 15, duration: 6, openingLine: "", score: null, selected: true, fallbackUsed: false, provenance: [], title: "Drag cut", libraryAssetId: asset.id }],
+      createdAt: "2026-09-12T00:00:00Z", updatedAt: "2026-09-12T00:00:00Z",
+    };
+    vi.mocked(listJobs).mockResolvedValue([job]);
+    vi.mocked(listAssets).mockResolvedValue([{ ...asset, previewUrl: "/api/v1/library/assets/asset-1/preview", origin: "generated-clip", sourceClipId: "clip-drag", sourceJobId: job.id, sourceProjectId: job.projectId }]);
+    render(<ShortsEditorView onJobCreated={vi.fn()} />);
+    const clipButton = await screen.findByRole("button", { name: /Drag cut/ });
+    const editor = document.querySelector(".shorts-editor-panel")!;
+    vi.spyOn(editor, "getBoundingClientRect").mockReturnValue({ x: 100, y: 100, left: 100, top: 100, right: 500, bottom: 600, width: 400, height: 500, toJSON: () => ({}) });
+    Object.defineProperty(clipButton, "setPointerCapture", { configurable: true, value: vi.fn() });
+
+    fireEvent.pointerDown(clipButton, { pointerId: 7, button: 0, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(clipButton, { pointerId: 7, clientX: 30, clientY: 30 });
+    fireEvent.pointerUp(window, { pointerId: 7, clientX: 200, clientY: 200 });
+
+    await waitFor(() => expect(screen.getByLabelText("End seconds")).toHaveValue(6));
+    expect(screen.getByLabelText("Start seconds")).toHaveValue(0);
+    expect(listAssets).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the current clip selected when discard protection is cancelled", async () => {
+    const job: Job = {
+      schemaVersion: 1, id: "job-selection", projectId: "project-selection", mode: "clip", state: "complete", stage: "complete", stageLabel: "Ready", progress: 100,
+      currentItem: 1, totalItems: 1, style: "educational", processingMode: "fast", warnings: [], error: null, beats: [], steps: [],
+      clips: [{ id: "clip-selection", index: 1, state: "complete", start: 3, end: 7, duration: 4, openingLine: "", score: null, selected: true, fallbackUsed: false, provenance: [], title: "Selected cut", libraryAssetId: asset.id }],
+      createdAt: "2026-09-12T00:00:00Z", updatedAt: "2026-09-12T00:00:00Z",
+    };
+    vi.mocked(listJobs).mockResolvedValue([job]);
+    vi.mocked(listAssets).mockResolvedValue([{ ...asset, previewUrl: "/api/v1/library/assets/asset-1/preview", origin: "generated-clip", sourceClipId: "clip-selection", sourceJobId: job.id, sourceProjectId: job.projectId }]);
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(<ShortsEditorView onJobCreated={vi.fn()} />);
+    await screen.findByRole("button", { name: /Selected cut/ });
+    fireEvent.change(screen.getByLabelText("Start seconds"), { target: { value: "20" } });
+    fireEvent.click(screen.getByRole("button", { name: /Selected cut/ }));
+    await waitFor(() => expect(window.confirm).toHaveBeenCalledWith("Discard unsaved Shorts Editor changes?"));
+    expect(screen.getByLabelText("Start seconds")).toHaveValue(20);
+    expect(screen.getByText("Unsaved edits")).toBeInTheDocument();
   });
 
   it("rejects invalid trim values and submits YouTube through multipart API", async () => {

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { Check, CircleStop, Clock3, Film, Maximize2, MessageSquare, Pause, Play, RefreshCw, RotateCcw, Scissors, Send, Sparkles, Volume2, VolumeX, WandSparkles, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { Check, CircleStop, Clock3, Film, GripVertical, Maximize2, MessageSquare, Pause, Play, RefreshCw, RotateCcw, Scissors, Send, Sparkles, Volume2, VolumeX, WandSparkles, X } from "lucide-react";
 import { controlJob, createShortsJob, createShortsSourceJob, listAssets, listJobs, readableError, retryClip } from "../api";
 import { DEFAULT_SUBSCRIBE_ANIMATION, type Clip, type Job, type LibraryAsset, type SubscribeAnimationConfig } from "../types";
 import { Button, StatusBadge, formatDimensions, formatDuration, resolveOutputAspectRatio, useSingleFlight } from "./common";
@@ -24,6 +24,11 @@ function clipStatus(clip: Clip, job: Job) {
   if (clip.state === "failed") return "failed";
   if (job.state === "paused") return "paused";
   return clip.state === "rendering" ? "rendering" : "queued";
+}
+
+function isLoadableShort({ job, clip }: ClipRow, assets: LibraryAsset[]) {
+  const asset = assets.find((candidate) => candidate.id === clip.libraryAssetId);
+  return clip.state === "complete" && job.mode === "clip" && Boolean(asset?.previewUrl && asset.mediaType.toLowerCase().startsWith("video/") && asset.origin === "generated-clip" && asset.sourceClipId === clip.id && asset.sourceJobId === job.id && asset.sourceProjectId === job.projectId);
 }
 
 export function parseAssistantRequest(text: string, current: EditState): { edit?: Partial<EditState>; proposal?: AssistantEdit; explanation: string; unsupported?: boolean } {
@@ -69,6 +74,7 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
   const [subtitles, setSubtitles] = useState(true);
   const [subscribeAnimation, setSubscribeAnimation] = useState<SubscribeAnimationConfig>(DEFAULT_SUBSCRIBE_ANIMATION);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [sourceLoading, setSourceLoading] = useState(false);
   const [sourceDuration, setSourceDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -83,11 +89,21 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
   const [pendingProposal, setPendingProposal] = useState<AssistantEdit | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [clipLimit, setClipLimit] = useState(CLIP_PAGE);
+  const [draggingClipId, setDraggingClipId] = useState<string | null>(null);
+  const [dragOverEditor, setDragOverEditor] = useState(false);
+  const [dragPosition, setDragPosition] = useState<{ x: number; y: number } | null>(null);
+  const [dragTitle, setDragTitle] = useState("");
   const singleFlight = useSingleFlight();
   const [status, setStatus] = useState("");
   const videoRef = useRef<HTMLVideoElement>(null);
   const frameRef = useRef<HTMLDivElement>(null);
   const objectUrl = useRef<string | null>(null);
+  const sourceLoadingRef = useRef(false);
+  const editorPanelRef = useRef<HTMLElement>(null);
+  const pointerStart = useRef<{ jobId: string; clipId: string; x: number; y: number; pointerId: number } | null>(null);
+  const draggedClipRef = useRef<string | null>(null);
+  const pointerFinish = useRef<(event: PointerEvent) => void>(() => undefined);
+  const suppressClick = useRef(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -98,6 +114,41 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
     } catch (cause) { setError(readableError(cause)); }
   }, []);
   useEffect(() => { queueMicrotask(() => void refresh()); return () => { if (objectUrl.current) URL.revokeObjectURL(objectUrl.current); }; }, [refresh]);
+  useEffect(() => {
+    const finish = (event: PointerEvent) => {
+      if (!pointerStart.current) {
+        if (suppressClick.current) window.setTimeout(() => { suppressClick.current = false; }, 0);
+        return;
+      }
+      pointerFinish.current(event);
+    };
+    const cancel = (event: PointerEvent) => {
+      if (pointerStart.current?.pointerId !== event.pointerId) return;
+      pointerStart.current = null; draggedClipRef.current = null; setDraggingClipId(null); setDragOverEditor(false); setDragPosition(null);
+    };
+    const move = (event: PointerEvent) => {
+      const start = pointerStart.current;
+      if (!start || start.pointerId !== event.pointerId) return;
+      if (!draggedClipRef.current && Math.hypot(event.clientX - start.x, event.clientY - start.y) >= 8) {
+        draggedClipRef.current = start.clipId;
+        setDraggingClipId(start.clipId);
+      }
+      if (!draggedClipRef.current) return;
+      setDragPosition({ x: event.clientX, y: event.clientY });
+      const bounds = editorPanelRef.current?.getBoundingClientRect();
+      setDragOverEditor(Boolean(bounds && event.clientX >= bounds.left && event.clientX <= bounds.right && event.clientY >= bounds.top && event.clientY <= bounds.bottom));
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || !pointerStart.current) return;
+      suppressClick.current = true;
+      pointerStart.current = null; draggedClipRef.current = null; setDraggingClipId(null); setDragOverEditor(false); setDragPosition(null);
+    };
+    window.addEventListener("pointerup", finish);
+    window.addEventListener("pointercancel", cancel);
+    window.addEventListener("pointermove", move);
+    window.addEventListener("keydown", escape);
+    return () => { window.removeEventListener("pointerup", finish); window.removeEventListener("pointercancel", cancel); window.removeEventListener("pointermove", move); window.removeEventListener("keydown", escape); };
+  }, []);
   // A queued render is durable but it must not look permanently queued in this
   // screen. Poll only job state (not the larger asset catalogue), and pull the
   // cadence in while a render is unsettled so completed previews appear here.
@@ -123,17 +174,6 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
     return () => { URL.revokeObjectURL(nextUrl); if (objectUrl.current === nextUrl) objectUrl.current = null; };
   }, [file]);
 
-  const selectClip = (row: ClipRow) => {
-    if (dirty && !window.confirm("Discard unsaved Shorts Editor changes?")) return;
-    setSelectedClipId(row.clip.id);
-    const nextAspect = row.clip.width && row.clip.height && row.clip.width / row.clip.height < 1 ? "9:16" : aspect;
-    const nextBaseline = { start: row.clip.start, end: row.clip.end, aspect: nextAspect, subtitles: row.job.burnSubtitles !== false, projectName: "" } as EditState;
-    setStart(String(nextBaseline.start)); setEnd(String(nextBaseline.end));
-    setAspect(nextBaseline.aspect); setSavedBaseline(nextBaseline); setHistory([]);
-    if (row.clip.previewUrl || row.clip.downloadUrl) setPreviewUrl(row.clip.previewUrl || row.clip.downloadUrl || null);
-    setAssistantMessages((current) => [...current, { id: Date.now(), role: "assistant", text: `Context switched to ${row.clip.title || `Clip ${row.clip.index}`}.` }]);
-  };
-
   const updateEdit = (next: Partial<EditState>) => {
     setHistory((current) => [...current.slice(-9), editState]);
     if (next.start !== undefined) setStart(String(next.start));
@@ -148,7 +188,17 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
     setHistory((current) => current.slice(0, -1));
   };
 
-  const loadFile = (next: File | null, pickerError?: string) => { setFile(next); setError(pickerError || null); if (next) { setMode("file"); setSelectedClipId(null); setSavedBaseline(editState); setHistory([]); } };
+  const loadFile = (next: File | null, pickerError?: string) => {
+    if (pickerError) { setError(pickerError); return; }
+    if (next && dirty && !window.confirm("Discard unsaved Shorts Editor changes?")) return;
+    setError(null); setFile(next); setPreviewUrl(null); setPlaying(false); setCurrentTime(0); setSourceDuration(0);
+    if (next) {
+      setMode("file"); setAssetId(""); setUrl(""); setSelectedClipId(null);
+      setSavedBaseline(editState); setHistory([]); setPendingProposal(null);
+      setAssistantMessages([{ id: Date.now(), role: "assistant", text: `Loaded local video ${next.name}.` }]);
+      setStatus(`Loaded local video ${next.name}.`);
+    }
+  };
   const submit = (event?: FormEvent) => {
     event?.preventDefault();
     return singleFlight(async () => {
@@ -159,7 +209,7 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
     if (to !== undefined && (!Number.isFinite(to) || to <= from)) return setError("End seconds must be blank or greater than start.");
     if (mode === "file" && !file) return setError("Choose a local video first.");
     if (mode === "url" && !url.trim()) return setError("Paste a supported YouTube URL first.");
-    if (mode === "library" && !assetId) return setError("Choose a Library video first.");
+    if (mode === "library" && (sourceLoading || !assetId)) return setError("Choose a Library video first.");
     setAssistantBusy(true);
     try {
       setStatus(mode === "file" ? "Uploading and validating source…" : mode === "url" ? "Importing and validating YouTube source…" : "Validating Library source…");
@@ -195,6 +245,68 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
   const sourcePreview = previewUrl || (mode === "library" ? assets.find((item) => item.id === assetId)?.previewUrl || null : null);
   const editState: EditState = { start: Number(start) || 0, end: end.trim() ? Number(end) : undefined, aspect, subtitles, projectName };
   const dirty = !sameEditState(editState, savedBaseline);
+  const loadLibrarySource = useCallback(async (id: string, identity?: { jobId: string; clipId: string }) => {
+    if (sourceLoadingRef.current) return;
+    sourceLoadingRef.current = true;
+    try {
+      setError(null); setSourceLoading(true);
+      const [freshAssets, freshJobs] = await Promise.all([listAssets(), identity ? listJobs() : Promise.resolve(jobs)]);
+      const asset = freshAssets.find((item) => item.id === id);
+      const freshJob = identity ? freshJobs.find((job) => job.id === identity.jobId && job.mode === "clip") : undefined;
+      const freshClip = identity ? freshJob?.clips.find((clip) => clip.id === identity.clipId) : undefined;
+      if (!asset || !asset.mediaType.toLowerCase().startsWith("video/") || !asset.previewUrl) {
+        setAssets(freshAssets.filter((item) => item.mediaType.toLowerCase().startsWith("video/")));
+        setError("This video is no longer available in the Library. Your current editor source and edits are unchanged.");
+        return;
+      }
+      if (identity && (!freshJob || !freshClip || freshClip.state !== "complete" || freshClip.libraryAssetId !== asset.id || asset.origin !== "generated-clip" || asset.sourceClipId !== freshClip.id || asset.sourceJobId !== freshJob.id || asset.sourceProjectId !== freshJob.projectId)) {
+        setError("This short is not currently published and available in the Library. Your current editor source and edits are unchanged.");
+        return;
+      }
+      const currentClipAlreadyLoaded = identity && selectedClipId === identity.clipId && assetId === asset.id;
+      const sameLibrarySource = !identity && selectedClipId === null && mode === "library" && assetId === asset.id;
+      if (currentClipAlreadyLoaded || sameLibrarySource) return;
+      if (dirty && !window.confirm("Discard unsaved Shorts Editor changes?")) return;
+
+      const row = freshClip && freshJob ? { clip: freshClip, job: freshJob } : undefined;
+      setAssets(freshAssets.filter((item) => item.mediaType.toLowerCase().startsWith("video/")));
+      setMode("library"); setAssetId(asset.id); setFile(null); setUrl(""); setPreviewUrl(asset.previewUrl);
+      setCurrentTime(0); setSourceDuration(0); setPlaying(false);
+      if (videoRef.current) { videoRef.current.pause(); videoRef.current.currentTime = 0; }
+      setSelectedClipId(row?.clip.id ?? null);
+      const nextAspect = row ? resolveOutputAspectRatio(asset.aspectRatio, asset.width, asset.height, row.job.contentFormat) : aspect;
+      const nextBaseline: EditState = {
+        start: 0,
+        end: row ? asset.durationSeconds ?? row.clip.duration : undefined,
+        aspect: nextAspect,
+        subtitles: row ? row.job.burnSubtitles !== false : subtitles,
+        projectName: "",
+      };
+      setStart(String(nextBaseline.start)); setEnd(nextBaseline.end === undefined ? "" : String(nextBaseline.end));
+      setAspect(nextBaseline.aspect); setSubtitles(nextBaseline.subtitles); setProjectName("");
+      setSavedBaseline(nextBaseline); setHistory([]); setPendingProposal(null);
+      setAssistantMessages([{ id: Date.now(), role: "assistant", text: row ? `Loaded ${row.clip.title || `Clip ${row.clip.index}`} from Library. This source is the published generated video.` : `Library source changed to ${asset.title}.` }]);
+      setStatus(row ? `Loaded ${row.clip.title || `Clip ${row.clip.index}`} from Library.` : `Loaded ${asset.title} from Library.`);
+    } catch (cause) { setError(readableError(cause)); }
+    finally { sourceLoadingRef.current = false; setSourceLoading(false); }
+  }, [assetId, dirty, jobs, mode, selectedClipId, aspect, subtitles]);
+  useEffect(() => {
+    pointerFinish.current = (event) => {
+      const pointer = pointerStart.current;
+      if (!pointer || pointer.pointerId !== event.pointerId) return;
+      const dragged = draggedClipRef.current === pointer.clipId;
+      if (dragged) {
+        const bounds = editorPanelRef.current?.getBoundingClientRect();
+        if (bounds && event.clientX >= bounds.left && event.clientX <= bounds.right && event.clientY >= bounds.top && event.clientY <= bounds.bottom) {
+          const row = jobs.flatMap((job) => job.clips.map((clip) => ({ job, clip }))).find(({ job, clip }) => job.id === pointer.jobId && clip.id === pointer.clipId);
+          if (row?.clip.libraryAssetId) void loadLibrarySource(row.clip.libraryAssetId, { jobId: pointer.jobId, clipId: pointer.clipId });
+        }
+        suppressClick.current = true;
+        window.setTimeout(() => { suppressClick.current = false; }, 0);
+      }
+      pointerStart.current = null; draggedClipRef.current = null; setDraggingClipId(null); setDragOverEditor(false); setDragPosition(null);
+    };
+  }, [draggingClipId, jobs, loadLibrarySource]);
   const applyProposal = () => {
     if (!pendingProposal) return;
     updateEdit(pendingProposal.edit);
@@ -211,14 +323,29 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
         would add a redundant region landmark around the aside below, so the
         meaningful names stay on the panels themselves. */}
     <section className="shorts-workspace">
-      <section className="shorts-editor-panel" aria-labelledby="editor-panel-title">
+      <section ref={editorPanelRef} className={`shorts-editor-panel ${dragOverEditor ? "clip-drop-active" : ""}`} aria-labelledby="editor-panel-title" onDragOver={(event) => { if (!(event.target instanceof Element && event.target.closest(".drop-zone"))) event.preventDefault(); }} onDrop={(event) => { if (event.target instanceof Element && event.target.closest(".drop-zone")) return; event.preventDefault(); if (event.dataTransfer.types.length) setError("Only completed clips from the Clips panel can be dropped into the Editor."); }}>
         <div className="workspace-panel-heading"><div><span className="panel-kicker">Editor</span><h2 id="editor-panel-title">{contextName}</h2></div><StatusBadge state={selectedRow ? selectedRow.job.state : "local"} label={selectedRow ? selectedRow.job.stageLabel : "Source ready"} /></div>
-        {!sourcePreview && <div className="shorts-source-empty"><div className="empty-icon"><Film size={28} /></div><h3>Bring a source into the editor</h3><p>Choose a local file, authorised YouTube URL, or a video from your Library.</p><VideoSourcePicker mode={mode} onModeChange={setMode} file={file} onFile={loadFile} url={url} onUrl={setUrl}><div className="field"><label className="field-label" htmlFor="shorts-source">Library video</label><select id="shorts-source" value={assetId} onChange={(event) => setAssetId(event.target.value)} disabled={!assets.length}><option value="">{assets.length ? "Select Library video" : "No Library videos available"}</option>{assets.map((asset) => <option key={asset.id} value={asset.id}>{asset.title}</option>)}</select><small>{assets.length ? "Private media stays on this machine." : "Add a video in Library first."}</small></div></VideoSourcePicker><SubscribeAnimationControl value={subscribeAnimation} onChange={setSubscribeAnimation} /><div className="trim-inputs shorts-empty-trim"><label>Start <input aria-label="Start seconds" type="number" min="0" step=".1" value={start} onChange={(event) => setStart(event.target.value)} /></label><label>End <input aria-label="End seconds" type="number" min="0" step=".1" value={end} onChange={(event) => setEnd(event.target.value)} placeholder="Source remainder" /></label><label>Aspect <select aria-label="Aspect ratio" value={aspect} onChange={(event) => updateEdit({ aspect: event.target.value as AspectRatio })}>{aspects.map((value) => <option key={value}>{value}</option>)}</select></label></div>{/* These are job settings rather than preview settings: a YouTube source has no local preview before import, so gating them on one made the output shape and captions unreachable for the very source type this screen offers. */}<div className="editor-options"><label className="shorts-project-name">Project name <input value={projectName} maxLength={160} onChange={(event) => { setHistory((current) => [...current.slice(-9), editState]); setProjectName(event.target.value); }} placeholder="Optional project name" /></label><label><input type="checkbox" checked={subtitles} onChange={(event) => updateEdit({ subtitles: event.target.checked })} /> Subtitles</label></div></div>}
-        {sourcePreview && <div className="video-editing-stage"><SubscribeAnimationControl value={subscribeAnimation} onChange={setSubscribeAnimation} /><div ref={frameRef} className={`shorts-video-frame aspect-${aspect.replace(":", "-")}`}><video ref={videoRef} muted={previewMuted} src={sourcePreview} onLoadedMetadata={(event) => setSourceDuration(event.currentTarget.duration)} onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} controls={false} /></div><div className="video-controls"><button type="button" className="icon-button" onClick={togglePlay} aria-label={playing ? "Pause preview" : "Play preview"}>{playing ? <Pause size={17} /> : <Play size={17} />}</button><span className="video-time">{formatDuration(currentTime)} / {formatDuration(sourceDuration || Number(end) || 0)}</span><input aria-label="Preview position" type="range" min="0" max={sourceDuration || 1} step=".1" value={Math.min(currentTime, sourceDuration || 1)} onChange={(event) => seek(Number(event.target.value))} /><button type="button" className="icon-button" aria-label={previewMuted ? "Unmute preview" : "Mute preview"} aria-pressed={previewMuted} onClick={toggleMute}>{previewMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}</button><button type="button" className="icon-button" aria-label="Expand preview" onClick={expandPreview}><Maximize2 size={16} /></button></div><div className="timeline-wrap"><div className="timeline-label"><span>Trim range</span><span>{formatDuration(Number(start) || 0)} – {end ? formatDuration(Number(end)) : "source end"}</span></div><input className="timeline-range" aria-label="Trim start" type="range" min="0" max={sourceDuration || 1} step=".1" value={Math.min(Number(start) || 0, sourceDuration || 1)} onChange={(event) => updateEdit({ start: Number(event.target.value) })} /><div className="trim-inputs"><label>Start <input aria-label="Start seconds" type="number" min="0" step=".1" value={start} onChange={(event) => updateEdit({ start: Number(event.target.value) })} /></label><label>End <input aria-label="End seconds" type="number" min="0" step=".1" value={end} onChange={(event) => { const value = event.target.value; updateEdit({ end: value.trim() ? Number(value) : undefined }); }} placeholder="Source end" /></label><label>Aspect <select aria-label="Aspect ratio" value={aspect} onChange={(event) => updateEdit({ aspect: event.target.value as AspectRatio })}>{aspects.map((value) => <option key={value}>{value}</option>)}</select></label></div><div className="editor-options"><label className="shorts-project-name">Project name <input value={projectName} maxLength={160} onChange={(event) => { setHistory((current) => [...current.slice(-9), editState]); setProjectName(event.target.value); }} placeholder="Optional project name" /></label><label><input type="checkbox" checked={subtitles} onChange={(event) => updateEdit({ subtitles: event.target.checked })} /> Subtitles</label><span>{mode === "url" ? "YouTube preview becomes available after import." : file ? file.name : "Library source"}</span><Button type="button" onClick={() => { setPreviewUrl(null); setFile(null); }}>Change source</Button></div></div></div>}
+        {dragOverEditor && draggingClipId && <div className="clip-drop-overlay" aria-hidden="true">Drop to edit</div>}
+        {!sourcePreview && <div className="shorts-source-empty"><div className="empty-icon"><Film size={28} /></div><h3>Bring a source into the editor</h3><p>Choose a local file, authorised YouTube URL, or a video from your Library.</p><VideoSourcePicker mode={mode} onModeChange={setMode} file={file} onFile={loadFile} url={url} onUrl={setUrl}><div className="field"><label className="field-label" htmlFor="shorts-source">Library video</label><select id="shorts-source" value={assetId} onChange={(event) => { if (event.target.value) void loadLibrarySource(event.target.value); }} disabled={!assets.length}><option value="">{assets.length ? "Select Library video" : "No Library videos available"}</option>{assets.map((asset) => <option key={asset.id} value={asset.id}>{asset.title}</option>)}</select><small>{assets.length ? "Private media stays on this machine." : "Add a video in Library first."}</small></div></VideoSourcePicker><SubscribeAnimationControl value={subscribeAnimation} onChange={setSubscribeAnimation} /><div className="trim-inputs shorts-empty-trim"><label>Start <input aria-label="Start seconds" type="number" min="0" step=".1" value={start} onChange={(event) => setStart(event.target.value)} /></label><label>End <input aria-label="End seconds" type="number" min="0" step=".1" value={end} onChange={(event) => setEnd(event.target.value)} placeholder="Source remainder" /></label><label>Aspect <select aria-label="Aspect ratio" value={aspect} onChange={(event) => updateEdit({ aspect: event.target.value as AspectRatio })}>{aspects.map((value) => <option key={value}>{value}</option>)}</select></label></div>{/* These are job settings rather than preview settings: a YouTube source has no local preview before import, so gating them on one made the output shape and captions unreachable for the very source type this screen offers. */}<div className="editor-options"><label className="shorts-project-name">Project name <input value={projectName} maxLength={160} onChange={(event) => { setHistory((current) => [...current.slice(-9), editState]); setProjectName(event.target.value); }} placeholder="Optional project name" /></label><label><input type="checkbox" checked={subtitles} onChange={(event) => updateEdit({ subtitles: event.target.checked })} /> Subtitles</label></div></div>}
+        {sourcePreview && <div className="video-editing-stage"><SubscribeAnimationControl value={subscribeAnimation} onChange={setSubscribeAnimation} /><div ref={frameRef} className={`shorts-video-frame aspect-${aspect.replace(":", "-")}`}><video ref={videoRef} muted={previewMuted} src={sourcePreview} onLoadedMetadata={(event) => setSourceDuration(event.currentTarget.duration)} onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} controls={false} /></div><div className="video-controls"><button type="button" className="icon-button" onClick={togglePlay} aria-label={playing ? "Pause preview" : "Play preview"}>{playing ? <Pause size={17} /> : <Play size={17} />}</button><span className="video-time">{formatDuration(currentTime)} / {formatDuration(sourceDuration || Number(end) || 0)}</span><input aria-label="Preview position" type="range" min="0" max={sourceDuration || 1} step=".1" value={Math.min(currentTime, sourceDuration || 1)} onChange={(event) => seek(Number(event.target.value))} /><button type="button" className="icon-button" aria-label={previewMuted ? "Unmute preview" : "Mute preview"} aria-pressed={previewMuted} onClick={toggleMute}>{previewMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}</button><button type="button" className="icon-button" aria-label="Expand preview" onClick={expandPreview}><Maximize2 size={16} /></button></div><div className="timeline-wrap"><div className="timeline-label"><span>Trim range</span><span>{formatDuration(Number(start) || 0)} – {end ? formatDuration(Number(end)) : "source end"}</span></div><input className="timeline-range" aria-label="Trim start" type="range" min="0" max={sourceDuration || 1} step=".1" value={Math.min(Number(start) || 0, sourceDuration || 1)} onChange={(event) => updateEdit({ start: Number(event.target.value) })} /><div className="trim-inputs"><label>Start <input aria-label="Start seconds" type="number" min="0" step=".1" value={start} onChange={(event) => updateEdit({ start: Number(event.target.value) })} /></label><label>End <input aria-label="End seconds" type="number" min="0" step=".1" value={end} onChange={(event) => { const value = event.target.value; updateEdit({ end: value.trim() ? Number(value) : undefined }); }} placeholder="Source end" /></label><label>Aspect <select aria-label="Aspect ratio" value={aspect} onChange={(event) => updateEdit({ aspect: event.target.value as AspectRatio })}>{aspects.map((value) => <option key={value}>{value}</option>)}</select></label></div><div className="editor-options"><label className="shorts-project-name">Project name <input value={projectName} maxLength={160} onChange={(event) => { setHistory((current) => [...current.slice(-9), editState]); setProjectName(event.target.value); }} placeholder="Optional project name" /></label><label><input type="checkbox" checked={subtitles} onChange={(event) => updateEdit({ subtitles: event.target.checked })} /> Subtitles</label>{selectedClipId && <small className="burned-caption-note">This generated video may already contain burned-in captions; this setting cannot remove them.</small>}<span>{mode === "url" ? "YouTube preview becomes available after import." : file ? file.name : "Library source"}</span><Button type="button" onClick={() => { if (!dirty || window.confirm("Discard unsaved Shorts Editor changes?")) { setPreviewUrl(null); setFile(null); setAssetId(""); setUrl(""); setMode("file"); setSelectedClipId(null); setCurrentTime(0); setSourceDuration(0); setPlaying(false); setSavedBaseline(editState); setHistory([]); setPendingProposal(null); setStatus(""); } }}>Change source</Button></div></div></div>}
+        {sourcePreview && <details className="shorts-source-switcher"><summary>Choose another source</summary><VideoSourcePicker mode={mode} onModeChange={setMode} file={file} onFile={loadFile} url={url} onUrl={setUrl}><div className="field"><label className="field-label" htmlFor="shorts-source-loaded">Library video</label><select id="shorts-source-loaded" value={assetId} onChange={(event) => { if (event.target.value) void loadLibrarySource(event.target.value); }} disabled={!assets.length || sourceLoading}><option value="">Select another Library video</option>{assets.map((asset) => <option key={asset.id} value={asset.id}>{asset.title}</option>)}</select><small>Generated shorts are loaded from their published Library asset.</small></div></VideoSourcePicker></details>}
         {status && <div className="shorts-inline-status" role="status"><Clock3 size={15} />{status}</div>}
       </section>
       <aside className="shorts-right-column" aria-label="Clips and editing assistant">
-        <section className="shorts-clips-panel" aria-labelledby="clips-panel-title"><div className="workspace-panel-heading"><div><span className="panel-kicker">Project output</span><h2 id="clips-panel-title">Clips <span className="count-pill">{rows.length}</span></h2></div><select aria-label="Filter clips" value={filter} onChange={(event) => { setFilter(event.target.value); setClipLimit(CLIP_PAGE); }}><option value="all">All clips</option><option value="queued">Queued</option><option value="rendering">Rendering</option><option value="complete">Complete</option><option value="failed">Failed</option></select></div><div className="clip-browser">{rows.length ? rows.slice(0, clipLimit).map((row) => <ClipBrowserItem key={`${row.job.id}-${row.clip.id}`} row={row} active={row.clip.id === selectedClipId} onSelect={() => selectClip(row)} onRetry={() => void retryClip(row.job.id, row.clip.id).then(refresh).catch((cause) => setError(readableError(cause)))} onStop={() => void controlJob(row.job.id, "stop-keep").then(refresh).catch((cause) => setError(readableError(cause)))} />) : <div className="clips-empty"><Film size={24} /><strong>No clips yet</strong><span>Queue a source from the editor and its durable render will appear here.</span></div>}{rows.length > clipLimit && <button type="button" className="show-all-projects" onClick={() => setClipLimit((value) => value + CLIP_PAGE)}>Show {Math.min(CLIP_PAGE, rows.length - clipLimit)} more of {rows.length}</button>}</div></section>
+        <section className="shorts-clips-panel" aria-labelledby="clips-panel-title"><div className="workspace-panel-heading"><div><span className="panel-kicker">Project output</span><h2 id="clips-panel-title">Clips <span className="count-pill">{rows.length}</span></h2></div><select aria-label="Filter clips" value={filter} onChange={(event) => { setFilter(event.target.value); setClipLimit(CLIP_PAGE); }}><option value="all">All clips</option><option value="queued">Queued</option><option value="rendering">Rendering</option><option value="complete">Complete</option><option value="failed">Failed</option></select></div><div className="clip-browser">{rows.length ? rows.slice(0, clipLimit).map((row) => <ClipBrowserItem key={`${row.job.id}-${row.clip.id}`} row={row} eligible={isLoadableShort(row, assets)} active={row.clip.id === selectedClipId} dragging={draggingClipId === row.clip.id} onSelect={() => { if (suppressClick.current) { suppressClick.current = false; return; } if (!isLoadableShort(row, assets) || !row.clip.libraryAssetId) { setError("This short is not currently available in the Library. Your current editor source and edits are unchanged."); return; } void loadLibrarySource(row.clip.libraryAssetId, { jobId: row.job.id, clipId: row.clip.id }); }} onPointerDown={(event) => {
+          if (event.button !== 0 || event.target instanceof Element && event.target.closest("a, input, select, textarea, [role=button]")) return;
+          suppressClick.current = false;
+          if (!isLoadableShort(row, assets) || !row.clip.libraryAssetId) return;
+          pointerStart.current = { jobId: row.job.id, clipId: row.clip.id, x: event.clientX, y: event.clientY, pointerId: event.pointerId };
+          setDragTitle(row.clip.title || `Clip ${row.clip.index}`);
+          draggedClipRef.current = null;
+          try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* Some browsers cannot capture a synthetic pointer. */ }
+        }} onPointerMove={(event) => {
+          const pointer = pointerStart.current;
+          if (!pointer || pointer.pointerId !== event.pointerId) return;
+          if (Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y) >= 8) { draggedClipRef.current = pointer.clipId; setDraggingClipId(pointer.clipId); }
+        }} onPointerCancel={() => { pointerStart.current = null; draggedClipRef.current = null; setDraggingClipId(null); setDragOverEditor(false); setDragPosition(null); }} onRetry={() => void retryClip(row.job.id, row.clip.id).then(refresh).catch((cause) => setError(readableError(cause)))} onStop={() => void controlJob(row.job.id, "stop-keep").then(refresh).catch((cause) => setError(readableError(cause)))} />) : <div className="clips-empty"><Film size={24} /><strong>No clips yet</strong><span>Queue a source from the editor and its durable render will appear here.</span></div>}{rows.length > clipLimit && <button type="button" className="show-all-projects" onClick={() => setClipLimit((value) => value + CLIP_PAGE)}>Show {Math.min(CLIP_PAGE, rows.length - clipLimit)} more of {rows.length}</button>}</div></section>
+        {draggingClipId && dragPosition && <div className="clip-drag-ghost" aria-hidden="true" style={{ left: dragPosition.x + 14, top: dragPosition.y + 14 }}><span><Film size={16} /></span><strong>{dragTitle || "Short"}</strong><small>Drag into Editor</small></div>}
         <section className="shorts-assistant-panel" aria-labelledby="assistant-panel-title"><div className="workspace-panel-heading"><div><span className="panel-kicker">Safe local controls</span><h2 id="assistant-panel-title"><WandSparkles size={17} /> AI editing assistant</h2></div><span className="assistant-context">{contextName}</span></div><div className="assistant-messages" aria-live="polite">{assistantMessages.map((message) => <div key={message.id} className={`assistant-message ${message.role}`}><span>{message.role === "assistant" ? <Sparkles size={13} /> : <MessageSquare size={13} />}</span><p>{message.text}</p></div>)}</div>{pendingProposal && <div className="assistant-proposal" role="status"><strong>Proposal ready</strong><span>{pendingProposal.explanation}</span><div><Button type="button" variant="primary" onClick={applyProposal}>Apply proposal</Button><Button type="button" onClick={() => setPendingProposal(null)}>Reject</Button></div></div>}<div className="assistant-composer"><input aria-label="Editing request" value={assistantInput} onChange={(event) => setAssistantInput(event.target.value)} onKeyDown={(event) => { if (event.key !== "Enter" || event.shiftKey) return; /* The composer lives inside the Queue-short form, so an unhandled Enter would submit that form and queue a render instead of sending the message. */ event.preventDefault(); void sendAssistant(); }} placeholder="Ask for a trim or aspect change…" disabled={assistantBusy} /><button type="button" onClick={() => void sendAssistant()} aria-label="Send editing request" disabled={assistantBusy || !assistantInput.trim()}><Send size={16} /></button></div></section>
       </aside>
     </section>
@@ -226,7 +353,7 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
   </div>;
 }
 
-function ClipBrowserItem({ row, active, onSelect, onRetry, onStop }: { row: ClipRow; active: boolean; onSelect: () => void; onRetry: () => void; onStop: () => void }) {
+function ClipBrowserItem({ row, eligible, active, dragging, onSelect, onPointerDown, onPointerMove, onPointerCancel, onRetry, onStop }: { row: ClipRow; eligible: boolean; active: boolean; dragging: boolean; onSelect: () => void; onPointerDown: (event: ReactPointerEvent<HTMLButtonElement>) => void; onPointerMove: (event: ReactPointerEvent<HTMLButtonElement>) => void; onPointerCancel: () => void; onRetry: () => void; onStop: () => void }) {
   const status = clipStatus(row.clip, row.job);
-  return <article className={`clip-browser-item ${active ? "active" : ""}`}><button type="button" className="clip-select-button" onClick={onSelect}>{row.clip.previewUrl || row.clip.downloadUrl ? <LazyVideoThumbnail key={row.clip.id} className="clip-browser-thumb" src={row.clip.previewUrl || row.clip.downloadUrl}><span>{String(row.clip.index).padStart(2, "0")}</span></LazyVideoThumbnail> : <div className="clip-browser-thumb"><Film size={20} /><span>{String(row.clip.index).padStart(2, "0")}</span></div>}<div className="clip-browser-info"><strong>{row.clip.title || `Clip ${String(row.clip.index).padStart(2, "0")}`}</strong><span>{formatDuration(row.clip.duration)} · {formatDuration(row.clip.start)}–{formatDuration(row.clip.end)} · {formatDimensions(resolveOutputAspectRatio(undefined, row.clip.width, row.clip.height, row.job.contentFormat), row.clip.width, row.clip.height)}</span><span className="clip-subtitle-state"><Check size={12} /> {row.job.burnSubtitles === false ? "Subtitles off" : "Subtitles enabled"}</span></div></button><div className="clip-browser-actions"><StatusBadge state={status === "complete" ? "complete" : status === "failed" ? "failed" : "active"} label={status} />{status === "failed" && <button type="button" className="icon-button" onClick={onRetry} aria-label="Retry failed clip"><RefreshCw size={14} /></button>}{["queued", "rendering", "active"].includes(status) && <button type="button" className="icon-button" onClick={onStop} aria-label="Stop clip and keep completed outputs"><CircleStop size={14} /></button>}</div></article>;
+  return <article className={`clip-browser-item ${active ? "active" : ""} ${dragging ? "dragging" : ""}`}><button type="button" className="clip-select-button" onClick={onSelect} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerCancel={onPointerCancel} aria-disabled={!eligible} aria-pressed={active} aria-label={`${eligible ? "Load" : "Unavailable"} ${row.clip.title || `Clip ${row.clip.index}`} ${eligible ? "into editor. Drag into Editor or select." : "in Editor"}`}>{row.clip.previewUrl || row.clip.downloadUrl ? <LazyVideoThumbnail key={row.clip.id} className="clip-browser-thumb" src={row.clip.previewUrl || row.clip.downloadUrl}><span>{String(row.clip.index).padStart(2, "0")}</span></LazyVideoThumbnail> : <div className="clip-browser-thumb"><Film size={20} /><span>{String(row.clip.index).padStart(2, "0")}</span></div>}<div className="clip-browser-info"><strong>{row.clip.title || `Clip ${String(row.clip.index).padStart(2, "0")}`}</strong><span>{formatDuration(row.clip.duration)} · {formatDuration(row.clip.start)}–{formatDuration(row.clip.end)} · {formatDimensions(resolveOutputAspectRatio(undefined, row.clip.width, row.clip.height, row.job.contentFormat), row.clip.width, row.clip.height)}</span><span className="clip-subtitle-state"><Check size={12} /> {row.job.burnSubtitles === false ? "Subtitles off" : "Subtitles enabled"}</span><span className="clip-drag-hint">{eligible ? <><GripVertical size={12} /> Drag into Editor</> : "Not available to edit"}</span></div></button><div className="clip-browser-actions"><StatusBadge state={status === "complete" ? "complete" : status === "failed" ? "failed" : "active"} label={status} />{status === "failed" && <button type="button" className="icon-button" onClick={onRetry} aria-label="Retry failed clip"><RefreshCw size={14} /></button>}{["queued", "rendering", "active"].includes(status) && <button type="button" className="icon-button" onClick={onStop} aria-label="Stop clip and keep completed outputs"><CircleStop size={14} /></button>}</div></article>;
 }

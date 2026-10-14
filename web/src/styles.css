@@ -1542,7 +1542,13 @@ main { min-width: 0; }
 .edit-state.dirty { color: var(--text-primary); }
 .shorts-workspace { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(280px, .85fr); align-items: start; gap: var(--space-3); }
 .shorts-editor-panel, .shorts-clips-panel, .shorts-assistant-panel { border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-1); overflow: hidden; }
-.shorts-editor-panel { display: flex; flex-direction: column; }
+.shorts-editor-panel { position: relative; display: flex; flex-direction: column; transition: border-color .18s ease, box-shadow .18s ease; }
+.shorts-editor-panel.clip-drop-active { border-color: var(--copper); box-shadow: 0 0 0 3px color-mix(in srgb, var(--copper) 22%, transparent); }
+.clip-drop-overlay { position: absolute; z-index: 2; inset: 36px 10px 10px; display: grid; place-items: center; border: 1px dashed var(--copper-light); background: color-mix(in srgb, var(--surface-1) 76%, transparent); color: var(--text); font-weight: var(--type-emphasis-weight); pointer-events: none; }
+.clip-drag-ghost { position: fixed; z-index: 110; display: grid; grid-template-columns: 26px minmax(0, 1fr); align-items: center; gap: 2px 8px; width: min(220px, calc(100vw - 24px)); padding: 9px; border: 1px solid var(--copper); border-radius: var(--radius-md); background: var(--surface-3); color: var(--text); opacity: .92; box-shadow: 0 8px 24px rgba(0,0,0,.38); pointer-events: none; }
+.clip-drag-ghost > span { grid-row: span 2; display: grid; place-items: center; width: 26px; height: 36px; background: var(--canvas); color: var(--copper-light); }
+.clip-drag-ghost strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.clip-drag-ghost small { color: var(--text-primary); }
 .shorts-editor-panel > .shorts-source-empty { flex: 1 1 auto; display: grid; align-content: center; }
 .workspace-panel-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3); border-bottom: 1px solid var(--border-soft); }
 .workspace-panel-heading > div:first-child { flex: 1 1 auto; min-width: 0; }
@@ -1563,10 +1569,18 @@ main { min-width: 0; }
 .trim-inputs { display: flex; flex-wrap: wrap; align-items: end; gap: var(--space-2); }
 .trim-inputs label, .shorts-project-name { display: grid; gap: 4px; min-width: 100px; flex: 1 1 110px; color: var(--text-primary); }
 .editor-options { margin-top: var(--space-3); color: var(--text-primary); }
-.editor-options > span { min-width: 0; overflow-wrap: anywhere; }
+.editor-options > span, .burned-caption-note { min-width: 0; overflow-wrap: anywhere; }
+.burned-caption-note { color: var(--warning); }
+.video-editing-stage { animation: shorts-source-settle .18s ease both; }
+@keyframes shorts-source-settle { from { opacity: .82; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
 .clip-browser { display: grid; gap: 6px; padding: 8px; max-height: 440px; overflow: auto; }
 .clip-browser-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; min-width: 0; padding: 6px; border: 1px solid var(--border); background: var(--surface-2); }
-.clip-select-button { display: flex; min-width: 0; gap: 7px; border: 0; background: transparent; color: inherit; text-align: left; }
+.clip-browser-item.dragging { opacity: .58; }
+.clip-select-button { display: flex; min-width: 0; gap: 7px; border: 0; background: transparent; color: inherit; text-align: left; touch-action: pan-y; user-select: none; -webkit-user-select: none; }
+.clip-select-button[aria-disabled="true"] { cursor: default; }
+.clip-select-button:not([aria-disabled="true"]) { cursor: grab; }
+.clip-drag-hint { display: inline-flex; align-items: center; gap: 3px; width: fit-content; color: var(--copper-light) !important; touch-action: none; }
+.clip-browser-item.dragging .clip-select-button { cursor: grabbing; }
 .clip-browser-thumb { position: relative; flex: 0 0 56px; height: 74px; overflow: hidden; display: grid; place-items: center; background: var(--canvas); color: var(--text-primary); }
 .clip-browser-thumb video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .clip-browser-thumb > span { position: absolute; top: 3px; left: 4px; }

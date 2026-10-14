@@ -335,6 +335,12 @@ def test_shorts_library_request_persists_animation_configuration(monkeypatch, tm
     assert response.status_code == 202, response.text
     assert saved["private"]["trim_start"] == 2
     assert saved["private"]["trim_end"] == 12
+    assert saved["private"]["source_path"] == str(source)
+    assert saved["private"]["source_hash"] == asset.content_hash
+    assert response.json()["project"]["sourceName"] == asset.filename
+    assert response.json()["job"]["clips"][0]["start"] == 2
+    assert response.json()["job"]["clips"][0]["end"] == 12
+    assert response.json()["job"]["clips"][0]["duration"] == 10
     assert saved["private"]["subscribe_animation"] == {"version": 1, "enabled": True, "short_form_lead_seconds": 5}
 
 
