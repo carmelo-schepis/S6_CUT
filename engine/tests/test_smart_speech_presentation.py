@@ -83,7 +83,13 @@ def test_reaction_policy_render_kwargs_require_speech_and_enabled_subtitles() ->
     assert _reaction_policy_render_kwargs(renderer, private, "speech", False) == {}
 
 
-def test_caption_rerender_forwards_saved_presentation_and_subtitle_flag(tmp_path: Path, monkeypatch) -> None:
+@pytest.mark.parametrize(("subtitles_enabled", "reaction_policy"), [
+    (False, None),
+    (True, {"version": 1, "name": "ironic_v1"}),
+])
+def test_caption_rerender_forwards_saved_presentation_and_subtitle_flag(
+    tmp_path: Path, monkeypatch, subtitles_enabled, reaction_policy,
+) -> None:
     from types import SimpleNamespace
 
     import engine.jobs as jobs
@@ -102,19 +108,20 @@ def test_caption_rerender_forwards_saved_presentation_and_subtitle_flag(tmp_path
     clip = Clip(id="rerender-clip", index=1, state="complete", start=2, end=4, duration=2, opening_line="words")
     job = Job(
         id="rerender-job", project_id="rerender-project", mode="clip", state="active", stage="render",
-        stage_label="Rendering", progress=50, style="educational", clips=[clip], burn_subtitles=False,
+        stage_label="Rendering", progress=50, style="educational", clips=[clip], burn_subtitles=subtitles_enabled,
     )
     request = {"clip_id": clip.id, "revision": 1, "run_id": "edit"}
     private = {
         "aspect_ratio": "9:16", "presentation": {"version": 1, "caption": "smart_speech_v1"},
-        "burn_subtitles": False, "caption_rerender": request,
+        "burn_subtitles": subtitles_enabled, "reaction_policy": reaction_policy, "caption_rerender": request,
         "caption_overrides": {clip.id: {"revision": 1, "cues": [{"id": "word", "start": .2, "end": .8, "text": "edited"}]}},
     }
 
     manager._process_caption_rerender(job, private, request)
 
     assert captured["presentation"] == "smart_speech_v1"
-    assert captured["subtitles_enabled"] is False
+    assert captured["subtitles_enabled"] is subtitles_enabled
+    assert captured.get("reaction_policy") == ("ironic_v1" if subtitles_enabled else None)
     assert captured["words"] == [{"text": "edited", "start": .2, "end": .8}]
 
 
