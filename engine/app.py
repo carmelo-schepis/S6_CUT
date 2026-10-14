@@ -468,6 +468,7 @@ async def create_clip_job(
         "count": count, "batch_mode": batch_mode, "min_duration": min_duration, "max_duration": max_duration,
         "aspect_ratio": aspect_ratio, "content_format": content_format, "processing_mode": mode,
         "presentation": presentation,
+        "reaction_policy": {"version": 1, "name": "ironic_v1"} if source_profile == "speech" and burn_subtitles else None,
         "burn_subtitles": True if source_profile == "music" else burn_subtitles, "embed_subtitles": embed_subtitles,
         "hook_text": {"enabled": hook_text, "status": "pending" if hook_text else "disabled"},
         "use_openrouter": mode == "smart" and smart_available and source_profile == "speech" and batch_mode == "standard",
@@ -607,7 +608,7 @@ async def _queue_shorts_job(
         manager._apply_step(job, job.steps[1], status="complete", detail="Source duration validated", completed_at=timestamp)
     if processing_mode == "fast":
         manager._apply_step(job, job.steps[2], status="skipped", detail="Trim supplied by Shorts Editor", completed_at=timestamp)
-    private = {"source_path": str(source_path) if source_path else None, "source_kind": source_kind, "source_hash": source_hash, "source_metadata": source_metadata, "url": url, "trim_start": start, "trim_end": end, "aspect_ratio": aspect_ratio, "count": 1, "min_duration": max(0.1, clip.duration), "max_duration": max(0.1, clip.duration), "processing_mode": processing_mode, "burn_subtitles": burn_subtitles, "embed_subtitles": embed_subtitles, "library_folder_id": library_folder_id, "subscribe_animation": (subscribe_animation or SubscribeAnimationConfig()).model_dump(), "muted": muted, "volume": volume, "filter_preset": filter_preset, "filter_intensity": filter_intensity, "tint_color": tint_color, "tint_opacity": tint_opacity, "text_overlays": text_overlays or []}
+    private = {"source_path": str(source_path) if source_path else None, "source_kind": source_kind, "source_hash": source_hash, "source_metadata": source_metadata, "url": url, "trim_start": start, "trim_end": end, "aspect_ratio": aspect_ratio, "count": 1, "min_duration": max(0.1, clip.duration), "max_duration": max(0.1, clip.duration), "processing_mode": processing_mode, "burn_subtitles": burn_subtitles, "embed_subtitles": embed_subtitles, "library_folder_id": library_folder_id, "subscribe_animation": (subscribe_animation or SubscribeAnimationConfig()).model_dump(), "muted": muted, "volume": volume, "filter_preset": filter_preset, "filter_intensity": filter_intensity, "tint_color": tint_color, "tint_opacity": tint_opacity, "text_overlays": text_overlays or [], "reaction_policy": {"version": 1, "name": "ironic_v1"} if burn_subtitles else None}
     db.save_project(project)
     db.save_job(job, private)
     try:
