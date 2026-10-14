@@ -179,6 +179,7 @@ test.describe("SEO titles", () => {
     }
 
     // Workspace shows the same titles, and every clip actually plays.
+    await expect(page.locator(".clip-tile.complete .clip-title")).toHaveCount(titles.length, { timeout: 30_000 });
     const tileTitles = await page.locator(".clip-tile.complete .clip-title").allTextContents();
     expect(tileTitles.sort()).toEqual([...titles].sort());
     const tiles = page.locator(".clip-tile.complete");
@@ -314,8 +315,7 @@ test.describe("SEO titles", () => {
       if (clip.libraryAssetId === handEdited.assetId) continue; // legacy data: only the Library copy was hand-edited
       expect(clip.title, "Workspace clip and Library asset share the title").toBe(byId.get(clip.libraryAssetId).title);
     }
-    const tileTitles = await page.locator(".clip-tile.complete .clip-title").allTextContents();
-    expect(tileTitles).toContain(editedTitle);
+    await expect(page.locator(".clip-tile.complete .clip-title").filter({ hasText: editedTitle })).toBeVisible({ timeout: 30_000 });
 
     // Running it again offers nothing new for the applied rows.
     await openLibrary(page);
