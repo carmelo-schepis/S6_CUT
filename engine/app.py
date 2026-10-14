@@ -459,8 +459,8 @@ async def create_clip_job(
         if mode != "smart":
             raise HTTPException(422, "AI hook text is unavailable in Fast mode.")
     presentation = {
-        "version": 1,
-        "caption": "smart_speech_v1"
+        "version": 2 if source_profile == "speech" and content_format == "short" and mode == "smart" else 1,
+        "caption": "smart_speech_v2"
         if source_profile == "speech" and content_format == "short" and mode == "smart"
         else "legacy",
     }
@@ -716,12 +716,13 @@ async def update_captions(job_id: str, clip_id: str, value: CaptionReviewInput) 
     duration = clip.duration
     private = db.get_job_private(job_id)
     presentation_snapshot = private.get("presentation")
-    presentation = presentation_snapshot.get("caption") if isinstance(presentation_snapshot, dict) and presentation_snapshot.get("version") == 1 else None
+    presentation = presentation_snapshot.get("caption") if isinstance(presentation_snapshot, dict) and presentation_snapshot.get("version") in {1, 2} else None
     from .captions import normalize_and_validate
     cues, findings = normalize_and_validate(
         [cue.model_dump() for cue in value.cues], duration,
         aspect=str(private.get("aspect_ratio") or "9:16"),
-        presentation=presentation if presentation == "smart_speech_v1" else None,
+        presentation=presentation if presentation in {"smart_speech_v1", "smart_speech_v2"} else None,
+        style=job.style,
     )
     fatal = [item for item in findings if item["severity"] == "error"]
     if fatal:
