@@ -233,12 +233,12 @@ export async function createClipJob(input: ClipJobInput): Promise<{ project: Pro
   return { project: projectSchema.parse(value.project), job: jobSchema.parse(value.job) };
 }
 
-export async function createShortsJob(input: { assetId: string; name?: string; burnSubtitles?: boolean; embedSubtitles?: boolean; subscribeAnimation?: SubscribeAnimationConfig; start: number; end?: number; aspectRatio: "9:16" | "16:9" | "1:1" | "4:5"; libraryFolderId?: string }): Promise<{ project: Project; job: Job }> {
+export async function createShortsJob(input: { assetId: string; name?: string; burnSubtitles?: boolean; embedSubtitles?: boolean; subscribeAnimation?: SubscribeAnimationConfig; start: number; end?: number; aspectRatio: "9:16" | "16:9" | "1:1" | "4:5"; libraryFolderId?: string; muted?: boolean; volume?: number; filterPreset?: "none" | "warm" | "monochrome" }): Promise<{ project: Project; job: Job }> {
   const value = await request<{ project: unknown; job: unknown }>("/jobs/shorts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...input, embedSubtitles: input.embedSubtitles ?? false }) });
   return { project: projectSchema.parse(value.project), job: jobSchema.parse(value.job) };
 }
 
-export async function createShortsSourceJob(input: { file?: File; url?: string; name?: string; burnSubtitles?: boolean; subscribeAnimation?: SubscribeAnimationConfig; start: number; end?: number; aspectRatio: "9:16" | "16:9" | "1:1" | "4:5"; libraryFolderId?: string }): Promise<{ project: Project; job: Job }> {
+export async function createShortsSourceJob(input: { file?: File; url?: string; name?: string; burnSubtitles?: boolean; subscribeAnimation?: SubscribeAnimationConfig; start: number; end?: number; aspectRatio: "9:16" | "16:9" | "1:1" | "4:5"; libraryFolderId?: string; muted?: boolean; volume?: number; filterPreset?: "none" | "warm" | "monochrome" }): Promise<{ project: Project; job: Job }> {
   const form = new FormData();
   if (input.file) form.set("file", input.file);
   if (input.url) form.set("url", input.url);
@@ -249,6 +249,9 @@ export async function createShortsSourceJob(input: { file?: File; url?: string; 
   if (input.libraryFolderId) form.set("library_folder_id", input.libraryFolderId);
   form.set("burn_subtitles", String(input.burnSubtitles ?? true));
   if (input.subscribeAnimation) form.set("subscribe_animation", JSON.stringify(input.subscribeAnimation));
+  form.set("muted", String(input.muted ?? false));
+  form.set("volume", String(input.volume ?? 1));
+  form.set("filter_preset", input.filterPreset ?? "none");
   const value = await request<{ project: unknown; job: unknown }>("/jobs/shorts/source", { method: "POST", body: form });
   return { project: projectSchema.parse(value.project), job: jobSchema.parse(value.job) };
 }

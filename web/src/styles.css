@@ -1540,7 +1540,21 @@ main { min-width: 0; }
 .shorts-header-actions, .editor-options, .video-controls, .assistant-proposal > div { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 .edit-state { color: var(--text-primary); }
 .edit-state.dirty { color: var(--text-primary); }
-.shorts-workspace { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(280px, .85fr); align-items: start; gap: var(--space-3); }
+.shorts-workspace { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(300px, .8fr); align-items: start; gap: var(--space-3); }
+.shorts-workspace-header { padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-md); background: linear-gradient(120deg, var(--surface-2), var(--surface-1)); }
+.shorts-header-actions .edit-state { padding: 6px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-1); font-size: var(--type-caption-size); }
+.shorts-header-actions .edit-state.dirty { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 45%, var(--border)); }
+.shorts-editor-panel, .shorts-clips-panel, .shorts-assistant-panel { box-shadow: 0 8px 26px color-mix(in srgb, var(--canvas) 72%, transparent); }
+.shorts-editor-panel .workspace-panel-heading { background: var(--surface-2); }
+.shorts-video-frame.aspect-16-9 { aspect-ratio: 16 / 9; }
+.shorts-video-frame.aspect-1-1 { aspect-ratio: 1 / 1; }
+.shorts-video-frame.aspect-4-5 { aspect-ratio: 4 / 5; }
+.shorts-video-frame { max-height: min(62vh, 720px); }
+.video-editing-stage .editor-options { padding-top: 10px; border-top: 1px solid var(--border-soft); }
+.video-editing-stage .editor-options label:not(.shorts-project-name) { display: flex; align-items: center; gap: 6px; }
+.video-editing-stage .editor-options input[type="range"] { width: 110px; }
+.clip-browser-item.active { border-color: var(--copper); box-shadow: inset 3px 0 var(--copper); }
+.assistant-message.user { border-color: var(--brand-border); background: var(--theme-primary-soft); }
 .shorts-editor-panel, .shorts-clips-panel, .shorts-assistant-panel { border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-1); overflow: hidden; }
 .shorts-editor-panel { position: relative; display: flex; flex-direction: column; transition: border-color .18s ease, box-shadow .18s ease; }
 .shorts-editor-panel.clip-drop-active { border-color: var(--copper); box-shadow: 0 0 0 3px color-mix(in srgb, var(--copper) 22%, transparent); }

@@ -319,6 +319,9 @@ class ShortsJobInput(ApiModel):
     aspect_ratio: Literal["9:16", "16:9", "1:1", "4:5"] = "9:16"
     library_folder_id: str = UNSORTED_LIBRARY_FOLDER_ID
     subscribe_animation: SubscribeAnimationConfig = Field(default_factory=SubscribeAnimationConfig)
+    muted: bool = False
+    volume: float = Field(default=1.0, ge=0, le=2)
+    filter_preset: Literal["none", "warm", "monochrome"] = "none"
 
     @field_validator("start", "end")
     @classmethod

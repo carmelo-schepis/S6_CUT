@@ -2151,7 +2151,7 @@ def _smart_speech_emoji_filters(plan: list[tuple[Path, float, float, int, int, i
     return ";".join(filters)
 
 
-def render_clip(source: Path, output: Path, *, start: float, end: float, aspect: str, words: list[dict[str, Any]], visuals: list[tuple[str, float, float]], overlays: list[tuple[Path, float, float]], settings: Settings, style: str = "educational", has_audio: bool = True, embed_subtitles: bool = False, subtitle_language: str = "und", creator_credit: str | None = None, content_format: str | None = None, centered_partial_fill: bool = False, subscribe_animation: dict[str, Any] | None = None, music_theme: str | None = None, music_top_text: str | None = None, music_treatment: str | None = None, hook_text: str | None = None, presentation: str | None = None, subtitles_enabled: bool = True) -> None:
+def render_clip(source: Path, output: Path, *, start: float, end: float, aspect: str, words: list[dict[str, Any]], visuals: list[tuple[str, float, float]], overlays: list[tuple[Path, float, float]], settings: Settings, style: str = "educational", has_audio: bool = True, embed_subtitles: bool = False, subtitle_language: str = "und", creator_credit: str | None = None, content_format: str | None = None, centered_partial_fill: bool = False, subscribe_animation: dict[str, Any] | None = None, music_theme: str | None = None, music_top_text: str | None = None, music_treatment: str | None = None, hook_text: str | None = None, presentation: str | None = None, subtitles_enabled: bool = True, muted: bool = False, volume: float = 1.0, filter_preset: str = "none") -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     has_supported_emoji = presentation in {"smart_speech_v1", "smart_speech_v2"} and any(find_emoji_sequences(str(word.get("text", ""))) for word in words)
     separate_burn_script = bool(creator_credit or hook_text or not subtitles_enabled or has_supported_emoji)
@@ -2189,13 +2189,17 @@ def render_clip(source: Path, output: Path, *, start: float, end: float, aspect:
     if source_meta["rotation"] % 180:
         sample_aspect_ratio = 1.0 / sample_aspect_ratio
     filters, mapped = _filters(width, height, overlays, 1, ass.name, source_dimensions, subscribe_animations, music_treatment, centered_partial_fill, sample_aspect_ratio)
+    if filter_preset == "monochrome":
+        filters = filters.replace("[0:v]", "[0:v]hue=s=0,")
+    elif filter_preset == "warm":
+        filters = filters.replace("[0:v]", "[0:v]colorbalance=rs=.05:gs=.015:bs=-.03,")
     if emoji_plan:
         emoji_filters = _smart_speech_emoji_filters(emoji_plan, 1 + len(overlays) + len(subscribe_animations), emoji_inputs)
         filters = f"{filters};{emoji_filters}"
         mapped = f"emojiout{len(emoji_plan) - 1}"
     command.extend(["-t", f"{duration:.3f}", "-filter_complex", filters, "-map", f"[{mapped}]"])
-    if has_audio:
-        command.extend(["-map", "0:a:0", "-c:a", DELIVERY_AUDIO_CODEC, "-b:a", DELIVERY_AUDIO_BITRATE, "-ar", DELIVERY_AUDIO_RATE])
+    if has_audio and not muted:
+        command.extend(["-map", "0:a:0", "-af", f"volume={max(0.0, min(2.0, volume)):.3f}", "-c:a", DELIVERY_AUDIO_CODEC, "-b:a", DELIVERY_AUDIO_BITRATE, "-ar", DELIVERY_AUDIO_RATE])
     else:
         command.append("-an")
     if embed_subtitles:
@@ -2203,7 +2207,7 @@ def render_clip(source: Path, output: Path, *, start: float, end: float, aspect:
     command.extend(["-c:v", DELIVERY_VIDEO_CODEC, "-preset", DELIVERY_PRESET, "-crf", DELIVERY_CRF, "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-t", f"{duration:.3f}", str(temp)])
     run(command, cwd=output.parent, timeout=7200)
     metadata = probe(temp, settings)
-    if metadata["width"] != width or metadata["height"] != height or (has_audio and not metadata["audio"]):
+    if metadata["width"] != width or metadata["height"] != height or (has_audio and not muted and not metadata["audio"]):
         raise MediaError("Rendered clip failed structural output validation")
     os.replace(temp, output)
 
@@ -2460,6 +2464,9 @@ def render_fast_clip(
     music_treatment: str | None = None,
     presentation: str | None = None,
     hook_text: str | None = None,
+    muted: bool = False,
+    volume: float = 1.0,
+    filter_preset: str = "none",
 ) -> None:
     """Render a fast clip with optional captions and no overlays or visual beats.
 
@@ -2512,6 +2519,7 @@ def render_fast_clip(
             creator_credit=creator_credit, content_format=content_format,
             centered_partial_fill=centered_partial_fill, subscribe_animation=subscribe_animation,
             presentation=presentation, subtitles_enabled=subtitles_enabled, hook_text=hook_text,
+            muted=muted, volume=volume, filter_preset=filter_preset,
         )
         return
 
@@ -2527,6 +2535,7 @@ def render_fast_clip(
             creator_credit=creator_credit, content_format=content_format,
             centered_partial_fill=centered_partial_fill, subscribe_animation=subscribe_animation, music_theme=music_theme,
             music_top_text=music_top_text, music_treatment=music_treatment,
+            muted=muted, volume=volume, filter_preset=filter_preset,
         )
         return
 
@@ -2553,6 +2562,10 @@ def render_fast_clip(
             # surfaces source-quality warnings for exactly this case.
             logger.info("Skipping punch-in for %s: source %dx%d has no headroom over %dx%d",
                         output.name, src_width, src_height, width, height)
+    if filter_preset == "monochrome":
+        vf = f"{vf},hue=s=0"
+    elif filter_preset == "warm":
+        vf = f"{vf},colorbalance=rs=.05:gs=.015:bs=-.03"
     if look_before:
         vf = f"{vf},{look_before}"
     if look_after:
@@ -2610,10 +2623,12 @@ def render_fast_clip(
         "-movflags",
         "+faststart",
     ])
-    if has_audio:
+    if has_audio and not muted:
         command.extend([
             "-map",
             "0:a:0",
+            "-af",
+            f"volume={max(0.0, min(2.0, volume)):.3f}",
             "-c:a",
             DELIVERY_AUDIO_CODEC,
             "-b:a",
@@ -2635,7 +2650,7 @@ def render_fast_clip(
             f"Fast clip failed delivery validation: expected {width}x{height}, "
             f"got {result['width']}x{result['height']}"
         )
-    if has_audio and not result["audio"]:
+    if has_audio and not muted and not result["audio"]:
         raise MediaError("Fast clip expected audio but the output has no audio track")
     if abs(float(result["duration"]) - duration) > max(0.75, duration * 0.05):
         raise MediaError("Fast clip failed duration validation")

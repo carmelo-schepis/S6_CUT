@@ -568,7 +568,8 @@ async def _queue_shorts_job(
     source_hash: str | None, source_metadata: dict[str, object] | None, url: str | None,
     start: float, end: float | None, aspect_ratio: str, library_folder_id: str,
     name: str | None = None, burn_subtitles: bool = True, embed_subtitles: bool = False, job_id: str | None = None,
-    subscribe_animation: SubscribeAnimationConfig | None = None,
+    subscribe_animation: SubscribeAnimationConfig | None = None, muted: bool = False,
+    volume: float = 1.0, filter_preset: Literal["none", "warm", "monochrome"] = "none",
 ) -> dict[str, object]:
     if manager.queue.full():
         raise HTTPException(429, "The local processing queue is full. Try again after an active job completes.")
@@ -593,7 +594,7 @@ async def _queue_shorts_job(
         manager._apply_step(job, job.steps[1], status="complete", detail="Source duration validated", completed_at=timestamp)
     if processing_mode == "fast":
         manager._apply_step(job, job.steps[2], status="skipped", detail="Trim supplied by Shorts Editor", completed_at=timestamp)
-    private = {"source_path": str(source_path) if source_path else None, "source_kind": source_kind, "source_hash": source_hash, "source_metadata": source_metadata, "url": url, "trim_start": start, "trim_end": end, "aspect_ratio": aspect_ratio, "count": 1, "min_duration": max(0.1, clip.duration), "max_duration": max(0.1, clip.duration), "processing_mode": processing_mode, "burn_subtitles": burn_subtitles, "embed_subtitles": embed_subtitles, "library_folder_id": library_folder_id, "subscribe_animation": (subscribe_animation or SubscribeAnimationConfig()).model_dump()}
+    private = {"source_path": str(source_path) if source_path else None, "source_kind": source_kind, "source_hash": source_hash, "source_metadata": source_metadata, "url": url, "trim_start": start, "trim_end": end, "aspect_ratio": aspect_ratio, "count": 1, "min_duration": max(0.1, clip.duration), "max_duration": max(0.1, clip.duration), "processing_mode": processing_mode, "burn_subtitles": burn_subtitles, "embed_subtitles": embed_subtitles, "library_folder_id": library_folder_id, "subscribe_animation": (subscribe_animation or SubscribeAnimationConfig()).model_dump(), "muted": muted, "volume": volume, "filter_preset": filter_preset}
     db.save_project(project)
     db.save_job(job, private)
     try:
@@ -619,7 +620,7 @@ async def create_shorts_job(request: Request, value: ShortsJobInput) -> dict[str
         metadata = await asyncio.to_thread(probe, source, settings)
     except MediaError as exc:
         raise HTTPException(422, str(exc)) from exc
-    return await _queue_shorts_job(request=request, source_name=asset.filename, source_kind="upload", source_path=source, source_hash=asset.content_hash, source_metadata=metadata, url=None, start=value.start, end=value.end, aspect_ratio=value.aspect_ratio, library_folder_id=value.library_folder_id, name=value.name, burn_subtitles=value.burn_subtitles, embed_subtitles=value.embed_subtitles, subscribe_animation=value.subscribe_animation)
+    return await _queue_shorts_job(request=request, source_name=asset.filename, source_kind="upload", source_path=source, source_hash=asset.content_hash, source_metadata=metadata, url=None, start=value.start, end=value.end, aspect_ratio=value.aspect_ratio, library_folder_id=value.library_folder_id, name=value.name, burn_subtitles=value.burn_subtitles, embed_subtitles=value.embed_subtitles, subscribe_animation=value.subscribe_animation, muted=value.muted, volume=value.volume, filter_preset=value.filter_preset)
 
 
 @app.post("/api/v1/jobs/shorts/source", status_code=status.HTTP_202_ACCEPTED)
@@ -634,6 +635,9 @@ async def create_shorts_source_job(
     name: Annotated[str | None, Form()] = None,
     burn_subtitles: Annotated[bool, Form()] = True,
     subscribe_animation: Annotated[str, Form()] = "{}",
+    muted: Annotated[bool, Form()] = False,
+    volume: Annotated[float, Form(ge=0, le=2)] = 1.0,
+    filter_preset: Annotated[Literal["none", "warm", "monochrome"], Form()] = "none",
 ) -> dict[str, object]:
     _rate_limit(request)
     subscribe_animation = _subscribe_animation_request(subscribe_animation)
@@ -654,7 +658,7 @@ async def create_shorts_source_job(
         try:
             _, source_hash = await _stream_upload(file, source, settings.max_upload_bytes)
             metadata = await asyncio.to_thread(validate_video_upload, source, original, settings)
-            result = await _queue_shorts_job(request=request, source_name=original, source_kind="upload", source_path=source, source_hash=source_hash, source_metadata=metadata, url=None, start=parsed_start, end=parsed_end, aspect_ratio=aspect_ratio, library_folder_id=library_folder_id, name=name, burn_subtitles=burn_subtitles, job_id=job_id, subscribe_animation=subscribe_animation)
+            result = await _queue_shorts_job(request=request, source_name=original, source_kind="upload", source_path=source, source_hash=source_hash, source_metadata=metadata, url=None, start=parsed_start, end=parsed_end, aspect_ratio=aspect_ratio, library_folder_id=library_folder_id, name=name, burn_subtitles=burn_subtitles, job_id=job_id, subscribe_animation=subscribe_animation, muted=muted, volume=volume, filter_preset=filter_preset)
             return result
         except MediaError as exc:
             source.unlink(missing_ok=True)
@@ -667,7 +671,7 @@ async def create_shorts_source_job(
         validated_url = validate_youtube_url(url or "")
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    return await _queue_shorts_job(request=request, source_name="YouTube import", source_kind="youtube", source_path=None, source_hash=None, source_metadata=None, url=validated_url, start=parsed_start, end=parsed_end, aspect_ratio=aspect_ratio, library_folder_id=library_folder_id, name=name, burn_subtitles=burn_subtitles, subscribe_animation=subscribe_animation)
+    return await _queue_shorts_job(request=request, source_name="YouTube import", source_kind="youtube", source_path=None, source_hash=None, source_metadata=None, url=validated_url, start=parsed_start, end=parsed_end, aspect_ratio=aspect_ratio, library_folder_id=library_folder_id, name=name, burn_subtitles=burn_subtitles, subscribe_animation=subscribe_animation, muted=muted, volume=volume, filter_preset=filter_preset)
 
 
 @app.post("/api/v1/jobs/{job_id}/repair-publication", response_model=Job)

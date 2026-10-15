@@ -10,7 +10,11 @@ atomic publication transaction, immutable content-addressed blobs, and
 server-signed preview/download URLs.
 
 The workflow currently supports 9:16, 16:9, 1:1, and 4:5 output, optional burned
-captions through the ASS pipeline, and authorised Library music with bounded volume.
+captions through the ASS pipeline, a closed set of safe Original/Warm/Monochrome
+looks, output mute and bounded 0–200% volume, and the existing subscribe animation.
+These choices are snapshotted into each queued job; they never alter the immutable
+source. Filter choices are enumerated server-side (no user-authored FFmpeg filter
+strings are accepted).
 Completed Shorts Editor outputs can be selected from the Clips panel or dragged into
 the Editor; both paths resolve the clip's server-published Library asset and its
 signed preview URL. Loaded short trims are relative to that generated video (from
