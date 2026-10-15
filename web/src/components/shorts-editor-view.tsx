@@ -270,7 +270,24 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
     player.volume = Math.max(0, Math.min(1, volume));
   }, [previewMuted, volume, previewUrl, mode, assetId]);
   const seek = (value: number) => { const lower = Number(start) || 0; const upper = end.trim() ? Number(end) : sourceDuration || value; const bounded = Math.max(lower, Math.min(upper, value)); setCurrentTime(bounded); if (videoRef.current) videoRef.current.currentTime = bounded; };
-  const togglePlay = () => { if (!videoRef.current) return; if (videoRef.current.paused) { void videoRef.current.play(); setPlaying(true); } else { videoRef.current.pause(); setPlaying(false); } };
+  const togglePlay = () => {
+    const player = videoRef.current;
+    if (!player) return;
+    if (!player.paused) { player.pause(); setPlaying(false); return; }
+    setError(null);
+    const failPlayback = () => {
+      if (videoRef.current !== player) return;
+      setPlaying(false);
+      setError("Preview playback could not start. Try another video or reload the source.");
+    };
+    try {
+      void player.play().then(() => {
+        if (videoRef.current === player && !player.paused) setPlaying(true);
+      }).catch(failPlayback);
+    } catch {
+      failPlayback();
+    }
+  };
   const toggleMute = () => { const player = videoRef.current; const next = !previewMuted; if (player) player.muted = next; setPreviewMuted(next); };
   const changeOverlays = (change: (items: TextOverlay[]) => TextOverlay[]) => { setHistory((current) => [...current.slice(-9), { edit: editState, overlays: textOverlays }]); setTextOverlays(change); };
   useEffect(() => { const close = (event: KeyboardEvent) => { if (event.key === "Escape" && propertiesOpen) { setPropertiesOpen(false); [...document.querySelectorAll<HTMLElement>("[data-property-toggle]")].find((element) => element.getClientRects().length > 0)?.focus(); } }; window.addEventListener("keydown", close); return () => window.removeEventListener("keydown", close); }, [propertiesOpen]);

@@ -108,6 +108,25 @@ describe("ShortsEditorView", () => {
     await act(async () => finishLoading([asset]));
   });
 
+  it("surfaces rejected preview playback without leaving the player in a playing state", async () => {
+    vi.mocked(listAssets).mockResolvedValue([{ ...asset, previewUrl: "/preview.mp4" }]);
+    const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockRejectedValue(new DOMException("Unsupported video", "NotSupportedError"));
+    try {
+      render(<ShortsEditorView onJobCreated={vi.fn()} />);
+      fireEvent.click(await screen.findByRole("tab", { name: /Library/ }));
+      fireEvent.change(await screen.findByLabelText("Library video"), { target: { value: asset.id } });
+      await screen.findByLabelText("Source video preview");
+
+      fireEvent.click(screen.getAllByRole("button", { name: "Play preview" })[0]);
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("Preview playback could not start.");
+      expect(screen.getAllByRole("button", { name: "Play preview" })).toHaveLength(2);
+      expect(play).toHaveBeenCalledOnce();
+    } finally {
+      play.mockRestore();
+    }
+  });
+
   it("loads a published clip from the same Library asset using clip-relative trim bounds", async () => {
     const job: Job = {
       schemaVersion: 1, id: "job-same-source", projectId: "project-same-source", mode: "clip", state: "complete", stage: "complete", stageLabel: "Ready", progress: 100,
