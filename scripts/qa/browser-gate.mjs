@@ -66,6 +66,11 @@ page.on("pageerror", (e) => report.consoleErrors.push(String(e)));
 page.on("response", (r) => { if (r.status() >= 400) report.httpErrors.push(`${r.status()} ${new URL(r.url()).pathname}`); });
 
 const rail = async (name) => { await page.getByRole("button", { name, exact: true }).first().click(); await page.waitForTimeout(2500); };
+const openClips = async () => {
+  const toggle = page.getByRole("button", { name: /^Clips & assistant/ });
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+  await page.getByRole("complementary", { name: "Clips and editing assistant" }).waitFor({ state: "visible" });
+};
 
 try {
   await page.goto(base, { waitUntil: "domcontentloaded" });
@@ -114,6 +119,7 @@ try {
 
   // --- Shorts Editor clip browser ------------------------------------------
   await rail("Shorts Editor");
+  await openClips();
   // The clip browser pages at 30 rows, so a recent project can sit past the
   // first page; expand until the wanted row is mounted.
   for (let i = 0; i < 6; i += 1) {

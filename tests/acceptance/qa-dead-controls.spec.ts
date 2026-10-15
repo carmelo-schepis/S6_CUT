@@ -25,6 +25,12 @@ async function rail(page: Page, name: string) {
   await page.waitForTimeout(2_500);
 }
 
+async function openClips(page: Page) {
+  const toggle = page.getByRole("button", { name: /^Clips & assistant/ });
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+  await expect(page.getByRole("complementary", { name: "Clips and editing assistant" })).toBeVisible();
+}
+
 /**
  * Opens a Workspace that has at least one rendered clip tile on the board.
  *
@@ -124,6 +130,7 @@ test("Workspace inspector tabs are labelled in sentence case", async ({ page }) 
 test("Shorts Editor clip rows report each clip's real aspect ratio", async ({ page }) => {
   await boot(page);
   await rail(page, "Shorts Editor");
+  await openClips(page);
   await expect(page.locator(".clip-browser-item").first()).toBeVisible({ timeout: 30_000 });
 
   // Page the browser in so non-9:16 renders from earlier runs are included.
@@ -209,6 +216,7 @@ test("Enter in the Shorts Editor assistant sends a message and queues nothing", 
   await expect(picker).toBeEnabled();
   await picker.selectOption((await picker.locator("option").nth(1).getAttribute("value"))!);
   await page.waitForTimeout(1_000);
+  await openClips(page);
 
   const composer = page.getByRole("textbox", { name: "Editing request" });
   await expect(composer).toBeVisible();

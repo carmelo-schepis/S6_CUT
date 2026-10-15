@@ -15,6 +15,12 @@ async function open(page: Page, label: string) {
   await expect(page.locator("#main-content")).toBeVisible();
 }
 
+async function openClips(page: Page) {
+  const toggle = page.getByRole("button", { name: /^Clips & assistant/ });
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+  await expect(page.getByRole("complementary", { name: "Clips and editing assistant" })).toBeVisible();
+}
+
 async function waitForJob(page: Page, terminal = true) {
   const status = page.locator(".workspace-commandbar .status");
   const observed: string[] = [];
@@ -124,6 +130,7 @@ test("Docker-served studio acceptance workflow", async ({ page, request }) => {
   const tabletMeasure = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth, innerWidth: window.innerWidth }));
   await fs.writeFile(path.join(artifactDir, "responsive-measurements.json"), JSON.stringify(tabletMeasure, null, 2));
   expect(tabletMeasure.scrollWidth).toBeLessThanOrEqual(tabletMeasure.clientWidth);
+  await openClips(page);
   await expect(page.getByRole("heading", { name: "AI editing assistant" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Queue short" })).toBeVisible();
   await capture(page, "shorts-editor-tablet");
@@ -150,15 +157,18 @@ test("Docker-served studio acceptance workflow", async ({ page, request }) => {
   await expect(page.getByText("Unsaved edits")).toBeVisible();
   await expect(page.getByRole("button", { name: "Undo" })).toBeVisible();
   await capture(page, "proposal-applied");
+  await page.getByRole("button", { name: "Close clips and assistant" }).click();
   await page.getByRole("button", { name: "Undo" }).click();
   await expect(page.getByLabel("Aspect ratio")).toHaveValue("9:16");
   await expect(page.getByText("All changes saved")).toBeVisible();
   await expect(page.getByRole("button", { name: "Undo" })).not.toBeVisible();
   await capture(page, "proposal-undone");
+  await openClips(page);
   await page.locator('input[aria-label="Editing request"]').fill("Change the aspect ratio to 1:1 now.");
   await page.getByRole("button", { name: "Send editing request" }).click();
   await expect(page.locator(".assistant-messages").getByText(/Applied locally/).last()).toBeVisible();
   await expect(page.getByLabel("Aspect ratio")).toHaveValue("1:1");
+  await page.getByRole("button", { name: "Close clips and assistant" }).click();
   await page.getByRole("button", { name: "Undo" }).click();
   await expect(page.getByText("All changes saved")).toBeVisible();
   const shortResponse = page.waitForResponse((response) => response.request().method() === "POST" && new URL(response.url()).pathname === "/api/v1/jobs/shorts/source");
