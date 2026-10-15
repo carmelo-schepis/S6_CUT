@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent } from "react";
-import { Check, CircleStop, Clock3, Film, GripVertical, Maximize2, MessageSquare, Pause, Play, RefreshCw, RotateCcw, Scissors, Send, Sparkles, Volume2, VolumeX, WandSparkles, X } from "lucide-react";
+import { Check, CircleStop, Clock3, Film, GripVertical, Maximize2, MessageSquare, PanelRight, Pause, Play, RefreshCw, RotateCcw, Scissors, Send, Sparkles, Volume2, VolumeX, WandSparkles, X } from "lucide-react";
 import { controlJob, createShortsJob, createShortsSourceJob, listAssets, listJobs, readableError, retryClip } from "../api";
 import { DEFAULT_SUBSCRIBE_ANIMATION, type Clip, type Job, type LibraryAsset, type SubscribeAnimationConfig } from "../types";
 import { Button, StatusBadge, formatDimensions, formatDuration, resolveOutputAspectRatio, useSingleFlight } from "./common";
@@ -109,6 +109,7 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
   const [dragOverEditor, setDragOverEditor] = useState(false);
   const [dragPosition, setDragPosition] = useState<{ x: number; y: number } | null>(null);
   const [dragTitle, setDragTitle] = useState("");
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const singleFlight = useSingleFlight();
   const [status, setStatus] = useState("");
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -121,6 +122,10 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
   const draggedClipRef = useRef<string | null>(null);
   const pointerFinish = useRef<(event: PointerEvent) => void>(() => undefined);
   const suppressClick = useRef(false);
+  const drawerRef = useRef<HTMLElement>(null);
+  const drawerToggleRef = useRef<HTMLButtonElement>(null);
+  // A closed drawer is visibility-hidden, so focus inside it would fall back to <body>.
+  const closeDrawer = useCallback(() => { if (drawerRef.current?.contains(document.activeElement)) drawerToggleRef.current?.focus(); setDrawerOpen(false); }, []);
 
   const refresh = useCallback(async () => {
     try {
@@ -361,9 +366,10 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
       setSavedBaseline(nextBaseline); setTextOverlays([]); setOverlayBaseline("[]"); setSelectedOverlayId(null); setHistory([]); setPendingProposal(null);
       setAssistantMessages([{ id: Date.now(), role: "assistant", text: row ? `Loaded ${row.clip.title || `Clip ${row.clip.index}`} from Library. This source is the published generated video.` : `Library source changed to ${asset.title}.` }]);
       setStatus(row ? `Loaded ${row.clip.title || `Clip ${row.clip.index}`} from Library.` : `Loaded ${asset.title} from Library.`);
+      closeDrawer();
     } catch (cause) { setError(readableError(cause)); }
     finally { sourceLoadingRef.current = false; setSourceLoading(false); }
-  }, [assetId, dirty, jobs, mode, selectedClipId]);
+  }, [assetId, closeDrawer, dirty, jobs, mode, selectedClipId]);
   useEffect(() => {
     pointerFinish.current = (event) => {
       const pointer = pointerStart.current;
@@ -390,10 +396,10 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
 
   return <div className="page shorts-workspace-page">
     <form className="shorts-workspace-form" onSubmit={submit}>
-    <header className="shorts-workspace-header"><div><div className="eyebrow">Native editing workflow</div><h1>Shorts Editor</h1></div><div className="shorts-header-actions"><span className={dirty ? "edit-state dirty" : "edit-state"}>{dirty ? "Unsaved edits" : "All changes saved"}</span>{history.length > 0 && <Button type="button" onClick={undo}><RotateCcw size={14} /> Undo</Button>}<Button type="submit" variant="primary" disabled={assistantBusy}><Scissors size={14} /> Queue short</Button></div></header>
+    <header className="shorts-workspace-header"><div><div className="eyebrow">Native editing workflow</div><h1>Shorts Editor</h1></div><div className="shorts-header-actions"><span className={dirty ? "edit-state dirty" : "edit-state"}>{dirty ? "Unsaved edits" : "All changes saved"}</span>{history.length > 0 && <Button type="button" onClick={undo}><RotateCcw size={14} /> Undo</Button>}<button ref={drawerToggleRef} type="button" className="button button-secondary" aria-expanded={drawerOpen} aria-controls="shorts-clip-drawer" onClick={() => setDrawerOpen((open) => !open)}><PanelRight size={14} /> Clips &amp; assistant <span className="count-pill">{rows.length}</span></button><Button type="submit" variant="primary" disabled={assistantBusy}><Scissors size={14} /> Queue short</Button></div></header>
     {error && <div className="shorts-global-alert" role="alert"><X size={16} />{error}</div>}
     {/* A <main> here nested a second main landmark inside the shell's
-        #main-content. This element only lays the two columns out — naming it
+        #main-content. This element only lays out the editor and its drawer — naming it
         would add a redundant region landmark around the aside below, so the
         meaningful names stay on the panels themselves. */}
     <section className="shorts-workspace">
@@ -405,7 +411,8 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
         {sourcePreview && <details className="shorts-source-switcher"><summary>Choose another source</summary><VideoSourcePicker mode={mode} onModeChange={changeSourceMode} file={file} onFile={loadFile} url={url} onUrl={setUrl}><div className="field"><label className="field-label" htmlFor="shorts-source-loaded">Library video</label><select id="shorts-source-loaded" value={assetId} onChange={(event) => { if (event.target.value) void loadLibrarySource(event.target.value); }} disabled={!assets.length || sourceLoading}><option value="">Select another Library video</option>{assets.map((asset) => <option key={asset.id} value={asset.id}>{asset.title}</option>)}</select><small>Generated shorts are loaded from their published Library asset.</small></div></VideoSourcePicker></details>}
         {status && <div className="shorts-inline-status" role="status"><Clock3 size={15} />{status}</div>}
       </section>
-      <aside className="shorts-right-column" aria-label="Clips and editing assistant">
+      <aside ref={drawerRef} id="shorts-clip-drawer" className={`shorts-right-column shorts-clip-drawer${drawerOpen ? " open" : ""}${draggingClipId ? " drag-through" : ""}`} aria-label="Clips and editing assistant" onKeyDown={(event) => { if (event.key !== "Escape" || pointerStart.current) return; event.stopPropagation(); closeDrawer(); }}>
+        <div className="shorts-drawer-heading"><strong>Clips &amp; assistant</strong><button type="button" className="icon-button" aria-label="Close clips and assistant" onClick={closeDrawer}><X size={16} /></button></div>
         <details className="shorts-collapsible-panel" open><summary>Clips browser</summary><section className="shorts-clips-panel" aria-labelledby="clips-panel-title"><div className="workspace-panel-heading"><div><span className="panel-kicker">Project output</span><h2 id="clips-panel-title">Clips <span className="count-pill">{rows.length}</span></h2></div><select aria-label="Filter clips" value={filter} onChange={(event) => { setFilter(event.target.value); setClipLimit(CLIP_PAGE); }}><option value="all">All clips</option><option value="queued">Queued</option><option value="rendering">Rendering</option><option value="complete">Complete</option><option value="failed">Failed</option></select></div><div className="clip-browser">{rows.length ? rows.slice(0, clipLimit).map((row) => <ClipBrowserItem key={`${row.job.id}-${row.clip.id}`} row={row} eligible={isLoadableShort(row, assets)} active={row.clip.id === selectedClipId} dragging={draggingClipId === row.clip.id} onSelect={() => { if (suppressClick.current) { suppressClick.current = false; return; } if (!isLoadableShort(row, assets) || !row.clip.libraryAssetId) { setError("This short is not currently available in the Library. Your current editor source and edits are unchanged."); return; } void loadLibrarySource(row.clip.libraryAssetId, { jobId: row.job.id, clipId: row.clip.id }); }} onPointerDown={(event) => {
           if (event.button !== 0 || event.target instanceof Element && event.target.closest("a, input, select, textarea, [role=button]")) return;
           suppressClick.current = false;
@@ -419,9 +426,9 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
           if (!pointer || pointer.pointerId !== event.pointerId) return;
           if (Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y) >= 8) { draggedClipRef.current = pointer.clipId; setDraggingClipId(pointer.clipId); }
         }} onPointerCancel={() => { pointerStart.current = null; draggedClipRef.current = null; setDraggingClipId(null); setDragOverEditor(false); setDragPosition(null); }} onRetry={() => void retryClip(row.job.id, row.clip.id).then(refresh).catch((cause) => setError(readableError(cause)))} onStop={() => void controlJob(row.job.id, "stop-keep").then(refresh).catch((cause) => setError(readableError(cause)))} />) : <div className="clips-empty"><Film size={24} /><strong>No clips yet</strong><span>Queue a source from the editor and its durable render will appear here.</span></div>}{rows.length > clipLimit && <button type="button" className="show-all-projects" onClick={() => setClipLimit((value) => value + CLIP_PAGE)}>Show {Math.min(CLIP_PAGE, rows.length - clipLimit)} more of {rows.length}</button>}</div></section></details>
-        {draggingClipId && dragPosition && <div className="clip-drag-ghost" aria-hidden="true" style={{ left: dragPosition.x + 14, top: dragPosition.y + 14 }}><span><Film size={16} /></span><strong>{dragTitle || "Short"}</strong><small>Drag into Editor</small></div>}
         <details className="shorts-collapsible-panel" open><summary>Local editing assistant</summary><section className="shorts-assistant-panel" aria-labelledby="assistant-panel-title"><div className="workspace-panel-heading"><div><span className="panel-kicker">Safe local controls</span><h2 id="assistant-panel-title"><WandSparkles size={17} /> AI editing assistant</h2></div><span className="assistant-context">{contextName}</span></div><div className="assistant-messages" aria-live="polite">{assistantMessages.map((message) => <div key={message.id} className={`assistant-message ${message.role}`}><span>{message.role === "assistant" ? <Sparkles size={13} /> : <MessageSquare size={13} />}</span><p>{message.text}</p></div>)}</div>{pendingProposal && <div className="assistant-proposal" role="status"><strong>Proposal ready</strong><span>{pendingProposal.explanation}</span><div><Button type="button" variant="primary" onClick={applyProposal}>Apply proposal</Button><Button type="button" onClick={() => setPendingProposal(null)}>Reject</Button></div></div>}<div className="assistant-composer"><input aria-label="Editing request" value={assistantInput} onChange={(event) => setAssistantInput(event.target.value)} onKeyDown={(event) => { if (event.key !== "Enter" || event.shiftKey) return; /* The composer lives inside the Queue-short form, so an unhandled Enter would submit that form and queue a render instead of sending the message. */ event.preventDefault(); void sendAssistant(); }} placeholder="Ask for a trim or aspect change…" disabled={assistantBusy} /><button type="button" onClick={() => void sendAssistant()} aria-label="Send editing request" disabled={assistantBusy || !assistantInput.trim()}><Send size={16} /></button></div></section></details>
       </aside>
+      {draggingClipId && dragPosition && <div className="clip-drag-ghost" aria-hidden="true" style={{ left: dragPosition.x + 14, top: dragPosition.y + 14 }}><span><Film size={16} /></span><strong>{dragTitle || "Short"}</strong><small>Drag into Editor</small></div>}
     </section>
     </form>
   </div>;

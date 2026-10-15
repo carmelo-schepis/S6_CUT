@@ -89,7 +89,7 @@ test.describe("Shorts Editor reference-inspired editing controls", () => {
     const previewOverlay = page.getByRole("button", { name: "Text overlay: Local fixture title" });
     await expect(previewOverlay).toHaveCount(0);
     const previewPosition = page.getByRole("slider", { name: "Preview position" });
-    await previewPosition.scrollIntoViewIfNeeded();
+    await previewPosition.evaluate((element) => element.scrollIntoView({ block: "center" }));
     const positionBox = await previewPosition.boundingBox();
     if (!positionBox) throw new Error("Preview position should have visible dimensions.");
     const scrubX = positionBox.x + positionBox.width * 0.15;

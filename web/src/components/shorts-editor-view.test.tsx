@@ -176,6 +176,39 @@ describe("ShortsEditorView", () => {
     await waitFor(() => expect(createShortsJob).toHaveBeenCalledWith(expect.objectContaining({ assetId: asset.id, start: 0, end: 4 })));
   });
 
+  it("slides clips and the assistant in from the right and hands focus back when a clip loads", async () => {
+    const job: Job = {
+      schemaVersion: 1, id: "job-drawer", projectId: "project-drawer", mode: "clip", state: "complete", stage: "complete", stageLabel: "Ready", progress: 100,
+      currentItem: 1, totalItems: 1, style: "educational", processingMode: "fast", warnings: [], error: null, beats: [], steps: [],
+      clips: [{ id: "clip-drawer", index: 1, state: "complete", start: 2, end: 7, duration: 5, openingLine: "", score: null, selected: true, fallbackUsed: false, provenance: [], title: "Drawer cut", libraryAssetId: asset.id }],
+      createdAt: "2026-09-12T00:00:00Z", updatedAt: "2026-09-12T00:00:00Z",
+    };
+    vi.mocked(listJobs).mockResolvedValue([job]);
+    vi.mocked(listAssets).mockResolvedValue([{ ...asset, previewUrl: "/api/v1/library/assets/asset-1/preview", origin: "generated-clip", sourceClipId: "clip-drawer", sourceJobId: job.id, sourceProjectId: job.projectId }]);
+    render(<ShortsEditorView onJobCreated={vi.fn()} />);
+    const toggle = screen.getByRole("button", { name: /^Clips & assistant/ });
+    const drawer = document.getElementById("shorts-clip-drawer")!;
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(drawer).not.toHaveClass("open");
+
+    fireEvent.click(toggle);
+    expect(drawer).toHaveClass("open");
+    const clip = await screen.findByRole("button", { name: /Drawer cut/ });
+    clip.focus();
+    fireEvent.click(clip);
+    await waitFor(() => expect(trimField("End seconds")).toHaveValue(5));
+    expect(drawer).not.toHaveClass("open");
+    expect(toggle).toHaveFocus();
+
+    // Escape inside the drawer closes only the drawer; the open inspector stays put.
+    fireEvent.click(toggle);
+    clip.focus();
+    fireEvent.keyDown(clip, { key: "Escape" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).toHaveFocus();
+    expect(screen.getByRole("region", { name: "Video properties" })).toBeInTheDocument();
+  });
+
   it("drops an eligible clip into the editor and loads its linked asset", async () => {
     const job: Job = {
       schemaVersion: 1, id: "job-drag", projectId: "project-drag", mode: "clip", state: "complete", stage: "complete", stageLabel: "Ready", progress: 100,

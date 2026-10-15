@@ -2152,3 +2152,42 @@ main { min-width: 0; }
   .shorts-editor-toolbox .shorts-bottom-controls label input { width: 80px; }
   .shorts-video-frame.aspect-9-16 { max-width: min(100%, 310px); }
 }
+
+/* Shorts Editor: the editor owns the page width; clips and the assistant slide in over it from the right. */
+.shorts-workspace-page { max-width: none; padding: var(--space-3) var(--space-4); }
+.shorts-workspace { grid-template-columns: minmax(0, 1fr); }
+.shorts-workspace-header { margin-bottom: var(--space-2); padding: var(--space-2) var(--space-3); }
+.shorts-workspace-header > div:first-child, .shorts-editor-panel > .workspace-panel-heading > div:first-child { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; }
+.shorts-workspace-header :is(.eyebrow, h1), .shorts-editor-panel > .workspace-panel-heading h2 { margin: 0; }
+.shorts-editor-panel > .workspace-panel-heading { padding-block: var(--space-2); }
+.shorts-editor-panel > .shorts-source-empty { align-self: center; width: min(100%, 960px); }
+.shorts-source-empty > .empty-icon { margin-inline: auto; }
+.shorts-clip-drawer { position: fixed; z-index: 40; inset: 0 0 0 auto; width: min(440px, 100vw); display: flex; flex-direction: column; overflow: hidden; border-left: 1px solid var(--border); background: var(--surface-1); box-shadow: -24px 0 48px rgba(0, 0, 0, .55); visibility: hidden; transform: translateX(100%); transition: transform .22s ease, visibility 0s linear .22s; }
+.shorts-clip-drawer.open { visibility: visible; transform: none; transition: transform .22s ease; }
+/* While a clip is dragged the drawer steps aside so the whole Editor is a drop target. */
+.shorts-clip-drawer.open.drag-through { transform: translateX(100%); }
+.shorts-drawer-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); min-height: 48px; padding: 0 var(--space-3); border-bottom: 1px solid var(--border); }
+.shorts-clip-drawer > .shorts-collapsible-panel[open]:first-of-type { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.shorts-clip-drawer .clip-browser { max-height: none; }
+.shorts-clip-drawer .assistant-messages { max-height: 180px; }
+.shorts-editor-toolbox .shorts-bottom-controls .icon-button { width: auto; min-width: var(--control-height); padding-inline: var(--space-2); }
+.shorts-editor-toolbox .shorts-bottom-controls label { white-space: nowrap; }
+.shorts-editor-toolbox .timeline-scale { margin: 0 5px 0 73px; }
+.shorts-editor-toolbox .timeline-scale span:first-child { transform: none; }
+.shorts-editor-toolbox .timeline-scale span:last-child { transform: translateX(-100%); }
+.shorts-editor-toolbox .track-block { display: flex; align-items: center; padding-inline: var(--space-2); }
+.shorts-editor-toolbox .shorts-track-list [role="row"]::after { content: none; }
+@media (min-width: 901px) {
+  .shorts-workspace-header { align-items: center; }
+  .video-editing-stage { grid-template-columns: 52px minmax(200px, 260px) minmax(260px, 1fr) minmax(220px, 280px); gap: 10px; }
+  /* The canvas cell reads as a program monitor without adding a wrapper element. */
+  .video-editing-stage::before { content: ""; grid-column: 3; grid-row: 2; align-self: stretch; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: var(--canvas); }
+  .video-editing-stage > .shorts-video-frame { z-index: 1; align-self: center; height: clamp(300px, calc(100dvh - 452px), 860px); max-height: none; }
+  .shorts-editor-toolbox .shorts-tool-pane, .shorts-editor-toolbox .shorts-property-inspector { align-self: stretch; max-height: none; }
+  .shorts-editor-toolbox .property-toggle { position: relative; z-index: 2; top: auto; right: auto; grid-column: 4; grid-row: 2; justify-self: end; align-self: start; margin: 6px; }
+  .shorts-editor-toolbox .shorts-bottom-controls { grid-row: 3; padding: 4px 0; border-top: 0; }
+  .shorts-editor-toolbox .shorts-track-list { grid-row: 4; padding: var(--space-2) 0; border-top: 1px solid var(--border-soft); background: var(--canvas); }
+  .shorts-editor-toolbox .track-lane { height: 30px; }
+  .shorts-editor-toolbox [role="row"][aria-label="Video"] .track-block { border-color: var(--selector-highlight); background: var(--selector-highlight-soft); }
+  .shorts-editor-toolbox [role="row"][aria-label="Audio"] .track-block { background: var(--surface-4); color: var(--text-primary); }
+}

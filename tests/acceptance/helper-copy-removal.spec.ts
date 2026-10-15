@@ -36,6 +36,12 @@ async function mockEngine(page: Page, { profiles = [disconnectedProfile], jobs =
   return { get updateCount() { return updateCount; } };
 }
 
+async function openClips(page: Page) {
+  const toggle = page.getByRole("button", { name: /^Clips & assistant/ });
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+  await expect(page.getByRole("complementary", { name: "Clips and editing assistant" })).toBeVisible();
+}
+
 async function navigate(page: Page, label: string) {
   await page.getByRole("button", { name: label, exact: true }).click();
   await expect(page.locator("#main-content")).toBeVisible();
@@ -201,6 +207,7 @@ test.describe("removed helper copy", () => {
     await page.goto("/", { waitUntil: "domcontentloaded" });
     await navigate(page, "Shorts Editor");
     await expect(page.getByRole("heading", { level: 1, name: "Shorts Editor" })).toBeVisible();
+    await openClips(page);
     const assistantInput = page.getByRole("textbox", { name: "Editing request" });
     await expect(assistantInput).toBeVisible();
     await assistantInput.fill("Make the clip tighter");

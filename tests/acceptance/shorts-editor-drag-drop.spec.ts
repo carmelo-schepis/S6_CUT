@@ -16,6 +16,12 @@ const jobs = [
   { schemaVersion: 1, id: "job-failed", projectId: "project-failed", mode: "clip", state: "failed", stage: "failed", stageLabel: "Failed", progress: 0, currentItem: 0, totalItems: 1, style: "educational", processingMode: "fast", contentFormat: "short", warnings: [], error: "fixture failure", beats: [], steps: [], clips: [{ id: "clip-failed", index: 1, state: "failed", start: 0, end: 4, duration: 4, openingLine: "Failed", score: null, selected: true, fallbackUsed: false, provenance: [], title: "Failed Preview" }], createdAt: now, updatedAt: now },
 ];
 
+async function openClips(page) {
+  const toggle = page.getByRole("button", { name: /^Clips & assistant/ });
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+  await expect(page.getByRole("complementary", { name: "Clips and editing assistant" })).toBeVisible();
+}
+
 async function openEditor(page) {
   const preview = path.join(root, "tests/fixtures/openrouter-fallback.mp4");
   await page.route("**/api/v1/library/assets", (route) => route.fulfill({ json: assets }));
@@ -25,10 +31,12 @@ async function openEditor(page) {
   await expect(page.locator("#main-content")).toBeVisible();
   await page.getByRole("button", { name: "Shorts Editor", exact: true }).first().click();
   await expect(page.getByRole("heading", { level: 1, name: "Shorts Editor" })).toBeVisible();
+  await openClips(page);
   await expect(page.getByRole("button", { name: /Copper sunrise/ })).toBeVisible();
 }
 
 async function dragToEditor(page, clipName: string, target = ".shorts-editor-panel") {
+  await openClips(page);
   const source = page.getByRole("button", { name: new RegExp(clipName) });
   const dragHandle = source.locator(".clip-drag-hint");
   await dragHandle.scrollIntoViewIfNeeded();
@@ -72,6 +80,7 @@ test.describe("Shorts Editor drag-and-drop source loading", () => {
     await page.getByLabel("Library video").selectOption("asset-short-b");
     await expect(page.locator("#editor-panel-title")).toHaveText("Blue city");
     await expect(page.getByLabel("Video trim end seconds")).toHaveValue("");
+    await openClips(page);
     await page.getByRole("button", { name: /Blue city/ }).click();
     await expect(page.locator("#editor-panel-title")).toHaveText("Blue city");
     await expect(page.getByLabel("Video trim start seconds")).toHaveValue("0");
@@ -81,9 +90,11 @@ test.describe("Shorts Editor drag-and-drop source loading", () => {
     await expect(page.getByLabel("Video trim start seconds")).toHaveValue("1.5");
 
     page.once("dialog", (dialog) => dialog.dismiss());
+    await openClips(page);
     await page.getByRole("button", { name: /Copper sunrise/ }).click();
     await expect(page.getByLabel("Video trim start seconds")).toHaveValue("1.5");
 
+    await openClips(page);
     const source = page.getByRole("button", { name: /Copper sunrise/ });
     const sourceBox = await source.boundingBox();
     const editorBox = await page.locator(".shorts-editor-panel").boundingBox();
@@ -98,14 +109,17 @@ test.describe("Shorts Editor drag-and-drop source loading", () => {
     await expect(page.locator(".clip-drag-ghost")).toHaveCount(0);
     await expect(page.locator(".clip-drop-overlay")).toHaveCount(0);
     await expect(page.locator("#editor-panel-title")).toHaveText("Blue city");
+    await page.getByRole("button", { name: "Close clips and assistant" }).click();
     if (await page.getByRole("button", { name: "Show properties" }).count()) await page.getByRole("button", { name: "Show properties" }).click();
     await expect(page.getByLabel("Video trim start seconds")).toHaveValue("1.5");
+    await openClips(page);
     await expect(page.getByRole("button", { name: /Unavailable Pending Preview/ })).toHaveAttribute("aria-disabled", "true");
     await expect(page.getByRole("button", { name: /Unavailable Failed Preview/ })).toHaveAttribute("aria-disabled", "true");
   });
 
   test("loads by keyboard, retains YouTube/local-file options, and avoids narrow overflow", async ({ page }, testInfo) => {
     await openEditor(page);
+    await openClips(page);
     const first = page.getByRole("button", { name: /Copper sunrise/ });
     await first.focus();
     await page.keyboard.press("Enter");

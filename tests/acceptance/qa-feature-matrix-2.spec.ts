@@ -19,6 +19,12 @@ const rail = async (page: Page, name: string) => {
   await page.waitForTimeout(2_000);
 };
 
+async function openClips(page: Page) {
+  const toggle = page.getByRole("button", { name: /^Clips & assistant/ });
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+  await expect(page.getByRole("complementary", { name: "Clips and editing assistant" })).toBeVisible();
+}
+
 test.describe("§6.4 Shorts Editor", () => {
   test("trim validation rejects a negative start and an end at or before start", async ({ page }) => {
     await boot(page);
@@ -50,6 +56,7 @@ test.describe("§6.4 Shorts Editor", () => {
     const picker = page.locator("#shorts-source");
     await picker.selectOption((await picker.locator("option").nth(1).getAttribute("value"))!);
     await page.waitForTimeout(1_200);
+    await openClips(page);
 
     const composer = page.getByRole("textbox", { name: "Editing request" });
     const send = page.getByRole("button", { name: "Send editing request" });
@@ -86,6 +93,7 @@ test.describe("§6.4 Shorts Editor", () => {
   test("clip filter narrows the browser to the chosen state", async ({ page }) => {
     await boot(page);
     await rail(page, "Shorts Editor");
+    await openClips(page);
     await expect(page.locator(".clip-browser-item").first()).toBeVisible({ timeout: 30_000 });
     const all = await page.locator(".clip-browser-item").count();
     await page.getByLabel("Filter clips").selectOption("complete");
