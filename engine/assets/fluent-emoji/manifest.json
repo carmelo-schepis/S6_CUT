@@ -353,6 +353,94 @@
       "relativePath": "emoji-32.png",
       "width": 256,
       "height": 256
+    },
+    {
+      "emoji": "💀",
+      "file": "emoji-33.png",
+      "source": "assets/Skull/3D/skull_3d.png",
+      "sha256": "9920d9e79017306b7af9eef09117070ff7fde28d7711fdb4861c14c446b5bf45",
+      "assetId": "u1f480",
+      "name": "Skull",
+      "relativePath": "emoji-33.png",
+      "width": 256,
+      "height": 256
+    },
+    {
+      "emoji": "🗿",
+      "file": "emoji-34.png",
+      "source": "assets/Moai/3D/moai_3d.png",
+      "sha256": "9b6c57fb0838d6107b0dfe7ca0569345b28525ab3a0303e02879ea65ba715c98",
+      "assetId": "u1f5ff",
+      "name": "Moai",
+      "relativePath": "emoji-34.png",
+      "width": 256,
+      "height": 256
+    },
+    {
+      "emoji": "🧍",
+      "file": "emoji-35.png",
+      "source": "assets/Man standing/Default/3D/man_standing_3d_default.png",
+      "sha256": "3f90f28f78d39dbe1407262d963677644706dfc38d1fab2200381649a1a52df7",
+      "assetId": "u1f9cd",
+      "name": "Man standing",
+      "relativePath": "emoji-35.png",
+      "width": 256,
+      "height": 256
+    },
+    {
+      "emoji": "📉",
+      "file": "emoji-36.png",
+      "source": "assets/Chart decreasing/3D/chart_decreasing_3d.png",
+      "sha256": "def4556976f4ea37549cdff95a9e677994acb2fe359a1b21dcd38ebc92b82925",
+      "assetId": "u1f4c9",
+      "name": "Chart decreasing",
+      "relativePath": "emoji-36.png",
+      "width": 256,
+      "height": 256
+    },
+    {
+      "emoji": "🤨",
+      "file": "emoji-37.png",
+      "source": "assets/Face with raised eyebrow/3D/face_with_raised_eyebrow_3d.png",
+      "sha256": "13e2bca9b7a3cc83c2a14214fb540e7f6ea0826750ecfdc0d1e9f8ee66567b53",
+      "assetId": "u1f928",
+      "name": "Face with raised eyebrow",
+      "relativePath": "emoji-37.png",
+      "width": 256,
+      "height": 256
+    },
+    {
+      "emoji": "🪦",
+      "file": "emoji-38.png",
+      "source": "assets/Headstone/3D/headstone_3d.png",
+      "sha256": "046213feb4cc6fd06218095e0798d8b6171424b86fa7f818d369fa18e463549b",
+      "assetId": "u1faa6",
+      "name": "Headstone",
+      "relativePath": "emoji-38.png",
+      "width": 256,
+      "height": 256
+    },
+    {
+      "emoji": "🥶",
+      "file": "emoji-39.png",
+      "source": "assets/Cold face/3D/cold_face_3d.png",
+      "sha256": "0196625191a24519055a6eec8526b4c6b215197a93dc477a1f51657fa5486bad",
+      "assetId": "u1f976",
+      "name": "Cold face",
+      "relativePath": "emoji-39.png",
+      "width": 256,
+      "height": 256
+    },
+    {
+      "emoji": "🧠",
+      "file": "emoji-40.png",
+      "source": "assets/Brain/3D/brain_3d.png",
+      "sha256": "37906c3f0b0495215df114d72565a389496dc4c5b2af02398abf9dc7dc5a2a43",
+      "assetId": "u1f9e0",
+      "name": "Brain",
+      "relativePath": "emoji-40.png",
+      "width": 256,
+      "height": 256
     }
   ]
 }

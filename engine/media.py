@@ -1395,8 +1395,8 @@ def _srt_time(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{seconds_value:02d},{millis:03d}"
 
 
-def write_caption_sidecars(path: Path, words: list[dict[str, Any]], *, offset: float, duration: float, style: str = "educational", music_theme: str | None = None, presentation: str | None = None) -> None:
-    cues = _caption_cues(words, offset, duration, style, music_presentation=music_theme is not None, local_text_only=presentation in {"smart_speech_v1", "smart_speech_v2"})
+def write_caption_sidecars(path: Path, words: list[dict[str, Any]], *, offset: float, duration: float, style: str = "educational", music_theme: str | None = None, presentation: str | None = None, reaction_policy: str | None = None) -> None:
+    cues = _caption_cues(words, offset, duration, style, music_presentation=music_theme is not None, local_text_only=presentation in {"smart_speech_v1", "smart_speech_v2"} or reaction_policy == "ironic_v1")
     srt = "\n\n".join(f"{index}\n{_srt_time(start)} --> {_srt_time(end)}\n{text}" for index, (start, end, text) in enumerate(cues, 1)) + ("\n" if cues else "")
     path.with_suffix(".srt").write_text(srt, encoding="utf-8")
     vtt = "WEBVTT\n\n" + "\n\n".join(f"{_srt_time(start).replace(',', '.')} --> {_srt_time(end).replace(',', '.')}\n{text}" for start, end, text in cues) + ("\n" if cues else "")
@@ -1568,33 +1568,153 @@ def _smart_speech_emoji_kind(texts: Iterable[str]) -> str | None:
 
 _UNSUPPORTED_EMOJI_WARNED: set[str] = set()
 
+# Precedence is earliest phrase start, then longest phrase, then category order:
+# punchline, foolish reasoning, deadpan confidence, twist/awkwardness, failure,
+# suspicious excuse, rejection/defeat, impressive comeback.
+# Keep rules explicit, contiguous, and phrase-level; never add single-token triggers.
+_IRONIC_REACTION_PHRASES = (
+    ("💀", ("that was hilarious", "that's hilarious", "what an absurd ending", "that killed me", "i am dead laughing")),
+    ("🧠", ("galaxy brain move", "big brain move", "because that makes sense", "that is my logic")),
+    ("🗿", ("nothing can go wrong", "could not possibly fail", "foolproof plan", "there is no way this fails")),
+    ("🧍", ("plot twist", "i did not know what to say", "i had no idea what to do", "wait what just happened")),
+    ("📉", ("that went wrong", "it did not work", "failed again", "that backfired", "the plan fell apart")),
+    ("🤨", ("that does not add up", "you expect me to believe", "that excuse makes no sense", "are you serious")),
+    ("🪦", ("we reject your offer", "application was rejected", "completely defeated", "no chance of recovery", "knocked out of the final")),
+    ("🥶", ("came back stronger", "made an incredible comeback", "turned it all around", "that was a cold comeback")),
+)
+_IRONIC_REACTION_ASSETS = {emoji: resolve_emoji(emoji) for emoji, _ in _IRONIC_REACTION_PHRASES}
+_IRONIC_REACTION_DURATION = 1.1
+_IRONIC_REACTION_COOLDOWN = 5.0
+_CLIP_REACTION_EMOJIS = {
+    "funny": ("💀", "🗿", "🧠", "🧍"),
+    "hype": ("🥶", "💀", "🗿"),
+}
+_CLIP_REACTION_INTERVAL = 3.5
 
-def _caption_emoji_plan(words: list[dict[str, Any]], width: int, height: int, duration: float, *, offset: float, style: str, presentation: str | None, music_theme: str | None) -> list[tuple[Path, float, float, int, int, int]]:
-    """Plan exact local image slots for Smart Speech caption events only.
 
-    Slot geometry follows the shared phrase layout. Visibility uses the union
-    of word-event intervals, so images neither linger through pauses nor alter
-    unrelated legacy/music caption treatments.
+def select_ironic_reactions(words: list[dict[str, Any]], offset: float, duration: float, *, style: str | None = None) -> list[tuple[str, float, float]]:
+    """Select clip-local (emoji, start, end) cues from timed transcript words.
+
+    Matching uses contiguous normalized word phrases; source text and timestamps
+    are only read, never modified. Funny/Hype clips fill 3.5s speech slots with
+    phrase matches or bundled fallbacks; other callers retain sparse matching.
     """
+    clip_start, clip_duration = float(offset), float(duration)
+    if not math.isfinite(clip_start) or not math.isfinite(clip_duration) or clip_duration <= 0:
+        return []
+    normalized = []
+    manual_emoji_times = []
+    for word in words:
+        text = str(word.get("text", ""))
+        tokens = re.findall(r"[\w']+", text.casefold())
+        try:
+            start, end = float(word["start"]), float(word["end"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if math.isfinite(start) and math.isfinite(end) and end > start and _has_emoji(text):
+            manual_emoji_times.append((start, end))
+        if tokens and math.isfinite(start) and math.isfinite(end) and end > start:
+            normalized.append((tokens, start, end, _has_emoji(text), bool(re.search(r"[.!?][\"')\]]*$", text))))
+    stream = []
+    for index, (tokens, start, end, _, _) in enumerate(normalized):
+        for token in tokens:
+            stream.append((token, index, start, end))
+    matches = []
+    for reaction_order, (emoji, phrases) in enumerate(_IRONIC_REACTION_PHRASES):
+        for phrase in phrases:
+            phrase_tokens = tuple(re.findall(r"[\w']+", phrase.casefold()))
+            if len(phrase_tokens) < 2:
+                continue
+            for index in range(len(stream) - len(phrase_tokens) + 1):
+                segment = stream[index:index + len(phrase_tokens)]
+                if tuple(item[0] for item in segment) != phrase_tokens:
+                    continue
+                word_start, word_end = segment[0][1], segment[-1][1]
+                phrase_start, phrase_end = normalized[word_start][1], normalized[word_end][2]
+                if word_end - word_start + 1 != len({item[1] for item in segment}):
+                    continue
+                if any(normalized[index][3] for index in range(word_start, word_end + 1)):
+                    continue
+                if any(normalized[index][4] for index in range(word_start, word_end)):
+                    continue
+                if any(normalized[index + 1][1] - normalized[index][2] > 1.25 for index in range(word_start, word_end)):
+                    continue
+                if phrase_end <= clip_start or phrase_start >= clip_start + clip_duration:
+                    continue
+                matches.append((phrase_start, -len(phrase_tokens), reaction_order, phrase_end, emoji))
+    if style in _CLIP_REACTION_EMOJIS:
+        allowed = _CLIP_REACTION_EMOJIS[style]
+        selected = []
+        cadence_index = 0
+        while cadence_index * _CLIP_REACTION_INTERVAL < clip_duration:
+            window_start = cadence_index * _CLIP_REACTION_INTERVAL
+            window_end = min(clip_duration, window_start + _CLIP_REACTION_INTERVAL)
+            speech = [item for item in normalized if item[2] > clip_start + window_start and item[1] < clip_start + window_end]
+            if speech:
+                match = next((item for item in sorted(matches) if window_start <= item[0] - clip_start < window_end), None)
+                if match:
+                    emoji = match[4]
+                    cue_start = max(0.0, match[3] - clip_start - .15)
+                else:
+                    emoji = allowed[cadence_index % len(allowed)]
+                    cue_start = max(window_start, speech[0][1] - clip_start)
+                cue_end = min(clip_duration, cue_start + _IRONIC_REACTION_DURATION)
+                absolute_start, absolute_end = clip_start + cue_start, clip_start + cue_end
+                if cue_end > cue_start and any(start < absolute_end and end > absolute_start for start, end in manual_emoji_times):
+                    candidate = next((item for item in speech if not any(start < min(clip_start + window_end, item[2]) and end > max(clip_start + window_start, item[1]) for start, end in manual_emoji_times)), None)
+                    if candidate is None:
+                        cadence_index += 1
+                        continue
+                    cue_start = max(window_start, candidate[1] - clip_start)
+                    cue_end = min(clip_duration, cue_start + _IRONIC_REACTION_DURATION)
+                    if any(start < clip_start + cue_end and end > clip_start + cue_start for start, end in manual_emoji_times):
+                        cadence_index += 1
+                        continue
+                if cue_end > cue_start:
+                    selected.append((emoji, cue_start, cue_end))
+            cadence_index += 1
+        return selected
+
+    selected = []
+    cooldown_until = -math.inf
+    for phrase_start, _, _, phrase_end, emoji in sorted(matches):
+        cue_start = max(0.0, phrase_end - clip_start - .15)
+        cue_end = min(clip_duration, cue_start + _IRONIC_REACTION_DURATION)
+        absolute_cue_start, absolute_cue_end = clip_start + cue_start, clip_start + cue_end
+        if cue_end <= cue_start or cue_start < cooldown_until:
+            continue
+        if any(start < absolute_cue_end and end > absolute_cue_start for start, end in manual_emoji_times):
+            continue
+        selected.append((emoji, cue_start, cue_end))
+        cooldown_until = cue_start + _IRONIC_REACTION_COOLDOWN
+    return selected
+
+
+def _caption_emoji_plan(words: list[dict[str, Any]], width: int, height: int, duration: float, *, offset: float, style: str, presentation: str | None, music_theme: str | None, reaction_policy: str | None = None, source_profile: str = "speech") -> list[tuple[Path, float, float, int, int, int]]:
+    """Plan phrase-level reaction overlays independently of caption layout."""
     local = caption_words_for_clip(words, offset, offset + duration)
     if not local:
         return []
     scale = min(width, height) / 1080
-    size = max(48, round(112 * scale))
-    y = (max(round(height * .34), round(height * .54 - 104 * scale - size - 18 * scale))
-         if presentation == "smart_speech_v1" or style == "hype"
-         else round(height * .60 - size))
+    size = min(round(112 * scale), width, height)
+    smart_speech = presentation in {"smart_speech_v1", "smart_speech_v2"}
+    if smart_speech:
+        y = max(round(height * .34), round(height * .54 - 104 * scale - size - 18 * scale))
+    else:
+        metrics = _ass_style_metrics(width, height)
+        y = max(0, min(height - size, height - metrics["margin_v"] - size - 2 * metrics["fontsize"] - round(24 * scale)))
     plan: list[tuple[Path, float, float, int, int, int]] = []
-    if presentation not in {"smart_speech_v1", "smart_speech_v2"} or music_theme:
+    if source_profile == "music" or (not smart_speech and reaction_policy != "ironic_v1"):
         return plan
+    ironic = reaction_policy == "ironic_v1" and source_profile == "speech"
     enriched_local = local
     cooldown_until = -1.0
     for group_start in range(0, len(local), 3):
         group = local[group_start:group_start + 3]
         enriched_group = enriched_local[group_start:group_start + 3]
-        sequences = [(sequence, asset) for word in enriched_group for _, _, sequence, asset in find_emoji_sequences(str(word.get("text", "")))]
+        sequences = [(sequence, asset) for word in enriched_group for _, _, sequence, asset in find_emoji_sequences(str(word.get("text", "")))] if smart_speech else []
         automatic = False
-        if not sequences:
+        if not sequences and not ironic and smart_speech:
             detected = _smart_speech_emoji_kind(str(word.get("text", "")) for word in group)
             sequence = _SMART_SPEECH_EMOJI_SEQUENCES.get(detected or "")
             asset = resolve_emoji(sequence) if sequence else None
@@ -1639,6 +1759,11 @@ def _caption_emoji_plan(words: list[dict[str, Any]], width: int, height: int, du
         for index, (_, asset) in enumerate(unique[:2]):
             x = round(width / 2 - size / 2 - (len(unique[:2]) - 1) * size * .58 + index * size * 1.16)
             plan.extend((asset, interval_start, interval_end, x, y, size) for interval_start, interval_end in active_intervals)
+    if ironic:
+        for emoji, cue_start, cue_end in select_ironic_reactions(words, offset, duration, style=style):
+            asset = _IRONIC_REACTION_ASSETS.get(emoji)
+            if asset is not None:
+                plan.append((asset, cue_start, cue_end, round(width / 2 - size / 2), y, size))
     return plan
 
 
@@ -1721,7 +1846,7 @@ def _smart_speech_lines(group: list[dict[str, Any]], width: int, fontsize: int, 
     return lines
 
 
-def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duration: float, visuals: Iterable[tuple[str, float, float]], width: int, height: int, style: str = "educational", creator_credit: str | None = None, credit_alignment: int = 3, content_format: str | None = None, music_theme: str | None = None, music_top_text: str | None = None, hook_text: str | None = None, hook_end_time: float | None = None, presentation: str | None = None, burn_emoji_images: bool = False) -> None:
+def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duration: float, visuals: Iterable[tuple[str, float, float]], width: int, height: int, style: str = "educational", creator_credit: str | None = None, credit_alignment: int = 3, content_format: str | None = None, music_theme: str | None = None, music_top_text: str | None = None, hook_text: str | None = None, hook_end_time: float | None = None, presentation: str | None = None, reaction_policy: str | None = None, burn_emoji_images: bool = False) -> None:
     # Unknown additive presentation values intentionally project to the legacy
     # renderer, keeping newer callers forward/backward compatible.
     smart_speech = presentation == "smart_speech_v1"
@@ -1874,7 +1999,7 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
     selected_words = caption_words_for_clip(words, offset, offset + duration)
     # Speech presentation intentionally suppresses recipe emoji and uses only
     # local text glyphs, so rendering remains deterministic and offline.
-    local = selected_words if music_theme or speech_presentation else _caption_words_with_emojis(selected_words, style)
+    local = selected_words if music_theme or speech_presentation or reaction_policy == "ironic_v1" else _caption_words_with_emojis(selected_words, style)
     if burn_emoji_images:
         local = [{**word, "_emoji_text": str(word.get("text", "")), "text": _emoji_layout_text(str(word.get("text", "")))} for word in local]
     if music_theme in reference_presets:
@@ -2198,7 +2323,7 @@ def _smart_speech_emoji_filters(plan: list[tuple[Path, float, float, int, int, i
     return ";".join(filters)
 
 
-def render_clip(source: Path, output: Path, *, start: float, end: float, aspect: str, words: list[dict[str, Any]], visuals: list[tuple[str, float, float]], overlays: list[tuple[Path, float, float]], settings: Settings, style: str = "educational", has_audio: bool = True, embed_subtitles: bool = False, subtitle_language: str = "und", creator_credit: str | None = None, content_format: str | None = None, centered_partial_fill: bool = False, subscribe_animation: dict[str, Any] | None = None, music_theme: str | None = None, music_top_text: str | None = None, music_treatment: str | None = None, hook_text: str | None = None, presentation: str | None = None, subtitles_enabled: bool = True, muted: bool = False, volume: float = 1.0, filter_preset: str = "none", filter_intensity: float = 1.0, tint_color: str = "#d58a55", tint_opacity: int = 0, text_overlays: list[dict[str, Any]] | None = None) -> None:
+def render_clip(source: Path, output: Path, *, start: float, end: float, aspect: str, words: list[dict[str, Any]], visuals: list[tuple[str, float, float]], overlays: list[tuple[Path, float, float]], settings: Settings, style: str = "educational", has_audio: bool = True, embed_subtitles: bool = False, subtitle_language: str = "und", creator_credit: str | None = None, content_format: str | None = None, centered_partial_fill: bool = False, subscribe_animation: dict[str, Any] | None = None, music_theme: str | None = None, music_top_text: str | None = None, music_treatment: str | None = None, hook_text: str | None = None, presentation: str | None = None, reaction_policy: str | None = None, source_profile: str = "speech", subtitles_enabled: bool = True, muted: bool = False, volume: float = 1.0, filter_preset: str = "none", filter_intensity: float = 1.0, tint_color: str = "#d58a55", tint_opacity: int = 0, text_overlays: list[dict[str, Any]] | None = None) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     has_supported_emoji = presentation in {"smart_speech_v1", "smart_speech_v2"} and any(find_emoji_sequences(str(word.get("text", ""))) for word in words)
     separate_burn_script = bool(creator_credit or hook_text or not subtitles_enabled or has_supported_emoji)
@@ -2213,20 +2338,20 @@ def render_clip(source: Path, output: Path, *, start: float, end: float, aspect:
         src_width, src_height = src_height, src_width
     credit_alignment = _credit_alignment(source, start=start, end=end, width=width, height=height, settings=settings) if creator_credit else 3
     caption_words = words if subtitles_enabled else []
-    write_ass(ass, caption_words, offset=start, duration=duration, visuals=visuals, width=width, height=height, style=style, creator_credit=creator_credit, credit_alignment=credit_alignment, content_format=content_format, music_theme=music_theme, music_top_text=music_top_text, hook_text=hook_text, hook_end_time=hook_end_time, presentation=presentation, burn_emoji_images=presentation in {"smart_speech_v1", "smart_speech_v2"})
+    write_ass(ass, caption_words, offset=start, duration=duration, visuals=visuals, width=width, height=height, style=style, creator_credit=creator_credit, credit_alignment=credit_alignment, content_format=content_format, music_theme=music_theme, music_top_text=music_top_text, hook_text=hook_text, hook_end_time=hook_end_time, presentation=presentation, reaction_policy=reaction_policy, burn_emoji_images=presentation in {"smart_speech_v1", "smart_speech_v2"})
     _append_text_overlays(ass, text_overlays or [], duration, width, height)
     # Downloadable sidecars remain independent of the burn-in toggle; the
     # internal ASS and MP4 overlay receive no speech captions when disabled.
-    write_caption_sidecars(output, words, offset=start, duration=duration, style=style, music_theme=music_theme, presentation=presentation)
+    write_caption_sidecars(output, words, offset=start, duration=duration, style=style, music_theme=music_theme, presentation=presentation, reaction_policy=reaction_policy)
     if separate_burn_script:
         # Downloadable ASS remains plain Unicode text. The internal burn script
         # can contain image-layout placeholders and is never substituted for it.
-        write_ass(output.with_suffix(".ass"), words, offset=start, duration=duration, visuals=visuals, width=width, height=height, style=style, content_format=content_format, music_theme=music_theme, music_top_text=music_top_text, presentation=presentation)
+        write_ass(output.with_suffix(".ass"), words, offset=start, duration=duration, visuals=visuals, width=width, height=height, style=style, content_format=content_format, music_theme=music_theme, music_top_text=music_top_text, presentation=presentation, reaction_policy=reaction_policy)
     temp = output.with_suffix(".partial.mp4")
     command = [settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{start:.3f}", "-i", str(source)]
     _overlay_inputs(command, overlays)
     subscribe_animations = _subscribe_animation_inputs(command, subscribe_animation, duration, content_format, width, height, 1 + len(overlays))
-    emoji_plan = _caption_emoji_plan(words, width, height, duration, offset=start, style=style, presentation=presentation, music_theme=music_theme) if subtitles_enabled and presentation in {"smart_speech_v1", "smart_speech_v2"} and not music_theme else []
+    emoji_plan = _caption_emoji_plan(words, width, height, duration, offset=start, style=style, presentation=presentation, music_theme=music_theme, reaction_policy=reaction_policy, source_profile=source_profile) if subtitles_enabled and (presentation in {"smart_speech_v1", "smart_speech_v2"} or reaction_policy == "ironic_v1") else []
     emoji_inputs = list(dict.fromkeys(path for path, *_ in emoji_plan))
     _overlay_inputs(command, [(path, 0, duration) for path in emoji_inputs])
     subtitle_index = 1 + len(overlays) + len(subscribe_animations) + len(emoji_inputs)
@@ -2509,6 +2634,8 @@ def render_fast_clip(
     music_top_text: str | None = None,
     music_treatment: str | None = None,
     presentation: str | None = None,
+    reaction_policy: str | None = None,
+    source_profile: str = "speech",
     hook_text: str | None = None,
     muted: bool = False,
     volume: float = 1.0,
@@ -2557,7 +2684,7 @@ def render_fast_clip(
     duration = max(0.1, end - start)
     temp = output.with_suffix(".partial.mp4")
 
-    if presentation is not None:
+    if presentation is not None or (reaction_policy == "ironic_v1" and subtitles_enabled and words):
         source_timed_words = [
             {**word, "start": start + float(word["start"]), "end": start + float(word["end"])}
             for word in (words or [])
@@ -2568,7 +2695,8 @@ def render_fast_clip(
             embed_subtitles=embed_subtitles, subtitle_language=subtitle_language,
             creator_credit=creator_credit, content_format=content_format,
             centered_partial_fill=centered_partial_fill, subscribe_animation=subscribe_animation,
-            presentation=presentation, subtitles_enabled=subtitles_enabled, hook_text=hook_text,
+            presentation=presentation, reaction_policy=reaction_policy, source_profile=source_profile,
+            subtitles_enabled=subtitles_enabled, hook_text=hook_text,
             muted=muted, volume=volume, filter_preset=filter_preset, filter_intensity=filter_intensity,
             tint_color=tint_color, tint_opacity=tint_opacity, text_overlays=text_overlays,
         )

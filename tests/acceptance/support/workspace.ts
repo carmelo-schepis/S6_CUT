@@ -111,7 +111,6 @@ export async function waitForProjectReady(page: Page, observed: Set<string>, dea
     if (Date.now() - lastLog > 30_000) {
       lastLog = Date.now();
       const active = (await checklist(page)).find((step) => step.status === "active");
-      // eslint-disable-next-line no-console
       console.log(`  … waiting (${Math.round((Date.now() - (deadline - deadlineMs)) / 1000)}s) active=${active?.label || "none"} outputs=${complete}`);
     }
     await page.waitForTimeout(1_000);
@@ -277,6 +276,8 @@ export async function createClipProject(page: Page, options: {
   name: string; count: number; mode: "Fast" | "Smart" | "Auto";
   aspect: string; min: number; max: number; captions: boolean;
   source: ProjectSource; style?: string;
+  format?: "short" | "long"; batch?: "standard" | "high-volume";
+  sourceProfile?: "speech" | "music";
 }) {
   await openProjects(page);
   if (options.source.kind === "file") {
@@ -302,6 +303,11 @@ export async function createClipProject(page: Page, options: {
   await expect(countValue).toHaveText(String(options.count));
 
   await page.getByRole("button", { name: options.mode, exact: true }).click();
+  if (options.format) await page.getByRole("button", { name: options.format === "long" ? "Long form · 16:9" : "Short form · 9:16", exact: true }).click();
+  if (options.batch) await page.getByRole("button", { name: options.batch === "high-volume" ? /High-volume/ : /Standard/ }).click();
+  const musicProfile = page.getByRole("button", { name: "Music / sung vocals", exact: true });
+  if (options.sourceProfile === "music") await musicProfile.click();
+  else if (options.sourceProfile === "speech" && await musicProfile.getAttribute("aria-pressed") === "true") await musicProfile.click();
 
   // Editorial style is chosen through its visible card, not left to the default.
   if (options.style) {
@@ -313,15 +319,22 @@ export async function createClipProject(page: Page, options: {
   // The create panel has more than one .subtitle-toggle (AI hook text is the
   // other); Fast mode disables this one because it never transcribes.
   const subtitles = page.locator(".subtitle-toggle").filter({ hasText: "Burn in subtitles" }).locator('input[type="checkbox"]');
-  if (await subtitles.isEnabled() && (await subtitles.isChecked()) !== options.captions) await subtitles.setChecked(options.captions);
-  expect(await subtitles.isChecked()).toBe(options.captions);
+  if (await subtitles.count() === 0) {
+    expect(options.sourceProfile, "only Music projects omit the speech-subtitles control").toBe("music");
+    expect(options.captions, "Music projects cannot enable speech subtitles").toBe(false);
+  } else {
+    if (await subtitles.isEnabled() && (await subtitles.isChecked()) !== options.captions) await subtitles.setChecked(options.captions);
+    expect(await subtitles.isChecked()).toBe(options.captions);
+  }
 
   await page.getByRole("button", { name: "Advanced controls", exact: true }).click();
-  await page.getByLabel("Aspect").selectOption(options.aspect);
+  // Long form fixes its aspect ratio to 16:9 and disables the selector.
+  if (options.format !== "long") await page.getByLabel("Aspect").selectOption(options.aspect);
   await page.getByLabel("Minimum seconds").fill(String(options.min));
   await page.getByLabel("Maximum seconds").fill(String(options.max));
 
-  await page.getByRole("button", { name: new RegExp(`^Create ${options.count} short clips?$`) }).click();
+  const createLabel = options.format === "long" ? "landscape clips?" : "short clips?";
+  await page.getByRole("button", { name: new RegExp(`^Create ${options.count} ${createLabel}$`) }).click();
   await expect(page.getByRole("heading", { name: options.name })).toBeVisible({ timeout: 60_000 });
 }
 

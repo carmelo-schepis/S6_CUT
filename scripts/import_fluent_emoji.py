@@ -52,6 +52,14 @@ SELECTIONS = (
     ("🤝", "Handshake", None),
     ("👩‍💻", "Woman technologist", "Default"),
     ("👩🏽‍💻", "Woman technologist", "Medium"),
+    ("💀", "Skull", None),
+    ("🗿", "Moai", None),
+    ("🧍", "Man standing", "Default"),
+    ("📉", "Chart decreasing", None),
+    ("🤨", "Face with raised eyebrow", None),
+    ("🪦", "Headstone", None),
+    ("🥶", "Cold face", None),
+    ("🧠", "Brain", None),
 )
 
 
@@ -83,14 +91,14 @@ def main() -> None:
             asset_id = "u" + "_".join(f"{ord(character):x}" for character in emoji)
             entries.append({
                 "emoji": emoji,
+                "file": filename,
+                "source": source_path,
+                "sha256": hashlib.sha256(content).hexdigest(),
                 "assetId": asset_id,
                 "name": title,
                 "relativePath": filename,
-                "file": filename,
-                "source": source_path,
                 "width": int.from_bytes(content[16:20], "big"),
                 "height": int.from_bytes(content[20:24], "big"),
-                "sha256": hashlib.sha256(content).hexdigest(),
             })
         manifest = {
             "upstream": f"https://github.com/{REPOSITORY}",
