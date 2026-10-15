@@ -1290,12 +1290,15 @@ def _shorts_grade_filter(preset: str, intensity: float, tint_color: str, tint_op
         return f"hue=s={0 if preset == 'monochrome' else 1 - amount:.3f}"
     if preset == "tint":
         safe_color = tint_color if re.fullmatch(r"#[0-9a-fA-F]{6}", tint_color) else "#d58a55"
-        # Tint opacity is transparent percent: 0 means opaque tint; 100 means invisible.
+        # Tint opacity is transparent percent: 0 means fully opaque, 100 means invisible.
         opacity = max(0, min(100, int(tint_opacity)))
-        alpha = amount * (1 - opacity / 100)
-        red, green, blue = (int(safe_color[index:index + 2], 16) for index in (1, 3, 5))
-        keep = 1 - alpha
-        return f"lutrgb=r='val*{keep:.4f}+{red * alpha:.2f}':g='val*{keep:.4f}+{green * alpha:.2f}':b='val*{keep:.4f}+{blue * alpha:.2f}'"
+        strength = amount * (1 - opacity / 100)
+        channels = [int(safe_color[index:index + 2], 16) / 255 for index in (1, 3, 5)]
+        # A zero-strength tint is the identity, while the maximum shifts each
+        # midtone toward the requested RGB tint without replacing source luma.
+        offsets = [max(-0.4, min(0.4, (channel - 0.5) * 0.8 * strength)) for channel in channels]
+        red, green, blue = offsets
+        return f"colorbalance=rm={red:.4f}:gm={green:.4f}:bm={blue:.4f}:pl=1"
     return "null"
 
 
@@ -1305,10 +1308,11 @@ def _append_text_overlays(path: Path, overlays: list[dict[str, Any]], duration: 
         text = _ass_escape(str(item.get("text", "")))
         if not text:
             continue
-        start = max(0.0, min(duration, float(item.get("start", 0))))
-        end = max(start, min(duration, start + float(item.get("duration", 0))))
-        if end <= start:
-            continue
+        start = float(item.get("start", 0))
+        item_duration = float(item.get("duration", 0))
+        if not math.isfinite(start) or not math.isfinite(item_duration) or start < 0 or item_duration <= 0 or start + item_duration > duration + 1e-6:
+            raise MediaError("Text overlay timing must be finite and fit inside the trimmed output")
+        end = start + item_duration
         color = str(item.get("color", "#ffffff"))
         if not re.fullmatch(r"#[0-9a-fA-F]{6}", color):
             color = "#ffffff"
@@ -1317,7 +1321,7 @@ def _append_text_overlays(path: Path, overlays: list[dict[str, Any]], duration: 
         x = round(max(0, min(1, float(item.get("x", .5))) * width))
         y = round(max(0, min(1, float(item.get("y", .5))) * height))
         tag = f"{{\\an5\\pos({x},{y})\\fs{size}\\1c&H{blue}{green}{red}&\\bord2\\shad1}}"
-        events.append(f"Dialogue: 30,{_ass_time(start)},{_ass_time(end)},Default,,0,0,0,,{tag}{text}")
+        events.append(f"Dialogue: 30,{_ass_time(start)},{_ass_time(end)},Caption,,0,0,0,,{tag}{text}")
     if events:
         with path.open("a", encoding="utf-8") as output:
             output.write("\n" + "\n".join(events) + "\n")
@@ -2618,10 +2622,10 @@ def render_fast_clip(
     ass: Path | None = None
     if (subtitles_enabled or embed_subtitles) and words:
         write_caption_sidecars(output, words, offset=0, duration=duration, style=style)
-    if (subtitles_enabled and words) or creator_credit:
+    if (subtitles_enabled and words) or creator_credit or text_overlays:
         ass = output.parent / (f"{output.stem}.burn.ass" if creator_credit else f"{output.stem}.ass")
         credit_alignment = _credit_alignment(source, start=start, end=end, width=width, height=height, settings=settings) if creator_credit else 3
-        write_ass(ass, words or [], offset=0, duration=duration, visuals=[], width=width, height=height, style=style, creator_credit=creator_credit, credit_alignment=credit_alignment, content_format=content_format)
+        write_ass(ass, words if subtitles_enabled else [], offset=0, duration=duration, visuals=[], width=width, height=height, style=style, creator_credit=creator_credit, credit_alignment=credit_alignment, content_format=content_format)
         _append_text_overlays(ass, text_overlays or [], duration, width, height)
         if creator_credit:
             write_ass(output.with_suffix(".ass"), words or [], offset=0, duration=duration, visuals=[], width=width, height=height, style=style, content_format=content_format)

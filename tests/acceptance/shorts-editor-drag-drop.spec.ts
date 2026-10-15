@@ -54,9 +54,9 @@ test.describe("Shorts Editor drag-and-drop source loading", () => {
     await dragToEditor(page, "Copper sunrise");
     await expect(page.locator("#editor-panel-title")).toHaveText("Copper sunrise");
     await expect(page.locator(".clip-browser-item").filter({ hasText: "Copper sunrise" })).toHaveClass(/active/);
-    await expect(page.getByLabel("Start seconds")).toHaveValue("0");
-    await expect(page.getByLabel("End seconds")).toHaveValue("4");
-    await expect(page.getByLabel("Aspect ratio")).toHaveValue("9:16");
+    await expect(page.getByLabel("Video trim start seconds")).toHaveValue("0");
+    await expect(page.getByLabel("Video trim end seconds")).toHaveValue("4");
+    await expect(page.getByRole("region", { name: "Media settings" }).getByLabel("Aspect ratio")).toHaveValue("9:16");
     await expect(page.locator(".shorts-video-frame video")).toHaveAttribute("src", /asset-short-a\/preview/);
     await expect(page.locator(".shorts-inline-status")).toHaveText("Loaded Copper sunrise from Library.");
     await expect(page.locator(".clip-drag-ghost")).toHaveCount(0);
@@ -71,18 +71,18 @@ test.describe("Shorts Editor drag-and-drop source loading", () => {
     await page.getByText("Choose another source").click();
     await page.getByLabel("Library video").selectOption("asset-short-b");
     await expect(page.locator("#editor-panel-title")).toHaveText("Blue city");
-    await expect(page.getByLabel("End seconds")).toHaveValue("");
+    await expect(page.getByLabel("Video trim end seconds")).toHaveValue("");
     await page.getByRole("button", { name: /Blue city/ }).click();
     await expect(page.locator("#editor-panel-title")).toHaveText("Blue city");
-    await expect(page.getByLabel("Start seconds")).toHaveValue("0");
-    await expect(page.getByLabel("End seconds")).toHaveValue("6");
-    await page.getByLabel("Start seconds").fill("1.5");
+    await expect(page.getByLabel("Video trim start seconds")).toHaveValue("0");
+    await expect(page.getByLabel("Video trim end seconds")).toHaveValue("6");
+    await page.getByLabel("Video trim start seconds").fill("1.5");
     await dragToEditor(page, "Blue city");
-    await expect(page.getByLabel("Start seconds")).toHaveValue("1.5");
+    await expect(page.getByLabel("Video trim start seconds")).toHaveValue("1.5");
 
     page.once("dialog", (dialog) => dialog.dismiss());
     await page.getByRole("button", { name: /Copper sunrise/ }).click();
-    await expect(page.getByLabel("Start seconds")).toHaveValue("1.5");
+    await expect(page.getByLabel("Video trim start seconds")).toHaveValue("1.5");
 
     const source = page.getByRole("button", { name: /Copper sunrise/ });
     const sourceBox = await source.boundingBox();
@@ -98,7 +98,8 @@ test.describe("Shorts Editor drag-and-drop source loading", () => {
     await expect(page.locator(".clip-drag-ghost")).toHaveCount(0);
     await expect(page.locator(".clip-drop-overlay")).toHaveCount(0);
     await expect(page.locator("#editor-panel-title")).toHaveText("Blue city");
-    await expect(page.getByLabel("Start seconds")).toHaveValue("1.5");
+    if (await page.getByRole("button", { name: "Show properties" }).count()) await page.getByRole("button", { name: "Show properties" }).click();
+    await expect(page.getByLabel("Video trim start seconds")).toHaveValue("1.5");
     await expect(page.getByRole("button", { name: /Unavailable Pending Preview/ })).toHaveAttribute("aria-disabled", "true");
     await expect(page.getByRole("button", { name: /Unavailable Failed Preview/ })).toHaveAttribute("aria-disabled", "true");
   });

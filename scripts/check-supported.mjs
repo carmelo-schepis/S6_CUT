@@ -56,7 +56,7 @@ process.once("SIGTERM", () => stopOnSignal("SIGTERM"));
 
 let exitCode = 1;
 try {
-  await writeFile(overrideFile, `services:\n  engine:\n    user: "${testUid}:${testGid}"\n    volumes:\n      - type: bind\n        source: ${JSON.stringify(dataPath)}\n        target: /app/data\n      - type: bind\n        source: ${JSON.stringify(join(root, "tests"))}\n        target: /app/tests\n        read_only: true\n`);
+  await writeFile(overrideFile, `services:\n  engine:\n    user: "${testUid}:${testGid}"\n    volumes:\n      - type: bind\n        source: ${JSON.stringify(dataPath)}\n        target: /app/data\n      - type: bind\n        source: ${JSON.stringify(join(root, "tests"))}\n        target: /app/tests\n        read_only: true\n      - type: bind\n        source: ${JSON.stringify(join(root, "scripts"))}\n        target: /app/scripts\n        read_only: true\n`);
   console.log("Supported check: frontend checks/build run on the host; backend tests run in a freshly built Docker engine image.");
   await run("npm", ["run", "lint"]);
   await run("npm", ["run", "typecheck"]);

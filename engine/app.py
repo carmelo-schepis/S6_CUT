@@ -579,7 +579,19 @@ async def _queue_shorts_job(
         raise _not_found("Library folder")
     if selected_folder.archived:
         raise HTTPException(409, "Archived folders cannot receive new projects")
-    _validate_shorts_trim(start, end, float(source_metadata["duration"]) if source_metadata else None)
+    source_duration = float(source_metadata["duration"]) if source_metadata else None
+    _validate_shorts_trim(start, end, source_duration)
+    output_duration = (end if end is not None else source_duration) - start if (end is not None or source_duration is not None) else None
+    for overlay in text_overlays or []:
+        try:
+            overlay_start = float(overlay["start"])
+            overlay_duration = float(overlay["duration"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(422, "Text overlay timing must be finite and positive") from exc
+        if not math.isfinite(overlay_start) or not math.isfinite(overlay_duration) or overlay_start < 0 or overlay_duration <= 0:
+            raise HTTPException(422, "Text overlay timing must be finite and positive")
+        if output_duration is not None and overlay_start + overlay_duration > output_duration + 1e-6:
+            raise HTTPException(422, "Text overlay timing must fit inside the trimmed output")
     project_id = str(uuid.uuid4())
     job_id = job_id or str(uuid.uuid4())
     project = Project(id=project_id, name=_project_name(name, f"Short — {Path(source_name).stem}"), mode="clip", style="educational", state="queued", source_name=source_name, source_kind=source_kind, requested_count=1, latest_job_id=job_id, library_folder_id=library_folder_id)
@@ -646,10 +658,6 @@ async def create_shorts_source_job(
 ) -> dict[str, object]:
     _rate_limit(request)
     subscribe_animation = _subscribe_animation_request(subscribe_animation)
-    try:
-        overlay_values = [item.model_dump() for item in ShortsJobInput.model_validate({"asset_id": "validation", "start": 0, "text_overlays": json.loads(text_overlays)}).text_overlays]
-    except (ValueError, TypeError) as exc:
-        raise HTTPException(422, "Invalid text overlays") from exc
     if bool(file) == bool(url and url.strip()):
         raise HTTPException(422, "Provide exactly one local video or supported YouTube URL")
     parsed_start = _parse_shorts_form_float(start, "Start seconds")
@@ -657,6 +665,15 @@ async def create_shorts_source_job(
     if parsed_start is None:
         raise HTTPException(422, "Start seconds must be a finite number at least 0")
     _validate_shorts_trim(parsed_start, parsed_end)
+    try:
+        overlay_values = [item.model_dump() for item in ShortsJobInput.model_validate({
+            "asset_id": "multipart-validation", "start": parsed_start, "end": parsed_end,
+            "text_overlays": json.loads(text_overlays), "muted": muted, "volume": volume,
+            "filter_preset": filter_preset, "filter_intensity": filter_intensity,
+            "tint_color": tint_color, "tint_opacity": tint_opacity,
+        }).text_overlays]
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(422, "Invalid Shorts output or text-overlay settings") from exc
     if file:
         original = safe_filename(file.filename or "source.mp4", "source.mp4")
         suffix = Path(original).suffix.casefold()

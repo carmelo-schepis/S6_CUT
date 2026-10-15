@@ -11,13 +11,18 @@ server-signed preview/download URLs.
 
 The workflow currently supports 9:16, 16:9, 1:1, and 4:5 output, optional burned
 captions through the ASS pipeline, closed safe Original/Warm/Cool/Black & White/Tint
-looks, output mute and bounded 0–200% volume, literal text overlays, and the existing
-subscribe animation. The editor presents Video, Audio, and Text tools beside an
-output-aspect preview and a compact shared-time-scale track view; these local edits
-are only submitted when the user explicitly queues a short. Text placement is
-output-relative and keyboard-adjustable, and the contextual properties panel can be
-dismissed without changing the edit. Text positions are normalized to the output frame; overlay start
-and positive duration are relative to the trimmed output and must fit within it.
+looks, output mute and bounded volume, literal text overlays, and the existing
+subscribe animation. The reference-inspired workspace uses a Media/Filters/Text tool
+rail, an aspect-ratio preview, a shared-time-scale Video/Audio/Text track view, and a
+contextual properties inspector. Selecting Video or Audio on the timeline exposes
+trim or audio properties; the Video and Audio tracks stay linked to the same source.
+Export mute and volume are separate from the preview-only mute control. The editor's
+volume control is bounded to 0–100% so preview and rendered loudness stay aligned.
+These local edits are only submitted when the user explicitly queues a short. Text
+placement is output-relative, keyboard-adjustable, and draggable inside the frame;
+the inspector can be dismissed without changing the edit. Overlay start and positive
+duration are relative to the trimmed output and must fit within it; an invalid interval
+is flagged and blocks submission until corrected.
 Tint opacity uses a transparency scale: 0% transparency is fully opaque and 100% is
 invisible. Filter intensity is bounded and user text is escaped for ASS rendering.
 These choices are snapshotted into each queued job; they never alter the immutable

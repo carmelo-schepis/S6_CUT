@@ -385,6 +385,41 @@ def test_render_fast_clip_9_16_with_audio(settings: Settings, tmp_path: Path) ->
     assert abs(meta["width"] / meta["height"] - 9 / 16) < 0.02
 
 
+def test_shorts_editor_look_and_timed_text_are_burned_into_export(settings: Settings, tmp_path: Path) -> None:
+    _require_ffmpeg(settings)
+    source = _make_source(settings, tmp_path, duration=2.5, with_audio=True)
+    base = tmp_path / "base.mp4"
+    tint = tmp_path / "tint.mp4"
+    text = tmp_path / "text.mp4"
+    common = {"start": 0, "end": 2, "aspect": "9:16", "settings": settings, "has_audio": True, "subtitles_enabled": False}
+    render_fast_clip(source, base, **common)
+    render_fast_clip(source, tint, **common, filter_preset="tint", filter_intensity=1, tint_color="#ff0000", tint_opacity=0)
+    render_fast_clip(source, text, **common, filter_preset="tint", filter_intensity=1, tint_color="#ff0000", tint_opacity=0,
+                     volume=0.5, text_overlays=[{"text": "Timed text", "start": 0.2, "duration": 0.8, "x": 0.5, "y": 0.5, "size": 48, "color": "#ffffff"}])
+
+    tint_meta = probe(tint, settings)
+    text_meta = probe(text, settings)
+    assert (text_meta["width"], text_meta["height"]) == (1080, 1920)
+    assert text_meta["audio"] is True
+    assert text_meta["duration"] == pytest.approx(2, abs=0.15)
+
+    def sample_frame(path: Path, time: float) -> bytes:
+        return subprocess.run(
+            [settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-ss", str(time), "-i", str(path),
+             "-frames:v", "1", "-vf", "scale=160:284:flags=bilinear", "-pix_fmt", "rgb24", "-f", "rawvideo", "pipe:1"],
+            check=True, capture_output=True,
+        ).stdout
+
+    def changed_pixels(left: bytes, right: bytes) -> int:
+        return sum(abs(a - b) > 20 for a, b in zip(left, right))
+
+    base_frame = sample_frame(base, 0.5)
+    tint_frame = sample_frame(tint, 0.5)
+    text_frame = sample_frame(text, 0.5)
+    assert changed_pixels(base_frame, tint_frame) > 10_000, tint_meta
+    assert changed_pixels(tint_frame, text_frame) > 1_000, "timed title should alter visible pixels during its interval"
+
+
 def test_render_fast_clip_16_9_no_audio(settings: Settings, tmp_path: Path) -> None:
     src = _make_source(settings, tmp_path, duration=3.0, with_audio=False)
     out = tmp_path / "clip.mp4"

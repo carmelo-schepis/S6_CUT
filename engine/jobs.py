@@ -1821,7 +1821,9 @@ class JobManager:
                 render_kwargs = {
                     "start": clip.start, "end": clip.end, "aspect": private["aspect_ratio"],
                     "muted": bool(private.get("muted", False)), "volume": float(private.get("volume", 1.0)),
-                    "filter_preset": str(private.get("filter_preset", "none")), "text_overlays": private.get("text_overlays", []),
+                    "filter_preset": str(private.get("filter_preset", "none")), "filter_intensity": float(private.get("filter_intensity", 1.0)),
+                    "tint_color": str(private.get("tint_color", "#d58a55")), "tint_opacity": int(private.get("tint_opacity", 0)),
+                    "text_overlays": private.get("text_overlays", []),
                     # Keep transcript words available to render_clip so it can write
                     # downloadable SRT/VTT sidecars even when visual burn-in is off.
                     "words": clip_words,
@@ -2046,7 +2048,7 @@ class JobManager:
                         else:
                             warning = f"Clip {clip.index}: Local captioning unavailable; exported without captions. ({detail})"
                         job.warnings.append(warning)
-                render_kwargs: dict[str, Any] = {"start": clip.start, "end": clip.end, "aspect": private["aspect_ratio"], "has_audio": has_audio, "settings": self.settings, "muted": bool(private.get("muted", False)), "volume": float(private.get("volume", 1.0)), "filter_preset": str(private.get("filter_preset", "none")), "text_overlays": private.get("text_overlays", []), **_centered_partial_fill_kwargs(render, centered_partial_fill_eligible(job, private, metadata)), **_subscribe_render_kwargs(render, private.get("subscribe_animation"))}
+                render_kwargs: dict[str, Any] = {"start": clip.start, "end": clip.end, "aspect": private["aspect_ratio"], "has_audio": has_audio, "settings": self.settings, "muted": bool(private.get("muted", False)), "volume": float(private.get("volume", 1.0)), "filter_preset": str(private.get("filter_preset", "none")), "filter_intensity": float(private.get("filter_intensity", 1.0)), "tint_color": str(private.get("tint_color", "#d58a55")), "tint_opacity": int(private.get("tint_opacity", 0)), "text_overlays": private.get("text_overlays", []), **_centered_partial_fill_kwargs(render, centered_partial_fill_eligible(job, private, metadata)), **_subscribe_render_kwargs(render, private.get("subscribe_animation"))}
                 if embed_subtitles:
                     render_kwargs["embed_subtitles"] = True
                 # Style is a rendering input even when there are no caption words;
