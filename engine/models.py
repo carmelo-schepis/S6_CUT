@@ -309,6 +309,25 @@ class CaptionReviewInput(ApiModel):
     cues: list[CaptionCue] = Field(max_length=500)
 
 
+class ShortsTextOverlay(ApiModel):
+    id: str = Field(min_length=1, max_length=80)
+    text: str = Field(max_length=500)
+    color: str = Field(default="#ffffff", pattern=r"^#[0-9a-fA-F]{6}$")
+    size: float = Field(default=48, ge=8, le=240)
+    x: float = Field(default=0.5, ge=0, le=1)
+    y: float = Field(default=0.5, ge=0, le=1)
+    start: float = Field(default=0, ge=0)
+    duration: float = Field(default=1, gt=0)
+
+    @field_validator("start", "duration")
+    @classmethod
+    def finite_overlay_times(cls, value: float) -> float:
+        import math
+        if not math.isfinite(value):
+            raise ValueError("Overlay times must be finite")
+        return value
+
+
 class ShortsJobInput(ApiModel):
     name: str | None = Field(default=None, max_length=160)
     burn_subtitles: bool = True
@@ -321,7 +340,11 @@ class ShortsJobInput(ApiModel):
     subscribe_animation: SubscribeAnimationConfig = Field(default_factory=SubscribeAnimationConfig)
     muted: bool = False
     volume: float = Field(default=1.0, ge=0, le=2)
-    filter_preset: Literal["none", "warm", "monochrome"] = "none"
+    filter_preset: Literal["none", "warm", "cool", "black_white", "tint", "monochrome"] = "none"
+    filter_intensity: float = Field(default=1, ge=0, le=1)
+    tint_color: str = Field(default="#d58a55", pattern=r"^#[0-9a-fA-F]{6}$")
+    tint_opacity: int = Field(default=0, ge=0, le=100)
+    text_overlays: list[ShortsTextOverlay] = Field(default_factory=list, max_length=20)
 
     @field_validator("start", "end")
     @classmethod

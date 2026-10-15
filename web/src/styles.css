@@ -1573,7 +1573,16 @@ main { min-width: 0; }
 .shorts-source-empty :where(.video-source-picker, .shorts-empty-trim) { max-width: 560px; margin: 0 auto; text-align: left; }
 .video-editing-stage { min-width: 0; padding: 12px; }
 .shorts-video-frame { width: min(100%, 520px); aspect-ratio: 9 / 16; margin: 0 auto; overflow: hidden; background: #000; border: 1px solid var(--border-strong); }
+.shorts-video-frame { position: relative; container-type: inline-size; }
 .shorts-video-frame video { display: block; width: 100%; height: 100%; object-fit: contain; }
+.shorts-text-overlay { position: absolute; z-index: 2; max-width: 96%; padding: 3px 8px; transform: translate(-50%, -50%); border: 1px solid transparent; border-radius: 3px; background: transparent; color: inherit; font-weight: 800; line-height: 1.1; text-shadow: 0 2px 5px #000, 1px 1px 2px #000; cursor: move; white-space: pre-wrap; }
+.shorts-text-overlay.selected { border-color: var(--copper); }
+.shorts-text-tools { display: grid; gap: 8px; margin-top: 10px; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
+.shorts-text-tools > div:first-child, .shorts-overlay-properties { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.shorts-overlay-properties { padding: 7px 0; border-top: 1px solid var(--border-soft); }
+.shorts-overlay-properties label { display: grid; gap: 3px; font-size: var(--type-caption-size); }
+.shorts-overlay-properties input[type="number"] { width: 78px; }
+.shorts-overlay-properties input[type="color"] { width: 42px; height: 32px; padding: 2px; }
 .video-controls { padding: 8px 0; color: var(--text-primary); }
 .video-controls input[type="range"] { min-width: 80px; flex: 1 1 120px; }
 .video-time { white-space: nowrap; }
