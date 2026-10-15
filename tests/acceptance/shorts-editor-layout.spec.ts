@@ -83,7 +83,7 @@ test.describe("Shorts Editor reference-inspired editing controls", () => {
     const currentPreviewTime = await page.locator(".shorts-video-frame video").evaluate((video) => video.currentTime);
     const overlayStart = Math.ceil((currentPreviewTime + 0.5) * 10) / 10;
     await overlay.getByLabel("Overlay start seconds").fill(String(overlayStart));
-    await overlay.getByLabel("Overlay duration seconds").fill("2.4");
+    await overlay.getByLabel("Overlay duration seconds").fill("6");
     await expect(overlay.getByLabel("Horizontal position")).toHaveValue("0.3");
     await expect(overlay.getByLabel("Overlay start seconds")).toHaveValue(String(overlayStart));
     const previewOverlay = page.getByRole("button", { name: "Text overlay: Local fixture title" });
@@ -92,7 +92,7 @@ test.describe("Shorts Editor reference-inspired editing controls", () => {
     await previewPosition.evaluate((element) => element.scrollIntoView({ block: "center" }));
     const positionBox = await previewPosition.boundingBox();
     if (!positionBox) throw new Error("Preview position should have visible dimensions.");
-    const scrubX = positionBox.x + positionBox.width * 0.15;
+    const scrubX = positionBox.x + positionBox.width * 0.3;
     const scrubY = positionBox.y + positionBox.height / 2;
     if (testInfo.project.name === "Desktop Chromium") await page.mouse.click(scrubX, scrubY);
     else await page.touchscreen.tap(scrubX, scrubY);
