@@ -108,6 +108,54 @@ describe("ShortsEditorView", () => {
     await act(async () => finishLoading([asset]));
   });
 
+  it("surfaces rejected preview playback without leaving the player in a playing state", async () => {
+    vi.mocked(listAssets).mockResolvedValue([{ ...asset, previewUrl: "/preview.mp4" }]);
+    const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockRejectedValue(new DOMException("Unsupported video", "NotSupportedError"));
+    try {
+      render(<ShortsEditorView onJobCreated={vi.fn()} />);
+      fireEvent.click(await screen.findByRole("tab", { name: /Library/ }));
+      fireEvent.change(await screen.findByLabelText("Library video"), { target: { value: asset.id } });
+      await screen.findByLabelText("Source video preview");
+
+      fireEvent.click(screen.getAllByRole("button", { name: "Play preview" })[0]);
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("Preview playback could not start.");
+      expect(screen.getAllByRole("button", { name: "Play preview" })).toHaveLength(2);
+      expect(play).toHaveBeenCalledOnce();
+    } finally {
+      play.mockRestore();
+    }
+  });
+
+  it("ignores a canceled playback rejection after switching Library sources", async () => {
+    const firstAsset = { ...asset, previewUrl: "/preview-1.mp4" };
+    const secondAsset = { ...asset, id: "asset-2", title: "Another Library clip", filename: "clip-2.mp4", blobId: "blob-2", previewUrl: "/preview-2.mp4" };
+    vi.mocked(listAssets).mockResolvedValue([firstAsset, secondAsset]);
+    let rejectPlay!: (reason: DOMException) => void;
+    const pendingPlay = new Promise<void>((_, reject) => { rejectPlay = reject; });
+    const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockReturnValue(pendingPlay);
+    const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);
+    try {
+      render(<ShortsEditorView onJobCreated={vi.fn()} />);
+      fireEvent.click(await screen.findByRole("tab", { name: /Library/ }));
+      fireEvent.change(await screen.findByLabelText("Library video"), { target: { value: firstAsset.id } });
+      await screen.findByLabelText("Source video preview");
+      fireEvent.click(screen.getAllByRole("button", { name: "Play preview" })[0]);
+      expect(play).toHaveBeenCalledOnce();
+
+      fireEvent.click(screen.getByText("Choose another source"));
+      fireEvent.change(screen.getByLabelText("Library video"), { target: { value: secondAsset.id } });
+      await screen.findByRole("heading", { level: 2, name: secondAsset.title });
+      await act(async () => rejectPlay(new DOMException("Playback interrupted", "AbortError")));
+
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      expect(screen.getByRole("heading", { level: 2, name: secondAsset.title })).toBeInTheDocument();
+    } finally {
+      play.mockRestore();
+      pause.mockRestore();
+    }
+  });
+
   it("loads a published clip from the same Library asset using clip-relative trim bounds", async () => {
     const job: Job = {
       schemaVersion: 1, id: "job-same-source", projectId: "project-same-source", mode: "clip", state: "complete", stage: "complete", stageLabel: "Ready", progress: 100,
