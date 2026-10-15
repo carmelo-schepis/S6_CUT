@@ -9,6 +9,7 @@ const dataPath = await mkdtemp(join(tmpdir(), "s6-cut-check-"));
 await chmod(dataPath, 0o777);
 const overrideFile = join(dataPath, "compose.override.yaml");
 const project = `s6-cut-check-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const checkNetwork = `${project}-private`;
 const compose = ["compose", "-p", project, "-f", join(root, "compose.yaml"), "-f", overrideFile];
 const testUid = process.getuid?.() ?? 1000;
 const testGid = process.getgid?.() ?? 1000;
@@ -42,10 +43,26 @@ async function cleanup() {
   if (!cleanupPromise) {
     cleanupPromise = (async () => {
       try { await run("docker", [...compose, "down", "--volumes", "--remove-orphans"], { timeoutMs: 120_000 }); } catch (error) { console.error(error); }
+      try { await run("docker", ["network", "rm", checkNetwork], { timeoutMs: 30_000 }); } catch (error) { console.error(error); }
       await rm(dataPath, { recursive: true, force: true });
     })();
   }
   await cleanupPromise;
+}
+
+async function createCheckNetwork() {
+  let lastError;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const subnet = `10.250.${1 + Math.floor(Math.random() * 254)}.0/24`;
+    try {
+      await run("docker", ["network", "create", "--driver", "bridge", "--subnet", subnet, checkNetwork], { timeoutMs: 30_000 });
+      return;
+    } catch (error) {
+      lastError = error;
+      try { await run("docker", ["network", "rm", checkNetwork], { timeoutMs: 30_000 }); } catch {}
+    }
+  }
+  throw lastError;
 }
 
 function stopOnSignal(signal) {
@@ -56,7 +73,8 @@ process.once("SIGTERM", () => stopOnSignal("SIGTERM"));
 
 let exitCode = 1;
 try {
-  await writeFile(overrideFile, `services:\n  engine:\n    user: "${testUid}:${testGid}"\n    volumes:\n      - type: bind\n        source: ${JSON.stringify(dataPath)}\n        target: /app/data\n      - type: bind\n        source: ${JSON.stringify(join(root, "tests"))}\n        target: /app/tests\n        read_only: true\n`);
+  await createCheckNetwork();
+  await writeFile(overrideFile, `services:\n  engine:\n    user: "${testUid}:${testGid}"\n    volumes:\n      - type: bind\n        source: ${JSON.stringify(dataPath)}\n        target: /app/data\n      - type: bind\n        source: ${JSON.stringify(join(root, "tests"))}\n        target: /app/tests\n        read_only: true\n      - type: bind\n        source: ${JSON.stringify(join(root, "scripts"))}\n        target: /app/scripts\n        read_only: true\nnetworks:\n  private:\n    external: true\n    name: ${checkNetwork}\n`);
   console.log("Supported check: frontend checks/build run on the host; backend tests run in a freshly built Docker engine image.");
   await run("npm", ["run", "lint"]);
   await run("npm", ["run", "typecheck"]);

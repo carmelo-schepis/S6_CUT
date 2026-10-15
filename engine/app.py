@@ -26,18 +26,20 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from . import __version__
 from .config import settings
-from .database import Database, MAX_FOLDER_DEPTH, UNSORTED_FOLDER_ID
+from .database import Database, MAX_FOLDER_DEPTH, MetadataGenerationClaimError, UNSORTED_FOLDER_ID
 from .jobs import JobManager, ProjectDeletingError, QueueFullError, RetiredScriptJobError, SwitchFastError, can_retry_import, resolve_batch_target, uses_fast_pipeline
 from .library import LibraryRules
 from .media import _SUBTITLE_PRESETS, MediaError, available, caption_font_mismatches, probe, validate_video_upload
 from .models import (
     Asset, AssetDelete, AssetDeleteResult, AssetMove, AssetOrigin, AssetUpdate, AssetPage, CaptionCue, CaptionDownload, CaptionReviewInput, Clip, FolderCreate, FolderMove, FolderUpdate, Health, Job, LibraryPurgeInput, LibraryPurgeResult,
     LibraryFolder, MatchExplanation, RecentClipsPage, ContentFormat, ProcessingMode, ProfileInput, Project, ProjectFolderUpdate,
-    OpenRouterModel, ProviderProfile, SelectionInput, ShortsJobInput, SubscribeAnimationConfig, MusicPresentationConfig, now_iso,
+    OpenRouterModel, ProviderProfile, SelectionInput, ShortsJobInput, SubscribeAnimationConfig, MusicPresentationConfig, YouTubeMetadataUpdate, now_iso,
 )
 from .providers import ProfileService, ProviderError
 from .security import MediaSigner, SecretVault, confined, safe_filename, validate_youtube_url
+from .seo_titles import SEO_PROMPT_VERSION, SEO_TITLE_RULES, normalize_seo_description, normalize_seo_title, source_context_title
 from .thumbnails import get_thumbnail, prune_thumbnails
+from .title_backfill import TitleApplyRequest, TitleApplyResponse, TitleBackfill, TitleSuggestionRequest, TitleSuggestionResponse
 from .video_downloads import VideoDownloadInput, VideoDownloadManager, VideoDownloadTask
 
 
@@ -73,6 +75,7 @@ signer = MediaSigner(settings.data_path / "secrets" / "media-signing.key", setti
 rules = LibraryRules(db, settings.data_path / "library")
 profiles = ProfileService(db, vault)
 manager = JobManager(db, rules, profiles, settings)
+title_backfill = TitleBackfill(db, profiles, lambda job, private: manager._save(job, private))
 video_downloads = VideoDownloadManager(settings, signer)
 creation_times: defaultdict[str, deque[float]] = defaultdict(deque)
 
@@ -411,6 +414,8 @@ async def create_clip_job(
     music_presentation: Annotated[str, Form()] = "{}",
     music_top_text: Annotated[str, Form()] = "",
     hook_text: Annotated[bool, Form()] = False,
+    youtube_metadata: Annotated[bool | None, Form()] = None,
+    youtube_metadata_model_id: Annotated[str | None, Form(max_length=200)] = None,
 ) -> dict[str, object]:
     _rate_limit(request)
     selected_folder = db.get_folder(library_folder_id)
@@ -445,6 +450,26 @@ async def create_clip_job(
     cap_explanation: str | None = None
     smart_available = profiles.smart_available()
     mode = "smart" if source_profile == "music" else resolve_processing_mode(processing_mode, smart_available)
+    selected_profile = next((profile for profile in profiles.db.list_profiles() if profile.selected), None)
+    if youtube_metadata is None:
+        # Not specified by the client: SEO titles follow the profile's
+        # "Auto-write SEO titles" setting for eligible Smart short jobs.
+        youtube_metadata = bool(
+            selected_profile and selected_profile.auto_seo_titles and smart_available
+            and content_format == "short" and mode == "smart" and processing_mode != "fast" and batch_mode != "high_volume"
+        )
+    if youtube_metadata and processing_mode == "auto" and (mode != "smart" or not smart_available):
+        # The default-on SEO toggle must not block an Auto job that resolved to
+        # Fast because OpenRouter is not reachable right now.
+        youtube_metadata = False
+    if youtube_metadata:
+        if content_format != "short" or processing_mode == "fast" or mode != "smart":
+            raise HTTPException(422, "YouTube metadata is unavailable in Fast or Long form jobs.")
+        if not smart_available or not selected_profile:
+            raise HTTPException(422, "YouTube metadata generation requires a connected OpenRouter provider.")
+        # The metadata model is an independent Settings profile preference. A
+        # job snapshots it so a later profile edit cannot rewrite queued work.
+        youtube_metadata_model_id = selected_profile.youtube_metadata_model_id
     if hook_text:
         if content_format != "short":
             raise HTTPException(422, "AI hook text is unavailable for Long form.")
@@ -470,6 +495,7 @@ async def create_clip_job(
         "presentation": presentation,
         "burn_subtitles": True if source_profile == "music" else burn_subtitles, "embed_subtitles": embed_subtitles,
         "hook_text": {"enabled": hook_text, "status": "pending" if hook_text else "disabled"},
+        "youtube_metadata": {"enabled": youtube_metadata, "model_id": youtube_metadata_model_id, "status": "pending" if youtube_metadata else "disabled"},
         "use_openrouter": mode == "smart" and smart_available and source_profile == "speech" and batch_mode == "standard",
         "library_folder_id": library_folder_id,
         "subscribe_animation": _subscribe_animation_request(subscribe_animation).model_dump(),
@@ -513,7 +539,7 @@ async def create_clip_job(
         private["cap_explanation"] = cap_explanation
     elif batch_mode == "high_volume":
         cap_explanation = "Effective target will be confirmed after YouTube download and FFprobe validation."
-    project = Project(id=project_id, name=_project_name(name, Path(source_name).stem), mode="clip", style=style, state="queued", source_name=source_name, source_kind=source_kind, requested_count=count, batch_mode=batch_mode, effective_target=effective_target, cap_explanation=cap_explanation, content_format=content_format, source_profile=source_profile, latest_job_id=job_id, library_folder_id=library_folder_id)
+    project = Project(id=project_id, name=_project_name(name, Path(source_name).stem), name_is_auto=not _project_name(name, ""), mode="clip", style=style, state="queued", source_name=source_name, source_kind=source_kind, requested_count=count, batch_mode=batch_mode, effective_target=effective_target, cap_explanation=cap_explanation, content_format=content_format, source_profile=source_profile, latest_job_id=job_id, library_folder_id=library_folder_id)
     high_volume_smart_landscape = batch_mode == "high_volume" and content_format == "long" and mode == "smart"
     steps = manager._fast_steps() if uses_fast_pipeline(mode, content_format) and not high_volume_smart_landscape else manager._smart_steps(bool(private["use_openrouter"]), source_profile, include_hook_text=hook_text)
     if batch_mode == "high_volume" and mode == "smart":
@@ -529,7 +555,7 @@ async def create_clip_job(
             steps[1].status = "complete"
             steps[1].detail = f"Source validated - {float(source_metadata['duration']):.1f}s"
             steps[1].started_at = steps[1].completed_at = checkpoint_time
-    job = Job(id=job_id, project_id=project_id, library_folder_id=library_folder_id, mode="clip", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style=style, processing_mode=mode, content_format=content_format, source_profile=source_profile, music_presentation=music_config if source_profile == "music" else None, music_top_text=(music_top_text if music_top_text.strip() else None) if source_profile == "music" else None, requested_count=count, batch_mode=batch_mode, effective_target=effective_target, cap_explanation=cap_explanation, burn_subtitles=True if source_profile == "music" else burn_subtitles, embed_subtitles=embed_subtitles, hook_text_enabled=hook_text, steps=steps)
+    job = Job(id=job_id, project_id=project_id, library_folder_id=library_folder_id, mode="clip", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style=style, processing_mode=mode, content_format=content_format, source_profile=source_profile, music_presentation=music_config if source_profile == "music" else None, music_top_text=(music_top_text if music_top_text.strip() else None) if source_profile == "music" else None, requested_count=count, batch_mode=batch_mode, effective_target=effective_target, cap_explanation=cap_explanation, burn_subtitles=True if source_profile == "music" else burn_subtitles, embed_subtitles=embed_subtitles, hook_text_enabled=hook_text, youtube_metadata_enabled=youtube_metadata, youtube_metadata_model_id=youtube_metadata_model_id, steps=steps)
     db.save_project(project)
     db.save_job(job, private)
     try:
@@ -734,6 +760,247 @@ async def update_captions(job_id: str, clip_id: str, value: CaptionReviewInput) 
     private.setdefault("caption_overrides", {})[clip_id] = {"revision": clip.caption_revision, "cues": cues}
     db.save_job(job, private)
     return public_job(job)
+
+
+@app.put("/api/v1/jobs/{job_id}/clips/{clip_id}/youtube-metadata", response_model=Job)
+async def update_youtube_metadata(job_id: str, clip_id: str, value: YouTubeMetadataUpdate) -> Job:
+    job = db.get_job(job_id)
+    if not job:
+        raise _not_found("Job")
+    clip = next((item for item in job.clips if item.id == clip_id), None)
+    if not clip:
+        raise _not_found("Clip")
+    if clip.library_asset_id is None:
+        raise HTTPException(409, "This completed clip has no linked Library asset")
+    linked = db.get_asset(clip.library_asset_id)
+    title, description = value.title, value.description
+    if linked and title == (clip.title or "") and linked.title != title:
+        # The Workspace draft was seeded from an older clip title (legacy data
+        # where only the Library copy was edited); an unchanged field must not
+        # revert the Library title.
+        title = linked.title
+    if linked and description == (clip.youtube_description or "") and linked.description and linked.description[:500] != description:
+        description = linked.description[:500]
+    try:
+        asset, saved_job, _ = db.update_generated_clip_metadata(
+            clip.library_asset_id, title, description, value.revision,
+            title_source="user" if linked is None or title != linked.title else None,
+        )
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    private = db.get_job_private(job_id)
+    private.setdefault("youtube_metadata_generation", {})[clip_id] = {
+        "status": "generated", "manual_edit": True, "updated_at": time.time(),
+    }
+    manager._save(saved_job, private)
+    return public_job(saved_job)
+
+
+def _record_youtube_metadata_failure(job_id: str, clip_id: str, revision: int, reason: str, excerpt: str = "") -> None:
+    latest = db.get_job(job_id)
+    clip = next((item for item in latest.clips if item.id == clip_id), None) if latest else None
+    if not latest or not clip or clip.youtube_metadata_revision != revision:
+        return
+    private = db.get_job_private(job_id)
+    state = private.setdefault("youtube_metadata_generation", {})
+    if not isinstance(state, dict):
+        state = private["youtube_metadata_generation"] = {}
+    state[clip_id] = {"status": "unavailable", "reason": reason[:300], "updated_at": time.time()}
+    fallback_description = clip.youtube_description or (excerpt[:500] if len(excerpt) >= 40 else "")
+    if clip.library_asset_id:
+        try:
+            linked_asset = db.get_asset(clip.library_asset_id)
+            # A failed generation records status only: the Library title and any
+            # description already there (possibly hand-written) stay as they are.
+            if linked_asset and linked_asset.description:
+                fallback_description = linked_asset.description[:500]
+            _, latest, clip = db.update_generated_clip_metadata(
+                clip.library_asset_id, (linked_asset.title if linked_asset else None) or clip.title or "Suggested title", fallback_description,
+                clip.youtube_metadata_revision, metadata_status="fallback" if fallback_description else "unavailable",
+                metadata_reason=reason[:300],
+            )
+        except (ValueError, KeyError):
+            clip.youtube_metadata_status = "unavailable"
+            clip.youtube_metadata_reason = reason[:300]
+    else:
+        clip.youtube_metadata_status = "fallback" if fallback_description else "unavailable"
+        clip.youtube_metadata_reason = reason[:300]
+        clip.youtube_description = fallback_description
+    manager._save(latest, private)
+
+
+@app.post("/api/v1/jobs/{job_id}/clips/{clip_id}/youtube-metadata", response_model=Job)
+async def generate_youtube_metadata(job_id: str, clip_id: str, regenerate: bool = Body(default=False, embed=True)) -> Job:
+    job = db.get_job(job_id)
+    if not job:
+        raise _not_found("Job")
+    clip = next((item for item in job.clips if item.id == clip_id), None)
+    if not clip or clip.state != "complete":
+        raise _not_found("Completed clip")
+    if job.mode != "clip":
+        raise HTTPException(409, "YouTube metadata generation is available only for Clip jobs")
+    if job.processing_mode == "fast" or job.content_format != "short":
+        raise HTTPException(409, "OpenRouter metadata generation is unavailable for Fast or Long form jobs")
+    private = db.get_job_private(job_id)
+    generation_state = private.setdefault("youtube_metadata_generation", {})
+    if not isinstance(generation_state, dict):
+        generation_state = private["youtube_metadata_generation"] = {}
+    prior = generation_state.get(clip_id)
+    if isinstance(prior, dict) and prior.get("status") == "in_flight":
+        started_at = prior.get("started_at")
+        if isinstance(started_at, (int, float)) and time.time() - started_at >= 120:
+            generation_state[clip_id] = {"status": "unavailable", "reason": "A previous generation attempt timed out; explicitly retrying is now allowed.", "updated_at": time.time()}
+            clip.youtube_metadata_status = "unavailable"
+            clip.youtube_metadata_reason = "A previous generation attempt timed out; explicitly retrying is now allowed."
+            manager._save(job, private)
+        else:
+            raise HTTPException(409, "Metadata generation is already in flight; wait for its result before retrying")
+    if clip.youtube_metadata_status == "generated" and not regenerate:
+        return public_job(job)
+    # Existing clips are handled only through this explicit action. Require the
+    # actual saved transcript excerpt; never infer clip content from the source title.
+    excerpt = (clip.transcript_excerpt or "").strip()[:1600]
+    if len(excerpt) < 20:
+        clip.youtube_metadata_status = "unavailable"
+        clip.youtube_metadata_reason = "Insufficient saved transcript context; no metadata was invented."
+        job.updated_at = now_iso()
+        manager._save(job, private)
+        raise HTTPException(422, "This clip has insufficient saved transcript context for metadata generation")
+    calls = private.get("youtube_metadata_generation_calls", 0)
+    if type(calls) is not int or calls < 0 or calls >= 5:
+        raise HTTPException(429, "This job has reached its five-request YouTube metadata generation limit")
+    profile = next((item for item in db.list_profiles() if item.selected), None)
+    model_id = job.youtube_metadata_model_id or (profile.youtube_metadata_model_id if profile else None)
+    if not model_id:
+        raise HTTPException(409, "Choose a title and description model in Settings")
+    try:
+        available_models = await profiles.openrouter_models()
+    except ProviderError as exc:
+        _record_youtube_metadata_failure(job_id, clip_id, clip.youtube_metadata_revision, exc.safe_message, excerpt)
+        raise HTTPException(503, exc.safe_message) from exc
+    model = next((item for item in available_models if item.id == model_id), None)
+    if not model or not model.pricing:
+        _record_youtube_metadata_failure(job_id, clip_id, clip.youtube_metadata_revision, "The selected metadata model is unavailable or has unknown pricing.", excerpt)
+        raise HTTPException(409, "The selected metadata model is unavailable or has unknown pricing")
+    if "response_format" not in model.supported_parameters:
+        _record_youtube_metadata_failure(job_id, clip_id, clip.youtube_metadata_revision, "The selected metadata model does not support structured JSON output.", excerpt)
+        raise HTTPException(409, "The selected metadata model does not support structured JSON output")
+    try:
+        input_rate = float(model.pricing["prompt"]) * 1_000_000
+        output_rate = float(model.pricing["completion"]) * 1_000_000
+    except (KeyError, ValueError, TypeError):
+        _record_youtube_metadata_failure(job_id, clip_id, clip.youtube_metadata_revision, "The selected metadata model has unknown pricing.", excerpt)
+        raise HTTPException(409, "The selected metadata model has unknown pricing") from None
+    if not math.isfinite(input_rate) or not math.isfinite(output_rate) or input_rate > 0.10 or output_rate > 0.40:
+        _record_youtube_metadata_failure(job_id, clip_id, clip.youtube_metadata_revision, "The selected metadata model exceeds the allowed price ceiling.", excerpt)
+        raise HTTPException(409, "The selected metadata model exceeds the $0.10/$0.40 per-million-token price ceiling")
+    system = SEO_TITLE_RULES
+    project = db.get_project(job.project_id)
+    language = str((private.get("transcript") or {}).get("language") or private.get("transcription_language") or "the transcript language")
+    avoid_titles = _library_title_pool(exclude_asset_id=clip.library_asset_id)
+    user = json.dumps({
+        "output_format": job.content_format, "transcript_language": language,
+        "source_title": source_context_title(project, private),
+        "channel_name": str((project.source_creator if project else None) or private.get("youtube_creator") or "")[:120],
+        "user_topic": str(private.get("topic") or "")[:200], "avoid_titles": avoid_titles,
+        "clips": [{"clip_id": clip.id, "start_seconds": round(clip.start, 2), "end_seconds": round(clip.end, 2), "transcript": excerpt}],
+    }, ensure_ascii=False)
+    cache_key = hashlib.sha256(json.dumps({
+        "range": [round(clip.start, 3), round(clip.end, 3)], "text": excerpt,
+        "language": language, "model": model_id, "prompt": SEO_PROMPT_VERSION,
+    }, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+    metadata_cache = private.setdefault("youtube_metadata_cache", {})
+    cached = metadata_cache.get(cache_key) if isinstance(metadata_cache, dict) else None
+    if not regenerate and isinstance(cached, dict) and isinstance(cached.get("title"), str) and isinstance(cached.get("description"), str):
+        if clip.library_asset_id is None:
+            raise HTTPException(409, "The completed clip has no linked Library asset")
+        try:
+            asset, saved_job, updated_clip = db.update_generated_clip_metadata(clip.library_asset_id, cached["title"], cached["description"], clip.youtube_metadata_revision, title_source="ai")
+        except ValueError as exc:
+            raise HTTPException(409, "Metadata changed before the cached suggestion could be applied") from exc
+        updated_clip.youtube_metadata_status = "generated"
+        updated_clip.youtube_metadata_model = model_id
+        updated_clip.youtube_metadata_generated_at = cached.get("generated_at")
+        updated_clip.youtube_metadata_cost_usd = cached.get("cost_usd")
+        updated_clip.youtube_metadata_cost_kind = cached.get("cost_kind", "estimated")
+        saved_job.clips = [updated_clip if item.id == clip_id else item for item in saved_job.clips]
+        latest_private = db.get_job_private(job_id)
+        latest_state = latest_private.setdefault("youtube_metadata_generation", {})
+        if isinstance(latest_state, dict):
+            latest_state[clip_id] = {"status": "generated", "cache_key": cache_key, "updated_at": time.time()}
+        manager._save(saved_job, latest_private)
+        return public_job(saved_job)
+    schema = {"type": "object", "additionalProperties": False, "properties": {
+        "clip_id": {"type": "string", "enum": [clip.id]},
+        "title": {"type": "string", "minLength": 1, "maxLength": 100},
+        "description": {"type": "string", "maxLength": 500},
+    }, "required": ["clip_id", "title", "description"]}
+    estimate_input = max(1, (len(system) + len(user) + 3) // 4)
+    estimate_output = 200
+    reserve = 2 * (estimate_input * 0.10 + estimate_output * 0.40) / 1_000_000
+    snapshot_revision = clip.youtube_metadata_revision
+    try:
+        job, private, clip = db.claim_youtube_metadata_generation(job_id, clip_id, snapshot_revision, model_id, reserve)
+        metadata_cache = private.setdefault("youtube_metadata_cache", {})
+        generation_state = private.setdefault("youtube_metadata_generation", {})
+        if not isinstance(generation_state, dict):
+            generation_state = private["youtube_metadata_generation"] = {}
+    except MetadataGenerationClaimError as exc:
+        code = 429 if exc.category in {"limit", "budget"} else 409
+        raise HTTPException(code, str(exc)) from exc
+    try:
+        result = await profiles.openrouter_json(
+            [{"role": "system", "content": system}, {"role": "user", "content": user}], schema,
+            require_saved_profile=True, model_id=model_id, temperature=0.2, max_tokens=200,
+            provider={"require_parameters": True, "max_price": {"prompt": 0.10, "completion": 0.40}},
+            reasoning={"enabled": False}, include_usage=True,
+        )
+        if not result or not isinstance(result, tuple):
+            raise ProviderError("not_configured", "Connect and test the selected OpenRouter profile before generating metadata")
+        payload, usage = result
+        if payload.get("clip_id") != clip.id:
+            raise ValueError("Provider returned a missing or unknown clip identifier")
+        clean_title = normalize_seo_title(payload.get("title"))
+        if not clean_title:
+            raise ValueError("Provider returned an unusable title")
+        metadata = YouTubeMetadataUpdate(revision=snapshot_revision, title=clean_title, description=normalize_seo_description(payload.get("description")))
+        if any(item.id != clip_id and item.title and item.title.casefold() == metadata.title.casefold() for item in job.clips) or metadata.title.casefold() in {title.casefold() for title in avoid_titles}:
+            raise ValueError("Provider returned a repetitive title already used in the Library")
+        latest = db.get_job(job_id)
+        latest_clip = next((item for item in latest.clips if item.id == clip_id), None) if latest else None
+        if not latest_clip or latest_clip.youtube_metadata_revision != snapshot_revision:
+            raise HTTPException(409, "Metadata changed while generation was running; the newer edit was preserved")
+        if latest_clip.library_asset_id is None:
+            raise HTTPException(409, "The completed clip has no linked Library asset")
+        input_tokens = usage.get("prompt_tokens") if isinstance(usage.get("prompt_tokens"), int) else estimate_input
+        output_tokens = usage.get("completion_tokens") if isinstance(usage.get("completion_tokens"), int) else estimate_output
+        actual = usage.get("cost")
+        has_actual_cost = isinstance(actual, (int, float)) and actual >= 0
+        if not has_actual_cost:
+            actual = input_tokens * float(model.pricing["prompt"]) + output_tokens * float(model.pricing["completion"])
+        generated_at = now_iso()
+        cost_usd = float(actual)
+        cost_kind = "actual" if has_actual_cost else "estimated"
+        asset, saved_job, updated_clip = db.update_generated_clip_metadata(
+            latest_clip.library_asset_id, metadata.title, metadata.description, snapshot_revision,
+            model_id=model_id, generated_at=generated_at, input_tokens=input_tokens,
+            output_tokens=output_tokens, cost_usd=cost_usd, cost_kind=cost_kind, title_source="ai",
+        )
+        saved_job.clips = [updated_clip if item.id == clip_id else item for item in saved_job.clips]
+        if isinstance(metadata_cache, dict):
+            metadata_cache[cache_key] = {"title": metadata.title, "description": metadata.description, "generated_at": updated_clip.youtube_metadata_generated_at, "cost_usd": updated_clip.youtube_metadata_cost_usd, "cost_kind": updated_clip.youtube_metadata_cost_kind, "model": model_id}
+        generation_state[clip_id] = {"status": "generated", "model": model_id, "cache_key": cache_key, "updated_at": time.time()}
+        manager._save(saved_job, private)
+        return public_job(saved_job)
+    except HTTPException:
+        raise
+    except ProviderError as exc:
+        _record_youtube_metadata_failure(job_id, clip_id, snapshot_revision, exc.safe_message, excerpt)
+        raise HTTPException(503, exc.safe_message) from exc
+    except (ValueError, TypeError, KeyError) as exc:
+        reason = "Provider returned invalid metadata; transcript-based description is shown."
+        _record_youtube_metadata_failure(job_id, clip_id, snapshot_revision, reason, excerpt)
+        raise HTTPException(502, "OpenRouter returned invalid YouTube metadata; the playable clip was preserved") from exc
 
 
 @app.post("/api/v1/jobs/{job_id}/clips/{clip_id}/captions/rerender", response_model=Job)
@@ -952,7 +1219,7 @@ async def get_video_download(task_id: str) -> VideoDownloadTask:
     return result
 
 
-@app.get("/api/v1/openrouter/models", response_model=list[OpenRouterModel])
+@app.get("/api/v1/openrouter/models", response_model=list[OpenRouterModel], response_model_exclude_none=True)
 async def list_openrouter_models(output_modalities: Annotated[str | None, Query(alias="outputModalities")] = None) -> list[OpenRouterModel]:
     if output_modalities not in {None, "text"}:
         raise HTTPException(422, "Unsupported OpenRouter output modality")
@@ -1328,9 +1595,53 @@ async def update_asset(asset_id: str, value: AssetUpdate) -> Asset:
             raise _not_found("Folder")
         if destination.archived:
             raise HTTPException(409, "Archived folders cannot receive assets")
-    asset = asset.model_copy(update=update)
-    db.save_asset(asset)
+    metadata_update = asset.origin == "generated-clip" and ({"title", "description"} & update.keys())
+    if metadata_update:
+        job = db.get_job(asset.source_job_id or "")
+        clip = next((item for item in job.clips if item.id == asset.source_clip_id), None) if job else None
+        if not job or not clip:
+            raise HTTPException(409, "The linked generated clip is unavailable")
+        title = str(update.get("title", asset.title))
+        description = str(update.get("description", asset.description))
+        try:
+            asset, saved_job, _ = db.update_generated_clip_metadata(
+                asset.id, title, description, clip.youtube_metadata_revision,
+                title_source="user" if title != asset.title else None,
+            )
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        other_updates = {key: value for key, value in update.items() if key not in {"title", "description"}}
+        if other_updates:
+            asset = asset.model_copy(update=other_updates)
+            db.save_asset(asset)
+        manager._save(saved_job, db.get_job_private(saved_job.id))
+    else:
+        if "title" in update and update["title"] != asset.title:
+            update["title_source"] = "user"
+        asset = asset.model_copy(update=update)
+        db.save_asset(asset)
     return _public_asset(asset)
+
+
+def _library_title_pool(*, exclude_asset_id: str | None = None) -> list[str]:
+    """Existing Library titles the AI must not repeat (bounded prompt size)."""
+    return sorted({asset.title for asset in db.list_assets(include_archived=True) if asset.id != exclude_asset_id and asset.title})[:200]
+
+
+@app.post("/api/v1/library/title-suggestions", response_model=TitleSuggestionResponse)
+async def suggest_library_titles(value: TitleSuggestionRequest) -> TitleSuggestionResponse:
+    """Suggest SEO titles for existing Library items. Writes nothing."""
+    if not value.asset_ids and value.scope != "auto-titled":
+        raise HTTPException(422, "Choose Library items or the auto-titled scope")
+    try:
+        return await title_backfill.suggest(value)
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.post("/api/v1/library/title-suggestions/apply", response_model=TitleApplyResponse)
+async def apply_library_titles(value: TitleApplyRequest) -> TitleApplyResponse:
+    return await asyncio.to_thread(title_backfill.apply, value)
 
 
 @app.get("/api/v1/library/match", response_model=MatchExplanation)
