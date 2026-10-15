@@ -1585,14 +1585,19 @@ _IRONIC_REACTION_PHRASES = (
 _IRONIC_REACTION_ASSETS = {emoji: resolve_emoji(emoji) for emoji, _ in _IRONIC_REACTION_PHRASES}
 _IRONIC_REACTION_DURATION = 1.1
 _IRONIC_REACTION_COOLDOWN = 5.0
+_CLIP_REACTION_EMOJIS = {
+    "funny": ("💀", "🗿", "🧠", "🧍"),
+    "hype": ("🥶", "💀", "🗿"),
+}
+_CLIP_REACTION_INTERVAL = 3.5
 
 
-def select_ironic_reactions(words: list[dict[str, Any]], offset: float, duration: float) -> list[tuple[str, float, float]]:
-    """Select sparse phrase-level reactions as clip-local (emoji, start, end) cues.
+def select_ironic_reactions(words: list[dict[str, Any]], offset: float, duration: float, *, style: str | None = None) -> list[tuple[str, float, float]]:
+    """Select clip-local (emoji, start, end) cues from timed transcript words.
 
     Matching uses contiguous normalized word phrases; source text and timestamps
-    are only read, never modified. Phrase ends anchor a 1.1s cue just before and
-    after the final spoken word, bounded to the requested clip.
+    are only read, never modified. Funny/Hype clips fill 3.5s speech slots with
+    phrase matches or bundled fallbacks; other callers retain sparse matching.
     """
     clip_start, clip_duration = float(offset), float(duration)
     if not math.isfinite(clip_start) or not math.isfinite(clip_duration) or clip_duration <= 0:
@@ -1637,6 +1642,39 @@ def select_ironic_reactions(words: list[dict[str, Any]], offset: float, duration
                 if phrase_end <= clip_start or phrase_start >= clip_start + clip_duration:
                     continue
                 matches.append((phrase_start, -len(phrase_tokens), reaction_order, phrase_end, emoji))
+    if style in _CLIP_REACTION_EMOJIS:
+        allowed = _CLIP_REACTION_EMOJIS[style]
+        selected = []
+        cadence_index = 0
+        while cadence_index * _CLIP_REACTION_INTERVAL < clip_duration:
+            window_start = cadence_index * _CLIP_REACTION_INTERVAL
+            window_end = min(clip_duration, window_start + _CLIP_REACTION_INTERVAL)
+            speech = [item for item in normalized if item[2] > clip_start + window_start and item[1] < clip_start + window_end]
+            if speech:
+                match = next((item for item in sorted(matches) if window_start <= item[0] - clip_start < window_end), None)
+                if match:
+                    emoji = match[4]
+                    cue_start = max(0.0, match[3] - clip_start - .15)
+                else:
+                    emoji = allowed[cadence_index % len(allowed)]
+                    cue_start = max(window_start, speech[0][1] - clip_start)
+                cue_end = min(clip_duration, cue_start + _IRONIC_REACTION_DURATION)
+                absolute_start, absolute_end = clip_start + cue_start, clip_start + cue_end
+                if cue_end > cue_start and any(start < absolute_end and end > absolute_start for start, end in manual_emoji_times):
+                    candidate = next((item for item in speech if not any(start < min(clip_start + window_end, item[2]) and end > max(clip_start + window_start, item[1]) for start, end in manual_emoji_times)), None)
+                    if candidate is None:
+                        cadence_index += 1
+                        continue
+                    cue_start = max(window_start, candidate[1] - clip_start)
+                    cue_end = min(clip_duration, cue_start + _IRONIC_REACTION_DURATION)
+                    if any(start < clip_start + cue_end and end > clip_start + cue_start for start, end in manual_emoji_times):
+                        cadence_index += 1
+                        continue
+                if cue_end > cue_start:
+                    selected.append((emoji, cue_start, cue_end))
+            cadence_index += 1
+        return selected
+
     selected = []
     cooldown_until = -math.inf
     for phrase_start, _, _, phrase_end, emoji in sorted(matches):
@@ -1666,7 +1704,7 @@ def _caption_emoji_plan(words: list[dict[str, Any]], width: int, height: int, du
         metrics = _ass_style_metrics(width, height)
         y = max(0, min(height - size, height - metrics["margin_v"] - size - 2 * metrics["fontsize"] - round(24 * scale)))
     plan: list[tuple[Path, float, float, int, int, int]] = []
-    if source_profile == "music" or music_theme or (not smart_speech and reaction_policy != "ironic_v1"): 
+    if source_profile == "music" or (not smart_speech and reaction_policy != "ironic_v1"):
         return plan
     ironic = reaction_policy == "ironic_v1" and source_profile == "speech"
     enriched_local = local
@@ -1722,7 +1760,7 @@ def _caption_emoji_plan(words: list[dict[str, Any]], width: int, height: int, du
             x = round(width / 2 - size / 2 - (len(unique[:2]) - 1) * size * .58 + index * size * 1.16)
             plan.extend((asset, interval_start, interval_end, x, y, size) for interval_start, interval_end in active_intervals)
     if ironic:
-        for emoji, cue_start, cue_end in select_ironic_reactions(words, offset, duration):
+        for emoji, cue_start, cue_end in select_ironic_reactions(words, offset, duration, style=style):
             asset = _IRONIC_REACTION_ASSETS.get(emoji)
             if asset is not None:
                 plan.append((asset, cue_start, cue_end, round(width / 2 - size / 2), y, size))
@@ -2313,7 +2351,7 @@ def render_clip(source: Path, output: Path, *, start: float, end: float, aspect:
     command = [settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{start:.3f}", "-i", str(source)]
     _overlay_inputs(command, overlays)
     subscribe_animations = _subscribe_animation_inputs(command, subscribe_animation, duration, content_format, width, height, 1 + len(overlays))
-    emoji_plan = _caption_emoji_plan(words, width, height, duration, offset=start, style=style, presentation=presentation, music_theme=music_theme, reaction_policy=reaction_policy, source_profile=source_profile) if subtitles_enabled and (presentation in {"smart_speech_v1", "smart_speech_v2"} or reaction_policy == "ironic_v1") and not music_theme else []
+    emoji_plan = _caption_emoji_plan(words, width, height, duration, offset=start, style=style, presentation=presentation, music_theme=music_theme, reaction_policy=reaction_policy, source_profile=source_profile) if subtitles_enabled and (presentation in {"smart_speech_v1", "smart_speech_v2"} or reaction_policy == "ironic_v1") else []
     emoji_inputs = list(dict.fromkeys(path for path, *_ in emoji_plan))
     _overlay_inputs(command, [(path, 0, duration) for path in emoji_inputs])
     subtitle_index = 1 + len(overlays) + len(subscribe_animations) + len(emoji_inputs)

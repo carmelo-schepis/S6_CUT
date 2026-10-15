@@ -133,6 +133,50 @@ def test_ironic_reaction_cues_clip_to_requested_interval_and_use_local_times() -
     assert select_ironic_reactions(after, float("nan"), 5) == []
 
 
+@pytest.mark.parametrize(("style", "expected"), [
+    ("funny", ["💀", "🗿", "🧠", "🧍"]),
+    ("hype", ["🥶", "💀", "🗿", "🥶"]),
+])
+def test_clip_reactions_fill_ordinary_speech_every_three_point_five_seconds(style: str, expected: list[str]) -> None:
+    from engine.media import select_ironic_reactions
+
+    words = [
+        {"text": f"ordinary{index}", "start": index * .5, "end": index * .5 + .4}
+        for index in range(24)
+    ]
+    result = select_ironic_reactions(words, 0, 12, style=style)
+
+    assert [emoji for emoji, *_ in result] == expected
+    assert [start for _, start, _ in result] == pytest.approx([0, 3.5, 7, 10.5])
+    assert [end - start for _, start, end in result] == pytest.approx([1.1] * 4)
+
+
+def test_hype_cadence_uses_available_match_outside_its_fallback_cycle() -> None:
+    from engine.media import select_ironic_reactions
+
+    result = select_ironic_reactions(_phrase_words("that backfired"), 0, 5, style="hype")
+
+    assert [emoji for emoji, *_ in result] == ["📉"]
+
+
+def test_funny_cadence_prefers_matching_reaction_and_avoids_manual_emoji_overlap() -> None:
+    from engine.media import select_ironic_reactions
+
+    words = [
+        {"text": "🔥", "start": 0, "end": .8},
+        {"text": "ordinary", "start": .2, "end": .4},
+        {"text": "speech", "start": .8, "end": 1.2},
+        {"text": "plot", "start": 4, "end": 4.2},
+        {"text": "twist", "start": 4.25, "end": 4.45},
+    ]
+
+    result = select_ironic_reactions(words, 0, 8, style="funny")
+
+    assert [emoji for emoji, *_ in result] == ["💀", "🧍"]
+    assert [start for _, start, _ in result] == pytest.approx([.8, 4.3])
+    assert [end for _, _, end in result] == pytest.approx([1.9, 5.4])
+
+
 def test_ironic_reaction_assets_are_bundled_and_available_offline() -> None:
     from engine.media import _IRONIC_REACTION_ASSETS, _IRONIC_REACTION_PHRASES
 
