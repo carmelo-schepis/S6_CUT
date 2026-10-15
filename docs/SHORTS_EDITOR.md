@@ -10,7 +10,24 @@ atomic publication transaction, immutable content-addressed blobs, and
 server-signed preview/download URLs.
 
 The workflow currently supports 9:16, 16:9, 1:1, and 4:5 output, optional burned
-captions through the ASS pipeline, and authorised Library music with bounded volume.
+captions through the ASS pipeline, closed safe Original/Warm/Cool/Black & White/Tint
+looks, output mute and bounded volume, literal text overlays, and the existing
+subscribe animation. The reference-inspired workspace uses a Media/Filters/Text tool
+rail, an aspect-ratio preview, a shared-time-scale Video/Audio/Text track view, and a
+contextual properties inspector. Selecting Video or Audio on the timeline exposes
+trim or audio properties; the Video and Audio tracks stay linked to the same source.
+Export mute and volume are separate from the preview-only mute control. The editor's
+volume control is bounded to 0–100% so preview and rendered loudness stay aligned.
+These local edits are only submitted when the user explicitly queues a short. Text
+placement is output-relative, keyboard-adjustable, and draggable inside the frame;
+the inspector can be dismissed without changing the edit. Overlay start and positive
+duration are relative to the trimmed output and must fit within it; an invalid interval
+is flagged and blocks submission until corrected.
+Tint opacity uses a transparency scale: 0% transparency is fully opaque and 100% is
+invisible. Filter intensity is bounded and user text is escaped for ASS rendering.
+These choices are snapshotted into each queued job; they never alter the immutable
+source. Filter choices are enumerated server-side (no user-authored FFmpeg filter
+strings are accepted).
 Completed Shorts Editor outputs can be selected from the Clips panel or dragged into
 the Editor; both paths resolve the clip's server-published Library asset and its
 signed preview URL. Loaded short trims are relative to that generated video (from

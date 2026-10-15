@@ -1280,6 +1280,53 @@ def _ass_escape(value: str) -> str:
     return safe.replace("\\", r"\\").replace("{", r"\{").replace("}", r"\}").replace("\r\n", r"\N").replace("\r", r"\N").replace("\n", r"\N")
 
 
+def _shorts_grade_filter(preset: str, intensity: float, tint_color: str, tint_opacity: int) -> str:
+    amount = max(0.0, min(1.0, float(intensity)))
+    if preset == "warm":
+        return f"colorbalance=rs={.05 * amount:.3f}:gs={.015 * amount:.3f}:bs={-.03 * amount:.3f}"
+    if preset == "cool":
+        return f"colorbalance=rs={-.03 * amount:.3f}:gs={.01 * amount:.3f}:bs={.05 * amount:.3f}"
+    if preset in {"black_white", "monochrome"}:
+        return f"hue=s={0 if preset == 'monochrome' else 1 - amount:.3f}"
+    if preset == "tint":
+        safe_color = tint_color if re.fullmatch(r"#[0-9a-fA-F]{6}", tint_color) else "#d58a55"
+        # Tint opacity is transparent percent: 0 means fully opaque, 100 means invisible.
+        opacity = max(0, min(100, int(tint_opacity)))
+        strength = amount * (1 - opacity / 100)
+        channels = [int(safe_color[index:index + 2], 16) / 255 for index in (1, 3, 5)]
+        # A zero-strength tint is the identity, while the maximum shifts each
+        # midtone toward the requested RGB tint without replacing source luma.
+        offsets = [max(-0.4, min(0.4, (channel - 0.5) * 0.8 * strength)) for channel in channels]
+        red, green, blue = offsets
+        return f"colorbalance=rm={red:.4f}:gm={green:.4f}:bm={blue:.4f}:pl=1"
+    return "null"
+
+
+def _append_text_overlays(path: Path, overlays: list[dict[str, Any]], duration: float, width: int, height: int) -> None:
+    events = []
+    for item in overlays[:20]:
+        text = _ass_escape(str(item.get("text", "")))
+        if not text:
+            continue
+        start = float(item.get("start", 0))
+        item_duration = float(item.get("duration", 0))
+        if not math.isfinite(start) or not math.isfinite(item_duration) or start < 0 or item_duration <= 0 or start + item_duration > duration + 1e-6:
+            raise MediaError("Text overlay timing must be finite and fit inside the trimmed output")
+        end = start + item_duration
+        color = str(item.get("color", "#ffffff"))
+        if not re.fullmatch(r"#[0-9a-fA-F]{6}", color):
+            color = "#ffffff"
+        red, green, blue = color[1:3], color[3:5], color[5:7]
+        size = max(8, min(240, round(float(item.get("size", 48)) * height / 1920)))
+        x = round(max(0, min(1, float(item.get("x", .5))) * width))
+        y = round(max(0, min(1, float(item.get("y", .5))) * height))
+        tag = f"{{\\an5\\pos({x},{y})\\fs{size}\\1c&H{blue}{green}{red}&\\bord2\\shad1}}"
+        events.append(f"Dialogue: 30,{_ass_time(start)},{_ass_time(end)},Caption,,0,0,0,,{tag}{text}")
+    if events:
+        with path.open("a", encoding="utf-8") as output:
+            output.write("\n" + "\n".join(events) + "\n")
+
+
 def caption_words_for_clip(words: Iterable[dict[str, Any]], start: float, end: float) -> list[dict[str, Any]]:
     """Select source-time words and convert their timestamps to clip-local time."""
     clip_start, clip_end = float(start), float(end)
@@ -2151,7 +2198,7 @@ def _smart_speech_emoji_filters(plan: list[tuple[Path, float, float, int, int, i
     return ";".join(filters)
 
 
-def render_clip(source: Path, output: Path, *, start: float, end: float, aspect: str, words: list[dict[str, Any]], visuals: list[tuple[str, float, float]], overlays: list[tuple[Path, float, float]], settings: Settings, style: str = "educational", has_audio: bool = True, embed_subtitles: bool = False, subtitle_language: str = "und", creator_credit: str | None = None, content_format: str | None = None, centered_partial_fill: bool = False, subscribe_animation: dict[str, Any] | None = None, music_theme: str | None = None, music_top_text: str | None = None, music_treatment: str | None = None, hook_text: str | None = None, presentation: str | None = None, subtitles_enabled: bool = True) -> None:
+def render_clip(source: Path, output: Path, *, start: float, end: float, aspect: str, words: list[dict[str, Any]], visuals: list[tuple[str, float, float]], overlays: list[tuple[Path, float, float]], settings: Settings, style: str = "educational", has_audio: bool = True, embed_subtitles: bool = False, subtitle_language: str = "und", creator_credit: str | None = None, content_format: str | None = None, centered_partial_fill: bool = False, subscribe_animation: dict[str, Any] | None = None, music_theme: str | None = None, music_top_text: str | None = None, music_treatment: str | None = None, hook_text: str | None = None, presentation: str | None = None, subtitles_enabled: bool = True, muted: bool = False, volume: float = 1.0, filter_preset: str = "none", filter_intensity: float = 1.0, tint_color: str = "#d58a55", tint_opacity: int = 0, text_overlays: list[dict[str, Any]] | None = None) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     has_supported_emoji = presentation in {"smart_speech_v1", "smart_speech_v2"} and any(find_emoji_sequences(str(word.get("text", ""))) for word in words)
     separate_burn_script = bool(creator_credit or hook_text or not subtitles_enabled or has_supported_emoji)
@@ -2167,6 +2214,7 @@ def render_clip(source: Path, output: Path, *, start: float, end: float, aspect:
     credit_alignment = _credit_alignment(source, start=start, end=end, width=width, height=height, settings=settings) if creator_credit else 3
     caption_words = words if subtitles_enabled else []
     write_ass(ass, caption_words, offset=start, duration=duration, visuals=visuals, width=width, height=height, style=style, creator_credit=creator_credit, credit_alignment=credit_alignment, content_format=content_format, music_theme=music_theme, music_top_text=music_top_text, hook_text=hook_text, hook_end_time=hook_end_time, presentation=presentation, burn_emoji_images=presentation in {"smart_speech_v1", "smart_speech_v2"})
+    _append_text_overlays(ass, text_overlays or [], duration, width, height)
     # Downloadable sidecars remain independent of the burn-in toggle; the
     # internal ASS and MP4 overlay receive no speech captions when disabled.
     write_caption_sidecars(output, words, offset=start, duration=duration, style=style, music_theme=music_theme, presentation=presentation)
@@ -2189,13 +2237,15 @@ def render_clip(source: Path, output: Path, *, start: float, end: float, aspect:
     if source_meta["rotation"] % 180:
         sample_aspect_ratio = 1.0 / sample_aspect_ratio
     filters, mapped = _filters(width, height, overlays, 1, ass.name, source_dimensions, subscribe_animations, music_treatment, centered_partial_fill, sample_aspect_ratio)
+    if filter_preset != "none":
+        filters = filters.replace("[0:v]", f"[0:v]{_shorts_grade_filter(filter_preset, filter_intensity, tint_color, tint_opacity)},")
     if emoji_plan:
         emoji_filters = _smart_speech_emoji_filters(emoji_plan, 1 + len(overlays) + len(subscribe_animations), emoji_inputs)
         filters = f"{filters};{emoji_filters}"
         mapped = f"emojiout{len(emoji_plan) - 1}"
     command.extend(["-t", f"{duration:.3f}", "-filter_complex", filters, "-map", f"[{mapped}]"])
-    if has_audio:
-        command.extend(["-map", "0:a:0", "-c:a", DELIVERY_AUDIO_CODEC, "-b:a", DELIVERY_AUDIO_BITRATE, "-ar", DELIVERY_AUDIO_RATE])
+    if has_audio and not muted:
+        command.extend(["-map", "0:a:0", "-af", f"volume={max(0.0, min(2.0, volume)):.3f}", "-c:a", DELIVERY_AUDIO_CODEC, "-b:a", DELIVERY_AUDIO_BITRATE, "-ar", DELIVERY_AUDIO_RATE])
     else:
         command.append("-an")
     if embed_subtitles:
@@ -2203,7 +2253,7 @@ def render_clip(source: Path, output: Path, *, start: float, end: float, aspect:
     command.extend(["-c:v", DELIVERY_VIDEO_CODEC, "-preset", DELIVERY_PRESET, "-crf", DELIVERY_CRF, "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-t", f"{duration:.3f}", str(temp)])
     run(command, cwd=output.parent, timeout=7200)
     metadata = probe(temp, settings)
-    if metadata["width"] != width or metadata["height"] != height or (has_audio and not metadata["audio"]):
+    if metadata["width"] != width or metadata["height"] != height or (has_audio and not muted and not metadata["audio"]):
         raise MediaError("Rendered clip failed structural output validation")
     os.replace(temp, output)
 
@@ -2460,6 +2510,13 @@ def render_fast_clip(
     music_treatment: str | None = None,
     presentation: str | None = None,
     hook_text: str | None = None,
+    muted: bool = False,
+    volume: float = 1.0,
+    filter_preset: str = "none",
+    filter_intensity: float = 1.0,
+    tint_color: str = "#d58a55",
+    tint_opacity: int = 0,
+    text_overlays: list[dict[str, Any]] | None = None,
 ) -> None:
     """Render a fast clip with optional captions and no overlays or visual beats.
 
@@ -2512,6 +2569,8 @@ def render_fast_clip(
             creator_credit=creator_credit, content_format=content_format,
             centered_partial_fill=centered_partial_fill, subscribe_animation=subscribe_animation,
             presentation=presentation, subtitles_enabled=subtitles_enabled, hook_text=hook_text,
+            muted=muted, volume=volume, filter_preset=filter_preset, filter_intensity=filter_intensity,
+            tint_color=tint_color, tint_opacity=tint_opacity, text_overlays=text_overlays,
         )
         return
 
@@ -2527,6 +2586,8 @@ def render_fast_clip(
             creator_credit=creator_credit, content_format=content_format,
             centered_partial_fill=centered_partial_fill, subscribe_animation=subscribe_animation, music_theme=music_theme,
             music_top_text=music_top_text, music_treatment=music_treatment,
+            muted=muted, volume=volume, filter_preset=filter_preset, filter_intensity=filter_intensity,
+            tint_color=tint_color, tint_opacity=tint_opacity, text_overlays=text_overlays,
         )
         return
 
@@ -2553,6 +2614,7 @@ def render_fast_clip(
             # surfaces source-quality warnings for exactly this case.
             logger.info("Skipping punch-in for %s: source %dx%d has no headroom over %dx%d",
                         output.name, src_width, src_height, width, height)
+    vf = f"{vf},{_shorts_grade_filter(filter_preset, filter_intensity, tint_color, tint_opacity)}" if filter_preset != "none" else vf
     if look_before:
         vf = f"{vf},{look_before}"
     if look_after:
@@ -2560,10 +2622,11 @@ def render_fast_clip(
     ass: Path | None = None
     if (subtitles_enabled or embed_subtitles) and words:
         write_caption_sidecars(output, words, offset=0, duration=duration, style=style)
-    if (subtitles_enabled and words) or creator_credit:
+    if (subtitles_enabled and words) or creator_credit or text_overlays:
         ass = output.parent / (f"{output.stem}.burn.ass" if creator_credit else f"{output.stem}.ass")
         credit_alignment = _credit_alignment(source, start=start, end=end, width=width, height=height, settings=settings) if creator_credit else 3
-        write_ass(ass, words or [], offset=0, duration=duration, visuals=[], width=width, height=height, style=style, creator_credit=creator_credit, credit_alignment=credit_alignment, content_format=content_format)
+        write_ass(ass, words if subtitles_enabled else [], offset=0, duration=duration, visuals=[], width=width, height=height, style=style, creator_credit=creator_credit, credit_alignment=credit_alignment, content_format=content_format)
+        _append_text_overlays(ass, text_overlays or [], duration, width, height)
         if creator_credit:
             write_ass(output.with_suffix(".ass"), words or [], offset=0, duration=duration, visuals=[], width=width, height=height, style=style, content_format=content_format)
     if look_before or look_after:
@@ -2610,10 +2673,12 @@ def render_fast_clip(
         "-movflags",
         "+faststart",
     ])
-    if has_audio:
+    if has_audio and not muted:
         command.extend([
             "-map",
             "0:a:0",
+            "-af",
+            f"volume={max(0.0, min(2.0, volume)):.3f}",
             "-c:a",
             DELIVERY_AUDIO_CODEC,
             "-b:a",
@@ -2635,7 +2700,7 @@ def render_fast_clip(
             f"Fast clip failed delivery validation: expected {width}x{height}, "
             f"got {result['width']}x{result['height']}"
         )
-    if has_audio and not result["audio"]:
+    if has_audio and not muted and not result["audio"]:
         raise MediaError("Fast clip expected audio but the output has no audio track")
     if abs(float(result["duration"]) - duration) > max(0.75, duration * 0.05):
         raise MediaError("Fast clip failed duration validation")

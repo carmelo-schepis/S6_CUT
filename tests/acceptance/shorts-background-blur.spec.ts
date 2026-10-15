@@ -129,11 +129,7 @@ async function queueShorts(page: Page, name: string, aspect: Aspect, source: "ur
   await page.locator('input[aria-label="End seconds"]').fill("10", { timeout: 10_000 });
   await page.locator('select[aria-label="Aspect ratio"]').selectOption(aspect, { timeout: 10_000 });
   await page.locator('input[placeholder="Optional project name"]').fill(name, { timeout: 10_000 });
-  await page.evaluate(() => {
-    const button = [...document.querySelectorAll("button")].find((candidate) => candidate.textContent?.includes("Queue short"));
-    if (!button) throw new Error("Queue short button not found");
-    button.click();
-  });
+  await page.getByRole("button", { name: "Queue short" }).click();
   return waitForComplete(name);
 }
 

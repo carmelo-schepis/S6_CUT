@@ -10,6 +10,11 @@ vi.mock("../api", () => ({
 
 const asset: LibraryAsset = { id: "asset-1", title: "Library clip", description: "", mediaType: "video/mp4", filename: "clip.mp4", tags: [], triggers: [], aliases: [], negativeTriggers: [], policy: "neutral", protected: false, minSpacingSeconds: 0, maxUsesPerProject: 0, licence: "User", attribution: "", contentHash: "hash", brands: [], people: [], folderId: "folder", origin: "manual-import", blobId: "blob", createdAt: "2026-01-01T00:00:00Z" };
 
+function trimField(name: "Start seconds" | "End seconds") {
+  const inspectorLabel = name === "Start seconds" ? "Video trim start seconds" : "Video trim end seconds";
+  return screen.queryByRole("region", { name: "Video properties" })?.querySelector(`[aria-label="${inspectorLabel}"]`) ?? screen.getByLabelText(name, { exact: true });
+}
+
 describe("ShortsEditorView", () => {
   beforeEach(() => { vi.clearAllMocks(); vi.mocked(listAssets).mockImplementation(async () => [asset]); vi.mocked(listJobs).mockResolvedValue([]); vi.mocked(createShortsJob).mockResolvedValue({ project: {} as never, job: {} as never }); vi.mocked(createShortsSourceJob).mockResolvedValue({ project: {} as never, job: {} as never }); });
   afterEach(() => vi.useRealTimers());
@@ -81,8 +86,8 @@ describe("ShortsEditorView", () => {
     fireEvent.click(screen.getByRole("tab", { name: /Library/ }));
     fireEvent.change(screen.getByLabelText("Library video"), { target: { value: asset.id } });
     await waitFor(() => expect(screen.getByLabelText("Library video")).toHaveValue(asset.id));
-    fireEvent.change(screen.getByLabelText("Start seconds"), { target: { value: "12.5" } });
-    fireEvent.change(screen.getByLabelText("End seconds"), { target: { value: "18" } });
+    fireEvent.change(trimField("Start seconds"), { target: { value: "12.5" } });
+    fireEvent.change(trimField("End seconds"), { target: { value: "18" } });
     fireEvent.click(screen.getByRole("button", { name: "Queue short" }));
 
     await waitFor(() => expect(createShortsJob).toHaveBeenCalledWith(expect.objectContaining({
@@ -116,9 +121,9 @@ describe("ShortsEditorView", () => {
     fireEvent.click(await screen.findByRole("button", { name: /Published cut/ }));
 
     await waitFor(() => expect(listAssets).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(screen.getByLabelText("End seconds")).toHaveValue(4));
-    expect(screen.getByLabelText("Start seconds")).toHaveValue(0);
-    expect(screen.getByLabelText("End seconds")).toHaveValue(4);
+    await waitFor(() => expect(trimField("End seconds")).toHaveValue(4));
+    expect(trimField("Start seconds")).toHaveValue(0);
+    expect(trimField("End seconds")).toHaveValue(4);
     fireEvent.click(screen.getByRole("button", { name: "Queue short" }));
     await waitFor(() => expect(createShortsJob).toHaveBeenCalledWith(expect.objectContaining({ assetId: asset.id, start: 0, end: 4 })));
   });
@@ -142,8 +147,8 @@ describe("ShortsEditorView", () => {
     fireEvent.pointerMove(clipButton, { pointerId: 7, clientX: 30, clientY: 30 });
     fireEvent.pointerUp(window, { pointerId: 7, clientX: 200, clientY: 200 });
 
-    await waitFor(() => expect(screen.getByLabelText("End seconds")).toHaveValue(6));
-    expect(screen.getByLabelText("Start seconds")).toHaveValue(0);
+    await waitFor(() => expect(trimField("End seconds")).toHaveValue(6));
+    expect(trimField("Start seconds")).toHaveValue(0);
     expect(listAssets).toHaveBeenCalledTimes(2);
   });
 
@@ -159,23 +164,24 @@ describe("ShortsEditorView", () => {
     vi.spyOn(window, "confirm").mockReturnValue(false);
     render(<ShortsEditorView onJobCreated={vi.fn()} />);
     await screen.findByRole("button", { name: /Selected cut/ });
-    fireEvent.change(screen.getByLabelText("Start seconds"), { target: { value: "20" } });
+    fireEvent.change(trimField("Start seconds"), { target: { value: "20" } });
     fireEvent.click(screen.getByRole("button", { name: /Selected cut/ }));
     await waitFor(() => expect(window.confirm).toHaveBeenCalledWith("Discard unsaved Shorts Editor changes?"));
-    expect(screen.getByLabelText("Start seconds")).toHaveValue(20);
+    expect(trimField("Start seconds")).toHaveValue(20);
     expect(screen.getByText("Unsaved edits")).toBeInTheDocument();
   });
 
   it("rejects invalid trim values and submits YouTube through multipart API", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
     render(<ShortsEditorView onJobCreated={vi.fn()} />);
     await waitFor(() => expect(screen.getByText("YouTube")).toBeInTheDocument());
-    fireEvent.change(screen.getByLabelText("Start seconds"), { target: { value: "-1" } });
+    fireEvent.change(trimField("Start seconds"), { target: { value: "-1" } });
     fireEvent.submit(screen.getByRole("button", { name: "Queue short" }).closest("form")!);
     expect(await screen.findByRole("alert")).toHaveTextContent(/at least 0/);
     fireEvent.click(screen.getByRole("tab", { name: /YouTube/ }));
     await waitFor(() => expect(screen.getByLabelText("YouTube URL")).toBeInTheDocument());
     fireEvent.change(screen.getByLabelText("YouTube URL"), { target: { value: "https://www.youtube.com/watch?v=test" } });
-    fireEvent.change(screen.getByLabelText("Start seconds"), { target: { value: "0" } });
+    fireEvent.change(trimField("Start seconds"), { target: { value: "0" } });
     fireEvent.click(screen.getByRole("button", { name: "Queue short" }));
     await waitFor(() => expect(createShortsSourceJob).toHaveBeenCalledWith(expect.objectContaining({ url: "https://www.youtube.com/watch?v=test", end: undefined })));
   });

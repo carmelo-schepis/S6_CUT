@@ -9,15 +9,13 @@ import { test, expect } from "@playwright/test";
 test("Shorts Editor exposes output settings for a YouTube source", async ({ page }) => {
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await expect(page.locator("#main-content")).toBeVisible();
-  await page.waitForTimeout(4_000);
-
+  await expect(page.getByRole("button", { name: "Shorts Editor", exact: true }).first()).toBeVisible();
   await page.getByRole("button", { name: "Shorts Editor", exact: true }).first().click();
-  await page.waitForTimeout(2_000);
+  await expect(page.getByRole("heading", { name: "Shorts Editor", exact: true })).toBeVisible();
   await page.getByRole("tab", { name: "YouTube", exact: true }).click();
-  await page.waitForTimeout(800);
+  await expect(page.getByLabel("YouTube URL")).toBeVisible();
   await page.getByRole("textbox", { name: /YouTube|URL/i }).first()
     .fill("https://www.youtube.com/watch?v=ZvSEsBpuP3c&pp=ugUHEgVlbi1BVQ%3D%3D");
-  await page.waitForTimeout(1_200);
 
   // Trim is already reachable; the rest of the job settings must be too.
   await expect(page.getByRole("spinbutton", { name: "Start seconds" }).first()).toBeVisible();

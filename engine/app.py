@@ -568,7 +568,9 @@ async def _queue_shorts_job(
     source_hash: str | None, source_metadata: dict[str, object] | None, url: str | None,
     start: float, end: float | None, aspect_ratio: str, library_folder_id: str,
     name: str | None = None, burn_subtitles: bool = True, embed_subtitles: bool = False, job_id: str | None = None,
-    subscribe_animation: SubscribeAnimationConfig | None = None,
+    subscribe_animation: SubscribeAnimationConfig | None = None, muted: bool = False,
+    volume: float = 1.0, filter_preset: Literal["none", "warm", "cool", "black_white", "tint", "monochrome"] = "none",
+    filter_intensity: float = 1.0, tint_color: str = "#d58a55", tint_opacity: int = 0, text_overlays: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     if manager.queue.full():
         raise HTTPException(429, "The local processing queue is full. Try again after an active job completes.")
@@ -577,7 +579,19 @@ async def _queue_shorts_job(
         raise _not_found("Library folder")
     if selected_folder.archived:
         raise HTTPException(409, "Archived folders cannot receive new projects")
-    _validate_shorts_trim(start, end, float(source_metadata["duration"]) if source_metadata else None)
+    source_duration = float(source_metadata["duration"]) if source_metadata else None
+    _validate_shorts_trim(start, end, source_duration)
+    output_duration = (end if end is not None else source_duration) - start if (end is not None or source_duration is not None) else None
+    for overlay in text_overlays or []:
+        try:
+            overlay_start = float(overlay["start"])
+            overlay_duration = float(overlay["duration"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(422, "Text overlay timing must be finite and positive") from exc
+        if not math.isfinite(overlay_start) or not math.isfinite(overlay_duration) or overlay_start < 0 or overlay_duration <= 0:
+            raise HTTPException(422, "Text overlay timing must be finite and positive")
+        if output_duration is not None and overlay_start + overlay_duration > output_duration + 1e-6:
+            raise HTTPException(422, "Text overlay timing must fit inside the trimmed output")
     project_id = str(uuid.uuid4())
     job_id = job_id or str(uuid.uuid4())
     project = Project(id=project_id, name=_project_name(name, f"Short — {Path(source_name).stem}"), mode="clip", style="educational", state="queued", source_name=source_name, source_kind=source_kind, requested_count=1, latest_job_id=job_id, library_folder_id=library_folder_id)
@@ -593,7 +607,7 @@ async def _queue_shorts_job(
         manager._apply_step(job, job.steps[1], status="complete", detail="Source duration validated", completed_at=timestamp)
     if processing_mode == "fast":
         manager._apply_step(job, job.steps[2], status="skipped", detail="Trim supplied by Shorts Editor", completed_at=timestamp)
-    private = {"source_path": str(source_path) if source_path else None, "source_kind": source_kind, "source_hash": source_hash, "source_metadata": source_metadata, "url": url, "trim_start": start, "trim_end": end, "aspect_ratio": aspect_ratio, "count": 1, "min_duration": max(0.1, clip.duration), "max_duration": max(0.1, clip.duration), "processing_mode": processing_mode, "burn_subtitles": burn_subtitles, "embed_subtitles": embed_subtitles, "library_folder_id": library_folder_id, "subscribe_animation": (subscribe_animation or SubscribeAnimationConfig()).model_dump()}
+    private = {"source_path": str(source_path) if source_path else None, "source_kind": source_kind, "source_hash": source_hash, "source_metadata": source_metadata, "url": url, "trim_start": start, "trim_end": end, "aspect_ratio": aspect_ratio, "count": 1, "min_duration": max(0.1, clip.duration), "max_duration": max(0.1, clip.duration), "processing_mode": processing_mode, "burn_subtitles": burn_subtitles, "embed_subtitles": embed_subtitles, "library_folder_id": library_folder_id, "subscribe_animation": (subscribe_animation or SubscribeAnimationConfig()).model_dump(), "muted": muted, "volume": volume, "filter_preset": filter_preset, "filter_intensity": filter_intensity, "tint_color": tint_color, "tint_opacity": tint_opacity, "text_overlays": text_overlays or []}
     db.save_project(project)
     db.save_job(job, private)
     try:
@@ -619,7 +633,7 @@ async def create_shorts_job(request: Request, value: ShortsJobInput) -> dict[str
         metadata = await asyncio.to_thread(probe, source, settings)
     except MediaError as exc:
         raise HTTPException(422, str(exc)) from exc
-    return await _queue_shorts_job(request=request, source_name=asset.filename, source_kind="upload", source_path=source, source_hash=asset.content_hash, source_metadata=metadata, url=None, start=value.start, end=value.end, aspect_ratio=value.aspect_ratio, library_folder_id=value.library_folder_id, name=value.name, burn_subtitles=value.burn_subtitles, embed_subtitles=value.embed_subtitles, subscribe_animation=value.subscribe_animation)
+    return await _queue_shorts_job(request=request, source_name=asset.filename, source_kind="upload", source_path=source, source_hash=asset.content_hash, source_metadata=metadata, url=None, start=value.start, end=value.end, aspect_ratio=value.aspect_ratio, library_folder_id=value.library_folder_id, name=value.name, burn_subtitles=value.burn_subtitles, embed_subtitles=value.embed_subtitles, subscribe_animation=value.subscribe_animation, muted=value.muted, volume=value.volume, filter_preset=value.filter_preset, filter_intensity=value.filter_intensity, tint_color=value.tint_color, tint_opacity=value.tint_opacity, text_overlays=[item.model_dump() for item in value.text_overlays])
 
 
 @app.post("/api/v1/jobs/shorts/source", status_code=status.HTTP_202_ACCEPTED)
@@ -634,6 +648,13 @@ async def create_shorts_source_job(
     name: Annotated[str | None, Form()] = None,
     burn_subtitles: Annotated[bool, Form()] = True,
     subscribe_animation: Annotated[str, Form()] = "{}",
+    muted: Annotated[bool, Form()] = False,
+    volume: Annotated[float, Form(ge=0, le=2)] = 1.0,
+    filter_preset: Annotated[Literal["none", "warm", "cool", "black_white", "tint", "monochrome"], Form()] = "none",
+    filter_intensity: Annotated[float, Form(ge=0, le=1)] = 1,
+    tint_color: Annotated[str, Form()] = "#d58a55",
+    tint_opacity: Annotated[int, Form(ge=0, le=100)] = 0,
+    text_overlays: Annotated[str, Form()] = "[]",
 ) -> dict[str, object]:
     _rate_limit(request)
     subscribe_animation = _subscribe_animation_request(subscribe_animation)
@@ -644,6 +665,15 @@ async def create_shorts_source_job(
     if parsed_start is None:
         raise HTTPException(422, "Start seconds must be a finite number at least 0")
     _validate_shorts_trim(parsed_start, parsed_end)
+    try:
+        overlay_values = [item.model_dump() for item in ShortsJobInput.model_validate({
+            "asset_id": "multipart-validation", "start": parsed_start, "end": parsed_end,
+            "text_overlays": json.loads(text_overlays), "muted": muted, "volume": volume,
+            "filter_preset": filter_preset, "filter_intensity": filter_intensity,
+            "tint_color": tint_color, "tint_opacity": tint_opacity,
+        }).text_overlays]
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(422, "Invalid Shorts output or text-overlay settings") from exc
     if file:
         original = safe_filename(file.filename or "source.mp4", "source.mp4")
         suffix = Path(original).suffix.casefold()
@@ -654,7 +684,7 @@ async def create_shorts_source_job(
         try:
             _, source_hash = await _stream_upload(file, source, settings.max_upload_bytes)
             metadata = await asyncio.to_thread(validate_video_upload, source, original, settings)
-            result = await _queue_shorts_job(request=request, source_name=original, source_kind="upload", source_path=source, source_hash=source_hash, source_metadata=metadata, url=None, start=parsed_start, end=parsed_end, aspect_ratio=aspect_ratio, library_folder_id=library_folder_id, name=name, burn_subtitles=burn_subtitles, job_id=job_id, subscribe_animation=subscribe_animation)
+            result = await _queue_shorts_job(request=request, source_name=original, source_kind="upload", source_path=source, source_hash=source_hash, source_metadata=metadata, url=None, start=parsed_start, end=parsed_end, aspect_ratio=aspect_ratio, library_folder_id=library_folder_id, name=name, burn_subtitles=burn_subtitles, job_id=job_id, subscribe_animation=subscribe_animation, muted=muted, volume=volume, filter_preset=filter_preset, filter_intensity=filter_intensity, tint_color=tint_color, tint_opacity=tint_opacity, text_overlays=overlay_values)
             return result
         except MediaError as exc:
             source.unlink(missing_ok=True)
@@ -667,7 +697,7 @@ async def create_shorts_source_job(
         validated_url = validate_youtube_url(url or "")
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    return await _queue_shorts_job(request=request, source_name="YouTube import", source_kind="youtube", source_path=None, source_hash=None, source_metadata=None, url=validated_url, start=parsed_start, end=parsed_end, aspect_ratio=aspect_ratio, library_folder_id=library_folder_id, name=name, burn_subtitles=burn_subtitles, subscribe_animation=subscribe_animation)
+    return await _queue_shorts_job(request=request, source_name="YouTube import", source_kind="youtube", source_path=None, source_hash=None, source_metadata=None, url=validated_url, start=parsed_start, end=parsed_end, aspect_ratio=aspect_ratio, library_folder_id=library_folder_id, name=name, burn_subtitles=burn_subtitles, subscribe_animation=subscribe_animation, muted=muted, volume=volume, filter_preset=filter_preset, filter_intensity=filter_intensity, tint_color=tint_color, tint_opacity=tint_opacity, text_overlays=overlay_values)
 
 
 @app.post("/api/v1/jobs/{job_id}/repair-publication", response_model=Job)
