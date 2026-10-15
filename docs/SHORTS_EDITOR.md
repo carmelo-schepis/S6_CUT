@@ -12,7 +12,11 @@ server-signed preview/download URLs.
 The workflow currently supports 9:16, 16:9, 1:1, and 4:5 output, optional burned
 captions through the ASS pipeline, closed safe Original/Warm/Cool/Black & White/Tint
 looks, output mute and bounded 0–200% volume, literal text overlays, and the existing
-subscribe animation. Text positions are normalized to the output frame; overlay start
+subscribe animation. The editor presents Video, Audio, and Text tools beside an
+output-aspect preview and a compact shared-time-scale track view; these local edits
+are only submitted when the user explicitly queues a short. Text placement is
+output-relative and keyboard-adjustable, and the contextual properties panel can be
+dismissed without changing the edit. Text positions are normalized to the output frame; overlay start
 and positive duration are relative to the trimmed output and must fit within it.
 Tint opacity uses a transparency scale: 0% transparency is fully opaque and 100% is
 invisible. Filter intensity is bounded and user text is escaped for ASS rendering.
