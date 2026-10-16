@@ -76,18 +76,26 @@
 
      Selector blue remains independent of all of this, so changing the brand
      never erases option-selection feedback. */
-  /* PicThing pink, deepened from #e24b8c so white button text clears 4.5:1;
-     the reference value returns on hover. */
-  --brand-primary: #d63a7f;
-  --brand-primary-hover: #e24b8c;
-  --brand-primary-active: #c22f6f;
-  --brand-muted: rgba(214, 58, 127, 0.55);
-  --brand-border: rgba(214, 58, 127, 0.45);
+  /* The accent is neutral grey; colour arrives only as the logo's gradient,
+     faded in on hover and on the current page marker. */
+  --brand-primary: #d4d4d4;
+  --brand-primary-hover: #ffffff;
+  --brand-primary-active: #a3a3a3;
+  --brand-muted: rgba(255, 255, 255, 0.4);
+  --brand-border: rgba(255, 255, 255, 0.28);
   /* The same accented hairline at panel scale, where 0.28 across a long edge
      would read as a selected state rather than as chrome. */
-  --brand-border-soft: rgba(214, 58, 127, 0.24);
-  --brand-soft: rgba(214, 58, 127, 0.14);
-  --brand-faint: rgba(214, 58, 127, 0.07);
+  --brand-border-soft: rgba(255, 255, 255, 0.14);
+  --brand-soft: rgba(255, 255, 255, 0.08);
+  --brand-faint: rgba(255, 255, 255, 0.04);
+  /* The logo's own colours, sampled from LOGO/App icon.png and lifted a step so
+     they read on black: crimson pip, plum, navy corner, slate pip, copper glow. */
+  --logo-crimson: #a3183a;
+  --logo-plum: #4a1752;
+  --logo-navy: #2a2fa8;
+  --logo-slate: #5a7898;
+  --logo-peach: #d98f6c;
+  --logo-gradient: linear-gradient(115deg, var(--logo-crimson), var(--logo-plum) 28%, var(--logo-navy) 52%, var(--logo-slate) 76%, var(--logo-peach));
   /* Back-compat aliases. The ramp used to be red and most rules still name it
      that way; keeping the names is what stops any rule bypassing the token
      layer. Additive, never a rename. */
@@ -102,11 +110,11 @@
   --theme-primary-hover: var(--brand-primary-hover);
   --theme-primary-active: var(--brand-primary-active);
   --theme-primary-soft: var(--brand-soft);
-  /* One accent: option selection uses the brand pink too. The previous violet
-     stays available as --accent-violet for the editor's title clips. */
-  --selector-highlight: #d63a7f;
-  --selector-highlight-hover: #e24b8c;
-  --selector-highlight-soft: rgba(214, 58, 127, 0.16);
+  /* Option selection is grey like the accent. The previous violet stays
+     available as --accent-violet for the editor's title clips. */
+  --selector-highlight: #a3a3a3;
+  --selector-highlight-hover: #e5e5e5;
+  --selector-highlight-soft: rgba(255, 255, 255, 0.1);
   --accent-violet: #766bff;
   --accent-magenta: #f14d9a;
   --accent-coral: #ff9a7a;
@@ -2312,8 +2320,8 @@ main { min-width: 0; }
 .job-download :is(dt, dd) { font-weight: var(--type-text-weight); }
 
 /* Library cards: title, source line, then origin and policy on one row. */
-.asset-card-details-content { display: flex; flex-wrap: wrap; align-content: start; gap: var(--space-1) var(--space-2); padding: var(--space-3); }
-.asset-card-details-content > :is(strong, span:not(.origin-badge):not(.status)) { flex: 1 0 100%; min-width: 0; }
+.asset-card .asset-card-details > .asset-card-details-content { display: flex; flex-wrap: wrap; align-content: start; gap: var(--space-1) var(--space-2); padding: var(--space-3) 0; }
+.asset-card .asset-card-details > .asset-card-details-content > :is(strong, span:not(.origin-badge):not(.status)) { flex: 1 0 100%; min-width: 0; }
 
 /* Settings: the profile sits in its card rather than in a second box. */
 .profile-row { border: 0; padding-inline: 0; }
@@ -2334,8 +2342,9 @@ main { min-width: 0; }
      - a faint 64px grid with a pink glow behind the create screen
    =========================================================================== */
 
-/* Wordmark: two tones, the S6 in the accent. */
-.brand-accent { color: var(--brand-primary); }
+/* Wordmark as in the logo: a white S6, a quieter "_cut". */
+.brand-accent { color: var(--text); }
+.brand-button > span, .mobile-brand > span { color: var(--text-muted); }
 .mobile-brand > span { font-weight: 700; }
 .brand-button > span { font-weight: 700; letter-spacing: -0.2px; }
 
@@ -2343,8 +2352,7 @@ main { min-width: 0; }
 .app-rail { background: var(--canvas); border-right-color: var(--border); }
 .nav-item, .help-launcher { color: var(--text-muted); }
 .nav-item:hover, .help-launcher:hover { color: var(--text); background: var(--surface-2); }
-.nav-item.active { color: var(--text); background: var(--brand-soft); }
-.nav-item.active .nav-main-icon, .nav-item.active > .nav-icon-wrap > svg { color: var(--brand-primary-hover); }
+.nav-item.active { color: var(--text); background: var(--surface-2); }
 .topbar { border-bottom-color: var(--border); }
 
 /* Secondary copy steps back to neutral-400. */
@@ -2356,10 +2364,13 @@ main { min-width: 0; }
 .engine-chips :is(.ok, .warn), .advanced-toggle, .checklist-status-text { color: var(--text-muted); }
 input::placeholder, textarea::placeholder { color: #737373; }
 
-/* Buttons: the primary action is filled; everything else stays an outline. */
-.button-primary { background: var(--brand-primary); border-color: var(--brand-primary); color: #fff; }
-.button-primary:hover { background: var(--brand-primary-hover); border-color: var(--brand-primary-hover); color: #fff; }
-.button-primary:active { background: var(--brand-primary-active); border-color: var(--brand-primary-active); }
+/* Buttons: the primary action is a filled grey; on hover the logo's gradient
+   fades in around it. Everything else stays an outline. */
+.button-primary { position: relative; isolation: isolate; background: var(--surface-3); border-color: var(--control-border); color: var(--text); }
+.button-primary::before { content: ""; position: absolute; z-index: -1; inset: -1px; padding: 1px; border-radius: inherit; background: var(--logo-gradient); opacity: 0; transition: opacity .25s ease; -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); pointer-events: none; }
+.button-primary:hover:not(:disabled) { background: #2e2e2e; border-color: transparent; color: var(--text); }
+.button-primary:hover:not(:disabled)::before, .button-primary:focus-visible::before { opacity: 1; }
+.button-primary:active { background: var(--surface-4); }
 .button:hover, .icon-button:hover { background: var(--surface-2); }
 .create-button { min-height: var(--control-height-large); border-radius: 8px; }
 
@@ -2385,7 +2396,7 @@ select option { background: var(--surface-2); }
 .style-card .style-swatch { display: none; }
 .style-card small { grid-column: 1; color: var(--text-muted); }
 .style-card:hover { border-color: var(--border-strong); background: var(--surface-2); }
-.style-card.active { border-color: var(--brand-primary); background: var(--brand-faint); box-shadow: none; }
+.style-card.active { border-color: var(--control-border); background: var(--surface-2); box-shadow: none; }
 
 /* Composer and cards: neutral-950 on black with a neutral-800 hairline. */
 .source-step, .style-step { background: var(--surface-1); border-color: var(--border); }
@@ -2395,12 +2406,14 @@ select option { background: var(--surface-2); }
 /* The upload zone: dashed, and pink when a file is over it. */
 .drop-zone { border-color: var(--border-strong); border-radius: 12px; background: transparent; }
 .drop-zone:hover { border-color: var(--text-muted); background: var(--surface-2); }
-.drop-zone.drag-active { border-color: var(--brand-primary); background: var(--brand-faint); box-shadow: none; }
+.drop-zone.drag-active { border-color: var(--text); background: var(--surface-2); box-shadow: none; }
 
-/* Create screen backdrop: the reference's faint grid and a single pink glow. */
+/* Create screen backdrop: the reference's faint grid under a glow in the logo's colours. */
 .app-main:has(.projects-page) {
   background:
-    radial-gradient(60% 420px at 50% 0, rgba(214, 58, 127, 0.12), transparent 70%),
+    radial-gradient(40% 360px at 20% 0, color-mix(in srgb, var(--logo-crimson) 16%, transparent), transparent 70%),
+    radial-gradient(40% 360px at 55% 0, color-mix(in srgb, var(--logo-navy) 16%, transparent), transparent 70%),
+    radial-gradient(35% 320px at 90% 0, color-mix(in srgb, var(--logo-peach) 10%, transparent), transparent 70%),
     linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px) 0 0 / 64px 64px,
     linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px) 0 0 / 64px 64px,
     var(--canvas);
@@ -2532,3 +2545,110 @@ input[type="range"] { accent-color: var(--brand-primary); }
 .shorts-workspace-page input[type="range"] { accent-color: #d4d4d4; }
 /* Audio clips: name along the top, waveform beneath it. */
 .shorts-editor-toolbox [role="row"][aria-label="Audio"] .track-block { align-items: flex-start; padding-top: 1px; background-position: bottom 3px left 0; background-size: 100% 45%, auto; line-height: 16px; }
+
+/* ===========================================================================
+   OPEN LAYOUT — no cards, grey accent, logo-colour fades
+   ---------------------------------------------------------------------------
+   Pages are open planes: sections separate by space and, where two regions
+   meet, a single hairline. Nothing sits in a box unless it is a control, a
+   piece of media, or the editor's panels. Colour arrives only as the logo's
+   gradient: a marker on the current page, a glow behind Create, and a fade
+   around the primary action on hover.
+   =========================================================================== */
+
+/* --- Sidebar: collapse to icons; hover (or keyboard focus) peeks it open --- */
+.app-rail { transition: width .18s ease, box-shadow .18s ease; }
+.rail-toggle {
+  position: absolute; z-index: 3; top: 22px; right: -12px;
+  display: grid; place-items: center; width: 24px; height: 24px; padding: 0;
+  border: 1px solid var(--border-strong); border-radius: 999px;
+  background: var(--canvas); color: var(--text-muted);
+  opacity: 0; transition: opacity .18s ease, color .12s ease;
+}
+.app-rail:hover .rail-toggle, .rail-toggle:focus-visible, .app-shell[data-rail="collapsed"] .rail-toggle { opacity: 1; }
+.rail-toggle:hover { color: var(--text); border-color: var(--text-muted); }
+@media (min-width: 1181px) {
+  .app-shell[data-rail="collapsed"] { --rail: 68px; }
+  .app-shell[data-rail="collapsed"] .app-rail:not(:hover):not(:has(:focus-visible)) :is(.nav-label, .brand-button > span, .help-launcher > span) { display: none; }
+  .app-shell[data-rail="collapsed"] .app-rail:not(:hover):not(:has(:focus-visible)) :is(.nav-item, .help-launcher, .brand-button) { justify-content: center; padding: 0; }
+  .app-shell[data-rail="collapsed"] .app-rail:is(:hover, :has(:focus-visible)) { width: 224px; box-shadow: 24px 0 48px rgba(0, 0, 0, 0.6); }
+}
+/* At tablet widths the rail is icon-only by default and peeks the same way. */
+@media (min-width: 821px) and (max-width: 1180px) {
+  .rail-toggle { display: none; }
+  .app-rail:is(:hover, :has(:focus-visible)) { width: 224px; box-shadow: 24px 0 48px rgba(0, 0, 0, 0.6); }
+  .app-rail:is(:hover, :has(:focus-visible)) :is(.nav-item, .help-launcher, .brand-button) { justify-content: flex-start; padding: 0 var(--space-2); }
+  .app-rail:is(:hover, :has(:focus-visible)) :is(.nav-item .nav-label, .brand-button > span, .help-launcher > span) { display: inline; }
+}
+@media (max-width: 820px) { .rail-toggle { display: none; } }
+/* Labels fade in as the rail opens rather than snapping. */
+.app-rail:is(:hover, :has(:focus-visible)) :is(.nav-label, .brand-button > span, .help-launcher > span) { animation: open-fade .18s ease both; }
+
+/* Current page: a grey row with a thin marker in the logo's colours. */
+.nav-item.active::after { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 2px; border-radius: 2px; background: var(--logo-gradient); }
+.nav-item:hover:not(.active) { background: var(--surface-2); }
+@media (max-width: 820px) { .nav-item.active::after { top: 0; bottom: auto; left: 25%; right: 25%; width: auto; height: 2px; } .nav-item.active::before { background: transparent; } }
+
+/* --- Projects: two open columns on wide screens -------------------------- */
+.projects-page > * { max-width: 1180px; }
+.source-step, .style-step { padding: var(--space-6) 0; background: transparent; border: 0; border-radius: 0; }
+.style-step { border-top: 1px solid var(--border); }
+.create-step + .create-step { border-top: 0; }
+.style-step { border-top: 1px solid var(--border); }
+@media (min-width: 1024px) {
+  .create-grid { grid-template-columns: minmax(0, 1.55fr) minmax(300px, 1fr); grid-template-areas: "source action" "style action"; column-gap: var(--space-8); }
+  .source-step { grid-area: source; padding-top: 0; }
+  .style-step { grid-area: style; }
+  .action-step { grid-area: action; align-self: start; position: sticky; top: 72px; padding: 0 0 0 var(--space-8); border-left: 1px solid var(--border); }
+  .action-step > .field-group[aria-label="Destination"] > .field-group-body { grid-template-columns: minmax(0, 1fr); }
+}
+.provider-callout { padding: 0 0 var(--space-4); border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; }
+
+/* Options are text with a quiet fill, not boxes. */
+.style-card { border-color: transparent; background: transparent; }
+.style-card:hover { border-color: transparent; background: var(--surface-2); }
+.style-card.active { border-color: transparent; background: var(--surface-2); box-shadow: inset 0 -2px 0 0 var(--text); }
+
+/* Media grids: the picture and two lines of text — no frame around them. */
+.recent-clip-card, .asset-card { border-color: transparent; background: transparent; }
+.recent-clip-thumb { border-radius: 8px; }
+.recent-clip-content { padding: var(--space-2) 0 0; }
+.asset-card .asset-preview, .asset-card-details-full > .asset-preview { border-radius: 8px; overflow: hidden; }
+.asset-card.active { border-color: transparent; background: var(--surface-1); box-shadow: inset 0 0 0 1px var(--control-border); }
+
+/* Library: three open panes divided by hairlines. */
+.library-layout { border: 0; background: transparent; }
+.library-layout > .panel { background: transparent; border: 0; }
+.library-layout > .panel + .panel { border-left: 1px solid var(--border); }
+.library-sidebar > button.active { background: var(--surface-2); box-shadow: inset 2px 0 var(--text-muted); }
+.asset-inspector .panel-title { background: var(--canvas); }
+
+/* Settings: sections on the page, separated by a hairline above each. */
+.settings-card { padding: var(--space-5) 0; border: 0; border-top: 1px solid var(--border); border-radius: 0; background: transparent; }
+
+/* Workspace: the ledger, the three columns and the clip board sit on the page. */
+.workspace-page .panel, .workspace-page .checklist-panel, .workspace-page .board-panel { background: transparent; border-color: transparent; border-radius: 0; }
+.workspace-grid > .panel:first-child, .workspace-grid > .panel:last-child { border-radius: 0; }
+.workspace-grid { border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.workspace-grid > .panel + .panel { border-left: 1px solid var(--border); }
+.clip-tile { background: transparent; }
+.clip-tile.active { border-color: transparent; box-shadow: inset 0 0 0 1px var(--control-border); }
+
+/* Checkboxes: a grey fill with a dark tick. */
+input[type="checkbox"]:checked::before {
+  border-color: var(--selector-highlight-hover);
+  background-color: var(--selector-highlight-hover);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23000000' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 8.4 6.4 11.8 13 4.6'/%3E%3C/svg%3E");
+}
+
+/* --- Fades: one page entrance and hover highlights ----------------------- */
+@keyframes open-fade { from { opacity: 0; } to { opacity: 1; } }
+/* No fill mode: a filled opacity animation would leave every page as its own
+   stacking context and trap fixed overlays (the editor drawer) under the topbar. */
+#main-content > * { animation: open-fade .22s ease; }
+.drop-zone { transition: border-color .2s ease, background-color .2s ease; }
+.drop-zone:hover { border-color: var(--text-muted); }
+@media (prefers-reduced-motion: reduce) {
+  #main-content > *, .app-rail :is(.nav-label, .brand-button > span, .help-launcher > span) { animation: none; }
+  .app-rail, .rail-toggle, .button-primary::before { transition: none; }
+}

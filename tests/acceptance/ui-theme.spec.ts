@@ -41,9 +41,12 @@ const routes = ["Projects", "Library", "Workspace", "Shorts Editor", "Jobs", "Se
  * being colourless, which is the point.
  */
 const APPROVED_ACCENTS = new Set([
-  "rgb(214, 58, 127)",  // --brand-primary / --selector-highlight (PicThing pink)
-  "rgb(226, 75, 140)",  // --brand-primary-hover
-  "rgb(194, 47, 111)",  // --brand-primary-active
+  // The accent is neutral grey (never chromatic); colour is the logo palette only.
+  "rgb(163, 24, 58)",   // --logo-crimson
+  "rgb(74, 23, 82)",    // --logo-plum
+  "rgb(42, 47, 168)",   // --logo-navy
+  "rgb(90, 120, 152)",  // --logo-slate
+  "rgb(217, 143, 108)", // --logo-peach
   "rgb(76, 183, 130)",  // --success
   "rgb(240, 168, 75)",  // --warning
   "rgb(242, 56, 85)",   // --error / --accent-crimson
@@ -273,7 +276,9 @@ test.describe("theme contract", () => {
           document.body.appendChild(probe);
           const allowed = new Set<string>();
           // The brand pink is red-leaning but is the accent, not a failure red.
-          for (const token of ["--error", "--error-hover", "--error-active", "--error-disabled", "--warning", "--brand-primary", "--brand-primary-hover", "--brand-primary-active"]) {
+          // The logo's own colours appear only as the current-page marker, the
+          // Create glow and hover fades; they are the brand, not a failure red.
+          for (const token of ["--error", "--error-hover", "--error-active", "--error-disabled", "--warning", "--logo-crimson", "--logo-plum", "--logo-navy", "--logo-slate", "--logo-peach"]) {
             probe.style.color = "";
             probe.style.color = `var(${token})`;
             for (const paint of extract(getComputedStyle(probe).color)) allowed.add(triple(paint));

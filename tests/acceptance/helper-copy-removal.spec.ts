@@ -176,8 +176,9 @@ test.describe("removed helper copy", () => {
     expect(modeBox).not.toBeNull();
     expect(createBox).not.toBeNull();
     if (testInfo.project.name.includes("Desktop")) {
-      // Output settings sit in the composer; Create follows them as the last step.
-      expect(createBox!.y).toBeGreaterThan(modeBox!.y + modeBox!.height);
+      // Create is the last step: in the side column on wide screens, below the
+      // output settings otherwise.
+      expect(createBox!.y > modeBox!.y + modeBox!.height || createBox!.x >= modeBox!.x + modeBox!.width).toBe(true);
     }
   });
 
