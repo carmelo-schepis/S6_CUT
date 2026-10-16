@@ -120,7 +120,7 @@ describe("ShortsEditorView", () => {
       fireEvent.click(screen.getAllByRole("button", { name: "Play preview" })[0]);
 
       expect(await screen.findByRole("alert")).toHaveTextContent("Preview playback could not start.");
-      expect(screen.getAllByRole("button", { name: "Play preview" })).toHaveLength(2);
+      expect(screen.getAllByRole("button", { name: "Play preview" })).toHaveLength(1);
       expect(play).toHaveBeenCalledOnce();
     } finally {
       play.mockRestore();

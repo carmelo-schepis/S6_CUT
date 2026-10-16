@@ -172,7 +172,7 @@ export function App() {
     >Skip to main content</a>
     <aside className="app-rail" aria-label="Primary navigation">
       <button className="brand-button" onClick={() => setPage("projects")} aria-label="S6_cut Projects">
-        <img src="/app-icon.png" alt="" />
+        <img src="/app-icon.png" alt="" /><span>S6_cut</span>
       </button>
       <nav>
         {nav.map((item) => {

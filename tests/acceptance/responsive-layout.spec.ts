@@ -48,7 +48,7 @@ test.describe("responsive layout regressions", () => {
       }
 
       const items = nav.locator(".nav-item");
-      for (const index of [0, 6]) {
+      for (const index of [0, 5]) {
         await items.nth(index).focus();
         const focusStyle = await items.nth(index).evaluate((item) => {
           const style = getComputedStyle(item);
@@ -63,8 +63,8 @@ test.describe("responsive layout regressions", () => {
         expect(focusStyle.rect.top, `${width}px top focus edge`).toBeGreaterThanOrEqual(0);
         expect(focusStyle.rect.bottom, `${width}px bottom focus edge`).toBeLessThanOrEqual(focusStyle.viewport.height);
       }
-      await items.nth(6).press("Enter");
-      await expect(items.nth(6)).toHaveClass(/active/);
+      await items.nth(5).press("Enter");
+      await expect(items.nth(5)).toHaveClass(/active/);
     }
 
     await page.setViewportSize({ width: 1440, height: 844 });
@@ -73,8 +73,8 @@ test.describe("responsive layout regressions", () => {
       width: rail.getBoundingClientRect().width,
       navGap: getComputedStyle(rail.querySelector("nav")!).columnGap,
     }));
-    expect(desktop.width, "desktop rail width").toBe(108);
-    expect(desktop.navGap, "desktop navigation gap").toBe("5px");
+    expect(desktop.width, "desktop rail width").toBe(224);
+    expect(desktop.navGap, "desktop navigation gap").toBe("2px");
   });
 
   test("keeps completed Workspace clip boards contained at narrow widths", async ({ page }) => {

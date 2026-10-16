@@ -176,7 +176,8 @@ test.describe("removed helper copy", () => {
     expect(modeBox).not.toBeNull();
     expect(createBox).not.toBeNull();
     if (testInfo.project.name.includes("Desktop")) {
-      expect(Math.abs(modeBox!.y + modeBox!.height - (createBox!.y + createBox!.height))).toBeLessThanOrEqual(8);
+      // Output settings sit in the composer; Create follows them as the last step.
+      expect(createBox!.y).toBeGreaterThan(modeBox!.y + modeBox!.height);
     }
   });
 

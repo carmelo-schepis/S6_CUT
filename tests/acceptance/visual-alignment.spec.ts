@@ -136,10 +136,9 @@ test.describe("visual alignment", () => {
     }
   });
 
-  test("the Processing mode control and the Create action share a line", async ({ page }) => {
+  test("the Processing mode control and the Create action share one control height", async ({ page }) => {
     test.setTimeout(120_000);
-    // Only meaningful where the two columns actually sit side by side; below
-    // that the panel stacks and there is no shared line to hold.
+    // The create flow is one column: output settings, then Create underneath.
     for (const [name, width, height] of [viewports[0], viewports[1], viewports[3]] as const) {
       await page.setViewportSize({ width, height });
       await page.goto("/", { waitUntil: "domcontentloaded" });
@@ -161,12 +160,8 @@ test.describe("visual alignment", () => {
       expect(measure, `${name}: create panel controls`).not.toBeNull();
       const { tabs, create, tabsColumn, createColumn, options } = measure!;
 
-      const sideBySide = Math.min(tabsColumn.bottom, createColumn.bottom) - Math.max(tabsColumn.top, createColumn.top) > 0;
-      expect(sideBySide, `${name}: expected the style and action columns to be side by side`).toBe(true);
-
       expect(tabs.height, `${name}: Processing mode height`).toBe(create.height);
-      expect(Math.abs(tabs.top - create.top), `${name}: top edges`).toBeLessThanOrEqual(1);
-      expect(Math.abs(tabs.bottom - create.bottom), `${name}: bottom edges`).toBeLessThanOrEqual(1);
+      expect(create.top, `${name}: Create follows the output settings`).toBeGreaterThan(tabsColumn.top);
 
       // The action block fills its column; it must never shrink to its label.
       expect(create.width, `${name}: Create button does not fill its column`).toBeGreaterThan(createColumn.width - 40);

@@ -1,4 +1,4 @@
-import { Pause, Play, RotateCcw } from "lucide-react";
+import { Film, Maximize2, Pause, Play, RotateCcw, SlidersHorizontal, Type, Volume2, VolumeX } from "lucide-react";
 import { formatDuration } from "./common";
 
 export type ShortsTextOverlay = { id: string; text: string; color: string; size: number; x: number; y: number; start: number; duration: number };
@@ -47,6 +47,7 @@ type Props = {
   onTogglePlay: () => void;
   onSeek: (time: number) => void;
   sourceHasAudio: boolean | null;
+  onExpand?: () => void;
 };
 
 export function ShortsEditorToolbox(props: Props) {
@@ -73,9 +74,9 @@ export function ShortsEditorToolbox(props: Props) {
 
   return <div className="shorts-editor-toolbox">
     <div className="shorts-tool-rail" role="tablist" aria-label="Editor tools">
-      <button type="button" role="tab" aria-selected={props.activeTool === "media"} onClick={() => { props.setActiveTool("media"); props.setSelectedProperty("video"); props.setPropertiesOpen(true); }}>Media</button>
-      <button type="button" role="tab" aria-selected={props.activeTool === "filters"} onClick={() => { props.setActiveTool("filters"); props.setSelectedProperty(null); }}>Filters</button>
-      <button type="button" role="tab" aria-selected={props.activeTool === "text"} onClick={() => { props.setActiveTool("text"); props.setSelectedProperty(null); }}>Text</button>
+      <button type="button" role="tab" aria-selected={props.activeTool === "media"} onClick={() => { props.setActiveTool("media"); props.setSelectedProperty("video"); props.setPropertiesOpen(true); }}><Film size={16} aria-hidden="true" />Media</button>
+      <button type="button" role="tab" aria-selected={props.activeTool === "filters"} onClick={() => { props.setActiveTool("filters"); props.setSelectedProperty(null); }}><SlidersHorizontal size={16} aria-hidden="true" />Filters</button>
+      <button type="button" role="tab" aria-selected={props.activeTool === "text"} onClick={() => { props.setActiveTool("text"); props.setSelectedProperty(null); }}><Type size={16} aria-hidden="true" />Text</button>
     </div>
     <section className="shorts-tool-pane" aria-label={`${props.activeTool === "media" ? "Media" : props.activeTool === "filters" ? "Filters" : "Text"} settings`}>
       {props.activeTool === "media" && <div className="tool-settings-row">
@@ -141,9 +142,10 @@ export function ShortsEditorToolbox(props: Props) {
     </section>
     <div className="video-controls shorts-bottom-controls">
       <button type="button" className="icon-button" onClick={props.onTogglePlay} aria-label={props.playing ? "Pause preview" : "Play preview"}>{props.playing ? <Pause size={16} /> : <Play size={16} />}</button>
-      <button type="button" className="icon-button" aria-label={props.previewMuted ? "Unmute preview" : "Mute preview"} aria-pressed={props.previewMuted} onClick={props.onTogglePreviewMute}>{props.previewMuted ? "Unmute" : "Preview mute"}</button>
+      <button type="button" className="icon-button" aria-label={props.previewMuted ? "Unmute preview" : "Mute preview"} aria-pressed={props.previewMuted} onClick={props.onTogglePreviewMute}>{props.previewMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}</button>
       <span>{formatDuration(Math.max(0, props.currentTime - props.start))} / {formatDuration(props.outputDuration)}</span>
       <input aria-label="Preview position" type="range" min="0" max={Math.max(0.1, props.outputDuration)} step="0.1" value={Math.min(props.outputDuration, Math.max(0, props.currentTime - props.start))} onChange={(event) => props.onSeek(props.start + Number(event.target.value))} />
+      {props.onExpand && <button type="button" className="icon-button" aria-label="Expand preview" onClick={props.onExpand}><Maximize2 size={16} /></button>}
       <label>Trim start<input aria-label="Trim start" type="range" min="0" max={Math.max(props.start, props.sourceDuration || 1)} step="0.1" value={props.start} onChange={(event) => props.onTrim(Number(event.target.value), props.end)} /></label>
     </div>
   </div>;
