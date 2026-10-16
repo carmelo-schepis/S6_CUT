@@ -219,14 +219,14 @@ test.describe("workspace design system", () => {
       expect(Math.abs(column - Math.round(column)), `column ${index} (${column}px) is fractional`).toBeLessThanOrEqual(0.5);
     }
 
-    // One framed slab: the panels butt against each other with no seam, and
-    // only the outer corners are rounded.
+    // One open slab: the panels butt against each other with no seam and sit
+    // on the page without a rounded frame (the UI is open, not card-based).
     for (let index = 1; index < grid.panels.length; index += 1) {
       expect(grid.panels[index].left - grid.panels[index - 1].right, `seam between panel ${index - 1} and ${index}`).toBeLessThanOrEqual(1);
     }
     expect(spread(grid.panels.map((panel) => panel.height)), "panels are different heights").toBeLessThanOrEqual(1);
-    expect(grid.panels[0].radius, "left panel rounds only its outer corners").toBe("12px 0px 0px 12px");
-    expect(grid.panels[2].radius, "right panel rounds only its outer corners").toBe("0px 12px 12px 0px");
+    expect(grid.panels[0].radius, "left panel is unframed").toBe("0px");
+    expect(grid.panels[2].radius, "right panel is unframed").toBe("0px");
   });
 
   test("panel chrome shares one inline padding and one height", async ({ page }) => {
@@ -300,7 +300,7 @@ test.describe("workspace design system", () => {
     // below are what spend this budget.
     expect(panel.height, "progress panel height").toBeGreaterThanOrEqual(280);
     expect(panel.height, "progress panel height").toBeLessThanOrEqual(340);
-    expect(panel.radius, "progress panel radius").toBeCloseTo(12, 0);
+    expect(panel.radius, "progress panel is unframed").toBe(0);
 
     const rows = await page.locator(".checklist-step").evaluateAll((elements) => elements.map((element) => {
       const rect = element.getBoundingClientRect();
@@ -475,7 +475,8 @@ test.describe("workspace design system", () => {
           const overflowBy = Math.max(element.scrollWidth - element.clientWidth, element.scrollHeight - element.clientHeight);
           if (!truncates && overflowBy > 1) clipped.push({ text: text.slice(0, 48), cls: String(element.className).slice(0, 40), overflowBy });
 
-          if (!/^rgba?\(255, 255, 255/.test(style.color)) {
+          // White, PicThing's neutral-400 secondary copy, or the brand pink.
+          if (!/^rgba?\((255, 255, 255|163, 163, 163|214, 58, 127|226, 75, 140)/.test(style.color)) {
             coloured.push({ text: text.slice(0, 48), cls: String(element.className).slice(0, 40), colour: style.color });
           }
         }

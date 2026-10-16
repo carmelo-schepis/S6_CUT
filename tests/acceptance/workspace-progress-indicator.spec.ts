@@ -80,7 +80,8 @@ test("renders a stable centered Workspace progress ring at desktop and mobile si
     expect(initial.progress.x - (initial.icon.x + initial.icon.width)).toBeLessThanOrEqual(5);
     expect(Math.abs((initial.progress.x + initial.progress.width / 2) - (initial.value.x + initial.value.width / 2))).toBeLessThanOrEqual(1);
     expect(Math.abs((initial.progress.y + initial.progress.height / 2) - (initial.value.y + initial.value.height / 2))).toBeLessThanOrEqual(1);
-    if (viewport.width > 600) expect(initial.label.y).toBeGreaterThan(initial.progress.y + initial.progress.height);
+    // The labelled sidebar sets the caption beside the icon and its ring.
+    if (viewport.width > 1180) expect(initial.label.x).toBeGreaterThan(initial.progress.x + initial.progress.width);
     expect(initial.animationName).toBe("workspace-nav-progress-spin");
     expect(initial.animationDuration).not.toBe("0s");
     expect(initial.stroke).toBe("rgb(76, 183, 130)");

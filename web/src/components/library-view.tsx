@@ -194,7 +194,7 @@ export function LibraryView({ selectedAssetId }: { selectedAssetId?: string | nu
   };
 
   return <div className="page library-page">
-    <PageHeader eyebrow="Tier 0 resolver" title="Personal Media Library" description="Organise reusable and project media in local business folders. Folders group content; they are not access boundaries." actions={<Button variant="primary" onClick={() => setShowImport(!showImport)}><ImagePlus size={15} /> Import asset</Button>} />
+    <PageHeader title="Personal Media Library" description="Organise reusable and project media in local business folders. Folders group content; they are not access boundaries." actions={<Button variant="primary" onClick={() => setShowImport(!showImport)}><ImagePlus size={15} /> Import asset</Button>} />
     {error && <div className="library-error" role="alert"><div><strong>{error}</strong><span>{health ? `Engine: ${health.status}` : "Engine status unavailable"}</span></div><Button onClick={() => void load(false)}><RefreshCw size={14} /> Retry</Button></div>}
     {showImport && <ImportPanel folders={folders} defaultFolderId={folderId || undefined} onDone={() => { setShowImport(false); emitLibraryChanged(); void load(false); }} />}
 

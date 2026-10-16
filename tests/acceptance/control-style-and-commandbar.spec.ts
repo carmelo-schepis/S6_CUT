@@ -74,13 +74,16 @@ test.describe("control style", () => {
       expect(controls.length, `${route}: expected visible controls`).toBeGreaterThan(0);
 
       for (const control of controls) {
-        // No opaque fill at rest. Hover fills are asserted separately below.
-        expect(control.fillAlpha, `${route}: "${control.label}" has an opaque fill (${control.fillAlpha})`)
-          .toBeLessThan(0.85);
-        // Near-square corners, and never a circle or a pill.
+        // No opaque fill at rest, except the one filled primary action per the
+        // PicThing reference. Hover fills are asserted separately below.
+        if (!String(control.className).includes("button-primary")) {
+          expect(control.fillAlpha, `${route}: "${control.label}" has an opaque fill (${control.fillAlpha})`)
+            .toBeLessThan(0.85);
+        }
+        // PicThing's 6–8px corners, and never a circle or a pill.
         expect(control.radius, `${route}: "${control.label}" radius is a circle`).not.toContain("50%");
         expect(control.radiusPx, `${route}: "${control.label}" radius ${control.radius} exceeds the control radius`)
-          .toBeLessThanOrEqual(2);
+          .toBeLessThanOrEqual(8);
         expect(control.radiusPx, `${route}: "${control.label}" is a pill`)
           .toBeLessThan(Math.min(control.width, control.height) / 2);
         // A borderless transparent control has no affordance left; ghost
@@ -234,7 +237,7 @@ test.describe("workspace command bar", () => {
     expect(transport, "expected the transport play control").toBeDefined();
     expect(transport.fillAlpha, `the play control has an opaque fill (${transport.fillAlpha})`).toBeLessThan(0.85);
     expect(transport.radius, "the play control is a disc").not.toContain("50%");
-    expect(transport.radiusPx, `the play control radius ${transport.radius} exceeds the control radius`).toBeLessThanOrEqual(2);
+    expect(transport.radiusPx, `the play control radius ${transport.radius} exceeds the control radius`).toBeLessThanOrEqual(8);
     expect(transport.borderWidth, "the play control has no border to carry the outline").toBeGreaterThanOrEqual(1);
 
     const controls = page.locator(".workspace-controls");

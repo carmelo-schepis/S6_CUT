@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CircleHelp, BriefcaseBusiness, Film, FolderKanban, HardDrive, Library, LoaderCircle, Scissors, Settings, SlidersHorizontal } from "lucide-react";
+import { ChevronsLeft, ChevronsRight, CircleHelp, BriefcaseBusiness, Film, FolderKanban, Library, LoaderCircle, Scissors, Settings, SlidersHorizontal } from "lucide-react";
 import { getHealth, listJobs, listProfiles, listProjects, readableError } from "./api";
 import { JobsView } from "./components/jobs-view";
 import { LibraryView } from "./components/library-view";
@@ -24,6 +24,9 @@ type Page = "projects" | "library" | "workspace" | "shorts-editor" | "jobs" | "s
  */
 const HEALTH_POLL_MS = 5_000;
 
+/** Per-browser convenience: whether the desktop sidebar is collapsed to icons. */
+const RAIL_COLLAPSED_KEY = "s6.rail.collapsed";
+
 // `label` is the rail caption and must fit the rail without truncating;
 // `name` is the full accessible/breadcrumb name.
 const nav: { id: Page; label: string; name: string; icon: typeof Film }[] = [
@@ -47,6 +50,13 @@ export function App() {
   const [profilesLoaded, setProfilesLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [railCollapsed, setRailCollapsed] = useState(() => {
+    try { return localStorage.getItem(RAIL_COLLAPSED_KEY) === "1"; } catch { return false; }
+  });
+  const toggleRail = () => setRailCollapsed((collapsed) => {
+    try { localStorage.setItem(RAIL_COLLAPSED_KEY, collapsed ? "0" : "1"); } catch { /* Storage can be unavailable in hardened browsers. */ }
+    return !collapsed;
+  });
   const refreshRevision = useRef(0);
 
   // `getHealth` aborts itself after HEALTH_TIMEOUT_MS, so a wedged engine
@@ -157,7 +167,7 @@ export function App() {
   const hasSelectedProvider = profiles.some((profile) => profile.selected && profile.openrouterConfigured && profile.textStatus === "connected");
   const openProviders = () => setPage("settings");
 
-  return <div className="app-shell">
+  return <div className="app-shell" data-rail={railCollapsed ? "collapsed" : "expanded"}>
     {/* First tab stop: lets keyboard users bypass the seven rail destinations
         that otherwise precede page content on every screen. */}
     <a
@@ -172,7 +182,7 @@ export function App() {
     >Skip to main content</a>
     <aside className="app-rail" aria-label="Primary navigation">
       <button className="brand-button" onClick={() => setPage("projects")} aria-label="S6_cut Projects">
-        <img src="/app-icon.png" alt="" />
+        <img src="/app-icon.png" alt="" /><span><span className="brand-accent">S6</span>_cut</span>
       </button>
       <nav>
         {nav.map((item) => {
@@ -198,12 +208,17 @@ export function App() {
       <button className="help-launcher" onClick={() => setHelpOpen(true)} aria-label="Open S6 Cut Help">
         <CircleHelp size={18} aria-hidden="true" /><span>Help</span>
       </button>
+      {/* The tab on the sidebar's edge pins it open or folds it to icons; while
+          folded, hovering the icons peeks the full sidebar over the page. */}
+      <button type="button" className="rail-toggle" onClick={toggleRail} aria-label={railCollapsed ? "Expand sidebar" : "Collapse sidebar"} aria-expanded={!railCollapsed} title={railCollapsed ? "Expand sidebar" : "Collapse sidebar"}>
+        {railCollapsed ? <ChevronsRight size={14} aria-hidden="true" /> : <ChevronsLeft size={14} aria-hidden="true" />}
+      </button>
     </aside>
 
     <div className="app-main">
       <header className="topbar">
         <div className="topbar-context">
-          <span className="mobile-brand"><img src="/app-icon.png" alt="" /> S6_cut</span>
+          <span className="mobile-brand"><img src="/app-icon.png" alt="" /> <span><span className="brand-accent">S6</span>_cut</span></span>
           {selected && page === "workspace" ? <><span className="muted">Workspace</span><span className="crumb">/</span><strong>{selected.name}</strong></> : <strong>{nav.find((item) => item.id === page)?.name}</strong>}
         </div>
         <div className="topbar-state">
@@ -211,7 +226,6 @@ export function App() {
               engine-startup row below, which stays visible at every width —
               this badge is hidden under 540px. */}
           {health ? <StatusBadge state={health.status === "ready" ? "local" : "fallback"} label={health.status === "ready" ? "Local engine" : "Fallbacks active"} /> : healthChecked ? <StatusBadge state="offline" label="Engine offline" /> : null}
-          <span className="save-state"><HardDrive size={14} /> Saved on this machine</span>
         </div>
       </header>
       <PwaStatus />

@@ -16,9 +16,9 @@ export function JobsView({ onOpenProject, jobs, onRefresh }: { onOpenProject: (i
   // independent /jobs poll and could race the activity indicator's source.
   const load = () => { void onRefresh().then(() => setError(null)); };
   const action = async (job: Job, next: "pause" | "resume" | "retry-failed" | "retry-import") => { try { await controlJob(job.id, next); load(); } catch (cause) { setError(readableError(cause)); } };
-  return <div className="page jobs-page"><PageHeader eyebrow="Durable queue" title="Jobs & recovery" actions={<><span className="section-count">{jobs.length} total</span><Button onClick={load}><RefreshCw size={14} /> Refresh</Button></>} />
+  return <div className="page jobs-page"><PageHeader title="Jobs & recovery" actions={<><span className="section-count">{jobs.length} total</span><Button onClick={load}><RefreshCw size={14} /> Refresh</Button></>} />
     {error && <p className="form-error" role="alert">{error}</p>}
-    {jobs.length ? <><div className="jobs-list">{(showAll ? jobs : jobs.slice(0, JOB_LIMIT)).map((job) => <article className="job-card" key={job.id} data-job-id={job.id} data-project-id={job.projectId}><div className="job-mode">{job.mode === "clip" ? "CLIP" : "LEGACY"}</div><div className="job-main">{(() => {
+    {jobs.length ? <><div className="jobs-list">{(showAll ? jobs : jobs.slice(0, JOB_LIMIT)).map((job) => <article className="job-card" key={job.id} data-job-id={job.id} data-project-id={job.projectId}>{job.mode !== "clip" && <div className="job-mode">Legacy</div>}<div className="job-main">{(() => {
         const ready = job.clips.filter((clip) => clip.state === "complete").length;
         const download = job.downloadProgress ? downloadFacts(job.downloadProgress) : null;
         const facts = jobFacts(job);
