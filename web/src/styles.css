@@ -39,15 +39,16 @@
      second size, and never used just to manufacture hierarchy. */
   --type-emphasis-weight: 500;
   /* Surfaces: near-black canvas, charcoal panels, hairline borders. */
-  --canvas: #010102;
-  --black: #010102;
-  --surface-1: #0f1011;
-  --surface-2: #141516;
-  --surface-3: #1a1c1e;
-  --surface-4: #23252a;
-  --border-soft: #1b1d21;
-  --border: #23252a;
-  --border-strong: #2f3238;
+  /* PicThing neutrals: true black, neutral-950/900/800 surfaces, neutral-800 hairlines. */
+  --canvas: #000000;
+  --black: #000000;
+  --surface-1: #0a0a0a;
+  --surface-2: #171717;
+  --surface-3: #262626;
+  --surface-4: #303030;
+  --border-soft: #1c1c1c;
+  --border: #262626;
+  --border-strong: #404040;
   /* The control layer's hairline, and the one place a border carries an
      affordance rather than separating two surfaces. Once a control is an
      outline the border IS the control, so it has to clear WCAG 1.4.11's 3:1
@@ -75,16 +76,18 @@
 
      Selector blue remains independent of all of this, so changing the brand
      never erases option-selection feedback. */
-  --brand-primary: #ffffff;
-  --brand-primary-hover: #ffffff;
-  --brand-primary-active: rgba(255, 255, 255, 0.72);
-  --brand-muted: rgba(255, 255, 255, 0.55);
-  --brand-border: rgba(255, 255, 255, 0.28);
+  /* PicThing pink, deepened from #e24b8c so white button text clears 4.5:1;
+     the reference value returns on hover. */
+  --brand-primary: #d63a7f;
+  --brand-primary-hover: #e24b8c;
+  --brand-primary-active: #c22f6f;
+  --brand-muted: rgba(214, 58, 127, 0.55);
+  --brand-border: rgba(214, 58, 127, 0.45);
   /* The same accented hairline at panel scale, where 0.28 across a long edge
      would read as a selected state rather than as chrome. */
-  --brand-border-soft: rgba(255, 255, 255, 0.16);
-  --brand-soft: rgba(255, 255, 255, 0.10);
-  --brand-faint: rgba(255, 255, 255, 0.05);
+  --brand-border-soft: rgba(214, 58, 127, 0.24);
+  --brand-soft: rgba(214, 58, 127, 0.14);
+  --brand-faint: rgba(214, 58, 127, 0.07);
   /* Back-compat aliases. The ramp used to be red and most rules still name it
      that way; keeping the names is what stops any rule bypassing the token
      layer. Additive, never a rename. */
@@ -99,9 +102,12 @@
   --theme-primary-hover: var(--brand-primary-hover);
   --theme-primary-active: var(--brand-primary-active);
   --theme-primary-soft: var(--brand-soft);
-  --selector-highlight: #766bff;
-  --selector-highlight-hover: #9189ff;
-  --selector-highlight-soft: rgba(118, 107, 255, 0.18);
+  /* One accent: option selection uses the brand pink too. The previous violet
+     stays available as --accent-violet for the editor's title clips. */
+  --selector-highlight: #d63a7f;
+  --selector-highlight-hover: #e24b8c;
+  --selector-highlight-soft: rgba(214, 58, 127, 0.16);
+  --accent-violet: #766bff;
   --accent-magenta: #f14d9a;
   --accent-coral: #ff9a7a;
   --accent-crimson: #f23855;
@@ -137,9 +143,10 @@
      them; they all resolve to white so no rule can reintroduce grey text. */
   --text-primary: #ffffff;
   --text: #ffffff;
-  --text-secondary: #ffffff;
-  --text-muted: #ffffff;
-  --text-subtle: #ffffff;
+  /* Secondary copy is neutral-400, as in the PicThing reference: 8.5:1 on black. */
+  --text-secondary: #a3a3a3;
+  --text-muted: #a3a3a3;
+  --text-subtle: #a3a3a3;
   /* Only for genuinely disabled controls, never for merely secondary text. */
   --text-disabled: rgba(255, 255, 255, .45);
   /* Status colours carry meaning and stay distinct from the accent. */
@@ -204,7 +211,8 @@
      layer — buttons, inputs, selects, counts, chips — so a control is a hairline
      rectangle and nothing in the control layer is a circle or a pill. The
      --radius-sm/md/lg/xl steps stay for surfaces, cards, panels and dialogs. */
-  --radius-control: 2px;
+  /* PicThing controls: 6px corners. */
+  --radius-control: 6px;
   --radius-sm: 5px;
   --radius-md: 6px;
   --radius-lg: 8px;
@@ -2230,3 +2238,297 @@ main { min-width: 0; }
 .shorts-right-column > .shorts-collapsible-panel > summary { padding: 9px 12px; border-bottom: 1px solid var(--border-soft); cursor: pointer; font-weight: var(--type-emphasis-weight); }
 .shorts-right-column > .shorts-collapsible-panel > .shorts-clips-panel,
 .shorts-right-column > .shorts-collapsible-panel > .shorts-assistant-panel { border: 0; border-radius: 0; box-shadow: none; }
+
+/* ===========================================================================
+   MINIMAL PASS — space before lines
+   ---------------------------------------------------------------------------
+   Four rules, applied everywhere:
+     1. Where space already separates two blocks, no box or rule repeats it.
+     2. Status is a coloured icon beside plain text, never a filled chip.
+     3. Every screen has one title, in the title role, with nothing above it.
+     4. Rhythm on the 4px grid: 8 inside a group, 16 inside a section,
+        32 between sections, 40 above the page title.
+   =========================================================================== */
+:root { --section-gap: var(--space-8); --page-top: 40px; }
+
+/* Page rhythm and the one title per screen. */
+.page { padding-top: var(--page-top); padding-bottom: 64px; }
+.page-header { align-items: center; margin-bottom: var(--section-gap); }
+.page-header p { max-width: 64ch; margin-top: var(--space-1); }
+.page-header h1, .create-topline h2, .shorts-workspace-header h1 {
+  font-size: var(--type-title-size);
+  font-weight: var(--type-title-weight);
+  line-height: var(--type-title-line);
+  letter-spacing: var(--type-title-tracking);
+}
+/* The editor is a full-height workbench and keeps its own tight frame. */
+.page.shorts-workspace-page { padding: var(--space-3) var(--space-4); }
+
+/* Status: the icon carries the colour; the label is plain text. */
+.status, .section-count, .origin-badge, .count-pill { border-color: transparent; background: transparent; }
+.status { padding-inline: 0; }
+.engine-chips :is(.ok, .warn) { border-color: transparent; background: transparent; padding-inline: 0; }
+.engine-chips { gap: var(--space-3); }
+.edit-state, .shorts-header-actions .edit-state, .shorts-header-actions .edit-state.dirty { padding: 0 var(--space-2); border: 0; border-radius: 0; background: transparent; }
+
+/* Projects: a roomier composer, and step 3 reads as a calm list. */
+.create-topline { padding-bottom: var(--space-6); }
+.source-step, .style-step { padding: var(--space-6); }
+.create-step { gap: var(--space-5); }
+.action-step { padding-top: var(--section-gap); gap: var(--space-6); }
+.style-step > .field-group + .field-group { padding-top: var(--space-5); }
+.provider-callout { margin-bottom: var(--space-6); border-color: var(--border-soft); background: transparent; }
+.recent-clips-section { margin-top: 56px; }
+
+/* Jobs: a list divided by hairlines, not a stack of cards. */
+.jobs-list { gap: 0; border-top: 1px solid var(--border-soft); }
+.job-card { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-4) 0; border: 0; border-bottom: 1px solid var(--border-soft); border-radius: 0; background: transparent; }
+.job-main { flex: 1 1 auto; }
+.job-mode { flex: 0 0 auto; width: auto; height: auto; padding: 0 var(--space-2); border: 0; background: transparent; }
+.job-main p { margin: var(--space-1) 0; }
+
+/* Library: cards are their picture and two lines; the frame appears on hover and selection. */
+.asset-grid { gap: var(--space-4); padding: var(--space-4); }
+.asset-card { border-color: transparent; border-radius: var(--radius-md); background: transparent; transition: background-color .12s ease; }
+.asset-card:hover { background: var(--surface-2); }
+.asset-card.active { border-color: var(--selector-highlight); background: var(--surface-2); }
+
+/* Settings: one surface per card; rows inside it are separated by space. */
+.settings-grid { gap: var(--space-6); }
+.settings-card { padding: var(--space-5); border-color: var(--border-soft); }
+.settings-card-head { padding-bottom: var(--space-4); }
+.profile-row { border-color: var(--border-soft); background: transparent; }
+
+/* Workspace: clip tiles and the board lose their outlines until selected. */
+.clip-tile { border-color: transparent; background: var(--surface-1); }
+
+/* Empty states: the icon is a glyph, not a framed tile. */
+.empty-icon { border: 0; background: transparent; }
+.inline-empty { border-color: var(--border-soft); }
+
+/* Jobs: download facts read as one line of context, not a two-line table. */
+.job-download { margin: 0; gap: 0 var(--space-4); }
+.job-download > div { display: flex; gap: var(--space-1); }
+.job-download :is(dt, dd) { font-weight: var(--type-text-weight); }
+
+/* Library cards: title, source line, then origin and policy on one row. */
+.asset-card-details-content { display: flex; flex-wrap: wrap; align-content: start; gap: var(--space-1) var(--space-2); padding: var(--space-3); }
+.asset-card-details-content > :is(strong, span:not(.origin-badge):not(.status)) { flex: 1 0 100%; min-width: 0; }
+
+/* Settings: the profile sits in its card rather than in a second box. */
+.profile-row { border: 0; padding-inline: 0; }
+@media (max-width: 600px) {
+  :root { --page-top: var(--space-6); --section-gap: var(--space-6); }
+  .source-step, .style-step { padding: var(--space-4); }
+}
+
+/* ===========================================================================
+   PICTHING ELEMENTS
+   ---------------------------------------------------------------------------
+   The component vocabulary of pic.ping.gg, applied to the shell and every
+   page except the editor (which follows Final Cut Pro, below):
+     - filled pink primary actions; outlined neutral secondary actions
+     - tabs as a neutral-900 track with the chosen tab in black
+     - outlined badges; neutral-400 secondary copy
+     - a pink-tinted active row in the sidebar
+     - a faint 64px grid with a pink glow behind the create screen
+   =========================================================================== */
+
+/* Wordmark: two tones, the S6 in the accent. */
+.brand-accent { color: var(--brand-primary); }
+.mobile-brand > span { font-weight: 700; }
+.brand-button > span { font-weight: 700; letter-spacing: -0.2px; }
+
+/* Sidebar: grey labels, white on hover, a tinted row for the current page. */
+.app-rail { background: var(--canvas); border-right-color: var(--border); }
+.nav-item, .help-launcher { color: var(--text-muted); }
+.nav-item:hover, .help-launcher:hover { color: var(--text); background: var(--surface-2); }
+.nav-item.active { color: var(--text); background: var(--brand-soft); }
+.nav-item.active .nav-main-icon, .nav-item.active > .nav-icon-wrap > svg { color: var(--brand-primary-hover); }
+.topbar { border-bottom-color: var(--border); }
+
+/* Secondary copy steps back to neutral-400. */
+.page-header p, .create-topline p, .field small, .field-group-hint, .field-group-head p, .form-hint,
+.subtitle-toggle small, .muted, .small-text, .job-main p, .job-download :is(dt, dd), .drop-zone span,
+.asset-card-details-content > span:not(.origin-badge):not(.status), .settings-card-head p,
+.workspace-source-meta, .workspace-secondary-meta, .clip-line, .clip-meta, .crumb, .topbar-context > .muted,
+.timeline-scale, .recent-clip-content > span, .recent-clip-folder, .section-count, .count-pill,
+.engine-chips :is(.ok, .warn), .advanced-toggle, .checklist-status-text { color: var(--text-muted); }
+input::placeholder, textarea::placeholder { color: #737373; }
+
+/* Buttons: the primary action is filled; everything else stays an outline. */
+.button-primary { background: var(--brand-primary); border-color: var(--brand-primary); color: #fff; }
+.button-primary:hover { background: var(--brand-primary-hover); border-color: var(--brand-primary-hover); color: #fff; }
+.button-primary:active { background: var(--brand-primary-active); border-color: var(--brand-primary-active); }
+.button:hover, .icon-button:hover { background: var(--surface-2); }
+.create-button { min-height: var(--control-height-large); border-radius: 8px; }
+
+/* Inputs: transparent wells on whatever they sit in. */
+input:not([type="checkbox"]):not([type="range"]):not([type="color"]), select, textarea { background: transparent; }
+select option { background: var(--surface-2); }
+
+/* Tabs: a neutral-900 track; the chosen tab is black, the rest grey. */
+.segmented, .mode-tabs { padding: var(--space-1); border: 0; border-radius: 8px; background: var(--surface-2); }
+.segmented button, .mode-tabs button { border-radius: 6px; color: var(--text-muted); font-weight: var(--type-emphasis-weight); }
+.segmented button:hover, .mode-tabs button:hover { color: var(--text); }
+.segmented button.active, .mode-tabs button.active { background: var(--canvas); color: var(--text); box-shadow: none; }
+.mini-tabs { gap: 0; width: fit-content; padding: var(--space-1); border-radius: 8px; background: var(--surface-2); }
+.mini-tabs button { border-radius: 6px; color: var(--text-muted); }
+.mini-tabs button.active { background: var(--canvas); color: var(--text); }
+
+/* Badges: outlined, with the state carried by the icon. */
+.status, .engine-chips :is(.ok, .warn), .origin-badge { padding-inline: var(--space-2); border: 1px solid var(--border); border-radius: 6px; background: transparent; }
+.topbar-state .status { border-color: transparent; padding-inline: 0; }
+
+/* Option cards: neutral cards, a pink edge and wash when chosen; no decorative swatch. */
+.style-card { grid-template-columns: minmax(0, 1fr); padding: var(--space-3); border-color: var(--border); border-radius: 8px; background: var(--surface-1); }
+.style-card .style-swatch { display: none; }
+.style-card small { grid-column: 1; color: var(--text-muted); }
+.style-card:hover { border-color: var(--border-strong); background: var(--surface-2); }
+.style-card.active { border-color: var(--brand-primary); background: var(--brand-faint); box-shadow: none; }
+
+/* Composer and cards: neutral-950 on black with a neutral-800 hairline. */
+.source-step, .style-step { background: var(--surface-1); border-color: var(--border); }
+.settings-card, .shorts-clip-drawer { background: var(--surface-1); border-color: var(--border); }
+.provider-callout { border-color: var(--border); }
+
+/* The upload zone: dashed, and pink when a file is over it. */
+.drop-zone { border-color: var(--border-strong); border-radius: 12px; background: transparent; }
+.drop-zone:hover { border-color: var(--text-muted); background: var(--surface-2); }
+.drop-zone.drag-active { border-color: var(--brand-primary); background: var(--brand-faint); box-shadow: none; }
+
+/* Create screen backdrop: the reference's faint grid and a single pink glow. */
+.app-main:has(.projects-page) {
+  background:
+    radial-gradient(60% 420px at 50% 0, rgba(214, 58, 127, 0.12), transparent 70%),
+    linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px) 0 0 / 64px 64px,
+    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px) 0 0 / 64px 64px,
+    var(--canvas);
+}
+.app-main:has(.projects-page) .topbar { background: rgba(0, 0, 0, 0.82); }
+
+/* Disclosure rows read like the reference FAQ: a hairline and a quiet glyph. */
+.advanced-toggle { border-bottom-color: var(--border); }
+
+/* ===========================================================================
+   SHORTS EDITOR — Final Cut Pro elements
+   ---------------------------------------------------------------------------
+   Graphite panels butted together on 1px dark dividers (no gutters, no
+   rounded cards), an icon toolbar over the tools, a viewer header bar, play
+   centred under the picture beside a dark timecode readout, an inspector of
+   label-left / value-right rows, and a timeline of coloured clips: blue
+   video, green audio, violet titles, under a white playhead.
+   =========================================================================== */
+.shorts-workspace-page {
+  --fcp-window: #1e1e1e;
+  --fcp-panel: #262626;
+  --fcp-bar: #2d2d2d;
+  --fcp-divider: #0d0d0d;
+  --fcp-field: #171717;
+  --fcp-line: #3a3a3a;
+  --fcp-dim: var(--text-muted);
+  --fcp-video: var(--accent-blue);
+  --fcp-audio: var(--success);
+  --fcp-title: var(--accent-violet);
+  /* White at .46 clears 3:1 on the #262626 panels (and stays above it on black). */
+  --control-border: rgba(255, 255, 255, 0.46);
+}
+.app-main:has(.shorts-workspace-page) { background: var(--fcp-window, #1e1e1e); }
+.app-main:has(.shorts-workspace-page) > main { background: #1e1e1e; }
+
+/* Toolbar: title left, the project's actions right; buttons are FCP's translucent wells. */
+.shorts-workspace-header { padding: var(--space-1) 0 var(--space-2); border-bottom: 0; }
+.video-editing-stage > .shorts-video-frame { margin: var(--space-2) 0; }
+.shorts-workspace-page .shorts-header-actions .button:not(.button-primary) { background: rgba(255, 255, 255, 0.06); }
+.shorts-workspace-page .shorts-header-actions .button:not(.button-primary):hover { background: rgba(255, 255, 255, 0.12); }
+.shorts-workspace-page .edit-state { color: var(--fcp-dim); }
+
+/* The window: one bordered frame; panels inside meet on 1px dividers. */
+.shorts-editor-panel { border: 1px solid var(--fcp-divider); border-radius: 6px; background: var(--fcp-divider); }
+.shorts-editor-panel > .workspace-panel-heading { min-height: 36px; padding: var(--space-1) var(--space-3); border-bottom: 1px solid var(--fcp-divider); background: var(--fcp-bar); }
+.shorts-editor-panel > .shorts-source-empty { width: 100%; background: var(--fcp-panel); align-self: stretch; padding-block: var(--space-8); }
+.shorts-editor-panel > .shorts-source-switcher, .shorts-editor-panel > .shorts-inline-status { padding: var(--space-1) var(--space-3); background: var(--fcp-bar); color: var(--fcp-dim); }
+.video-editing-stage {
+  --nle-gutter: 1px;
+  padding: 0;
+  background: var(--fcp-divider);
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    "tools  vhead     inspector"
+    "pane   viewer    inspector"
+    "extra  transport inspector"
+    "timeline timeline timeline";
+}
+.video-editing-stage:not(:has(.shorts-property-inspector)) { grid-template-areas: "tools vhead vhead" "pane viewer viewer" "extra transport transport" "timeline timeline timeline"; }
+.shorts-editor-toolbox :is(.shorts-tool-rail, .shorts-tool-pane, .shorts-property-inspector, .shorts-track-list, .shorts-bottom-controls),
+.video-editing-stage > .shorts-collapsible-panel { border-radius: 0; background: var(--fcp-panel); }
+
+/* Toolbar of icon buttons over the tool panel. */
+.shorts-editor-toolbox .shorts-tool-rail { gap: var(--space-1); justify-content: flex-start; min-height: 36px; padding: 0 var(--space-2); border: 0; align-items: center; background: var(--fcp-bar); }
+.shorts-editor-toolbox .shorts-tool-rail button { flex: 0 0 auto; display: grid; place-items: center; width: 32px; min-height: 26px; padding: 0; border-radius: 5px; color: var(--fcp-dim); }
+.shorts-editor-toolbox .shorts-tool-rail button:hover { background: rgba(255, 255, 255, 0.08); color: var(--text); }
+.shorts-editor-toolbox .shorts-tool-rail button[aria-selected="true"] { background: rgba(255, 255, 255, 0.14); color: var(--text); font-weight: inherit; }
+.shorts-editor-toolbox .shorts-tool-pane { border-top: 0; }
+
+/* Viewer: a header bar naming the clip and its format, then the picture on black. */
+.viewer-header { grid-area: vhead; display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-width: 0; min-height: 36px; padding: 0 var(--space-3); background: var(--fcp-bar); color: var(--fcp-dim); }
+.viewer-header > span:first-child { min-width: 0; overflow: hidden; color: var(--text); text-overflow: ellipsis; white-space: nowrap; }
+.viewer-header > span:last-child { font-variant-numeric: tabular-nums; }
+.video-editing-stage::before { border-radius: 0; }
+
+/* Transport: one row under the picture — timecode readout, play between mute and
+   fullscreen, the scrubber taking the rest, trim at the end. It wraps rather
+   than squeezing the timecode when the monitor column is narrow. */
+.shorts-editor-toolbox .shorts-bottom-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  padding: var(--space-2) var(--space-3);
+}
+.shorts-editor-toolbox .shorts-bottom-controls > input[aria-label="Preview position"] { order: 5; flex: 1 1 120px; min-width: 120px; }
+.shorts-editor-toolbox .shorts-bottom-controls > span { order: 1; flex: 0 0 auto; min-width: max-content; padding: 2px var(--space-2); border-radius: 4px; background: var(--fcp-divider); font-size: var(--type-heading-size); font-weight: var(--type-emphasis-weight); }
+.shorts-editor-toolbox .shorts-bottom-controls > [aria-label="Play preview"], .shorts-editor-toolbox .shorts-bottom-controls > [aria-label="Pause preview"] { order: 3; width: 32px; height: 32px; border-radius: 50%; border-color: transparent; background: rgba(255, 255, 255, 0.1); }
+.shorts-editor-toolbox .shorts-bottom-controls > [aria-label$="ute preview"] { order: 2; }
+.shorts-editor-toolbox .shorts-bottom-controls > [aria-label="Expand preview"] { order: 4; }
+.shorts-editor-toolbox .shorts-bottom-controls > label { order: 6; color: var(--fcp-dim); }
+
+/* Inspector: a header bar, then label-left / value-right rows on compact fields. */
+.shorts-editor-toolbox .shorts-property-inspector { padding: 0 0 var(--space-3); }
+.shorts-editor-toolbox .shorts-property-inspector > strong { display: flex; align-items: center; min-height: 36px; margin: 0 0 var(--space-2); padding: 0 var(--space-3); background: var(--fcp-bar); font-size: var(--type-text-size); }
+.shorts-editor-toolbox .shorts-property-inspector:is([aria-label="Text properties"]) { padding-top: calc(36px + var(--space-2)); background: linear-gradient(var(--fcp-bar), var(--fcp-bar)) top / 100% 36px no-repeat, var(--fcp-panel); }
+.shorts-editor-toolbox .shorts-property-inspector > div, .shorts-editor-toolbox .shorts-property-inspector [role="group"] { grid-template-columns: minmax(0, 1fr); gap: var(--space-1); }
+.shorts-editor-toolbox .shorts-property-inspector label { grid-template-columns: minmax(0, 42%) minmax(0, 1fr); align-items: center; gap: var(--space-2); padding: 0 var(--space-3); color: var(--fcp-dim); }
+.shorts-editor-toolbox .shorts-property-inspector label:first-child { grid-column: auto; }
+.shorts-editor-toolbox .shorts-property-inspector label.compact-check { display: flex; }
+.shorts-editor-toolbox .shorts-property-inspector > p, .shorts-editor-toolbox .shorts-property-inspector button:not(.icon-button) { margin: var(--space-2) var(--space-3) 0; }
+.shorts-workspace-page .video-editing-stage :is(input:not([type="checkbox"]):not([type="range"]):not([type="color"]), select) { min-height: 26px; padding: 2px var(--space-2); border-radius: 4px; background: var(--fcp-field); }
+.shorts-editor-toolbox .property-toggle { width: 26px; min-height: 26px; height: 26px; margin: 5px var(--space-2); border-color: transparent; background: transparent; color: var(--fcp-dim); }
+
+/* Timeline: graphite lanes, coloured clips, a white playhead with a head. */
+.shorts-editor-toolbox .shorts-track-list { gap: 3px; padding: 0 var(--space-3) var(--space-3); background: #1b1b1b; }
+.shorts-editor-toolbox .timeline-scale { height: 24px; margin: 0 0 var(--space-1) 76px; border-bottom-color: var(--fcp-line); color: var(--fcp-dim); background: repeating-linear-gradient(90deg, var(--fcp-line) 0 1px, transparent 1px 2.5%) bottom / 100% 4px no-repeat, repeating-linear-gradient(90deg, var(--fcp-dim) 0 1px, transparent 1px 12.5%) bottom / 100% 8px no-repeat; }
+.shorts-editor-toolbox .track-label { color: var(--fcp-dim); font-weight: var(--type-text-weight); }
+.shorts-editor-toolbox .track-lane { height: 36px; border-radius: 0; background: transparent; }
+.shorts-editor-toolbox .track-block, .shorts-editor-toolbox .text-duration-block { border-radius: 5px; }
+.shorts-editor-toolbox [role="row"][aria-label="Video"] .track-block { border-color: var(--fcp-video); background: repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.18) 0 1px, transparent 1px 64px), color-mix(in srgb, var(--fcp-video) 42%, #141414); }
+.shorts-editor-toolbox [role="row"][aria-label="Audio"] .track-block { border-color: color-mix(in srgb, var(--fcp-audio) 70%, #141414); background: repeating-linear-gradient(90deg, color-mix(in srgb, var(--fcp-audio) 70%, #fff) 0 1px, transparent 1px 4px) center / 100% 50% no-repeat, color-mix(in srgb, var(--fcp-audio) 32%, #141414); color: var(--text); }
+.shorts-editor-toolbox .text-duration-block { border-color: var(--fcp-title); background: color-mix(in srgb, var(--fcp-title) 45%, #141414); }
+.shorts-editor-toolbox .track-playhead { width: 1px; margin-left: 0; background: #fff; }
+.shorts-editor-toolbox [role="row"][aria-label="Video"] .track-playhead::before { left: -5px; width: 11px; height: 9px; top: -9px; background: #fff; }
+.shorts-workspace-page .shorts-text-overlay.selected { border-color: #fff; }
+
+@media (max-width: 1100px) {
+  .video-editing-stage { grid-template-areas: "tools vhead" "pane viewer" "inspector viewer" "extra transport" "timeline timeline"; }
+  .video-editing-stage:not(:has(.shorts-property-inspector)) { grid-template-areas: "tools vhead" "pane viewer" "pane viewer" "extra transport" "timeline timeline"; }
+}
+@media (max-width: 700px) {
+  .video-editing-stage, .video-editing-stage:not(:has(.shorts-property-inspector)) { grid-template-areas: "vhead" "viewer" "transport" "timeline" "tools" "pane" "inspector" "extra"; }
+  .shorts-editor-toolbox .shorts-bottom-controls > input[aria-label="Preview position"] { order: 0; flex-basis: 100%; }
+  .shorts-editor-toolbox .shorts-bottom-controls > [aria-label="Play preview"], .shorts-editor-toolbox .shorts-bottom-controls > [aria-label="Pause preview"] { width: 40px; height: 40px; }
+}
+/* Sliders take the app accent; inside the editor they stay neutral like FCP's. */
+input[type="range"] { accent-color: var(--brand-primary); }
+.shorts-workspace-page input[type="range"] { accent-color: #d4d4d4; }
+/* Audio clips: name along the top, waveform beneath it. */
+.shorts-editor-toolbox [role="row"][aria-label="Audio"] .track-block { align-items: flex-start; padding-top: 1px; background-position: bottom 3px left 0; background-size: 100% 45%, auto; line-height: 16px; }

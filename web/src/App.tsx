@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CircleHelp, BriefcaseBusiness, Film, FolderKanban, HardDrive, Library, LoaderCircle, Scissors, Settings, SlidersHorizontal } from "lucide-react";
+import { CircleHelp, BriefcaseBusiness, Film, FolderKanban, Library, LoaderCircle, Scissors, Settings, SlidersHorizontal } from "lucide-react";
 import { getHealth, listJobs, listProfiles, listProjects, readableError } from "./api";
 import { JobsView } from "./components/jobs-view";
 import { LibraryView } from "./components/library-view";
@@ -172,7 +172,7 @@ export function App() {
     >Skip to main content</a>
     <aside className="app-rail" aria-label="Primary navigation">
       <button className="brand-button" onClick={() => setPage("projects")} aria-label="S6_cut Projects">
-        <img src="/app-icon.png" alt="" /><span>S6_cut</span>
+        <img src="/app-icon.png" alt="" /><span><span className="brand-accent">S6</span>_cut</span>
       </button>
       <nav>
         {nav.map((item) => {
@@ -203,7 +203,7 @@ export function App() {
     <div className="app-main">
       <header className="topbar">
         <div className="topbar-context">
-          <span className="mobile-brand"><img src="/app-icon.png" alt="" /> S6_cut</span>
+          <span className="mobile-brand"><img src="/app-icon.png" alt="" /> <span><span className="brand-accent">S6</span>_cut</span></span>
           {selected && page === "workspace" ? <><span className="muted">Workspace</span><span className="crumb">/</span><strong>{selected.name}</strong></> : <strong>{nav.find((item) => item.id === page)?.name}</strong>}
         </div>
         <div className="topbar-state">
@@ -211,7 +211,6 @@ export function App() {
               engine-startup row below, which stays visible at every width —
               this badge is hidden under 540px. */}
           {health ? <StatusBadge state={health.status === "ready" ? "local" : "fallback"} label={health.status === "ready" ? "Local engine" : "Fallbacks active"} /> : healthChecked ? <StatusBadge state="offline" label="Engine offline" /> : null}
-          <span className="save-state"><HardDrive size={14} /> Saved on this machine</span>
         </div>
       </header>
       <PwaStatus />

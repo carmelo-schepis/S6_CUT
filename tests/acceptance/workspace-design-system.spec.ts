@@ -475,7 +475,8 @@ test.describe("workspace design system", () => {
           const overflowBy = Math.max(element.scrollWidth - element.clientWidth, element.scrollHeight - element.clientHeight);
           if (!truncates && overflowBy > 1) clipped.push({ text: text.slice(0, 48), cls: String(element.className).slice(0, 40), overflowBy });
 
-          if (!/^rgba?\(255, 255, 255/.test(style.color)) {
+          // White, PicThing's neutral-400 secondary copy, or the brand pink.
+          if (!/^rgba?\((255, 255, 255|163, 163, 163|214, 58, 127|226, 75, 140)/.test(style.color)) {
             coloured.push({ text: text.slice(0, 48), cls: String(element.className).slice(0, 40), colour: style.color });
           }
         }

@@ -74,9 +74,9 @@ export function ShortsEditorToolbox(props: Props) {
 
   return <div className="shorts-editor-toolbox">
     <div className="shorts-tool-rail" role="tablist" aria-label="Editor tools">
-      <button type="button" role="tab" aria-selected={props.activeTool === "media"} onClick={() => { props.setActiveTool("media"); props.setSelectedProperty("video"); props.setPropertiesOpen(true); }}><Film size={16} aria-hidden="true" />Media</button>
-      <button type="button" role="tab" aria-selected={props.activeTool === "filters"} onClick={() => { props.setActiveTool("filters"); props.setSelectedProperty(null); }}><SlidersHorizontal size={16} aria-hidden="true" />Filters</button>
-      <button type="button" role="tab" aria-selected={props.activeTool === "text"} onClick={() => { props.setActiveTool("text"); props.setSelectedProperty(null); }}><Type size={16} aria-hidden="true" />Text</button>
+      <button type="button" role="tab" title="Media" aria-selected={props.activeTool === "media"} onClick={() => { props.setActiveTool("media"); props.setSelectedProperty("video"); props.setPropertiesOpen(true); }}><Film size={16} aria-hidden="true" /><span className="sr-only">Media</span></button>
+      <button type="button" role="tab" title="Filters" aria-selected={props.activeTool === "filters"} onClick={() => { props.setActiveTool("filters"); props.setSelectedProperty(null); }}><SlidersHorizontal size={16} aria-hidden="true" /><span className="sr-only">Filters</span></button>
+      <button type="button" role="tab" title="Text" aria-selected={props.activeTool === "text"} onClick={() => { props.setActiveTool("text"); props.setSelectedProperty(null); }}><Type size={16} aria-hidden="true" /><span className="sr-only">Text</span></button>
     </div>
     <section className="shorts-tool-pane" aria-label={`${props.activeTool === "media" ? "Media" : props.activeTool === "filters" ? "Filters" : "Text"} settings`}>
       {props.activeTool === "media" && <div className="tool-settings-row">
