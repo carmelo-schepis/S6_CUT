@@ -60,6 +60,8 @@ test.describe("customer controls", () => {
       await route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ detail: "QA guard probe" }) });
     });
     await page.goto("/", { waitUntil: "domcontentloaded" });
+    // The folded rail peeks open under a resting pointer; keep it over the page.
+    await page.mouse.move(900, 400);
     await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
     await page.getByRole("tab", { name: /Local file/ }).click();
     await page.locator('input[aria-label="Choose video file"]').setInputFiles({
@@ -145,6 +147,8 @@ test.describe("customer controls", () => {
 
   test("creation validation explains the problem without exposing backend detail", async ({ page }) => {
     await page.goto("/", { waitUntil: "domcontentloaded" });
+    // The folded rail peeks open under a resting pointer; keep it over the page.
+    await page.mouse.move(900, 400);
     await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
     const create = page.getByRole("button", { name: /Create \d+ short clip/ });
 

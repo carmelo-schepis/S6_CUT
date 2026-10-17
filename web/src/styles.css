@@ -2572,6 +2572,10 @@ input[type="range"] { accent-color: var(--brand-primary); }
   .app-shell[data-rail="collapsed"] .app-rail:not(:hover):not(:has(:focus-visible)) :is(.nav-label, .brand-button > span, .help-launcher > span) { display: none; }
   .app-shell[data-rail="collapsed"] .app-rail:not(:hover):not(:has(:focus-visible)) :is(.nav-item, .help-launcher, .brand-button) { justify-content: center; padding: 0; }
   .app-shell[data-rail="collapsed"] .app-rail:is(:hover, :has(:focus-visible)) { width: 224px; box-shadow: 24px 0 48px rgba(0, 0, 0, 0.6); }
+  /* After a click in the folded rail, stay folded until the pointer leaves. */
+  .app-shell[data-rail="collapsed"][data-rail-peek="held"] .app-rail:not(:has(:focus-visible)) { width: var(--rail); box-shadow: none; }
+  .app-shell[data-rail="collapsed"][data-rail-peek="held"] .app-rail:not(:has(:focus-visible)) :is(.nav-label, .brand-button > span, .help-launcher > span) { display: none; }
+  .app-shell[data-rail="collapsed"][data-rail-peek="held"] .app-rail:not(:has(:focus-visible)) :is(.nav-item, .help-launcher, .brand-button) { justify-content: center; padding: 0; }
 }
 /* At tablet widths the rail is icon-only by default and peeks the same way. */
 @media (min-width: 821px) and (max-width: 1180px) {

@@ -24,7 +24,8 @@ type Page = "projects" | "library" | "workspace" | "shorts-editor" | "jobs" | "s
  */
 const HEALTH_POLL_MS = 5_000;
 
-/** Per-browser convenience: whether the desktop sidebar is collapsed to icons. */
+/** Per-browser convenience: whether the desktop sidebar is collapsed to icons.
+ *  Collapsed by default; only an explicit "0" (pinned open via the toggle) expands it. */
 const RAIL_COLLAPSED_KEY = "s6.rail.collapsed";
 
 // `label` is the rail caption and must fit the rail without truncating;
@@ -51,12 +52,16 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const [railCollapsed, setRailCollapsed] = useState(() => {
-    try { return localStorage.getItem(RAIL_COLLAPSED_KEY) === "1"; } catch { return false; }
+    try { return localStorage.getItem(RAIL_COLLAPSED_KEY) !== "0"; } catch { return true; }
   });
   const toggleRail = () => setRailCollapsed((collapsed) => {
     try { localStorage.setItem(RAIL_COLLAPSED_KEY, collapsed ? "0" : "1"); } catch { /* Storage can be unavailable in hardened browsers. */ }
     return !collapsed;
   });
+  // A click inside the folded rail (navigating, or folding it) holds the hover
+  // peek shut until the pointer leaves, so the overlay never covers the page
+  // the user just opened while they move toward it.
+  const [railPeekHeld, setRailPeekHeld] = useState(false);
   const refreshRevision = useRef(0);
 
   // `getHealth` aborts itself after HEALTH_TIMEOUT_MS, so a wedged engine
@@ -167,7 +172,7 @@ export function App() {
   const hasSelectedProvider = profiles.some((profile) => profile.selected && profile.openrouterConfigured && profile.textStatus === "connected");
   const openProviders = () => setPage("settings");
 
-  return <div className="app-shell" data-rail={railCollapsed ? "collapsed" : "expanded"}>
+  return <div className="app-shell" data-rail={railCollapsed ? "collapsed" : "expanded"} data-rail-peek={railPeekHeld ? "held" : undefined}>
     {/* First tab stop: lets keyboard users bypass the seven rail destinations
         that otherwise precede page content on every screen. */}
     <a
@@ -180,7 +185,7 @@ export function App() {
         document.getElementById("main-content")?.focus();
       }}
     >Skip to main content</a>
-    <aside className="app-rail" aria-label="Primary navigation">
+    <aside className="app-rail" aria-label="Primary navigation" onClick={() => setRailPeekHeld(true)} onMouseLeave={() => setRailPeekHeld(false)}>
       <button className="brand-button" onClick={() => setPage("projects")} aria-label="S6_cut Projects">
         <img src="/app-icon.png" alt="" /><span><span className="brand-accent">S6</span>_cut</span>
       </button>
