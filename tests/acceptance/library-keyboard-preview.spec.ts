@@ -6,6 +6,8 @@ test("Library uses the full media area and opens details only with preview", asy
   const inspector = page.getByRole("complementary", { name: "Rule Inspector" });
   await expect(page.locator(".asset-card").first()).toBeVisible();
   await expect(inspector).toHaveCount(0);
+  const thumbnail = page.locator(".asset-card img").first();
+  await expect.poll(() => thumbnail.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
   const preview = page.locator(".asset-preview-trigger").first();
   const card = preview.locator("xpath=ancestor::article");
   const title = (await preview.getAttribute("aria-label"))!.replace(/^Preview /, "");
@@ -19,6 +21,8 @@ test("Library uses the full media area and opens details only with preview", asy
     await page.keyboard.press("Enter");
     await expect(page.getByRole("dialog")).toHaveCount(1);
     await expect(inspector.getByLabel("Title", { exact: true })).toHaveValue(title);
+    await inspector.getByLabel("Licence", { exact: true }).scrollIntoViewIfNeeded();
+    await expect(inspector.getByLabel("Licence", { exact: true })).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(inspector).toHaveCount(0);
     await expect(opener).toBeFocused();
@@ -52,5 +56,5 @@ test("Library uses the full media area and opens details only with preview", asy
     await expect(inspector).toHaveCount(0);
   }
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
-  await page.screenshot({ path: `test-artifacts/library-layout-${test.info().project.name}.png`, fullPage: true });
+  await page.screenshot({ path: `test-artifacts/library-layout-${test.info().project.name}.png`, fullPage: false });
 });
