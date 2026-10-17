@@ -61,6 +61,10 @@
      against every surface instead of only the one it was sampled on.
      --border-strong keeps its job separating surfaces; this is for controls. */
   --control-border: rgba(255, 255, 255, 0.36);
+  --control-translucent: color-mix(in srgb, var(--surface-1) 50%, transparent);
+  --control-translucent-group: color-mix(in srgb, var(--surface-2) 35%, transparent);
+  --control-translucent-hover: color-mix(in srgb, var(--surface-2) 60%, transparent);
+  --control-translucent-selected: color-mix(in srgb, var(--surface-3) 65%, transparent);
   /* ONE accent, and it is white. It is spent scarcely — primary action, focus
      ring, progress, brand mark, the in-flight state — and never decoratively.
      Hierarchy comes from the surface ladder and the hairlines above, never from
@@ -2772,9 +2776,17 @@ input[type="checkbox"]:checked::before {
 @container (min-width: 760px) {
   .projects-page .style-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
-.projects-page .style-card { min-width: 0; border-color: var(--control-border); background: var(--surface-1); }
-.projects-page .style-card:hover { border-color: var(--selector-highlight); background: var(--surface-2); }
-.projects-page .style-card.active { border-color: var(--selector-highlight-hover); background: var(--surface-3); }
+.projects-page .style-card { min-width: 0; border-color: var(--control-border); background: var(--control-translucent); }
+.projects-page .style-card:hover { border-color: var(--selector-highlight); background: var(--control-translucent-hover); }
+.projects-page .style-card.active { border-color: var(--selector-highlight-hover); background: var(--control-translucent-selected); }
+.projects-page :is(.segmented, .mode-tabs, .source-tabs) { background: var(--control-translucent-group); }
+.projects-page :is(.segmented, .mode-tabs, .source-tabs) button:not(.active):hover:not(:disabled) { background: var(--control-translucent-hover); }
+.projects-page :is(.segmented, .mode-tabs, .source-tabs) button.active { background: var(--control-translucent-selected); box-shadow: inset 0 0 0 1px var(--brand-border); }
+.projects-page :is(.count-control button, .count-control strong, .count-control input, .source-actions button),
+.projects-page input.high-volume-count-input[type="text"],
+.projects-page .drop-zone .button:not(.button-primary):not(.button-danger) { background: var(--control-translucent); }
+.projects-page :is(.count-control button, .source-actions button):hover:not(:disabled),
+.projects-page .drop-zone .button:not(.button-primary):not(.button-danger):hover:not(:disabled) { background: var(--control-translucent-hover); }
 .style-card-title { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
 .style-card-check { flex: 0 0 auto; color: var(--text); visibility: hidden; }
 .style-card[aria-pressed="true"] .style-card-check { visibility: visible; }
