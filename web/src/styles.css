@@ -2638,8 +2638,8 @@ input[type="checkbox"]:checked::before {
 /* Selected options are a fill. No underline bars, side markers or rings. */
 .segmented button.active, .mode-tabs button.active, .mini-tabs button.active,
 .panel-tabs button.active, .inspector-tabs button.active { box-shadow: none; }
-.panel-tabs, .inspector-tabs { display: flex; gap: var(--space-1); width: fit-content; min-height: 0; padding: var(--space-1); border-radius: var(--radius-lg); background: var(--surface-2); }
-.panel-tabs button, .inspector-tabs button, .panel-tabs button:first-child, .inspector-tabs button:first-child { min-height: var(--control-height-small); margin: 0; padding: 0 var(--space-3); border-radius: var(--radius-md); color: var(--text-muted); }
+.panel-tabs, .inspector-tabs { display: flex; flex-wrap: wrap; gap: var(--space-1); width: fit-content; max-width: 100%; min-height: 0; padding: var(--space-1); border-radius: var(--radius-lg); background: var(--surface-2); }
+.panel-tabs button, .inspector-tabs button, .panel-tabs button:first-child, .inspector-tabs button:first-child { min-height: var(--control-height-small); margin: 0; padding: 0 var(--space-2); border-radius: var(--radius-md); color: var(--text-muted); }
 .panel-tabs button.active, .inspector-tabs button.active { background: var(--canvas); color: var(--text); }
 .library-sidebar > button.active, .folder-node > button.active, .help-nav button.active { box-shadow: none; background: var(--surface-2); }
 /* Status reads as an icon and a word. */
@@ -2816,3 +2816,12 @@ input[type="checkbox"]:checked::before {
   .seo-title-dialog { padding: var(--space-3); max-height: 94vh; }
   .seo-title-dialog .dialog-actions .button { flex: 1 1 0; }
 }
+
+/* The metadata model picker lists long model names; the control never widens
+   its card past the viewport. */
+.metadata-model-card :is(select, input) { width: 100%; max-width: 100%; min-width: 0; }
+.metadata-model-card .field, .metadata-model-card label { min-width: 0; }
+/* Its header action keeps its label on one line and drops below the heading
+   on a narrow column instead of being squeezed under its own text. */
+.metadata-model-card .settings-card-head { flex-wrap: wrap; gap: var(--space-2) var(--space-3); }
+.metadata-model-card .settings-card-head > .button { flex: 0 0 auto; white-space: nowrap; }

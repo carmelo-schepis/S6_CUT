@@ -439,7 +439,8 @@ test.describe("workspace design system", () => {
     await expect(page.locator(".viewer-toolbar > span").first()).toHaveText(/^Output · \d+:\d+$/);
 
     // The inspector's tab set, in order.
-    expect(await page.locator(".inspector-tabs button").allTextContents()).toEqual(["Score", "Captions", "Asset", "Info"]);
+    // A clip project adds the YouTube metadata tab between Asset and Info.
+    expect(await page.locator(".inspector-tabs button").allTextContents()).toEqual(["Score", "Captions", "Asset", "YouTube", "Info"]);
     // The board's filter set, in order.
     expect(await page.locator(".board-filters button").allTextContents()).toEqual(["All", "Selected", "Failed"]);
 
