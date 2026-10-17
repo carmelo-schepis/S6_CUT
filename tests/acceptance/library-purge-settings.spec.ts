@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+test.use({ serviceWorkers: "block" });
+
 const profile = {
   id: "purge-profile", name: "Local profile", textModelId: "openai/gpt-4.1-mini", selected: true,
   persistence: "encrypted", openrouterConfigured: false, openrouterMasked: null, textStatus: "not_configured",
@@ -22,6 +24,11 @@ for (const [name, width, height] of [["desktop", 1440, 900], ["tablet", 768, 102
     await trigger.focus(); await trigger.press("Enter");
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
+    const inputBox = await dialog.getByLabel(/Type DELETE ALL CONTENT/i).boundingBox();
+    const actionsBox = await dialog.locator(".dialog-actions").boundingBox();
+    expect(inputBox).not.toBeNull();
+    expect(actionsBox).not.toBeNull();
+    expect(actionsBox!.y - (inputBox!.y + inputBox!.height)).toBeGreaterThanOrEqual(16);
     await expect(dialog.getByRole("button", { name: "Delete permanently" })).toBeDisabled();
     await dialog.getByLabel(/Type DELETE ALL CONTENT/i).fill("DELETE ALL CONTENT");
     await expect(dialog.getByRole("button", { name: "Delete permanently" })).toBeEnabled();
