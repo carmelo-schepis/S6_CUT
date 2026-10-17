@@ -52,7 +52,7 @@ describe("LibraryView", () => {
     const generated = { ...assets[0], description: "A short summary of the specific transcript-grounded clip, with useful topic context." };
     mockListAssets.mockResolvedValueOnce([generated, assets[1]]);
     render(<LibraryView />);
-    expect(await screen.findAllByText(generated.description)).toHaveLength(2);
+    expect(await screen.findAllByText(generated.description)).toHaveLength(1);
     expect(screen.queryByText("campaign")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Select Acme launch for Rule Inspector" }));
     expect(screen.getByLabelText("Full description")).toHaveValue(generated.description);
@@ -63,7 +63,9 @@ describe("LibraryView", () => {
     const archivedAsset = { ...assets[0], id: "archived-duplicate", title: assets[0].title, folderId: "archived-folder" };
     mockListAssets.mockResolvedValueOnce([...assets, archivedAsset]);
     render(<LibraryView selectedAssetId="archived-duplicate" />);
-    expect(await screen.findByDisplayValue("Acme launch")).toBeInTheDocument();
+    expect(await screen.findAllByText("Acme launch")).toHaveLength(2);
+    fireEvent.click(document.querySelector('[data-asset-id="archived-duplicate"] .asset-card-details')!);
+    expect(screen.getByDisplayValue("Acme launch")).toBeInTheDocument();
     expect(mockListAssets).toHaveBeenCalledWith({ includeArchived: true });
     expect(mockListFolders).toHaveBeenCalledWith({ includeArchived: true });
   });
@@ -112,7 +114,9 @@ describe("LibraryView", () => {
     expect(await screen.findByText("Acme launch")).toBeInTheDocument();
     const asides = [...document.querySelectorAll("aside")];
     const names = asides.map((aside) => aside.getAttribute("aria-label"));
-    expect(names).toEqual(["Folders and policy filters", "Rule Inspector"]);
+    expect(names).toEqual(["Folders and policy filters"]);
+    fireEvent.click(screen.getByRole("button", { name: "Preview Acme launch" }));
+    expect(within(screen.getByRole("dialog")).getByRole("complementary", { name: "Rule Inspector" })).toBeInTheDocument();
     expect(new Set(names).size).toBe(names.length);
   });
 
@@ -145,93 +149,30 @@ describe("LibraryView", () => {
     expect(screen.getByRole("dialog")).not.toHaveTextContent("Delete project everywhere");
   });
 
-  it("opens a preview without changing the existing Rule Inspector selection", async () => {
+  it("opens matching details with the player and removes both on close", async () => {
     render(<LibraryView />);
-    expect(await screen.findByText("Acme launch")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Select Other logo for Rule Inspector" }));
-    expect(screen.getByDisplayValue("Other logo")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Search media"), { target: { value: "launch" } });
-    fireEvent.change(screen.getByLabelText("Media type"), { target: { value: "video" } });
-    fireEvent.change(screen.getByLabelText("Asset origin"), { target: { value: "generated-clip" } });
+    await screen.findByText("Acme launch");
+    expect(screen.queryByRole("complementary", { name: "Rule Inspector" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Preview Acme launch" }));
-    const dialog = screen.getByRole("dialog", { name: "Acme launch video preview" });
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByDisplayValue("Acme launch")).toBeInTheDocument();
     expect(dialog.querySelector("video")).toHaveAttribute("src", assets[0].previewUrl);
-    expect(screen.getByDisplayValue("Other logo")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Close video preview" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.getByDisplayValue("Other logo")).toBeInTheDocument();
-    expect(screen.getByLabelText("Search media")).toHaveValue("launch");
-    expect(screen.getByLabelText("Media type")).toHaveValue("video");
-    expect(screen.getByLabelText("Asset origin")).toHaveValue("generated-clip");
+    expect(screen.queryByRole("complementary", { name: "Rule Inspector" })).not.toBeInTheDocument();
   });
 
-  it("keeps the video details button and checkbox independent from preview", async () => {
+  it("keeps bulk selection separate and opens the same view from card details", async () => {
     render(<LibraryView />);
-    expect(await screen.findByText("Acme launch")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Select Other logo for Rule Inspector" }));
+    await screen.findByText("Acme launch");
     fireEvent.click(screen.getByLabelText("Select Acme launch"));
     expect(screen.getByLabelText("Select Acme launch")).toBeChecked();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.getByDisplayValue("Other logo")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Select Acme launch for Rule Inspector" }));
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.getByDisplayValue("Acme launch")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Preview Acme launch" })).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Preview Acme launch" })).toHaveLength(1);
-    expect(screen.getAllByRole("button", { name: "Select Acme launch for Rule Inspector" })).toHaveLength(1);
-    expect(screen.getAllByLabelText("Select Acme launch")).toHaveLength(1);
-    expect(document.body.style.overflow).toBe("");
-  });
-
-  it("isolates realistic details pointer sequences and nested content from preview", async () => {
-    render(<LibraryView />);
-    expect(await screen.findByText("Acme launch")).toBeInTheDocument();
-    const details = screen.getByRole("button", { name: "Select Acme launch for Rule Inspector" });
-    fireEvent.pointerDown(details);
-    fireEvent.mouseDown(details);
-    fireEvent.pointerUp(details);
-    fireEvent.mouseUp(details);
-    fireEvent.click(details);
-    expect(screen.getByDisplayValue("Acme launch")).toBeInTheDocument();
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(document.body.style.overflow).toBe("");
-
-    const nestedDetails = screen.getByRole("button", { name: "Select Acme launch for Rule Inspector" });
-    fireEvent.click(within(nestedDetails).getByText("Acme launch", { selector: "strong" }));
-    fireEvent.click(within(nestedDetails).getByText("campaign"));
-    fireEvent.click(within(nestedDetails).getByText("Generated clip"));
-    fireEvent.click(within(nestedDetails).getByText("neutral"));
-    expect(screen.getByDisplayValue("Acme launch")).toBeInTheDocument();
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-  });
-
-  it("keeps preview, details, and checkbox actions independent across keyboard and rapid use", async () => {
-    render(<LibraryView />);
-    expect(await screen.findByText("Acme launch")).toBeInTheDocument();
-    const details = screen.getByRole("button", { name: "Select Acme launch for Rule Inspector" });
-    const checkbox = screen.getByLabelText("Select Acme launch");
-    fireEvent.click(screen.getByRole("button", { name: "Select Other logo for Rule Inspector" }));
-    fireEvent.click(checkbox);
-    expect(checkbox).toBeChecked();
-    expect(screen.getByDisplayValue("Other logo")).toBeInTheDocument();
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Preview Acme launch" }));
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(within(screen.getByRole("dialog")).getByDisplayValue("Acme launch")).toBeInTheDocument();
+    expect(document.body.style.overflow).toBe("hidden");
     fireEvent.click(screen.getByRole("button", { name: "Close video preview" }));
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    fireEvent.keyDown(details, { key: "Enter" });
-    fireEvent.click(details);
-    expect(screen.getByDisplayValue("Acme launch")).toBeInTheDocument();
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    fireEvent.keyDown(details, { key: " " });
-    fireEvent.click(details);
-    expect(screen.getByDisplayValue("Acme launch")).toBeInTheDocument();
-    const preview = screen.getByRole("button", { name: "Preview Acme launch" });
-    fireEvent.keyDown(preview, { key: "Enter" });
-    fireEvent.click(preview);
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("Acme launch")).toBeInTheDocument();
+    expect(document.body.style.overflow).toBe("");
   });
 
   it("renders isolated card controls without nested buttons or article activation", async () => {
@@ -255,7 +196,8 @@ describe("LibraryView", () => {
     expect(screen.queryByRole("button", { name: "Preview Acme launch" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Select Acme launch for Rule Inspector" }));
     fireEvent.click(screen.getByRole("button", { name: "Select Other logo for Rule Inspector" }));
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(within(screen.getByRole("dialog")).getByDisplayValue("Other logo")).toBeInTheDocument();
+    expect(screen.getByRole("dialog").querySelector("video")).toBeNull();
   });
 
   it("preserves loaded media and offers retry after a transient engine failure", async () => {

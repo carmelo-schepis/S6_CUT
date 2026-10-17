@@ -2885,3 +2885,37 @@ input[type="checkbox"]:checked::before {
    on a narrow column instead of being squeezed under its own text. */
 .metadata-model-card .settings-card-head { flex-wrap: wrap; gap: var(--space-2) var(--space-3); }
 .metadata-model-card .settings-card-head > .button { flex: 0 0 auto; white-space: nowrap; }
+
+/* Keep the Library focused on browsing; editing lives with the preview. */
+.library-page { padding-top: 24px; }
+.library-page > .page-header { margin-bottom: 28px; }
+.library-layout { grid-template-columns: 200px minmax(0, 1fr); column-gap: 28px; }
+.library-toolbar { flex-wrap: wrap; }
+.library-toolbar .search-box { min-width: 220px; }
+.library-page .asset-grid { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 22px 18px; padding: 16px 0; }
+.library-page .asset-preview-trigger, .library-page .asset-preview-trigger > .asset-preview,
+.library-page .asset-card-details-full > .asset-preview { height: auto; aspect-ratio: 16 / 9; }
+.library-page .asset-preview img { object-fit: contain; }
+.library-page .asset-card .asset-card-details-content { padding: 10px 2px; }
+.asset-preview-body { min-height: 0; display: grid; overflow: auto; }
+.asset-preview-dialog { width: min(1280px, 96vw); }
+.asset-preview-dialog .asset-preview-body { grid-template-columns: minmax(0, 1fr) 360px; }
+.asset-preview-dialog .asset-inspector { grid-column: auto; max-height: none; padding: 0 20px 20px; overflow: auto; }
+.asset-preview-dialog .asset-fields { grid-template-columns: minmax(0, 1fr); }
+.asset-preview-dialog .video-preview-stage { align-self: start; position: sticky; top: 0; }
+.asset-preview-dialog .video-preview-video { max-height: calc(90vh - 100px); }
+.asset-preview-dialog .asset-inspector:only-child { grid-column: 1 / -1; }
+@media (max-width: 900px) {
+  .library-layout { grid-template-columns: 160px minmax(0, 1fr); gap: 20px; }
+  .asset-preview-dialog .asset-preview-body { grid-template-columns: minmax(0, 1fr); }
+  .asset-preview-dialog .video-preview-stage { position: static; }
+  .asset-preview-dialog .video-preview-video { max-height: 48vh; }
+  .asset-preview-dialog .asset-inspector { overflow: visible; }
+}
+@media (max-width: 600px) {
+  .library-layout { display: block; }
+  .library-page .asset-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 12px; }
+  .library-toolbar .search-box { flex-basis: 100%; min-width: 0; }
+  .library-toolbar select { flex: 1; width: auto; }
+  .library-page > .page-header { margin-bottom: 20px; }
+}
