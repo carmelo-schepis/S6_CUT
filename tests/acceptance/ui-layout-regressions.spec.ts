@@ -115,10 +115,11 @@ test.describe("creation and Library layout regressions", () => {
       });
       expect(inspectorMeasure.rect.left).toBeGreaterThanOrEqual(0);
       expect(inspectorMeasure.rect.right).toBeLessThanOrEqual(width + 1);
-      expect(inspectorMeasure.rect.top).toBeGreaterThanOrEqual(-1);
-      expect(inspectorMeasure.rect.bottom).toBeLessThanOrEqual(height + 1);
+      const dialogBox = await page.getByRole("dialog").boundingBox();
+      expect(dialogBox!.y).toBeGreaterThanOrEqual(0);
+      expect(dialogBox!.y + dialogBox!.height).toBeLessThanOrEqual(height + 1);
       expect(inspectorMeasure.scrollWidth).toBeLessThanOrEqual(inspectorMeasure.clientWidth);
-      expect(inspectorMeasure.overflowY).toBe("auto");
+      expect(await page.locator(".asset-preview-body").evaluate((element) => getComputedStyle(element).overflowY)).toBe("auto");
       expect(inspectorMeasure.controls.every((control) => control.left >= inspectorMeasure.rect.left && control.right <= inspectorMeasure.rect.right + 1)).toBe(true);
       await expectNoHorizontalOverflow(page);
       await page.screenshot({ path: path.join(artifacts, `${name}-library-inspector.png`), fullPage: false });
