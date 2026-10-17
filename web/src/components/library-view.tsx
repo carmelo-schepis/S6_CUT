@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent, type MouseEvent } from "react";
-import { Archive, FileImage, Folder, FolderPlus, ImagePlus, Library, RefreshCw, Search, ShieldCheck, Trash2, Upload } from "lucide-react";
-import { archiveFolder, createFolder, deleteAsset, deleteAssets, getHealth, listAssets, listFolders, moveAssets, moveFolder, readableError, removeFolder, renewAssetThumbnail, updateAsset, updateFolder, uploadAsset } from "../api";
+import { Archive, FileImage, Folder, FolderPlus, ImagePlus, Library, RefreshCw, Search, ShieldCheck, Sparkles, Trash2, Upload } from "lucide-react";
+import { applyLibraryTitles, archiveFolder, createFolder, deleteAsset, deleteAssets, getHealth, listAssets, listFolders, moveAssets, moveFolder, readableError, removeFolder, renewAssetThumbnail, suggestLibraryTitles, updateAsset, updateFolder, uploadAsset } from "../api";
 import { bindRevalidationOnFocus, createBoundedRevalidation, emitLibraryChanged, onLibraryChanged } from "../library-sync";
-import type { AssetOrigin, Health, LibraryAsset, LibraryFolder } from "../types";
+import type { AssetOrigin, Health, LibraryAsset, LibraryFolder, TitleApplyItem, TitleSuggestionResponse } from "../types";
 import { Button, EmptyState, Field, FieldGroup, PageHeader, StatusBadge, formatAge } from "./common";
 import { LazyVideoThumbnail } from "./lazy-video-thumbnail";
+import { SeoTitleReviewDialog } from "./seo-title-review";
 import { VideoPreviewDialog } from "./video-preview-dialog";
 
 const originLabels = { "manual-import": "Manual", "project-source": "Source", "generated-clip": "Generated clip", "script-output": "Legacy output" } as const;
@@ -37,6 +38,12 @@ export function LibraryView({ selectedAssetId }: { selectedAssetId?: string | nu
   const [deleting, setDeleting] = useState(false);
   const [deleteFeedback, setDeleteFeedback] = useState<string | null>(null);
   const [assetLimit, setAssetLimit] = useState(ASSET_PAGE);
+  const [titleSuggestions, setTitleSuggestions] = useState<TitleSuggestionResponse | null>(null);
+  const [suggestingTitles, setSuggestingTitles] = useState(false);
+  const [applyingTitles, setApplyingTitles] = useState(false);
+  const [titleError, setTitleError] = useState<string | null>(null);
+  const [titleApplyError, setTitleApplyError] = useState<string | null>(null);
+  const [titleFeedback, setTitleFeedback] = useState<{ message: string; reasons: string[] } | null>(null);
   const loadFlight = useRef<Promise<void> | null>(null);
   const initialLoadComplete = useRef(false);
 
@@ -117,6 +124,12 @@ export function LibraryView({ selectedAssetId }: { selectedAssetId?: string | nu
     card?.scrollIntoView?.({ block: "center" });
   }, [selectedAssetId, assets, assetLimit]);
 
+  // The Library list holds the last loaded or saved copy; the inspector edits a draft.
+  const savedSelected = selected ? assets.find((asset) => asset.id === selected.id) : undefined;
+  const saveIfChanged = (field: "title" | "description") => {
+    if (!selected || (savedSelected && savedSelected[field] === selected[field])) return;
+    void saveSelected({ [field]: selected[field] });
+  };
   const saveSelected = async (patch: Record<string, unknown>) => {
     if (!selected) return;
     try { const next = await updateAsset(selected.id, patch); setSelected(next); setAssets((current) => current.map((asset) => asset.id === next.id ? next : asset)); emitLibraryChanged(); } catch (cause) { setError(readableError(cause)); }
@@ -171,6 +184,27 @@ export function LibraryView({ selectedAssetId }: { selectedAssetId?: string | nu
     if (!selectedIds.length) return;
     try { await moveAssets(selectedIds, destination); setAssets((current) => current.map((asset) => selectedIds.includes(asset.id) ? { ...asset, folderId: destination } : asset)); setSelectedIds([]); emitLibraryChanged(); } catch (cause) { setError(readableError(cause)); }
   };
+  const suggestTitles = async () => {
+    if (suggestingTitles) return;
+    setSuggestingTitles(true); setTitleError(null); setTitleFeedback(null); setTitleApplyError(null);
+    try { setTitleSuggestions(await suggestLibraryTitles(selectedIds.length ? { assetIds: [...selectedIds] } : { scope: "auto-titled" })); }
+    catch (cause) { setTitleError(`Could not write SEO titles. ${readableError(cause)}`); }
+    finally { setSuggestingTitles(false); }
+  };
+  const closeTitleReview = () => { setTitleSuggestions(null); setTitleApplyError(null); queueMicrotask(() => document.querySelector<HTMLButtonElement>('[data-testid="suggest-seo-titles"]')?.focus()); };
+  const applyTitles = async (items: TitleApplyItem[]) => {
+    setApplyingTitles(true); setTitleApplyError(null);
+    try {
+      const result = await applyLibraryTitles(items);
+      const updated = result.applied.length;
+      const conflicts = result.conflicts.length;
+      setTitleFeedback({ message: `Updated ${updated} title${updated === 1 ? "" : "s"}${conflicts ? ` · ${conflicts} conflict${conflicts === 1 ? "" : "s"}` : ""}`, reasons: result.conflicts.map((item) => `${item.title}: ${item.reason || "Changed since the suggestion was written."}`) });
+      closeTitleReview();
+      emitLibraryChanged();
+      await load(false);
+    } catch (cause) { setTitleApplyError(`Could not apply titles. ${readableError(cause)}`); }
+    finally { setApplyingTitles(false); }
+  };
   const confirmDelete = async () => {
     if (deleting || !selectedIds.length) return;
     const ids = [...selectedIds];
@@ -206,9 +240,11 @@ export function LibraryView({ selectedAssetId }: { selectedAssetId?: string | nu
         <strong>Policy</strong>{["required", "prefer", "neutral", "never"].map((item) => <button key={item} className={policy === item ? "active" : ""} onClick={() => setPolicy(policy === item ? null : item)}><ShieldCheck size={14} /><span className="library-control-label">{item === "prefer" ? "Preferred" : item[0].toUpperCase() + item.slice(1)}</span><span>{assets.filter((asset) => asset.policy === item).length}</span></button>)}
       </aside>
 
-      <section className="library-centre panel"><div className="library-toolbar"><div className="search-box"><Search size={15} /><input aria-label="Search media" placeholder="Search titles, tags, people, brands…" value={query} onChange={(event) => setQuery(event.target.value)} /></div><select aria-label="Media type" value={mediaType} onChange={(event) => setMediaType(event.target.value)}><option value="all">All media</option><option value="image">Images</option><option value="video">Video</option><option value="audio">Audio</option></select><select aria-label="Asset origin" value={origin} onChange={(event) => setOrigin(event.target.value as AssetOrigin | "all")}><option value="all">All origins</option><option value="project-source">Sources</option><option value="generated-clip">Generated clips</option><option value="script-output">Legacy outputs</option><option value="manual-import">Manual imports</option></select></div>
+      <section className="library-centre panel"><div className="library-toolbar"><div className="search-box"><Search size={15} /><input aria-label="Search media" placeholder="Search titles, tags, people, brands…" value={query} onChange={(event) => setQuery(event.target.value)} /></div><select aria-label="Media type" value={mediaType} onChange={(event) => setMediaType(event.target.value)}><option value="all">All media</option><option value="image">Images</option><option value="video">Video</option><option value="audio">Audio</option></select><select aria-label="Asset origin" value={origin} onChange={(event) => setOrigin(event.target.value as AssetOrigin | "all")}><option value="all">All origins</option><option value="project-source">Sources</option><option value="generated-clip">Generated clips</option><option value="script-output">Legacy outputs</option><option value="manual-import">Manual imports</option></select><Button className="seo-titles-button" data-testid="suggest-seo-titles" disabled={suggestingTitles} aria-busy={suggestingTitles || undefined} onClick={() => void suggestTitles()}><Sparkles size={14} aria-hidden="true" /> {suggestingTitles ? "Writing titles…" : selectedIds.length ? `Suggest SEO titles (${selectedIds.length})` : "Suggest SEO titles"}</Button></div>
         {selectedIds.length > 0 && <div className="bulk-bar"><strong>{selectedIds.length} selected</strong><select aria-label="Move selected assets" defaultValue="" onChange={(event) => { if (event.target.value) void moveSelected(event.target.value); }}><option value="" disabled>Move to…</option>{folders.filter((folder) => !folder.archived).map((folder) => <option value={folder.id} key={folder.id}>{folder.name}</option>)}</select><Button variant="danger" data-delete-selected="true" disabled={deleting} onClick={() => setDeleteDialogOpen(true)}><Trash2 size={15} aria-hidden="true" /> Delete</Button></div>}
         {deleteFeedback && <div className="library-feedback" role="status">{deleteFeedback}</div>}
+        {titleError && <p className="form-error library-title-error" role="alert">{titleError}</p>}
+        {titleFeedback && <div className="library-feedback" role="status" data-testid="seo-title-feedback">{titleFeedback.message}{titleFeedback.reasons.length > 0 && <ul className="seo-title-conflicts">{titleFeedback.reasons.map((reason, index) => <li key={index}>{reason}</li>)}</ul>}</div>}
         {visibleAssets.length ? <><div className="asset-grid">{pagedAssets.map((asset) => <LibraryAssetCard key={asset.id} asset={asset} isSelected={selectedIds.includes(asset.id)} isInspected={selected?.id === asset.id} onPreview={openPreview} onInspect={setSelected} onToggleSelected={(assetId, checked) => setSelectedIds((current) => checked ? [...current, assetId] : current.filter((id) => id !== assetId))} />)}</div>
           {remainingAssets > 0 && <button className="show-all-projects" onClick={() => setAssetLimit((value) => value + ASSET_PAGE)}>Show {Math.min(ASSET_PAGE, remainingAssets)} more of {visibleAssets.length}</button>}</>
           : loading && !assets.length ? <EmptyState icon={<Library size={30} />} title="Opening your Library">Reading local media from the engine…</EmptyState>
@@ -220,7 +256,9 @@ export function LibraryView({ selectedAssetId }: { selectedAssetId?: string | nu
 
       <aside className="asset-inspector panel" aria-label="Rule Inspector"><div className="panel-title"><strong>Rule Inspector</strong>{selected && <span>{formatAge(selected.createdAt)}</span>}</div>{selected ? <div className="asset-fields">
         <FieldGroup title="Identity" headingLevel={2}>
-          <Field label="Title"><input value={selected.title} onChange={(event) => setSelected({ ...selected, title: event.target.value })} onBlur={() => saveSelected({ title: selected.title })} /></Field>
+          <Field label="Title"><input value={selected.title} onChange={(event) => setSelected({ ...selected, title: event.target.value })} onBlur={() => saveIfChanged("title")} /></Field>
+          <Field label="Filename"><input readOnly value={selected.filename} /></Field>
+          <Field label="Description"><textarea value={selected.description} onChange={(event) => setSelected({ ...selected, description: event.target.value })} onBlur={() => saveIfChanged("description")} rows={4} aria-label="Full description" /></Field>
           <Field label="Policy" hint="Controls whether this asset may be chosen automatically."><select value={selected.policy} onChange={(event) => saveSelected({ policy: event.target.value })}><option value="required">Required</option><option value="prefer">Prefer</option><option value="neutral">Neutral</option><option value="never">Never</option></select></Field>
         </FieldGroup>
         <FieldGroup title="Matching" headingLevel={2}>
@@ -241,6 +279,7 @@ export function LibraryView({ selectedAssetId }: { selectedAssetId?: string | nu
       </div> : <p className="muted inspector-empty">Select an asset to edit its deterministic matching rules.</p>}</aside>
     </div>
 
+    {titleSuggestions && <SeoTitleReviewDialog result={titleSuggestions} applying={applyingTitles} error={titleApplyError} onCancel={closeTitleReview} onApply={(items) => void applyTitles(items)} />}
     {previewAsset && <VideoPreviewDialog asset={previewAsset} opener={previewOpener} onClose={closePreview} />}
     {deleteDialogOpen && selectedIds.length > 0 && <DeleteConfirmationDialog count={selectedIds.length} projectLinked={selectedIds.some((assetId) => assets.find((asset) => asset.id === assetId)?.sourceProjectId)} deleting={deleting} onCancel={() => { setDeleteDialogOpen(false); queueMicrotask(() => document.querySelector<HTMLButtonElement>('[data-delete-selected="true"]')?.focus()); }} onConfirm={() => void confirmDelete()} />}
 
@@ -288,7 +327,9 @@ function LibraryAssetCard({ asset, isSelected, isInspected, onPreview, onInspect
     event.stopPropagation();
     onToggleSelected(asset.id, event.currentTarget.checked);
   };
-  const details = <div className="asset-card-details-content" aria-hidden="true"><strong title={asset.title}>{asset.title}</strong><span>{asset.tags.slice(0, 3).join(" · ") || asset.filename}</span><span className="origin-badge">{originLabels[asset.origin]}</span><StatusBadge state={asset.policy === "never" ? "failed" : asset.policy === "required" ? "fallback" : "local"} label={asset.policy} /></div>;
+  const descriptionOnCard = asset.origin === "generated-clip" && asset.description.trim().length > 0;
+  const secondaryLine = descriptionOnCard ? asset.description : asset.tags.slice(0, 3).join(" · ") || asset.filename;
+  const details = <div className="asset-card-details-content" aria-hidden="true"><strong title={asset.title}>{asset.title}</strong><span className={descriptionOnCard ? "asset-card-description" : undefined} title={descriptionOnCard ? undefined : secondaryLine}>{secondaryLine}</span><span className="origin-badge">{originLabels[asset.origin]}</span><StatusBadge state={asset.policy === "never" ? "failed" : asset.policy === "required" ? "fallback" : "local"} label={asset.policy} /></div>;
 
   return <article className={`asset-card ${isInspected ? "active" : ""}`} data-asset-id={asset.id}>
     <label className="asset-select"><input aria-label={`Select ${asset.title}`} type="checkbox" checked={isSelected} onChange={handleToggleSelected} /></label>

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from decimal import Decimal, InvalidOperation
 import uuid
 from typing import Any
 
@@ -51,6 +52,15 @@ def test_openrouter_failure() -> tuple[str, str] | None:
         return None
     failure = os.getenv("S6_TEST_OPENROUTER_FAILURE", "").strip().casefold()
     return _TEST_FAILURE_MESSAGES.get(failure)
+
+
+def openrouter_base_url() -> str:
+    """OpenRouter API root. Isolated E2E stacks (S6_TEST_MODE=1 only) may point
+    it at a local mock provider; production always uses openrouter.ai."""
+    override = os.getenv("S6_TEST_OPENROUTER_BASE_URL", "").strip().rstrip("/")
+    if os.getenv("S6_TEST_MODE", "").strip() == "1" and override.startswith("http://"):
+        return override
+    return "https://openrouter.ai/api/v1"
 
 
 def provider_runtime_message(error: Exception, service: str) -> str:
@@ -147,8 +157,10 @@ class ProfileService:
         key = self._credential(value.openrouter_key, previous.get("openrouterKey", ""))
         previous_profile = existing[0] if existing else None
         text_unchanged = bool(previous_profile and not self._has_new_credential(value.openrouter_key) and value.text_model_id == previous_profile.text_model_id)
+        metadata_model_id = value.youtube_metadata_model_id or (previous_profile.youtube_metadata_model_id if previous_profile else "google/gemini-2.5-flash-lite")
+        auto_seo_titles = value.auto_seo_titles if value.auto_seo_titles is not None else (previous_profile.auto_seo_titles if previous_profile else True)
         profile = ProviderProfile(
-            id=profile_id, name=value.name, text_model_id=value.text_model_id, selected=value.selected, persistence=value.persistence,
+            id=profile_id, name=value.name, text_model_id=value.text_model_id, youtube_metadata_model_id=metadata_model_id, auto_seo_titles=auto_seo_titles, selected=value.selected, persistence=value.persistence,
             openrouter_configured=bool(key), openrouter_masked=mask_secret(key),
             text_status=previous_profile.text_status if text_unchanged else ("configured" if key else "not_configured"),
             text_message=previous_profile.text_message if text_unchanged else ("Ready to test" if key else "Optional; deterministic local planning remains available"),
@@ -173,7 +185,7 @@ class ProfileService:
         profile, _ = record
         secrets = self.secrets(profile_id)
         return self.save(ProfileInput(
-            name=f"{profile.name} copy", text_model_id=profile.text_model_id, openrouter_key=secrets.get("openrouterKey"),
+            name=f"{profile.name} copy", text_model_id=profile.text_model_id, youtube_metadata_model_id=profile.youtube_metadata_model_id, auto_seo_titles=profile.auto_seo_titles, openrouter_key=secrets.get("openrouterKey"),
             persistence=profile.persistence, selected=False,
         ))
 
@@ -203,13 +215,24 @@ class ProfileService:
         architecture = entry.get("architecture") if isinstance(entry.get("architecture"), dict) else {}
         raw_modalities = architecture.get("output_modalities", entry.get("output_modalities", []))
         modalities = [item.strip() for item in raw_modalities if isinstance(item, str) and item.strip()] if isinstance(raw_modalities, list) else []
+        raw_parameters = entry.get("supported_parameters", [])
+        supported_parameters = [item.strip() for item in raw_parameters if isinstance(item, str) and item.strip()] if isinstance(raw_parameters, list) else []
         pricing = entry.get("pricing") if isinstance(entry.get("pricing"), dict) else {}
         prices = [pricing.get(name) for name in ("prompt", "completion", "input", "output") if pricing.get(name) is not None]
+        normalized_prices: dict[str, str] = {}
+        for price_name in ("prompt", "completion"):
+            raw_price = pricing.get(price_name)
+            try:
+                parsed_price = Decimal(str(raw_price))
+                if parsed_price.is_finite() and parsed_price >= 0:
+                    normalized_prices[price_name] = str(parsed_price)
+            except (InvalidOperation, ValueError):
+                continue
         free = model_id.endswith(":free") or bool(prices) and all(str(price) in {"0", "0.0", "0.00"} for price in prices)
         return OpenRouterModel(
             id=model_id, name=name.strip() if isinstance(name, str) and name.strip() else model_id,
             context_length=context if isinstance(context, int) and not isinstance(context, bool) and context > 0 else None,
-            output_modalities=modalities, free=free,
+            output_modalities=modalities, supported_parameters=supported_parameters, free=free, pricing=normalized_prices or None,
         )
 
     async def openrouter_models(self, output_modalities: str | None = None) -> list[OpenRouterModel]:
@@ -222,7 +245,7 @@ class ProfileService:
         params = {"output_modalities": output_modalities} if output_modalities else None
         try:
             async with httpx.AsyncClient(timeout=12, follow_redirects=False) as client:
-                response = await client.get("https://openrouter.ai/api/v1/models", params=params, headers={"Authorization": f"Bearer {key}"})
+                response = await client.get(f"{openrouter_base_url()}/models", params=params, headers={"Authorization": f"Bearer {key}"})
         except (httpx.TimeoutException, httpx.RequestError) as exc:
             raise ProviderError("timeout_offline", "OpenRouter is offline or timed out. Try again later.") from exc
         if response.status_code >= 400:
@@ -261,7 +284,7 @@ class ProfileService:
                         profile.text_status, profile.text_message = "unavailable", "The configured OpenRouter text model is unavailable"
                     else:
                         response = await client.post(
-                            "https://openrouter.ai/api/v1/chat/completions",
+                            f"{openrouter_base_url()}/chat/completions",
                             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
                             json={"model": profile.text_model_id, "messages": [{"role": "user", "content": "Return exactly the JSON object {\"ok\":true}."}], "temperature": 0, "response_format": {"type": "json_object"}},
                         )
@@ -282,7 +305,7 @@ class ProfileService:
         self.db.save_profile(profile)
         return profile
 
-    async def openrouter_json(self, messages: list[dict[str, str]], schema: dict[str, Any], *, require_saved_profile: bool = False, model_id: str | None = None, temperature: float = 0) -> dict[str, Any] | None:
+    async def openrouter_json(self, messages: list[dict[str, str]], schema: dict[str, Any], *, require_saved_profile: bool = False, model_id: str | None = None, temperature: float = 0, max_tokens: int | None = None, provider: dict[str, Any] | None = None, reasoning: dict[str, Any] | None = None, include_usage: bool = False) -> dict[str, Any] | tuple[dict[str, Any], dict[str, Any]] | None:
         profile, secrets = self.selected_secrets(include_environment=not require_saved_profile)
         if require_saved_profile and (not profile or profile.text_status != "connected"):
             return None
@@ -297,10 +320,18 @@ class ProfileService:
             if not any(model.id == model_id for model in models):
                 raise ProviderError("unavailable", "The selected OpenRouter text model is no longer available. Choose another model in Settings.")
         payload = {"model": model_id or profile.text_model_id, "messages": messages, "temperature": temperature, "response_format": {"type": "json_schema", "json_schema": {"name": "s6_result", "strict": True, "schema": schema}}}
+        if max_tokens is not None:
+            # Callers bound their own budgets; this ceiling only stops runaway
+            # requests. Batched SEO metadata needs ~180 tokens per clip.
+            payload["max_tokens"] = max(1, min(max_tokens, 2000))
+        if provider is not None:
+            payload["provider"] = provider
+        if reasoning is not None:
+            payload["reasoning"] = reasoning
         async with httpx.AsyncClient(timeout=45, follow_redirects=False) as client:
             for attempt in range(2):
                 try:
-                    response = await client.post("https://openrouter.ai/api/v1/chat/completions", headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"}, json=payload)
+                    response = await client.post(f"{openrouter_base_url()}/chat/completions", headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"}, json=payload)
                 except (httpx.TimeoutException, httpx.RequestError) as exc:
                     if attempt == 0:
                         continue
@@ -324,6 +355,9 @@ class ProfileService:
                     raise ProviderError("malformed_response", "OpenRouter returned a plan that could not be validated.") from exc
                 if not isinstance(result, dict):
                     raise ProviderError("malformed_response", "OpenRouter returned a plan that could not be validated.")
+                if include_usage:
+                    usage = response.json().get("usage")
+                    return result, usage if isinstance(usage, dict) else {}
                 return result
         raise ProviderError("timeout_offline", "OpenRouter could not be reached")
 

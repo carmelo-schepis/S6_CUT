@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Film, Plus, Sparkles, Zap } from "lucide-react";
 import { createClipJob, createFolder, listFolders, readableError } from "../api";
-import { DEFAULT_SUBSCRIBE_ANIMATION, type BatchMode, type ContentFormat, type Health, type LibraryFolder, type ProcessingMode, type Project, type SourceProfile, type Style, type SubscribeAnimationConfig, type MusicTheme } from "../types";
+import { DEFAULT_SUBSCRIBE_ANIMATION, type BatchMode, type ContentFormat, type Health, type LibraryFolder, type ProcessingMode, type Project, type ProviderProfile, type SourceProfile, type Style, type SubscribeAnimationConfig, type MusicTheme } from "../types";
 import { Button, Field, FieldGroup, StepBadge, useSingleFlight } from "./common";
 import { VideoSourcePicker } from "./video-source-picker";
 import { VideoOnlyDownload } from "./video-only-download";
@@ -19,13 +19,14 @@ const styles: { id: Style; label: string; note: string }[] = [
   { id: "hype", label: "Hype", note: "Hooks & high energy" },
 ];
 
-export function ProjectsView({ health, healthChecked = true, providersLoaded = true, hasSelectedProvider = true, onConfigureProviders = () => undefined, onCreated, onSelectLibraryAsset }: {
+export function ProjectsView({ health, healthChecked = true, providersLoaded = true, hasSelectedProvider = true, selectedProfile = null, onConfigureProviders = () => undefined, onCreated, onSelectLibraryAsset }: {
   health: Health | null;
   /** False while the very first health read is still outstanding. */
   healthChecked?: boolean;
   /** False until /profiles has answered; provider availability is unknown. */
   providersLoaded?: boolean;
   hasSelectedProvider?: boolean;
+  selectedProfile?: ProviderProfile | null;
   onConfigureProviders?: () => void;
   onCreated: (project: Project) => void;
   onSelectLibraryAsset?: (assetId: string) => void;
@@ -50,6 +51,9 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
   const [sourceDuration, setSourceDuration] = useState<{ file: File; seconds: number } | null>(null);
   const [burnSubtitles, setBurnSubtitles] = useState(true);
   const [hookTextChoice, setHookTextChoice] = useState(false);
+  // null until the customer touches the toggle; until then it follows the
+  // profile's "Auto-write SEO titles" default as eligibility changes.
+  const [youtubeMetadataChoice, setYoutubeMetadataChoice] = useState<boolean | null>(null);
   const [subscribeAnimation, setSubscribeAnimation] = useState<SubscribeAnimationConfig>(DEFAULT_SUBSCRIBE_ANIMATION);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -138,6 +142,8 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
           processingMode: sourceProfile === "music" ? "smart" : processingMode,
           sourceProfile, burnSubtitles: fastMode ? false : burnSubtitles,
           ...(hookTextEnabled ? { hookText: true } : {}),
+          // Eligible: always send the explicit choice so an untick is respected.
+          ...(metadataDisabledReason === null ? { youtubeMetadata: youtubeMetadataActive } : {}),
           subscribeAnimation, libraryFolderId: libraryFolderId || undefined,
           ...(sourceProfile === "music" ? { musicPresentation: { version: 1 as const, subtitleTheme: musicTheme }, musicTopText } : {}),
         });
@@ -169,6 +175,14 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
     if (!hookTextEligible) setHookTextChoice(false);
   }
   const hookTextEnabled = hookTextEligible && hookTextChoice;
+  const metadataDisabledReason = contentFormat !== "short" ? "Available for Short form only."
+      : sourceProfile === "speech" && processingMode === "fast" ? "Fast mode does not support metadata generation. Choose Auto or Smart."
+        : !providersLoaded ? "Checking connected providers…"
+          : !hasSelectedProvider ? "Connect an OpenRouter profile to enable this optional feature."
+            : null;
+  // Mirrors the engine's own default: Smart-capable short, standard batches.
+  const youtubeMetadataDefault = hasSelectedProvider && selectedProfile?.autoSeoTitles !== false && batchMode !== "high_volume";
+  const youtubeMetadataActive = metadataDisabledReason === null && (youtubeMetadataChoice ?? youtubeMetadataDefault);
   const musicConfigurationMessage = sourceProfile === "music" && contentFormat !== "short"
     ? "Music / sung vocals is currently available for short clips only. Choose Short form to continue."
     : null;
@@ -298,6 +312,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
 
           {sourceProfile === "speech" && <label className="subtitle-toggle"><input type="checkbox" checked={fastMode ? false : burnSubtitles} disabled={fastMode} onChange={(event) => setBurnSubtitles(event.target.checked)} /> <span><strong>Burn in subtitles</strong><small>{fastMode ? "Fast mode skips transcription and captions. Choose Smart mode to enable them." : "Uses local word timing. Fast mode skips captions."}</small></span></label>}
           <label className="subtitle-toggle"><input type="checkbox" aria-label="Hook text" checked={hookTextEnabled} disabled={!hookTextEligible} onChange={(event) => setHookTextChoice(event.target.checked)} /> <span><strong>Hook text</strong><small>{hookTextDisabledReason ?? "Off by default. Tick to have OpenRouter write a short curiosity hook at the top of each short."}</small></span></label>
+          <label className="subtitle-toggle"><input type="checkbox" aria-label="Write SEO titles with AI (YouTube metadata)" data-testid="youtube-metadata-toggle" checked={youtubeMetadataActive} disabled={metadataDisabledReason !== null} onChange={(event) => setYoutubeMetadataChoice(event.target.checked)} /> <span><strong>Write SEO titles with AI</strong><small>{metadataDisabledReason ?? (processingMode === "fast" ? "Fast mode has no transcript and never calls providers. Choose Auto or Smart." : `${youtubeMetadataDefault ? "On by default (Settings › Auto-write SEO titles)" : "Off by default"}. Uses ${selectedProfile?.youtubeMetadataModelId || "the configured Settings model"} for each clip's YouTube title and description; at most five small requests and $0.05 estimated per job. Editable and separate from burned-in text.`)}</small></span></label>
 
           <button className="advanced-toggle" onClick={() => setAdvanced(!advanced)} aria-expanded={advanced}>Advanced controls <span aria-hidden="true">{advanced ? "−" : "+"}</span></button>
           {advanced && <div className="advanced-grid">

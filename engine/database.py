@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 import threading
+import time
 import uuid
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, Literal, TypeVar
 
 from pydantic import BaseModel
 
@@ -18,6 +20,12 @@ UNSORTED_FOLDER_ID = UNSORTED_LIBRARY_FOLDER_ID
 MAX_FOLDER_DEPTH = 3
 
 T = TypeVar("T", bound=BaseModel)
+
+
+class MetadataGenerationClaimError(ValueError):
+    def __init__(self, category: str, message: str):
+        super().__init__(message)
+        self.category = category
 
 
 class _ClosingSQLiteConnection(sqlite3.Connection):
@@ -374,9 +382,59 @@ class Database:
             """).fetchall()
         return [Project.model_validate_json(row["payload"]).model_copy(update={"library_folder_id": self.resolve_folder_id(row["library_folder_id"])}) for row in rows]
 
+    # Merge durable metadata that another writer (Library/Workspace edit, bulk
+    # retitle, per-clip generation) committed after this writer loaded its job.
+    # Used by save_job and publish_clip_output so a worker's stale in-memory job
+    # never reverts a title edit or resets the metadata budget counters.
+    @staticmethod
+    def _merge_saved_metadata(existing: sqlite3.Row, job: Job, private: dict[str, Any] | None, skip_clip_id: str | None = None) -> None:
+        if private is not None:
+            saved_private = json.loads(existing["private_payload"])
+            for key in ("youtube_metadata_generation_calls", "youtube_metadata_spend_estimate_usd"):
+                try:
+                    old_value = saved_private.get(key, 0) or 0
+                    new_value = private.get(key, 0) or 0
+                    private[key] = max(int(old_value), int(new_value)) if key.endswith("_calls") else max(float(old_value), float(new_value))
+                except (TypeError, ValueError):
+                    private[key] = saved_private.get(key, private.get(key, 0))
+            for key in ("youtube_metadata_cache",):
+                saved_values = saved_private.get(key)
+                new_values = private.get(key)
+                if isinstance(saved_values, dict) or isinstance(new_values, dict):
+                    private[key] = {**(saved_values if isinstance(saved_values, dict) else {}), **(new_values if isinstance(new_values, dict) else {})}
+            key = "youtube_metadata_generation"
+            saved_states = saved_private.get(key)
+            new_states = private.get(key)
+            if isinstance(saved_states, dict) or isinstance(new_states, dict):
+                merged_states = dict(saved_states) if isinstance(saved_states, dict) else {}
+                priority = {"in_flight": 0, "unavailable": 1, "fallback": 1, "generated": 2}
+                for clip_id, state in (new_states.items() if isinstance(new_states, dict) else ()):
+                    saved_state = merged_states.get(clip_id)
+                    saved_stamp = saved_state.get("updated_at", saved_state.get("started_at", 0)) if isinstance(saved_state, dict) else 0
+                    new_stamp = state.get("updated_at", state.get("started_at", 0)) if isinstance(state, dict) else 0
+                    if not isinstance(saved_stamp, (int, float)):
+                        saved_stamp = 0
+                    if not isinstance(new_stamp, (int, float)):
+                        new_stamp = 0
+                    if not isinstance(saved_state, dict) or not isinstance(state, dict) or new_stamp > saved_stamp or (new_stamp == saved_stamp and priority.get(state.get("status"), 0) >= priority.get(saved_state.get("status"), 0)):
+                        merged_states[clip_id] = state
+                private[key] = merged_states
+        saved_job = Job.model_validate_json(existing["payload"])
+        saved_clips = {clip.id: clip for clip in saved_job.clips}
+        for clip in job.clips:
+            saved_clip = saved_clips.get(clip.id)
+            if not saved_clip or clip.id == skip_clip_id:
+                continue
+            saved_priority = {None: 0, "pending": 1, "unavailable": 2, "fallback": 2, "generated": 3}
+            if saved_clip.youtube_metadata_revision > clip.youtube_metadata_revision or (saved_clip.youtube_metadata_revision > 0 and saved_clip.youtube_metadata_revision == clip.youtube_metadata_revision) or saved_priority.get(saved_clip.youtube_metadata_status, 0) > saved_priority.get(clip.youtube_metadata_status, 0):
+                for field in ("title", "title_source", "youtube_description", "youtube_metadata_revision", "youtube_metadata_status", "youtube_metadata_reason", "youtube_metadata_model", "youtube_metadata_generated_at", "youtube_metadata_input_tokens", "youtube_metadata_output_tokens", "youtube_metadata_cost_usd", "youtube_metadata_cost_kind"):
+                    setattr(clip, field, getattr(saved_clip, field))
+
     def save_job(self, job: Job, private: dict[str, Any] | None = None) -> None:
         with self._lock, self._connect() as db:
-            existing = db.execute("SELECT private_payload FROM jobs WHERE id=?", (job.id,)).fetchone()
+            existing = db.execute("SELECT payload,private_payload FROM jobs WHERE id=?", (job.id,)).fetchone()
+            if existing:
+                self._merge_saved_metadata(existing, job, private)
             private_json = json.dumps(private, separators=(",", ":")) if private is not None else (existing["private_payload"] if existing else "{}")
             folder_id = job.library_folder_id or UNSORTED_FOLDER_ID
             db.execute("INSERT INTO jobs(id,project_id,state,updated_at,payload,private_payload,library_folder_id) VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET project_id=excluded.project_id,state=excluded.state,updated_at=excluded.updated_at,payload=excluded.payload,private_payload=excluded.private_payload,library_folder_id=excluded.library_folder_id", (job.id, job.project_id, job.state, job.updated_at, self._json(job), private_json, folder_id))
@@ -453,6 +511,95 @@ class Database:
         with self._connect() as db:
             row = db.execute("SELECT * FROM assets WHERE id=?", (asset_id,)).fetchone()
         return self._asset_from_row(row) if row else None
+
+    def claim_youtube_metadata_generation(self, job_id: str, clip_id: str, expected_revision: int, model_id: str, reserve_usd: float):
+        """Atomically reserve a bounded provider request and claim one clip."""
+        with self._lock, self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT payload,library_folder_id,private_payload FROM jobs WHERE id=?", (job_id,)).fetchone()
+            if not row:
+                raise MetadataGenerationClaimError("missing", "The job is no longer available")
+            job = Job.model_validate_json(row["payload"]).model_copy(update={"library_folder_id": row["library_folder_id"] or UNSORTED_FOLDER_ID})
+            clip = next((item for item in job.clips if item.id == clip_id), None)
+            if not clip or clip.youtube_metadata_revision != expected_revision:
+                raise MetadataGenerationClaimError("stale", "Metadata changed before generation could start")
+            private = json.loads(row["private_payload"])
+            state = private.setdefault("youtube_metadata_generation", {})
+            if not isinstance(state, dict):
+                state = private["youtube_metadata_generation"] = {}
+            prior = state.get(clip_id)
+            if isinstance(prior, dict) and prior.get("status") == "in_flight":
+                started_at = prior.get("started_at")
+                if not isinstance(started_at, (int, float)) or time.time() - started_at < 120:
+                    raise MetadataGenerationClaimError("in_flight", "Metadata generation is already in flight")
+            calls = private.get("youtube_metadata_generation_calls", 0)
+            if type(calls) is not int or calls < 0 or calls >= 5:
+                raise MetadataGenerationClaimError("limit", "The five-request per-job metadata limit was reached")
+            try:
+                spent = float(private.get("youtube_metadata_spend_estimate_usd", 0) or 0)
+            except (TypeError, ValueError):
+                spent = 0.05
+            if not math.isfinite(spent) or spent < 0 or spent + reserve_usd > 0.05:
+                raise MetadataGenerationClaimError("budget", "The conservative $0.05 metadata budget is exhausted")
+            private["youtube_metadata_generation_calls"] = calls + 1
+            private["youtube_metadata_spend_estimate_usd"] = spent + reserve_usd
+            state[clip_id] = {"status": "in_flight", "model": model_id, "revision": expected_revision, "started_at": time.time(), "updated_at": time.time()}
+            clip.youtube_metadata_status = "pending"
+            clip.youtube_metadata_model = model_id
+            job.updated_at = now_iso()
+            db.execute("UPDATE jobs SET updated_at=?,payload=?,private_payload=? WHERE id=?", (job.updated_at, self._json(job), json.dumps(private, separators=(",", ":")), job_id))
+            return job, private, clip
+
+    def update_generated_clip_metadata(
+        self, asset_id: str, title: str, description: str, expected_revision: int, *,
+        model_id: str | None = None, generated_at: str | None = None,
+        input_tokens: int | None = None, output_tokens: int | None = None,
+        cost_usd: float | None = None, cost_kind: str | None = None,
+        metadata_status: Literal["generated", "fallback", "unavailable"] = "generated",
+        metadata_reason: str | None = None,
+        title_source: Literal["auto", "ai", "user"] | None = None,
+    ) -> tuple[Asset, Job, Clip]:
+        """Atomically update a generated asset and its linked clip metadata."""
+        with self._lock, self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            asset_row = db.execute("SELECT * FROM assets WHERE id=?", (asset_id,)).fetchone()
+            if not asset_row:
+                raise KeyError(asset_id)
+            asset = self._asset_from_row(asset_row)
+            if asset.origin != "generated-clip" or not asset.source_job_id or not asset.source_clip_id:
+                raise ValueError("Metadata edits require a linked generated clip")
+            job_row = db.execute("SELECT payload,library_folder_id,private_payload FROM jobs WHERE id=?", (asset.source_job_id,)).fetchone()
+            if not job_row:
+                raise ValueError("The linked job is unavailable")
+            job = Job.model_validate_json(job_row["payload"]).model_copy(update={"library_folder_id": job_row["library_folder_id"] or UNSORTED_FOLDER_ID})
+            clip = next((item for item in job.clips if item.id == asset.source_clip_id), None)
+            if not clip or clip.library_asset_id != asset.id:
+                raise ValueError("The generated clip and Library asset link is inconsistent")
+            if clip.youtube_metadata_revision != expected_revision:
+                raise ValueError("YouTube metadata revision is stale")
+            stamp = now_iso()
+            source_update = {"title_source": title_source} if title_source else {}
+            updated_asset = asset.model_copy(update={"title": title, "description": description, **source_update})
+            updated_clip = clip.model_copy(update={
+                "title": title, "youtube_description": description[:500], **source_update,
+                "youtube_metadata_revision": clip.youtube_metadata_revision + 1,
+                "youtube_metadata_status": metadata_status,
+                "youtube_metadata_reason": metadata_reason,
+                **({
+                    "youtube_metadata_model": model_id,
+                    "youtube_metadata_generated_at": generated_at,
+                    "youtube_metadata_input_tokens": input_tokens,
+                    "youtube_metadata_output_tokens": output_tokens,
+                    "youtube_metadata_cost_usd": cost_usd,
+                    "youtube_metadata_cost_kind": cost_kind,
+                } if generated_at is not None else {}),
+            })
+            job.clips = [updated_clip if item.id == clip.id else item for item in job.clips]
+            job.updated_at = stamp
+            db.execute("UPDATE assets SET updated_at=?,payload=? WHERE id=?", (stamp, self._json(updated_asset), asset.id))
+            db.execute("UPDATE jobs SET updated_at=?,payload=? WHERE id=?", (stamp, self._json(job), job.id))
+            self.validate_clip_asset_relationship(updated_clip, updated_asset)
+            return updated_asset, job, updated_clip
 
     def get_asset_by_hash(self, content_hash: str) -> Asset | None:
         with self._connect() as db:
@@ -535,6 +682,7 @@ class Database:
                     "max_uses_per_project": existing.max_uses_per_project,
                     "active_from": existing.active_from, "active_until": existing.active_until,
                     "licence": existing.licence, "attribution": existing.attribution,
+                    "title_source": existing.title_source,
                     "source_project_id": existing.source_project_id,
                     "source_job_id": existing.source_job_id,
                     "source_clip_id": existing.source_clip_id,
@@ -626,6 +774,7 @@ class Database:
                     "max_uses_per_project": existing.max_uses_per_project,
                     "active_from": existing.active_from, "active_until": existing.active_until,
                     "licence": existing.licence, "attribution": existing.attribution,
+                    "title_source": existing.title_source,
                     "source_project_id": existing.source_project_id,
                     "source_job_id": existing.source_job_id,
                     "source_clip_id": existing.source_clip_id,
@@ -643,6 +792,10 @@ class Database:
             db.execute("DELETE FROM media_blob_refs WHERE ref_type='clip-output' AND ref_id=?", (clip.id,))
             for ref_type, ref_id in [("asset", asset.id), ("clip-output", clip.id)]:
                 db.execute("INSERT OR IGNORE INTO media_blob_refs(blob_id,ref_type,ref_id,created_at) VALUES(?,?,?,?)", (asset.blob_id, ref_type, ref_id, stamp))
+
+            # A stable-identity republication retains prior user metadata in both
+            # linked records, just as it already does for the Library Asset.
+            clip = clip.model_copy(update={"title": asset.title, "title_source": asset.title_source, "youtube_description": asset.description[:500]})
 
             # 4. Update Clip fields with library_asset_id
             clip = clip.model_copy(update={
@@ -667,7 +820,10 @@ class Database:
             # 6. Save updated job payload
             folder_id = job.library_folder_id or UNSORTED_FOLDER_ID
             private_json = json.dumps(private, separators=(",", ":")) if private is not None else None
-            existing_private = db.execute("SELECT private_payload FROM jobs WHERE id=?", (job.id,)).fetchone()
+            existing_private = db.execute("SELECT payload,private_payload FROM jobs WHERE id=?", (job.id,)).fetchone()
+            if existing_private:
+                self._merge_saved_metadata(existing_private, job, private, skip_clip_id=clip.id)
+                private_json = json.dumps(private, separators=(",", ":")) if private is not None else None
             if private_json is None:
                 private_json = existing_private["private_payload"] if existing_private else "{}"
 

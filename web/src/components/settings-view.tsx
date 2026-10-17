@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowRight, Check, Copy, Cpu, Database, Eye, EyeOff, KeyRound, LockKeyhole, Network, Pencil, Plus, Server, ShieldAlert, Trash2, X } from "lucide-react";
-import { deleteProfile, duplicateProfile, listProfiles, purgeLibraryContent, readableError, saveProfile, testProfile } from "../api";
+import { ArrowRight, Check, Copy, Cpu, Database, Eye, EyeOff, KeyRound, LockKeyhole, Network, Pencil, Plus, RefreshCw, Server, ShieldAlert, Trash2, X } from "lucide-react";
+import { deleteProfile, duplicateProfile, listOpenRouterModels, listProfiles, purgeLibraryContent, readableError, saveProfile, testProfile } from "../api";
 import { emitLibraryChanged } from "../library-sync";
-import type { Health, LibraryPurgeResult, ProviderProfile } from "../types";
+import type { Health, LibraryPurgeResult, OpenRouterModel, ProviderProfile } from "../types";
 import { Button, Field, PageHeader, StatusBadge } from "./common";
 
 export function SettingsView({ health, onHealthRefresh, onProfilesChanged, onSkipSetup = () => undefined }: { health: Health | null; onHealthRefresh: () => Promise<void>; onProfilesChanged?: (profiles: ProviderProfile[]) => void; onSkipSetup?: () => void }) {
@@ -16,11 +16,44 @@ export function SettingsView({ health, onHealthRefresh, onProfilesChanged, onSki
   const [purging, setPurging] = useState(false);
   const [purgeError, setPurgeError] = useState<string | null>(null);
   const [purgeResult, setPurgeResult] = useState<LibraryPurgeResult | null>(null);
+  const [metadataModels, setMetadataModels] = useState<OpenRouterModel[]>([]);
+  const [metadataModelsLoading, setMetadataModelsLoading] = useState(false);
+  const [metadataModelError, setMetadataModelError] = useState<string | null>(null);
+  const selectedProfile = profiles.find((profile) => profile.selected) || null;
   const purgeTriggerRef = useRef<HTMLButtonElement>(null);
   const purgeInputRef = useRef<HTMLInputElement>(null);
   const wasPurgeDialogOpen = useRef(false);
   const load = useCallback(() => listProfiles().then((next) => { setProfiles(next); onProfilesChanged?.(next); }).catch((cause) => setError(readableError(cause))), [onProfilesChanged]);
   useEffect(() => { void load(); }, [load]);
+  const refreshMetadataModels = useCallback(async () => {
+    setMetadataModelsLoading(true); setMetadataModelError(null);
+    try { setMetadataModels(await listOpenRouterModels("text")); }
+    catch (cause) { setMetadataModelError(readableError(cause)); }
+    finally { setMetadataModelsLoading(false); }
+  }, []);
+  useEffect(() => {
+    if (selectedProfile?.textStatus !== "connected") return;
+    let active = true;
+    void listOpenRouterModels("text").then((models) => { if (active) setMetadataModels(models); }).catch((cause) => { if (active) setMetadataModelError(readableError(cause)); });
+    return () => { active = false; };
+  }, [selectedProfile?.id, selectedProfile?.textStatus]);
+  const setMetadataModel = async (modelId: string) => {
+    if (!selectedProfile) return;
+    setError(null);
+    try {
+      await saveProfile({ name: selectedProfile.name, textModelId: selectedProfile.textModelId, youtubeMetadataModelId: modelId, persistence: selectedProfile.persistence, selected: true }, selectedProfile.id);
+      await load();
+    } catch (cause) { setError(readableError(cause)); }
+  };
+  const [savingAutoSeo, setSavingAutoSeo] = useState(false);
+  const setAutoSeoTitles = async (autoSeoTitles: boolean) => {
+    if (!selectedProfile) return;
+    setError(null); setSavingAutoSeo(true);
+    try {
+      await saveProfile({ name: selectedProfile.name, textModelId: selectedProfile.textModelId, youtubeMetadataModelId: selectedProfile.youtubeMetadataModelId, autoSeoTitles, persistence: selectedProfile.persistence, selected: true }, selectedProfile.id);
+      await load();
+    } catch (cause) { setError(readableError(cause)); } finally { setSavingAutoSeo(false); }
+  };
   useEffect(() => {
     if (purgeDialogOpen) {
       wasPurgeDialogOpen.current = true;
@@ -42,7 +75,7 @@ export function SettingsView({ health, onHealthRefresh, onProfilesChanged, onSki
     try { await testProfile(id); await load(); } catch (cause) { setError(readableError(cause)); } finally { setTestingId(null); }
   };
   const select = async (profile: ProviderProfile) => {
-    try { await saveProfile({ name: profile.name, textModelId: profile.textModelId, persistence: profile.persistence, selected: true }, profile.id); await load(); }
+    try { await saveProfile({ name: profile.name, textModelId: profile.textModelId, youtubeMetadataModelId: profile.youtubeMetadataModelId, persistence: profile.persistence, selected: true }, profile.id); await load(); }
     catch (cause) { setError(readableError(cause)); }
   };
   const openPurgeDialog = () => { setPurgeConfirmation(""); setPurgeError(null); setPurgeDialogOpen(true); };
@@ -62,6 +95,21 @@ export function SettingsView({ health, onHealthRefresh, onProfilesChanged, onSki
         {showSetupForm && <ProfileForm initial={editing === "new" || editing === null ? undefined : editing} onUseFastLocal={onSkipSetup} onCancel={() => { setEditing(null); if (!profiles.length) setSetupDismissed(true); }} onSaved={() => { setEditing(null); void load(); }} />}
         <div className="profile-list">{profiles.map((profile) => <article key={profile.id} className="profile-row"><div className="profile-mark"><KeyRound size={17} /></div><div className="profile-info"><div><strong>{profile.name}</strong>{profile.selected && <span className="selected-label"><Check size={11} /> Active</span>}</div><p>{profile.textModelId || "Deterministic local planning"}</p><dl className="profile-secrets"><div><dt>OpenRouter key</dt><dd>{profile.openrouterMasked || "Not set"}</dd></div><div><dt>Text model</dt><dd>{profile.textModelId}</dd></div><div><dt>Storage</dt><dd><LockKeyhole size={11} aria-hidden="true" /> {profile.persistence === "encrypted" ? "Encrypted" : "Session only"}</dd></div></dl><div className="provider-results"><ConnectionResult service="Text generation" status={testingId === profile.id ? "checking" : profile.textStatus} message={profile.textMessage} lastCheckedAt={profile.textLastCheckedAt} /></div></div><StatusBadge state={testingId === profile.id ? "fallback" : profile.status === "connected" ? "ready" : profile.status === "partial" ? "partial" : "fallback"} label={testingId === profile.id ? "checking" : profile.status} /><div className="profile-actions">{!profile.selected && <Button onClick={() => select(profile)}>Use profile</Button>}<Button disabled={testingId === profile.id} onClick={() => test(profile.id)}>{testingId === profile.id ? "Checking…" : "Test"}</Button><button title="Edit" aria-label={`Edit ${profile.name}`} onClick={() => setEditing(profile)}><Pencil size={14} /></button><button title="Duplicate" aria-label={`Duplicate ${profile.name}`} onClick={() => duplicate(profile.id)}><Copy size={14} /></button><button title="Delete" aria-label={`Delete ${profile.name}`} onClick={() => remove(profile.id)}><Trash2 size={14} /></button></div></article>)}</div>
         {!profiles.length && !showSetupForm && <div className="settings-empty"><KeyRound size={22} /><div><strong>No OpenRouter profile</strong><p>Local deterministic planning, captions, and text-card visuals remain available.</p></div>{onSkipSetup && <Button variant="ghost" onClick={onSkipSetup}>Continue with local cutting <ArrowRight size={13} /></Button>}</div>}
+      </section>
+      <section className="settings-card metadata-model-card" aria-labelledby="metadata-model-heading"><div className="settings-card-head"><div><KeyRound size={18} /><div><h2 id="metadata-model-heading">Title and description model</h2><p>Independent from the general planning model; uses the selected OpenRouter profile credentials.</p></div></div><Button disabled={metadataModelsLoading || selectedProfile?.textStatus !== "connected"} onClick={() => void refreshMetadataModels()}><RefreshCw size={14} /> {metadataModelsLoading ? "Refreshing…" : "Refresh models"}</Button></div>
+        <Field label="YouTube title and description model" hint="Only models advertising structured output and priced at no more than $0.10/M input and $0.40/M output are eligible. No automatic paid-model substitution."><select aria-label="Title and description model" value={selectedProfile?.youtubeMetadataModelId || "google/gemini-2.5-flash-lite"} disabled={!selectedProfile || selectedProfile.textStatus !== "connected"} onChange={(event) => void setMetadataModel(event.target.value)}>
+          {selectedProfile && !metadataModels.some((model) => model.id === selectedProfile.youtubeMetadataModelId) && <option value={selectedProfile.youtubeMetadataModelId}>{selectedProfile.youtubeMetadataModelId} · unavailable or not refreshed</option>}
+          {metadataModels.map((model) => {
+            const input = Number(model.pricing?.prompt) * 1_000_000;
+            const output = Number(model.pricing?.completion) * 1_000_000;
+            const eligible = Number.isFinite(input) && Number.isFinite(output) && input <= 0.10 && output <= 0.40 && model.supportedParameters?.includes("response_format");
+            return <option key={model.id} value={model.id} disabled={!eligible}>{model.name} · {model.id} — {eligible ? `$${input.toFixed(3)}/M in · $${output.toFixed(3)}/M out` : "unavailable, unsupported, or above price cap"}</option>;
+          })}
+        </select></Field>
+        <label className="check-row auto-seo-titles-toggle"><input type="checkbox" data-testid="auto-seo-titles" checked={selectedProfile?.autoSeoTitles ?? true} disabled={!selectedProfile || savingAutoSeo} onChange={(event) => void setAutoSeoTitles(event.target.checked)} /><span><strong>Auto-write SEO titles for new clips</strong><small>Smart short clips get an AI title and description when OpenRouter is connected.</small></span></label>
+        {!selectedProfile && <p className="form-hint">Select and connect an OpenRouter profile first.</p>}
+        {metadataModelError && <p className="form-error" role="alert">Could not refresh model availability: {metadataModelError}</p>}
+        {selectedProfile && <p className="form-hint" role="status">Configured: {selectedProfile.youtubeMetadataModelId || "google/gemini-2.5-flash-lite"}. Generation is unavailable if the model is missing, unknown-priced, or above the hard cap.</p>}
       </section>
       <section className="settings-card about-card"><img src="/legal-logo.png" alt="S6_cut logo" /><div><h2>S6_cut</h2><p>Free, open-source, local-first video editing. No account, watermark, or artificial usage limit.</p><p className="muted">Process only media you own or are authorised to use. Code licences do not grant rights to downloaded media, fonts, models, voices, or logos.</p><span className="version">Engine {health?.version || "—"} · Schema v1</span></div></section>
     </div><div className="settings-column">
@@ -84,6 +132,7 @@ function formatBytes(value: number) { if (value < 1024) return `${value} B`; con
 function ProfileForm({ initial, onUseFastLocal, onCancel, onSaved }: { initial?: ProviderProfile; onUseFastLocal?: () => void; onCancel: () => void; onSaved: () => void }) {
   const [name, setName] = useState(initial?.name || "My profile");
   const [textModelId, setTextModelId] = useState(initial?.textModelId || "openai/gpt-4.1-mini");
+  const [youtubeMetadataModelId] = useState(initial?.youtubeMetadataModelId || "google/gemini-2.5-flash-lite");
   const [openrouterKey, setOpenrouterKey] = useState("");
   const [persistence, setPersistence] = useState<"encrypted" | "session">(initial?.persistence || "encrypted");
   const [showKey, setShowKey] = useState(false);
@@ -92,7 +141,7 @@ function ProfileForm({ initial, onUseFastLocal, onCancel, onSaved }: { initial?:
   const submit = async () => {
     setBusy(true); setError(null);
     try {
-      const saved = await saveProfile({ name, textModelId, openrouterKey: openrouterKey || undefined, persistence, selected: initial?.selected ?? true }, initial?.id);
+      const saved = await saveProfile({ name, textModelId, youtubeMetadataModelId, openrouterKey: openrouterKey || undefined, persistence, selected: initial?.selected ?? true }, initial?.id);
       await testProfile(saved.id); onSaved();
     } catch (cause) { setError(readableError(cause)); } finally { setBusy(false); }
   };

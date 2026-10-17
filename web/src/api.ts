@@ -32,6 +32,11 @@ import {
   type SubscribeAnimationConfig,
   videoDownloadTaskSchema,
   type VideoDownloadTask,
+  titleSuggestionResponseSchema,
+  titleApplyResponseSchema,
+  type TitleSuggestionResponse,
+  type TitleApplyItem,
+  type TitleApplyResponse,
 } from "./types";
 
 const API = "/api/v1";
@@ -204,6 +209,8 @@ type ClipJobInput = {
   musicPresentation?: MusicPresentationConfig;
   musicTopText?: string;
   hookText?: boolean;
+  youtubeMetadata?: boolean;
+  youtubeMetadataModelId?: string;
 };
 
 export async function createClipJob(input: ClipJobInput): Promise<{ project: Project; job: Job }> {
@@ -223,6 +230,10 @@ export async function createClipJob(input: ClipJobInput): Promise<{ project: Pro
   form.set("burn_subtitles", String(input.burnSubtitles ?? true));
   form.set("embed_subtitles", String(input.embedSubtitles ?? false));
   if (input.hookText === true) form.set("hook_text", "true");
+  // Omitted lets the engine follow the profile's auto-SEO-titles default; an
+  // explicit false must reach it so a customer's opt-out is respected.
+  if (input.youtubeMetadata !== undefined) form.set("youtube_metadata", String(input.youtubeMetadata));
+  if (input.youtubeMetadataModelId?.trim()) form.set("youtube_metadata_model_id", input.youtubeMetadataModelId.trim());
   if (input.libraryFolderId) form.set("library_folder_id", input.libraryFolderId);
   if (input.subscribeAnimation) form.set("subscribe_animation", JSON.stringify(input.subscribeAnimation));
   if (input.sourceProfile === "music") {
@@ -279,6 +290,14 @@ export async function controlJob(id: string, action: "pause" | "resume" | "stop-
 
 export async function retryClip(jobId: string, clipId: string): Promise<Job> {
   return jobSchema.parse(await request(`/jobs/${encodeURIComponent(jobId)}/clips/${encodeURIComponent(clipId)}/retry`, { method: "POST" }));
+}
+
+export async function generateYoutubeMetadata(jobId: string, clipId: string, regenerate = false): Promise<Job> {
+  return jobSchema.parse(await request(`/jobs/${encodeURIComponent(jobId)}/clips/${encodeURIComponent(clipId)}/youtube-metadata`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ regenerate }) }));
+}
+
+export async function updateYoutubeMetadata(jobId: string, clipId: string, title: string, description: string, revision: number): Promise<Job> {
+  return jobSchema.parse(await request(`/jobs/${encodeURIComponent(jobId)}/clips/${encodeURIComponent(clipId)}/youtube-metadata`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title, description, revision }) }));
 }
 
 export async function saveCaptionCues(jobId: string, clipId: string, revision: number, cues: Array<{ id: string; start: number; end: number; text: string; confidence?: number | null }>): Promise<Job> {
@@ -421,6 +440,19 @@ export async function updateAsset(id: string, input: Record<string, unknown>): P
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
+  }));
+}
+
+/** Asks the engine for SEO title suggestions. Writes nothing; may take tens of seconds. */
+export async function suggestLibraryTitles(input: { assetIds: string[] } | { scope: "auto-titled" }): Promise<TitleSuggestionResponse> {
+  return titleSuggestionResponseSchema.parse(await request("/library/title-suggestions", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input),
+  }));
+}
+
+export async function applyLibraryTitles(items: TitleApplyItem[]): Promise<TitleApplyResponse> {
+  return titleApplyResponseSchema.parse(await request("/library/title-suggestions/apply", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items }),
   }));
 }
 
