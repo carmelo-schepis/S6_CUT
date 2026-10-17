@@ -15,12 +15,14 @@
  *   1. One measure. `.workspace-page` opted out of the 1540px guide `.page`
  *      uses and `.topbar` mirrors, so above a ~1600px viewport the content ran
  *      ~200px wider than the bar directly above it.
- *   2. One vertical rhythm. The bands between the command bar and the film
- *      strip separated by 24 / 8 / 2px depending on which one it was.
+ *   2. Two vertical steps, never ad hoc ones: status bands 24px apart under
+ *      the command bar, and 64px before the panes and before the clip board.
+ *      ("Space, not lines": the section gap is what replaced the hairlines.)
  *   3. Whole pixels. The three panels measured 310.612 / 751.487 / 350.7px
- *      because the grid used fractional `fr` tracks; every hairline inside them
- *      then landed on a different subpixel column.
- *   4. One inline padding for panel chrome, and one height for a chrome row.
+ *      because the grid used fractional `fr` tracks. The panes are held apart
+ *      by one 48px gutter, never by a rule.
+ *   4. Panel chrome sits on its pane's text column (no inset), and the first
+ *      chrome row of every pane is one height.
  *   5. The progress ledger's status words share a single left edge. They used
  *      to end ragged against the right margin, twelve rows deep.
  *
@@ -40,12 +42,14 @@ const gateway = process.env.S6_ACCEPTANCE_URL || "http://127.0.0.1:8080";
 
 /** The 4px grid every spacing token in styles.css is a multiple of. */
 const GRID = 4;
-/** `--space-6`: the separation between two major bands of the page. */
+/** `--space-6`: the separation between two status bands, and the viewer's inset. */
 const BAND_GAP = 24;
-/** `--space-4`: the inline padding of every panel chrome row. */
-const PANEL_INSET = 16;
-/** The height of a panel's chrome row — tabs, title, toolbar, transport. */
-const CHROME_HEIGHT = 40;
+/** `--gap-section`: the space in front of the panes and the clip board. */
+const SECTION_GAP = 64;
+/** `--gap-pane`: the gutter between two panes. */
+const PANE_GUTTER = 48;
+/** The height of a pane's first chrome row — tabs, title, toolbar. */
+const CHROME_HEIGHT = 32;
 /** `--ws-measure`, shared with `.page` and mirrored by `.topbar`. */
 const MEASURE = 1540;
 /** `--ws-rail-left` / `--ws-rail-right` above the 1180px breakpoint. */
@@ -170,7 +174,7 @@ test.describe("workspace design system", () => {
     }
   });
 
-  test("every band of the page separates by exactly one 24px gap", async ({ page }) => {
+  test("every band of the page separates by a 24px or a 64px section gap", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await openWorkspace(page, projectName!);
 
@@ -185,7 +189,8 @@ test.describe("workspace design system", () => {
 
     for (let index = 1; index < bands.length; index += 1) {
       const gap = bands[index].top - bands[index - 1].bottom;
-      expect(gap, `gap between .${bands[index - 1].cls} and .${bands[index].cls}`).toBeCloseTo(BAND_GAP, 0);
+      const expected = ["workspace-grid", "board-panel"].includes(bands[index].cls) ? SECTION_GAP : BAND_GAP;
+      expect(gap, `gap between .${bands[index - 1].cls} and .${bands[index].cls}`).toBeCloseTo(expected, 0);
     }
     // Every band starts on the same column and runs the full measure.
     expect(spread(bands.map((band) => band.left)), "bands start on different columns").toBeLessThanOrEqual(1);
@@ -219,21 +224,20 @@ test.describe("workspace design system", () => {
       expect(Math.abs(column - Math.round(column)), `column ${index} (${column}px) is fractional`).toBeLessThanOrEqual(0.5);
     }
 
-    // One open slab: the panels butt against each other with no seam and sit
-    // on the page without a rounded frame (the UI is open, not card-based).
+    // Open panes: one gutter apart, never a rule or a frame between them.
     for (let index = 1; index < grid.panels.length; index += 1) {
-      expect(grid.panels[index].left - grid.panels[index - 1].right, `seam between panel ${index - 1} and ${index}`).toBeLessThanOrEqual(1);
+      expect(grid.panels[index].left - grid.panels[index - 1].right, `gutter between panel ${index - 1} and ${index}`).toBeCloseTo(PANE_GUTTER, 0);
     }
     expect(spread(grid.panels.map((panel) => panel.height)), "panels are different heights").toBeLessThanOrEqual(1);
     expect(grid.panels[0].radius, "left panel is unframed").toBe("0px");
     expect(grid.panels[2].radius, "right panel is unframed").toBe("0px");
   });
 
-  test("panel chrome shares one inline padding and one height", async ({ page }) => {
+  test("panel chrome sits on its pane's text column, at one height", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await openWorkspace(page, projectName!);
 
-    const chrome = await page.evaluate((inset) => {
+    const chrome = await page.evaluate(() => {
       const selectors = [".panel-tabs", ".inspector-tabs", ".panel-title", ".viewer-toolbar", ".transport", ".board-header", ".checklist-heading"];
       return selectors.flatMap((selector) => [...document.querySelectorAll<HTMLElement>(selector)]
         .filter((element) => element.getClientRects().length > 0)
@@ -244,28 +248,29 @@ test.describe("workspace design system", () => {
             height: element.getBoundingClientRect().height,
             paddingLeft: parseFloat(style.paddingLeft),
             paddingRight: parseFloat(style.paddingRight),
-            inset,
+            edges: [style.borderTopWidth, style.borderBottomWidth].map(parseFloat),
           };
         }));
-    }, PANEL_INSET);
+    });
 
     expect(chrome.length, "expected panel chrome rows").toBeGreaterThanOrEqual(6);
     for (const row of chrome) {
-      expect(row.paddingLeft, `${row.selector}: left inset`).toBeCloseTo(PANEL_INSET, 0);
-      expect(row.paddingRight, `${row.selector}: right inset`).toBeCloseTo(PANEL_INSET, 0);
-      // The progress heading is deliberately 36px — it spends its four spare
-      // pixels on the 280-340px panel-height contract below it.
-      const expected = row.selector === ".checklist-heading" ? 36 : CHROME_HEIGHT;
-      expect(row.height, `${row.selector}: chrome height`).toBeCloseTo(expected, 0);
-      expect(expected % GRID, `${row.selector}: height is off the 4px grid`).toBe(0);
+      // Tabs are a pill track, inset by its 4px shell; every other chrome row
+      // starts on the pane's own edge, so headings and bodies share a column.
+      const inset = [".panel-tabs", ".inspector-tabs"].includes(row.selector) ? 4 : 0;
+      expect(row.paddingLeft, `${row.selector}: left inset`).toBeCloseTo(inset, 0);
+      expect(row.paddingRight, `${row.selector}: right inset`).toBeCloseTo(inset, 0);
+      // No chrome row is ruled off from what it heads.
+      expect(Math.max(...row.edges), `${row.selector}: draws a rule`).toBe(0);
+      if ([".panel-tabs", ".inspector-tabs", ".panel-title", ".viewer-toolbar"].includes(row.selector)) {
+        expect(row.height, `${row.selector}: chrome height`).toBeCloseTo(CHROME_HEIGHT, 0);
+      }
     }
 
-    // Panel bodies use the same inset as the chrome above them, so a card's
-    // left edge continues the tab's text column rather than stepping in.
     for (const selector of [".source-content", ".inspector-content"]) {
       const body = await box(page, selector);
-      expect(body.paddingLeft, `${selector}: left inset`).toBeCloseTo(PANEL_INSET, 0);
-      expect(body.paddingRight, `${selector}: right inset`).toBeCloseTo(PANEL_INSET, 0);
+      expect(body.paddingLeft, `${selector}: left inset`).toBeCloseTo(0, 0);
+      expect(body.paddingRight, `${selector}: right inset`).toBeCloseTo(0, 0);
     }
   });
 
@@ -291,16 +296,19 @@ test.describe("workspace design system", () => {
     expect(spread(chips.map((chip) => chip.height)), "chip heights differ").toBeLessThanOrEqual(0.5);
   });
 
-  test("the progress ledger is one hairline-ruled list with an aligned status column", async ({ page }) => {
+  test("a finished progress ledger folds to one line and opens to an aligned list", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await openWorkspace(page, projectName!);
 
-    const panel = await box(page, ".checklist-panel");
-    // Owned by vertical-progress.spec.ts; restated because the ledger rules
-    // below are what spend this budget.
-    expect(panel.height, "progress panel height").toBeGreaterThanOrEqual(280);
-    expect(panel.height, "progress panel height").toBeLessThanOrEqual(340);
-    expect(panel.radius, "progress panel is unframed").toBe(0);
+    // A finished run is one line: the heading, its count and a toggle. The
+    // 280-340px budget belongs to a run in progress (vertical-progress.spec.ts).
+    const folded = await box(page, ".checklist-panel");
+    expect(folded.height, "a finished ledger is one line").toBeLessThanOrEqual(40);
+    expect(folded.radius, "progress panel is unframed").toBe(0);
+    await expect(page.locator(".checklist-count")).toHaveText(/^\d+ of \d+ complete$/);
+    const toggle = page.getByRole("button", { name: "Show steps" });
+    await toggle.click();
+    await expect(page.getByRole("button", { name: "Hide steps" })).toHaveAttribute("aria-expanded", "true");
 
     const rows = await page.locator(".checklist-step").evaluateAll((elements) => elements.map((element) => {
       const rect = element.getBoundingClientRect();
@@ -319,8 +327,8 @@ test.describe("workspace design system", () => {
 
     expect(rows.length, "progress rows").toBeGreaterThan(1);
 
-    // Rows are a ledger: same height, same left edge, same width, and they meet
-    // on a hairline rather than floating apart as separate chips.
+    // Rows are a ledger: same height, same left edge, same width, and they
+    // meet rather than floating apart as separate chips.
     expect(spread(rows.map((row) => row.height)), "rows are different heights").toBeLessThanOrEqual(1);
     expect(spread(rows.map((row) => row.left)), "rows start on different columns").toBeLessThanOrEqual(1);
     expect(spread(rows.map((row) => row.width)), "rows are different widths").toBeLessThanOrEqual(1);
@@ -393,8 +401,8 @@ test.describe("workspace design system", () => {
     });
 
     expect(measured.tiles.length, "expected tiles in the strip").toBeGreaterThan(0);
-    expect(measured.gap, "tile gap").toBeCloseTo(12, 0);
-    expect(measured.paddingLeft, "strip inset").toBeCloseTo(PANEL_INSET, 0);
+    expect(measured.gap, "tile gap").toBeCloseTo(BAND_GAP, 0);
+    expect(measured.paddingLeft, "strip inset").toBeCloseTo(0, 0);
     expect(spread(measured.tiles.map((tile) => tile.width)), "tiles are different widths").toBeLessThanOrEqual(1);
     expect(spread(measured.tiles.map((tile) => tile.height)), "tiles are different heights").toBeLessThanOrEqual(1);
     // A tile cut in half at the right edge reads as a bug unless the strip says
@@ -416,7 +424,7 @@ test.describe("workspace design system", () => {
     const title = page.locator(".workspace-project-name");
     await expect(title).toHaveText(projectName!);
     const titleStyle = await box(page, ".workspace-project-name");
-    expect(titleStyle.fontSize, "page title size").toBe(18);
+    expect(titleStyle.fontSize, "page title size").toBe(22);
     expect(titleStyle.fontWeight, "page title weight").toBe("600");
 
     const panelCaption = await box(page, ".panel-title strong");
@@ -475,8 +483,10 @@ test.describe("workspace design system", () => {
           const overflowBy = Math.max(element.scrollWidth - element.clientWidth, element.scrollHeight - element.clientHeight);
           if (!truncates && overflowBy > 1) clipped.push({ text: text.slice(0, 48), cls: String(element.className).slice(0, 40), overflowBy });
 
-          // White, PicThing's neutral-400 secondary copy, or the brand pink.
-          if (!/^rgba?\((255, 255, 255|163, 163, 163|214, 58, 127|226, 75, 140)/.test(style.color)) {
+          // White, PicThing's neutral-400 secondary copy, or the brand pink —
+          // and black only as the label of the one light primary action.
+          const primaryLabel = /^rgba?\(0, 0, 0/.test(style.color) && element.closest(".button-primary");
+          if (!primaryLabel && !/^rgba?\((255, 255, 255|163, 163, 163|214, 58, 127|226, 75, 140)/.test(style.color)) {
             coloured.push({ text: text.slice(0, 48), cls: String(element.className).slice(0, 40), colour: style.color });
           }
         }

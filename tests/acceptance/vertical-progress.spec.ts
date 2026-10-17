@@ -224,6 +224,10 @@ test.describe("vertical creation progress", () => {
 
       phase = "complete";
       await expect.poll(() => restoredProgress.locator(".checklist-step.status-complete").count(), { timeout: 15_000 }).toBe(expectedLabels.length);
+      // A finished run folds to one line; the steps are one click away.
+      await expect(restoredProgress.locator(".checklist-count")).toHaveText(`${expectedLabels.length} of ${expectedLabels.length} complete`);
+      await expect(restoredProgress.getByText("Project ready", { exact: true })).toBeHidden();
+      await restoredProgress.getByRole("button", { name: "Show steps" }).click();
       await expect(restoredProgress.getByText("Project ready", { exact: true })).toBeVisible();
       await page.screenshot({ path: "test-artifacts/progress-list-complete.png", fullPage: true });
 

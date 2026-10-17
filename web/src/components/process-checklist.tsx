@@ -63,6 +63,8 @@ export function ProcessChecklist({ steps, jobState, compact = false, label = "Sh
   // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
   const [announcement, setAnnouncement] = useState("");
   const [freshlyCompleted, setFreshlyCompleted] = useState<Set<string>>(() => new Set());
+  // A finished run folds to one line; the steps stay one click away.
+  const [stepsOpen, setStepsOpen] = useState(false);
   const [prevSnapshot, setPrevSnapshot] = useState<{ steps: ProcessingStep[]; jobState?: JobState } | null>(null);
   const prev = prevSnapshot;
 
@@ -119,15 +121,19 @@ export function ProcessChecklist({ steps, jobState, compact = false, label = "Sh
   if (steps.length === 0) return null;
 
   const headingId = `${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-heading`;
+  const listId = `${headingId}-steps`;
+  const finished = steps.every((step) => step.status === "complete" || step.status === "skipped");
+  const folded = finished && !stepsOpen;
 
   return (
     <section className={`checklist-panel${compact ? " compact" : ""}${paused ? " is-paused" : ""}`} aria-labelledby={headingId} data-testid="short-creation-progress">
       <div className="checklist-heading">
         <h2 id={headingId}>{label}</h2>
-        <span className="checklist-count">{steps.length} step{steps.length === 1 ? "" : "s"}</span>
+        <span className="checklist-count">{finished ? `${steps.filter((step) => step.status === "complete").length} of ${steps.length} complete` : `${steps.length} step${steps.length === 1 ? "" : "s"}`}</span>
+        {finished && <button type="button" className="checklist-toggle" aria-expanded={!folded} aria-controls={listId} onClick={() => setStepsOpen((open) => !open)}>{folded ? "Show steps" : "Hide steps"}</button>}
       </div>
       <div className="checklist-live sr-only" role="status" aria-live="polite">{announcement}</div>
-      <ol className="process-checklist" aria-label={label} data-testid="progress-step-list">
+      <ol id={listId} className="process-checklist" aria-label={label} data-testid="progress-step-list" hidden={folded}>
         {steps.map((step) => {
           const active = step.status === "active";
           const progress = itemProgress(step);
