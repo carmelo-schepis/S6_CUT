@@ -12,7 +12,7 @@
  * What is locked, and why each one was a real defect before it was locked:
  *
  *   SPACING
- *   1. One measure. `.workspace-page` opted out of the 1540px guide `.page`
+ *   1. One measure. `.workspace-page` opted out of the page guide `.page`
  *      uses and `.topbar` mirrors, so above a ~1600px viewport the content ran
  *      ~200px wider than the bar directly above it.
  *   2. Two vertical steps, never ad hoc ones: status bands 24px apart under
@@ -50,8 +50,9 @@ const SECTION_GAP = 64;
 const PANE_GUTTER = 48;
 /** The height of a pane's first chrome row — tabs, title, toolbar. */
 const CHROME_HEIGHT = 32;
-/** `--ws-measure`, shared with `.page` and mirrored by `.topbar`. */
-const MEASURE = 1540;
+/** The Projects content column every page shares (`--page-measure` is this
+ *  plus the page inset on each side), mirrored by `.topbar`. */
+const CONTENT = 1240;
 /** `--ws-rail-left` / `--ws-rail-right` above the 1180px breakpoint. */
 const RAIL_LEFT = 300;
 const RAIL_RIGHT = 340;
@@ -141,7 +142,7 @@ test.describe("workspace design system", () => {
 
   test("the page, the topbar and every band share one horizontal guide", async ({ page }) => {
     test.setTimeout(180_000);
-    // Deliberately includes widths above the 1540px measure: that is exactly
+    // Deliberately includes widths above the page measure: that is exactly
     // where the workspace used to drift away from the bar above it.
     for (const [width, height] of [[1920, 1080], [1680, 1050], [1440, 900], [1280, 800], [1024, 768]] as const) {
       await page.setViewportSize({ width, height });
@@ -159,6 +160,7 @@ test.describe("workspace design system", () => {
           };
         };
         return {
+          inset: parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--page-inset")),
           container: read(document.querySelector<HTMLElement>(".workspace-page")),
           topbar: read(document.querySelector<HTMLElement>(".topbar")),
           overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -167,7 +169,9 @@ test.describe("workspace design system", () => {
 
       const where = `${width}x${height}`;
       expect(guides.container, `${where}: workspace container`).not.toBeNull();
-      expect(guides.container!.maxWidth, `${where}: the workspace uses the shared measure`).toBe(`${MEASURE}px`);
+      expect(parseFloat(guides.container!.maxWidth), `${where}: the workspace uses the shared measure`).toBeCloseTo(CONTENT + 2 * guides.inset, 0);
+      // …so its content column is exactly the Projects column.
+      expect(guides.container!.right - guides.container!.left, `${where}: content column`).toBeLessThanOrEqual(CONTENT + 1);
       expect(Math.abs(guides.container!.left - guides.topbar!.left), `${where}: page and topbar start on different columns`).toBeLessThanOrEqual(1);
       expect(Math.abs(guides.container!.right - guides.topbar!.right), `${where}: page and topbar end on different columns`).toBeLessThanOrEqual(1);
       expect(guides.overflow, `${where}: the document scrolls horizontally`).toBeLessThanOrEqual(0);

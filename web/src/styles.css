@@ -561,7 +561,7 @@ select { line-height: var(--type-text-line); }
 .engine-dot.degraded, .engine-dot.starting { background: var(--warning); }
 .engine-dot.offline { background: var(--error); }
 .app-main { grid-column: 2; min-width: 0; }
-.topbar { position: sticky; z-index: 15; top: 0; height: 48px; display: flex; justify-content: space-between; align-items: center; gap: var(--space-4); padding-inline: max(var(--page-inset), calc((100% - 1540px) / 2 + var(--page-inset))); border-bottom: 0; background: var(--canvas); }
+.topbar { position: sticky; z-index: 15; top: 0; height: 48px; display: flex; justify-content: space-between; align-items: center; gap: var(--space-4); padding-inline: max(var(--page-inset), calc((100% - var(--page-measure)) / 2 + var(--page-inset))); border-bottom: 0; background: var(--canvas); }
 .topbar-context, .topbar-state { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .topbar-context strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .crumb { color: var(--text-primary); }
@@ -578,16 +578,16 @@ main { min-width: 0; }
 .form-hint { margin: 0; color: var(--text-primary); overflow-wrap: anywhere; }
 .batch-summary { display: grid; gap: var(--space-1); margin: 0 0 var(--space-3); padding: var(--space-3) var(--space-4); border: 0; border-left: 0; border-radius: var(--radius-md); background: var(--surface-2); color: var(--text-primary); }
 .batch-summary p { margin: 0; overflow-wrap: anywhere; }
-.page { max-width: 1540px; margin: 0 auto; padding: var(--space-8) var(--page-inset); }
+.page { max-width: var(--page-measure); margin: 0 auto; padding: var(--space-8) var(--page-inset); }
 .page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
 .page-header p { max-width: 650px; margin-bottom: 0; }
 .header-actions { display: flex; gap: 8px; align-items: center; }
 /* The single startup indicator, in the same slot the failure alert uses. */
-.engine-startup { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) max(var(--page-inset), calc((100% - 1540px) / 2 + var(--page-inset))); background: var(--surface-2); border-bottom: 0; color: var(--text-primary); }
+.engine-startup { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) max(var(--page-inset), calc((100% - var(--page-measure)) / 2 + var(--page-inset))); background: var(--surface-2); border-bottom: 0; color: var(--text-primary); }
 .engine-startup svg { color: var(--copper-light); flex: 0 0 auto; }
-.global-alert, .workspace-alert { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) max(var(--page-inset), calc((100% - 1540px) / 2 + var(--page-inset))); background: rgba(242,56,85,.16); border-bottom: 0; color: var(--text-primary); }
+.global-alert, .workspace-alert { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) max(var(--page-inset), calc((100% - var(--page-measure)) / 2 + var(--page-inset))); background: rgba(242,56,85,.16); border-bottom: 0; color: var(--text-primary); }
 .global-alert button, .workspace-alert button { margin-left: auto; background: transparent; border: 0; color: inherit; text-decoration: underline; }
-.pwa-status { display: flex; align-items: center; gap: var(--space-2); min-height: var(--control-height); padding: var(--space-1) max(var(--page-inset), calc((100% - 1540px) / 2 + var(--page-inset))); border-bottom: 0; color: var(--text-primary); }
+.pwa-status { display: flex; align-items: center; gap: var(--space-2); min-height: var(--control-height); padding: var(--space-1) max(var(--page-inset), calc((100% - var(--page-measure)) / 2 + var(--page-inset))); border-bottom: 0; color: var(--text-primary); }
 .pwa-status > svg { flex: 0 0 auto; }
 .pwa-status > span { min-width: 0; }
 .pwa-status-offline { background: rgba(240,168,75,.14); border-color: rgba(240,168,75,.3); }
@@ -687,8 +687,8 @@ main { min-width: 0; }
 
 /* Projects — one centred task column: purpose heading, source, output, create.
    No frame around the task; hairlines separate the three steps. */
-/* The page keeps the shared 1540px guide the topbar follows; the task column centres inside it. */
-.projects-page > * { max-width: 760px; margin-inline: auto; }
+/* The page keeps the shared --page-measure guide the topbar follows. */
+.projects-page > * { margin-inline: auto; }
 .create-panel { overflow: visible; }
 .create-topline { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); padding: 0 0 var(--space-4); }
 .create-topline > div:first-child { min-width: 0; }
@@ -1745,14 +1745,14 @@ main { min-width: 0; }
 :root {
   /* The single horizontal measure the workspace aligns to.
 
-     This is not a new number: it is the 1540px measure `.page` already uses,
+     This is not a new number: it is the --page-measure `.page` already uses,
      and that `.topbar` already mirrors through
-     `padding-inline: max(--page-inset, (100% - 1540px)/2 + --page-inset)`.
+     `padding-inline: max(--page-inset, (100% - --page-measure)/2 + --page-inset)`.
      The workspace was the one route that opted out at 1900px, so above roughly
      a 1600px viewport its content ran 200px wider than the topbar sitting
      directly above it. visual-alignment.spec.ts asserts those two edges share a
      column but only samples up to 1440px, which is why the drift survived. */
-  --ws-measure: 1540px;
+  --ws-measure: var(--page-measure);
   /* Whole-pixel side columns; the viewer takes what is left, so every column
      edge lands on an integer instead of on .612 of a pixel. */
   --ws-rail-left: 300px;
@@ -2112,7 +2112,7 @@ main { min-width: 0; }
    gutter of canvas; the picture is the only bright object on the screen.
    =========================================================================== */
 .shorts-workspace-page { max-width: none; padding: var(--space-3) var(--space-4); }
-/* The topbar normally mirrors the 1540px page measure; here the page is full width, so it follows the page inset. */
+/* The topbar normally mirrors the page measure; here the page is full width, so it follows the page inset. */
 .app-main:has(.shorts-workspace-page) .topbar { padding-inline: var(--space-4); }
 .shorts-workspace { grid-template-columns: minmax(0, 1fr); }
 .shorts-workspace-header { align-items: center; margin-bottom: var(--space-2); padding: 0 0 var(--space-2); border: 0; border-bottom: 0; border-radius: 0; background: transparent; }
@@ -2605,6 +2605,11 @@ input[type="checkbox"]:checked::before {
   --gap-section: 64px;
   --gap-pane: 48px;
   --gap-column: 80px;
+  /* Every page shares the Projects column: 1240px of content, centred, with
+     the page inset on either side. The topbar and full-bleed bands follow it,
+     so a title, its page and the bar above it start on one column on every
+     tab. The Shorts Editor is the one full-width workbench and opts out. */
+  --page-measure: calc(1240px + 2 * var(--page-inset));
   /* Section headings sit between the page title and a group heading, so a
      section announces itself by size rather than by a rule above it. */
   --type-title-size: 22px;
@@ -2615,7 +2620,8 @@ input[type="checkbox"]:checked::before {
   --type-display-size: 32px;
   --type-display-line: 36px;
 }
-.u-section-heading, .step-label, .jobs-day-heading, .settings-card-head :is(h2, h3), .checklist-heading h2, .board-header strong {
+.u-section-heading, .step-label, .jobs-day-heading, .settings-card-head :is(h2, h3), .checklist-heading h2, .board-header strong,
+.library-sidebar > strong, .asset-inspector .panel-title strong, .inspector-panel .panel-title strong {
   font-size: var(--type-section-size);
   line-height: var(--type-section-line);
   font-weight: var(--type-heading-weight);
@@ -2649,11 +2655,13 @@ input[type="checkbox"]:checked::before {
 .status, .origin-badge, .section-count, .saved-badge, .engine-chips :is(.ok, .warn), .processing-heading > :is(span, b) { padding-inline: 0; background: transparent; }
 
 /* --- Shell --------------------------------------------------------------- */
-.topbar, .app-rail { background: var(--canvas); }
+.app-rail { background: var(--canvas); }
+/* The Projects bar on every tab: a dark translucent band over a black page
+   (the wallpaper itself stays on Projects only). */
+.topbar { background: rgba(0, 0, 0, 0.82); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
 .page-header { margin-bottom: var(--gap-section); }
 
 /* --- Projects: a wide source-and-output column, a narrower create column - */
-.projects-page > * { max-width: 1240px; }
 .create-topline { padding-bottom: var(--gap-section); }
 .provider-callout { margin-bottom: var(--gap-section); padding: 0; border-radius: 0; background: transparent; }
 .create-step { gap: var(--gap-group); padding: 0; }
@@ -2755,10 +2763,16 @@ input[type="checkbox"]:checked::before {
 .job-card { padding: var(--space-3) 0; border-radius: 0; background: transparent; }
 .job-card + .job-card { margin-top: var(--space-3); }
 .job-card .status { margin-left: var(--space-2); }
+/* A row shrinks and wraps on a phone instead of pushing the page sideways
+   (a legacy job carries a tag, a long state and several actions). */
+.job-card { flex-wrap: wrap; }
+.job-main { flex: 1 1 240px; min-width: 0; overflow-wrap: anywhere; }
+.job-actions { flex-wrap: wrap; }
 .show-all-projects { margin-top: var(--gap-group); background: transparent; color: var(--text-muted); }
 
 /* --- Settings: areas on the page, no frames inside frames ---------------- */
-.settings-grid { column-gap: var(--gap-column); row-gap: var(--gap-section); }
+/* The Projects split: a wide main column and a narrower side column. */
+.settings-grid { grid-template-columns: minmax(0, 1.6fr) minmax(300px, 1fr); column-gap: var(--gap-column); row-gap: var(--gap-section); }
 .settings-column { gap: var(--gap-section); }
 .settings-card { padding: 0; border-radius: 0; background: transparent; }
 .settings-card-head { padding-bottom: var(--space-6); }
