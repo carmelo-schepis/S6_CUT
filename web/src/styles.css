@@ -2382,15 +2382,18 @@ select option { background: var(--surface-2); }
 .drop-zone:hover { border-color: var(--text-muted); background: var(--surface-2); }
 .drop-zone.drag-active { border-color: var(--text); background: var(--surface-2); box-shadow: none; }
 
-/* Create screen backdrop: a glow in the logo's colours; no line grid. */
+/* Projects wallpaper moves at 30% of the page scroll for a subtle parallax. */
 .app-main:has(.projects-page) {
-  background:
-    radial-gradient(40% 360px at 20% 0, color-mix(in srgb, var(--logo-crimson) 16%, transparent), transparent 70%),
-    radial-gradient(40% 360px at 55% 0, color-mix(in srgb, var(--logo-navy) 16%, transparent), transparent 70%),
-    radial-gradient(35% 320px at 90% 0, color-mix(in srgb, var(--logo-peach) 10%, transparent), transparent 70%),
-    var(--canvas);
+  background-color: var(--canvas);
+  background-image: linear-gradient(rgba(0, 0, 0, .62), rgba(0, 0, 0, .62)), url("/projects-wallpaper.jpg");
+  background-size: cover;
+  background-position: center calc(50% + var(--projects-scroll, 0px));
 }
 .app-main:has(.projects-page) .topbar { background: rgba(0, 0, 0, 0.82); }
+
+@media (prefers-reduced-motion: reduce) {
+  .app-main:has(.projects-page) { background-attachment: fixed; background-position: center; }
+}
 
 
 /* ===========================================================================
@@ -2736,6 +2739,7 @@ input[type="checkbox"]:checked::before {
 .asset-inspector .panel-title { padding-inline: 0; background: var(--canvas); }
 .asset-fields { gap: var(--gap-field); }
 .asset-card, .recent-clip-card { background: transparent; }
+.projects-page .style-card:is(:hover, .active) { background: transparent; }
 .asset-card.active { border-color: transparent; background: transparent; box-shadow: none; }
 .asset-card .asset-preview, .asset-card-details-full > .asset-preview, .recent-clip-thumb { border-radius: var(--radius-lg); overflow: hidden; }
 .asset-card.active .asset-preview { box-shadow: 0 0 0 2px var(--text); }

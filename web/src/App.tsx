@@ -144,6 +144,14 @@ export function App() {
     window.scrollTo({ top: 0, behavior: "auto" });
   }, [page]);
 
+  useEffect(() => {
+    if (page !== "projects" || (typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches)) return;
+    const sync = () => document.querySelector<HTMLElement>(".app-main")?.style.setProperty("--projects-scroll", `${window.scrollY * 0.7}px`);
+    sync();
+    window.addEventListener("scroll", sync, { passive: true });
+    return () => { window.removeEventListener("scroll", sync); document.querySelector<HTMLElement>(".app-main")?.style.removeProperty("--projects-scroll"); };
+  }, [page]);
+
   const openProject = (id: string) => {
     setSelectedProjectId(id);
     setPage("workspace");
