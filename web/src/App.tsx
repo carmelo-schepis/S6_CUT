@@ -145,11 +145,23 @@ export function App() {
   }, [page]);
 
   useEffect(() => {
-    if (page !== "projects" || (typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches)) return;
-    const sync = () => document.querySelector<HTMLElement>(".app-main")?.style.setProperty("--projects-scroll", `${window.scrollY * 0.7}px`);
+    if (page !== "projects") return;
+    const main = document.querySelector<HTMLElement>(".app-main");
+    if (!main) return;
+    const reducedMotion = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const sync = () => {
+      const scrollY = reducedMotion ? 0 : window.scrollY;
+      main.style.setProperty("--projects-scroll", `${scrollY * 0.7}px`);
+      main.style.setProperty("--projects-scroll-y", `${scrollY}px`);
+      main.style.setProperty("--projects-height", `${main.offsetHeight}px`);
+    };
     sync();
+    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(sync) : null;
+    observer?.observe(main);
     window.addEventListener("scroll", sync, { passive: true });
-    return () => { window.removeEventListener("scroll", sync); document.querySelector<HTMLElement>(".app-main")?.style.removeProperty("--projects-scroll"); };
+    // Retain the last Projects geometry while its wallpaper fades behind the
+    // destination. Resizing it to that page would make the image jump first.
+    return () => { window.removeEventListener("scroll", sync); observer?.disconnect(); };
   }, [page]);
 
   const openProject = (id: string) => {
@@ -237,6 +249,7 @@ export function App() {
     </aside>
 
     <div className="app-main">
+      <div className="app-wallpaper" aria-hidden="true" />
       <header className="topbar">
         <div className="topbar-context">
           <span className="mobile-brand"><img src="/app-icon.png" alt="" /> <span><span className="brand-accent">S6</span>_cut</span></span>

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Film, Plus, Sparkles, Zap } from "lucide-react";
+import { Check, Film, Plus, Sparkles, Zap } from "lucide-react";
 import { createClipJob, createFolder, listFolders, readableError } from "../api";
 import { DEFAULT_SUBSCRIBE_ANIMATION, type BatchMode, type ContentFormat, type Health, type LibraryFolder, type ProcessingMode, type Project, type ProviderProfile, type SourceProfile, type Style, type SubscribeAnimationConfig, type MusicTheme } from "../types";
 import { Button, Field, FieldGroup, StepBadge, useSingleFlight } from "./common";
@@ -237,8 +237,8 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
           <div className="step-label"><StepBadge step={2} /><span className="step-label-text">Choose the output</span></div>
           <FieldGroup title="Editorial style">
             <div className="style-grid">
-              {styles.map((item) => <button key={item.id} className={style === item.id ? "style-card active" : "style-card"} onClick={() => setStyle(item.id)} aria-pressed={style === item.id}>
-                <span className={`style-swatch ${item.id}`} /><strong>{item.label}</strong><small>{item.note}</small>
+              {styles.map((item) => <button type="button" key={item.id} className={style === item.id ? "style-card active" : "style-card"} onClick={() => setStyle(item.id)} aria-pressed={style === item.id}>
+                <span className="style-card-title"><strong>{item.label}</strong><Check className="style-card-check" size={16} aria-hidden="true" /></span><small>{item.note}</small>
               </button>)}
             </div>
           </FieldGroup>
