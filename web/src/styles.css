@@ -2164,7 +2164,7 @@ main { min-width: 0; }
 
 /* Program monitor: the picture is centred on black and sized by the viewport. */
 .video-editing-stage::before { content: ""; grid-area: viewer; border-radius: var(--radius-md); background: #000; }
-.video-editing-stage > .shorts-video-frame { grid-area: viewer; z-index: 1; place-self: center; width: auto; max-width: 100%; height: clamp(260px, calc(100dvh - 444px), 860px); max-height: none; margin: var(--space-3) 0; border: 0; }
+.video-editing-stage > .shorts-video-frame { grid-area: viewer; z-index: 1; place-self: center; width: auto; max-width: 100%; height: clamp(260px, calc(100dvh - 458px), 860px); max-height: none; margin: var(--space-3) 0; border: 0; }
 
 /* Transport sits directly under the picture, timecode first like every NLE. */
 .shorts-editor-toolbox .shorts-bottom-controls { grid-area: transport; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-3); }
@@ -2396,7 +2396,7 @@ select option { background: var(--surface-2); }
 /* ===========================================================================
    SHORTS EDITOR — Final Cut Pro elements
    ---------------------------------------------------------------------------
-   Graphite panels on the app's black canvas, held apart by 8px gutters
+   Graphite panels on the app's black canvas, held apart by 4px gutters
    rather than 1px dividers, an icon toolbar over the tools, a viewer header bar, play
    centred under the picture beside a dark timecode readout, an inspector of
    label-left / value-right rows, and a timeline of coloured clips: blue
@@ -2427,11 +2427,11 @@ select option { background: var(--surface-2); }
 
 /* The window sits on the canvas; its panels are apart by gutters. */
 .shorts-editor-panel { border: 0; border-radius: 0; background: transparent; }
-.shorts-editor-panel > .workspace-panel-heading { min-height: 36px; padding: var(--space-1) 0; border-bottom: 0; background: transparent; }
+.shorts-editor-panel > .workspace-panel-heading { min-height: 32px; padding: 0; border-bottom: 0; background: transparent; }
 .shorts-editor-panel > .shorts-source-empty { width: 100%; background: transparent; align-self: stretch; padding-block: var(--space-8); }
 .shorts-editor-panel > .shorts-source-switcher, .shorts-editor-panel > .shorts-inline-status { padding: var(--space-1) 0; background: transparent; color: var(--fcp-dim); }
 .video-editing-stage {
-  --nle-gutter: var(--space-2);
+  --nle-gutter: var(--space-1);
   padding: 0;
   background: transparent;
   grid-template-rows: auto minmax(0, 1fr) auto auto;
@@ -2654,7 +2654,9 @@ input[type="checkbox"]:checked::before {
 .create-step { gap: var(--gap-group); padding: 0; }
 .source-step, .style-step { padding: 0; border-radius: 0; background: transparent; }
 .create-step + .create-step { padding-top: var(--gap-section); }
-.style-step { column-gap: var(--gap-group); row-gap: var(--gap-group); }
+/* Format and Processing mode share a row only when each gets 300px; on a
+   narrower column they stack rather than squeezing their options onto two lines. */
+.style-step { grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); column-gap: var(--gap-group); row-gap: var(--gap-group); }
 .field-group { gap: var(--space-3); }
 .field-group + .field-group, .style-step > .field-group + .field-group { padding-top: var(--gap-group); }
 .field-group-body { gap: var(--gap-field); }
@@ -2666,13 +2668,14 @@ input[type="checkbox"]:checked::before {
   .create-step.action-step { grid-area: action; align-self: start; position: sticky; top: 72px; padding: 0; }
   .action-step > .field-group[aria-label="Destination"] > .field-group-body { grid-template-columns: minmax(0, 1fr); }
 }
-/* Option groups take the width their words need instead of stretching level. */
+/* Option groups take the width their words need instead of stretching level;
+   inside a group the options stay one width, so a choice never looks ranked. */
 .style-step .style-grid { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .style-card { min-width: 132px; padding: var(--space-3) var(--space-4); border-radius: var(--radius-lg); background: transparent; }
 .style-card:hover { background: var(--surface-1); }
 .style-card:hover, .style-card.active { border-color: transparent; }
 .style-card.active { background: var(--surface-2); box-shadow: none; }
-.mode-tabs, .format-tabs, .processing-mode-tabs, .style-step > .field-group[aria-label="Batch size"] .mode-tabs { width: fit-content; max-width: 100%; grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: max-content; }
+.mode-tabs, .format-tabs, .processing-mode-tabs, .style-step > .field-group[aria-label="Batch size"] .mode-tabs { width: fit-content; max-width: 100%; grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 1fr; }
 .mode-tabs button { padding-inline: var(--space-4); }
 .engine-summary { margin-top: var(--space-1); }
 .engine-chips { gap: var(--space-4); }

@@ -124,6 +124,9 @@ test.describe("responsive loading and creation controls", () => {
       await page.goto("/", { waitUntil: "domcontentloaded" });
       await page.getByRole("button", { name: "Projects", exact: true }).click();
       await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
+      // Between 821 and 1180px the rail peeks open while hovered and covers the
+      // left of the page; leave it the way a person would before using the form.
+      await page.mouse.move(width - 2, height - 2);
       await assertNoOverflow(page);
       const panel = page.locator(".create-panel");
       await expect(panel).toBeVisible();
