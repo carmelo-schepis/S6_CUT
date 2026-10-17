@@ -96,6 +96,8 @@ test.describe("theme contract", () => {
             // PicThing hierarchy: neutral-400 secondary copy, and the brand pink
             // for the wordmark and inline links. Nothing else.
             if (/^rgba?\((163, 163, 163|214, 58, 127|226, 75, 140)/.test(style.color)) continue;
+            // The primary action is the one light fill, so its label is black.
+            if (/^rgba?\(0, 0, 0/.test(style.color) && el.closest(".button-primary")) continue;
             if (disabled && /^rgba\(255, 255, 255/.test(style.color)) continue;
             bad.push({ sample: (own.trim() || el.getAttribute("placeholder") || "").slice(0, 40), colour: style.color, cls: String(el.className).slice(0, 40) });
           }

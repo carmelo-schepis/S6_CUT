@@ -1356,7 +1356,7 @@ main { min-width: 0; }
 .settings-column { display: grid; align-content: start; gap: var(--space-3); min-width: 0; }.settings-card { min-width: 0; border: 0; border-radius: var(--radius-lg); background: var(--surface-1); padding: var(--space-4); }/* The destructive ramp is declared once (--error stepped toward the surfaces
    beneath it); mixing --error toward --border here minted two further reds that
    belong to no token, so the purge card reuses the ramp instead. */
-.library-danger-card { border-color: var(--error-disabled); }.library-danger-card .settings-card-head svg { color: var(--error); }.library-danger-content { display: grid; gap: var(--space-3); padding-top: var(--space-3); }.library-danger-content p { margin: 0; color: var(--text-primary); }.library-danger-content strong { color: var(--text); }/* --error-active is the next step down but lands at 2.9:1 on this surface,
+.library-danger-card .settings-card-head svg { color: var(--error); }.library-danger-content { display: grid; gap: var(--space-3); padding-top: var(--space-3); }.library-danger-content p { margin: 0; color: var(--text-primary); }.library-danger-content strong { color: var(--text); }/* --error-active is the next step down but lands at 2.9:1 on this surface,
    under the 3:1 floor a control outline has to clear; --error-hover is the
    ramp step that passes, and full --error still marks the hover state. */
 .library-danger-trigger { margin-top: 3px; background: transparent; border-color: var(--error-hover); color: var(--text-primary); }.library-danger-trigger:hover { background: rgba(242,56,85,.16); border-color: var(--error); color: var(--text); }.library-purge-empty { padding-left: 0; padding-right: 0; }.library-purge-empty > svg { color: var(--success); }.purge-dialog { max-height: min(92vh, 620px); overflow-y: auto; }.purge-dialog-heading { display: flex; align-items: flex-start; gap: var(--space-2); }.purge-dialog-heading svg { flex: 0 0 auto; color: var(--error); }.purge-dialog-heading h2 { min-width: 0; }.purge-warning { padding: var(--space-2) var(--space-3); border: 1px solid var(--error-disabled); background: color-mix(in srgb, var(--error) 9%, transparent); }.purge-confirmation-field { display: block; margin-bottom: var(--space-1); color: var(--text); }.purge-confirmation-field code { color: var(--text); font-weight: var(--type-emphasis-weight); }.purge-dialog > input { width: 100%; }.purge-dialog .form-error { margin: var(--space-2) 0 0; }.settings-card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--space-3); padding-bottom: var(--space-3); border-bottom: 0; }.settings-card-head > div { display: flex; align-items: center; gap: var(--space-2); }.settings-card-head svg { color: var(--copper); }.settings-card-head h2 { margin: 0; font-size: var(--type-heading-size); font-weight: var(--type-heading-weight); line-height: var(--type-heading-line); letter-spacing: var(--type-heading-tracking); }.settings-card-head p { margin: 3px 0 0; color: var(--text-primary); }.settings-card-head > button { min-height: var(--control-height-small); padding: var(--control-pad-y) var(--control-pad-x); border: 0; background: transparent; color: var(--text-primary); }
@@ -2621,18 +2621,18 @@ input[type="checkbox"]:checked::before {
 .button:not(.button-primary):not(.button-danger):not(.library-danger-trigger),
 .profile-actions > button:not(.button), .pwa-update-button, .clip-thumb-retry {
   border-color: transparent;
-  background: var(--surface-2);
+  background: var(--brand-soft);
 }
-.button:not(.button-primary):not(.button-danger):not(.library-danger-trigger):hover:not(:disabled) { background: var(--surface-3); }
+.button:not(.button-primary):not(.button-danger):not(.library-danger-trigger):hover:not(:disabled) { background: var(--selector-highlight-soft); }
 .icon-button { border-color: transparent; background: transparent; color: var(--text-muted); }
-.icon-button:hover:not(:disabled), .icon-button[aria-pressed="true"] { background: var(--surface-2); color: var(--text); }
+.icon-button:hover:not(:disabled), .icon-button[aria-pressed="true"] { background: var(--brand-soft); color: var(--text); }
 /* The one bright thing on a page is the action it exists for. */
 .button-primary { border-color: transparent; background: var(--selector-highlight-hover); color: var(--black); }
 .button-primary:hover:not(:disabled) { background: var(--text); color: var(--black); }
 .button-primary:active { background: var(--brand-primary); }
 .button-primary:disabled { background: var(--surface-3); color: var(--text-disabled); }
-/* Numbered steps: a quiet disc and a grey numeral, not a ring. */
-.step-badge { background: var(--surface-2); color: var(--text-muted); }
+/* Numbered steps: a quiet disc behind the numeral, not a ring. */
+.step-badge { background: var(--surface-2); color: var(--text); }
 /* Selected options are a fill. No underline bars, side markers or rings. */
 .segmented button.active, .mode-tabs button.active, .mini-tabs button.active,
 .panel-tabs button.active, .inspector-tabs button.active { box-shadow: none; }
@@ -2685,7 +2685,6 @@ input[type="checkbox"]:checked::before {
 /* --- Workspace: three panes held apart by gutters ----------------------- */
 .workspace-page .panel, .workspace-page .checklist-panel, .workspace-page .board-panel,
 .workspace-grid > .panel:first-child, .workspace-grid > .panel:last-child { border-radius: 0; background: transparent; }
-.workspace-page .checklist-panel { margin-bottom: var(--gap-section); }
 .checklist-heading { gap: var(--space-3); padding-inline: 0; }
 .checklist-heading .checklist-count { color: var(--text-muted); margin-left: auto; }
 .checklist-toggle { min-height: var(--control-height-small); padding: 0 var(--space-2); border: 0; border-radius: var(--radius-md); background: transparent; color: var(--text-muted); }
@@ -2699,11 +2698,11 @@ input[type="checkbox"]:checked::before {
 .workspace-grid :is(.source-content, .inspector-content) { padding: 0; }
 .source-card { padding: 0; background: transparent; }
 .source-icon { background: var(--surface-2); }
-.viewer-panel { background: transparent; }
+.viewer-panel { grid-template-rows: 32px minmax(0, 1fr) 40px; background: transparent; }
 .viewer-frame { border-radius: var(--radius-xl); box-shadow: none; }
 .transport { padding-inline: 0; }
-.play-button { border-color: transparent; border-radius: 50%; background: var(--selector-highlight-hover); color: var(--black); }
-.play-button:hover { background: var(--text); }
+.play-button { border-color: transparent; background: var(--brand-soft); }
+.play-button:hover { background: var(--selector-highlight-soft); }
 .score-total { gap: var(--space-4); padding-bottom: var(--space-2); }
 .score-total > span { width: auto; height: auto; font-size: var(--type-display-size); line-height: var(--type-display-line); font-weight: var(--type-heading-weight); color: var(--text); }
 .score-explanation { margin: var(--space-4) 0 var(--space-6); }
@@ -2711,7 +2710,9 @@ input[type="checkbox"]:checked::before {
 .penalty-details summary, .penalty-details-content { padding-inline: 0; }
 .review-hint { margin-top: var(--gap-group); padding-top: 0; color: var(--text-muted); }
 .inspector-note { background: transparent; padding: 0; }
-.board-panel { margin-top: var(--gap-section); }
+/* Status bands stay 24px apart under the command bar; the work itself (the
+   panes and the clip board) starts a section, 64px down. */
+.workspace-page > .workspace-grid, .workspace-page > .board-panel { margin-top: var(--gap-section); }
 .board-header { padding: 0 0 var(--space-4); }
 .clip-board { gap: var(--space-6); padding: 0; }
 .clip-tile, .clip-tile.active, .clip-tile.failed { border-color: transparent; background: transparent; box-shadow: none; }
