@@ -6,6 +6,7 @@ test("Library uses the full media area and opens details only with preview", asy
   const inspector = page.getByRole("complementary", { name: "Rule Inspector" });
   await expect(page.locator(".asset-card").first()).toBeVisible();
   await expect(inspector).toHaveCount(0);
+  await page.locator(".asset-card").first().scrollIntoViewIfNeeded();
   const thumbnail = page.locator(".asset-card img").first();
   await expect.poll(() => thumbnail.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
   const preview = page.locator(".asset-preview-trigger").first();
