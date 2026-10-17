@@ -24,7 +24,8 @@ type Page = "projects" | "library" | "workspace" | "shorts-editor" | "jobs" | "s
  */
 const HEALTH_POLL_MS = 5_000;
 
-/** Per-browser convenience: whether the desktop sidebar is collapsed to icons. */
+/** Per-browser convenience: whether the desktop sidebar is collapsed to icons.
+ *  Collapsed by default; only an explicit "0" (pinned open via the toggle) expands it. */
 const RAIL_COLLAPSED_KEY = "s6.rail.collapsed";
 /** Hover intent: crossing the rail on the way somewhere else does not open it. */
 export const RAIL_PEEK_DELAY_MS = 150;
@@ -53,7 +54,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const [railCollapsed, setRailCollapsed] = useState(() => {
-    try { return localStorage.getItem(RAIL_COLLAPSED_KEY) === "1"; } catch { return false; }
+    try { return localStorage.getItem(RAIL_COLLAPSED_KEY) !== "0"; } catch { return true; }
   });
   const toggleRail = () => setRailCollapsed((collapsed) => {
     try { localStorage.setItem(RAIL_COLLAPSED_KEY, collapsed ? "0" : "1"); } catch { /* Storage can be unavailable in hardened browsers. */ }

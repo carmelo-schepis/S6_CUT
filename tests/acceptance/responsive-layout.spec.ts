@@ -69,6 +69,17 @@ test.describe("responsive layout regressions", () => {
 
     await page.setViewportSize({ width: 1440, height: 844 });
     await page.goto("/", { waitUntil: "domcontentloaded" });
+    await page.mouse.move(1400, 400);
+    const shell = page.locator(".app-shell");
+    const railWidth = () => page.locator(".app-rail").evaluate((rail) => rail.getBoundingClientRect().width);
+    // The desktop sidebar starts folded to icons until the user pins it open.
+    await expect(shell).toHaveAttribute("data-rail", "collapsed");
+    await expect.poll(railWidth, { message: "collapsed desktop rail width" }).toBe(68);
+    await page.getByRole("button", { name: "Expand sidebar" }).click();
+    await page.mouse.move(1400, 400);
+    await expect(shell).toHaveAttribute("data-rail", "expanded");
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(shell, "pinned-open rail survives a reload").toHaveAttribute("data-rail", "expanded");
     const desktop = await page.locator(".app-rail").evaluate((rail) => ({
       width: rail.getBoundingClientRect().width,
       navGap: getComputedStyle(rail.querySelector("nav")!).columnGap,
@@ -168,6 +179,8 @@ test.describe("responsive layout regressions", () => {
     for (const [width, height] of [[320, 844], [360, 800], [375, 812], [390, 844], [768, 1024], [1280, 720], [1440, 900]]) {
       await page.setViewportSize({ width, height });
       await page.goto("/", { waitUntil: "domcontentloaded" });
+      // The folded rail peeks open under a resting pointer; keep it over the page.
+      await page.mouse.move(width - 1, height / 2);
       await page.getByRole("button").filter({ hasText: "Responsive Workspace fixture" }).click();
       await expect(page.locator(".clip-board")).toBeVisible();
       const measurement = await page.locator(".clip-board").evaluate((board) => {

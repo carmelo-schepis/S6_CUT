@@ -25,6 +25,8 @@ function job(remaining: number) {
 }
 
 test("renders a stable centered Workspace progress ring at desktop and mobile sizes", async ({ page }) => {
+  // Measure the ring in the labelled sidebar: pin it open rather than relying on the folded default.
+  await page.addInitScript(() => localStorage.setItem("s6.rail.collapsed", "0"));
   let remaining = 7;
   await page.route("**/api/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
