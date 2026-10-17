@@ -124,7 +124,9 @@ test("Workspace inspector tabs are labelled in sentence case", async ({ page }) 
   await boot(page);
   await workspaceWithClips(page);
   const labels = await page.locator(".inspector-tabs button").allTextContents();
-  expect(labels).toEqual(["Score", "Captions", "Asset", "Info"]);
+  // Clip projects add the YouTube metadata tab between Asset and Info.
+  expect(labels.filter((label) => label !== "YouTube")).toEqual(["Score", "Captions", "Asset", "Info"]);
+  if (labels.includes("YouTube")) expect(labels).toEqual(["Score", "Captions", "Asset", "YouTube", "Info"]);
 });
 
 test("Shorts Editor clip rows report each clip's real aspect ratio", async ({ page }) => {

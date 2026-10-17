@@ -36,6 +36,41 @@ describe("SettingsView", () => {
     expect(within(article).getByText("Text generation")).toBeInTheDocument();
     expect(within(article).getAllByText(/OpenRouter key|Text generation/)).toHaveLength(2);
   });
+  it("shows, refreshes, and persists the independent title and description model", async () => {
+    mockListProfiles.mockResolvedValue([connectedProfile]);
+    const current = { id: "google/gemini-2.5-flash-lite", name: "Gemini Flash Lite", pricing: { prompt: "0.0000001", completion: "0.0000004" }, supportedParameters: ["response_format"] };
+    const cheaper = { id: "google/gemma-3-4b-it", name: "Gemma 3 4B", pricing: { prompt: "0.00000005", completion: "0.0000001" }, supportedParameters: ["response_format"] };
+    mockListModels.mockResolvedValue([current, cheaper]);
+    mockSaveProfile.mockResolvedValue({ ...connectedProfile, youtubeMetadataModelId: cheaper.id });
+    renderView();
+    const picker = await screen.findByRole("combobox", { name: "Title and description model" });
+    await waitFor(() => expect(mockListModels).toHaveBeenCalledWith("text"));
+    expect(picker).toHaveValue("google/gemini-2.5-flash-lite");
+    expect(screen.getByRole("option", { name: /Gemini Flash Lite.*\$0\.100\/M in.*\$0\.400\/M out/ })).toBeInTheDocument();
+    fireEvent.change(picker, { target: { value: cheaper.id } });
+    await waitFor(() => expect(mockSaveProfile).toHaveBeenCalledWith(expect.objectContaining({ youtubeMetadataModelId: cheaper.id, textModelId: connectedProfile.textModelId, selected: true }), connectedProfile.id));
+  });
+  it("binds Auto-write SEO titles to the selected profile and saves changes", async () => {
+    mockListProfiles.mockResolvedValue([connectedProfile]);
+    mockSaveProfile.mockResolvedValue({ ...connectedProfile, autoSeoTitles: false });
+    renderView();
+    const toggle = await screen.findByTestId("auto-seo-titles");
+    await waitFor(() => expect(toggle).toBeEnabled());
+    expect(toggle).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /Auto-write SEO titles for new clips/ })).toBe(toggle);
+    expect(screen.getByText("Smart short clips get an AI title and description when OpenRouter is connected.")).toBeInTheDocument();
+    mockListProfiles.mockResolvedValue([{ ...connectedProfile, autoSeoTitles: false }]);
+    fireEvent.click(toggle);
+    await waitFor(() => expect(mockSaveProfile).toHaveBeenCalledWith(expect.objectContaining({ autoSeoTitles: false, textModelId: connectedProfile.textModelId, selected: true }), connectedProfile.id));
+    await waitFor(() => expect(toggle).not.toBeChecked());
+  });
+  it("keeps Auto-write SEO titles off when the profile has it disabled", async () => {
+    mockListProfiles.mockResolvedValue([{ ...connectedProfile, autoSeoTitles: false }]);
+    renderView();
+    const toggle = await screen.findByTestId("auto-seo-titles");
+    await waitFor(() => expect(toggle).toBeEnabled());
+    expect(toggle).not.toBeChecked();
+  });
   it("opens the single-provider form and keeps the key masked", async () => {
     mockListProfiles.mockResolvedValue([]); renderView();
     expect(await screen.findByText("New OpenRouter profile")).toBeInTheDocument();

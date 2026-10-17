@@ -122,7 +122,9 @@ def test_every_complete_clip_has_linked_library_asset_and_vice_versa(monkeypatch
         assert asset.origin == "generated-clip"
         assert asset.source_job_id == job.id
         assert asset.source_project_id == job.project_id
-        assert asset.title == f"Publication campaign — Cut {clip.index:02d}"
+        # Fast clips have no transcript phrase: "<typed project name> – Clip N", no cut number.
+        assert asset.title == f"Publication campaign – Clip {clip.index}"
+        assert asset.title == clip.title and asset.title_source == clip.title_source == "auto"
         assert asset.duration_seconds == clip.duration
 
 

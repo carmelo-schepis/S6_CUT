@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, HEALTH_TIMEOUT_MS, TimeoutError, createClipJob, createFolder, createShortsJob, createShortsSourceJob, getHealth, listRecentClips, readableError, rerenderCaptions, saveCaptionCues, readableDetail } from "./api";
+import { ApiError, HEALTH_TIMEOUT_MS, TimeoutError, applyLibraryTitles, suggestLibraryTitles, createClipJob, createFolder, createShortsJob, createShortsSourceJob, getHealth, listRecentClips, readableError, rerenderCaptions, saveCaptionCues, readableDetail } from "./api";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -87,6 +87,44 @@ describe("engine API boundary", () => {
     await createClipJob({ ...input, hookText: false });
     expect(bodies[0].get("hook_text")).toBe("true");
     expect(bodies[1].has("hook_text")).toBe(false);
+  });
+
+  it("sends YouTube metadata options only when explicitly enabled", async () => {
+    const bodies: FormData[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      bodies.push(init?.body as FormData);
+      return new Response(JSON.stringify({
+        project: { schemaVersion: 1, id: "p", name: "P", mode: "clip", style: "serious", state: "queued", sourceName: "s", sourceKind: "upload", requestedCount: 1, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" },
+        job: { schemaVersion: 1, id: "j", projectId: "p", mode: "clip", state: "queued", stage: "q", stageLabel: "Q", progress: 0, style: "serious", warnings: [], clips: [], beats: [], createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" },
+      }), { status: 202, headers: { "Content-Type": "application/json" } });
+    }));
+    const input = { style: "serious" as const, count: 1, minDuration: 8, maxDuration: 20, aspectRatio: "9:16" };
+    await createClipJob({ ...input });
+    await createClipJob({ ...input, youtubeMetadata: true, youtubeMetadataModelId: "anthropic/claude-3.5-haiku" });
+    expect(bodies[0].has("youtube_metadata")).toBe(false);
+    expect(bodies[0].has("youtube_metadata_model_id")).toBe(false);
+    expect(bodies[1].get("youtube_metadata")).toBe("true");
+    expect(bodies[1].get("youtube_metadata_model_id")).toBe("anthropic/claude-3.5-haiku");
+    await createClipJob({ ...input, youtubeMetadata: false });
+    expect(bodies[2].get("youtube_metadata")).toBe("false");
+  });
+
+  it("posts Library title suggestion and apply requests and parses their responses", async () => {
+    const calls: Array<{ url: string; body: unknown }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, body: JSON.parse(String(init?.body)) });
+      const payload = url.endsWith("/apply")
+        ? { applied: [{ kind: "clip", assetId: "a1", projectId: null, title: "New", reason: null }], conflicts: [] }
+        : { suggestions: [{ kind: "clip", assetId: "a1", projectId: null, currentTitle: "Old", suggestedTitle: "New", suggestedDescription: "Desc", revision: 2 }], skipped: [], costUsd: 0.0012, costKind: "actual", model: "m", requests: 1, aiAvailable: true, warning: null };
+      return new Response(JSON.stringify(payload), { status: 200, headers: { "Content-Type": "application/json" } });
+    }));
+    const suggestions = await suggestLibraryTitles({ scope: "auto-titled" });
+    expect(suggestions.suggestions[0].suggestedTitle).toBe("New");
+    expect(calls[0]).toEqual({ url: "/api/v1/library/title-suggestions", body: { scope: "auto-titled" } });
+    const applied = await applyLibraryTitles([{ kind: "clip", assetId: "a1", projectId: null, currentTitle: "Old", title: "New", description: "Desc", revision: 2, edited: false }]);
+    expect(applied.applied).toHaveLength(1);
+    expect(calls[1].url).toBe("/api/v1/library/title-suggestions/apply");
+    expect(calls[1].body).toEqual({ items: [expect.objectContaining({ assetId: "a1", title: "New", edited: false })] });
   });
 
   it("serializes the opted-in music profile as source_profile and preserves Smart", async () => {

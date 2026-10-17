@@ -258,7 +258,7 @@ export function App() {
       {error && <div className="global-alert" role="alert"><strong>Engine unavailable.</strong> {error} <button onClick={() => refresh()}>Retry</button></div>}
 
       <main id="main-content" tabIndex={-1}>
-        {page === "projects" && <ProjectsView health={health} healthChecked={healthChecked} providersLoaded={profilesLoaded} hasSelectedProvider={hasSelectedProvider} onConfigureProviders={openProviders} onCreated={onCreated} onSelectLibraryAsset={openLibraryAsset} />}
+        {page === "projects" && <ProjectsView health={health} healthChecked={healthChecked} providersLoaded={profilesLoaded} hasSelectedProvider={hasSelectedProvider} selectedProfile={profiles.find((profile) => profile.selected) || null} onConfigureProviders={openProviders} onCreated={onCreated} onSelectLibraryAsset={openLibraryAsset} />}
         {page === "library" && <LibraryView selectedAssetId={selectedLibraryAssetId} />}
         {page === "workspace" && <WorkspaceView key={selected?.id || "none"} project={selected} providersLoaded={profilesLoaded} hasSelectedProvider={hasSelectedProvider} onConfigureProviders={openProviders} onProjectUpdated={refresh} onGoProjects={() => setPage("projects")} />}
         {page === "shorts-editor" && <ShortsEditorView onJobCreated={refresh} />}
