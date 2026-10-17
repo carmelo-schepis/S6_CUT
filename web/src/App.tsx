@@ -27,6 +27,8 @@ const HEALTH_POLL_MS = 5_000;
 /** Per-browser convenience: whether the desktop sidebar is collapsed to icons.
  *  Collapsed by default; only an explicit "0" (pinned open via the toggle) expands it. */
 const RAIL_COLLAPSED_KEY = "s6.rail.collapsed";
+/** Hover intent: crossing the rail on the way somewhere else does not open it. */
+export const RAIL_PEEK_DELAY_MS = 150;
 
 // `label` is the rail caption and must fit the rail without truncating;
 // `name` is the full accessible/breadcrumb name.
@@ -58,10 +60,16 @@ export function App() {
     try { localStorage.setItem(RAIL_COLLAPSED_KEY, collapsed ? "0" : "1"); } catch { /* Storage can be unavailable in hardened browsers. */ }
     return !collapsed;
   });
-  // A click inside the folded rail (navigating, or folding it) holds the hover
-  // peek shut until the pointer leaves, so the overlay never covers the page
-  // the user just opened while they move toward it.
-  const [railPeekHeld, setRailPeekHeld] = useState(false);
+  // A folded rail peeks open over the page only once the pointer has rested on
+  // it, and folds again the moment the pointer leaves or a destination is
+  // chosen. A plain :hover peek stayed open after a click while the pointer sat
+  // where the wide rail now covered the page, hiding the controls underneath.
+  const [railPeek, setRailPeek] = useState(false);
+  const railPeekTimer = useRef<number | undefined>(undefined);
+  const cancelRailPeek = () => { window.clearTimeout(railPeekTimer.current); railPeekTimer.current = undefined; };
+  const startRailPeek = () => { cancelRailPeek(); railPeekTimer.current = window.setTimeout(() => setRailPeek(true), RAIL_PEEK_DELAY_MS); };
+  const endRailPeek = () => { cancelRailPeek(); setRailPeek(false); };
+  useEffect(() => cancelRailPeek, []);
   const refreshRevision = useRef(0);
 
   // `getHealth` aborts itself after HEALTH_TIMEOUT_MS, so a wedged engine
@@ -172,7 +180,7 @@ export function App() {
   const hasSelectedProvider = profiles.some((profile) => profile.selected && profile.openrouterConfigured && profile.textStatus === "connected");
   const openProviders = () => setPage("settings");
 
-  return <div className="app-shell" data-rail={railCollapsed ? "collapsed" : "expanded"} data-rail-peek={railPeekHeld ? "held" : undefined}>
+  return <div className="app-shell" data-rail={railCollapsed ? "collapsed" : "expanded"}>
     {/* First tab stop: lets keyboard users bypass the seven rail destinations
         that otherwise precede page content on every screen. */}
     <a
@@ -185,7 +193,7 @@ export function App() {
         document.getElementById("main-content")?.focus();
       }}
     >Skip to main content</a>
-    <aside className="app-rail" aria-label="Primary navigation" onClick={() => setRailPeekHeld(true)} onMouseLeave={() => setRailPeekHeld(false)}>
+    <aside className="app-rail" aria-label="Primary navigation" data-peek={railPeek ? "open" : undefined} onPointerEnter={(event) => { if (event.pointerType === "mouse") startRailPeek(); }} onPointerLeave={endRailPeek} onClickCapture={endRailPeek}>
       <button className="brand-button" onClick={() => setPage("projects")} aria-label="S6_cut Projects">
         <img src="/app-icon.png" alt="" /><span><span className="brand-accent">S6</span>_cut</span>
       </button>

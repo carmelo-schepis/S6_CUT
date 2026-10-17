@@ -191,23 +191,37 @@ test.describe("visual alignment", () => {
           return { name: (option.textContent || "").trim(), width: rect.width, height: rect.height, selected: option.classList.contains("active") };
         }));
         expect(spread(measured.map((option) => option.height)), `${group}: heights change with selection`).toBeLessThanOrEqual(0.5);
-        expect(spread(measured.map((option) => option.width)), `${group}: widths change with selection`).toBeLessThanOrEqual(1);
         sizes.push(...measured);
+      }
+      // Options take the width their words need, so they differ from each
+      // other; what must not happen is an option resizing when it is chosen.
+      for (const name of names) {
+        const widths = sizes.filter((option) => option.name === name).map((option) => option.width);
+        expect(spread(widths), `${group}: "${name}" width changes with selection`).toBeLessThanOrEqual(0.5);
       }
       // Every measurement of the group, across every selection, is one size.
       expect(spread(sizes.map((option) => option.height)), `${group}: selection changed the outer height`).toBeLessThanOrEqual(0.5);
     }
 
-    // Editorial style cards carry a selected border; it must not grow the card.
-    const cards = await page.locator(".style-card").evaluateAll((elements) => elements.map((element) => {
+    // Editorial style options are a fill when chosen; choosing one must not
+    // resize it. Each is measured unselected, then selected.
+    const readCards = () => page.locator(".style-card").evaluateAll((elements) => elements.map((element) => {
       const rect = element.getBoundingClientRect();
       return { width: rect.width, height: rect.height, selected: element.classList.contains("active"), boxSizing: getComputedStyle(element).boxSizing };
     }));
-    expect(cards.some((card) => card.selected), "expected one selected style card").toBe(true);
-    expect(spread(cards.map((card) => card.height)), "selected style card height differs").toBeLessThanOrEqual(0.5);
-    // Cards divide a fluid grid, so widths may differ by a rounding remainder.
-    expect(spread(cards.map((card) => card.width)), "selected style card width differs").toBeLessThanOrEqual(1);
-    expect(cards.every((card) => card.boxSizing === "border-box"), "style cards are not border-box").toBe(true);
+    const before = await readCards();
+    expect(before.some((card) => card.selected), "expected one selected style card").toBe(true);
+    expect(spread(before.map((card) => card.height)), "selected style card height differs").toBeLessThanOrEqual(0.5);
+    expect(before.every((card) => card.boxSizing === "border-box"), "style cards are not border-box").toBe(true);
+    const target = before.findIndex((card) => !card.selected);
+    await page.locator(".style-card").nth(target).click();
+    await page.waitForTimeout(150);
+    const after = await readCards();
+    expect(after[target].selected, "the clicked style card is selected").toBe(true);
+    for (const [index, card] of after.entries()) {
+      expect(Math.abs(card.width - before[index].width), `style card ${index} width changes with selection`).toBeLessThanOrEqual(0.5);
+      expect(Math.abs(card.height - before[index].height), `style card ${index} height changes with selection`).toBeLessThanOrEqual(0.5);
+    }
   });
 
   test("repeated components keep one geometry per row", async ({ page }) => {

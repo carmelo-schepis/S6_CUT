@@ -3,10 +3,11 @@
  *
  * Two contracts the "Buttons look weird" report exposed:
  *
- *   1. Controls are outlines, not filled blobs. A control at rest has no opaque
- *      fill and is never a circle or a pill; fill is spent on hover alone. The
- *      loading-shimmer `.skeleton*` components and the status dots are a
- *      different family and are excluded by name.
+ *   1. Controls are soft fills, not outlines (the "space, not lines" pass): a
+ *      secondary control at rest has no visible edge, only the primary action
+ *      is bright, and nothing is a pill. The play button is the one deliberate
+ *      circle. The loading-shimmer `.skeleton*` components and the status dots
+ *      are a different family and are excluded by name.
  *   2. Everything in the workspace command bar sits on one optical axis. The
  *      folder picker used to be a two-row grid inside a bottom-aligned flex
  *      row, so its label overhung the actions by 20px and the 24px status chip
@@ -63,33 +64,29 @@ async function readControls(page: Page, exempt: string[]) {
 }
 
 test.describe("control style", () => {
-  test("controls are outlines at rest, never filled blobs or circles", async ({ page }) => {
+  test("controls are soft fills at rest, never outlines or pills", async ({ page }) => {
     test.setTimeout(180_000);
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto("/", { waitUntil: "domcontentloaded" });
 
     for (const route of ["Projects", "Library", "Shorts Editor", "Jobs", "Settings"] as const) {
       await gotoRoute(page, route);
-      const controls = await readControls(page, EXEMPT);
+      const controls = await readControls(page, [...EXEMPT, ".play-button"]);
       expect(controls.length, `${route}: expected visible controls`).toBeGreaterThan(0);
 
       for (const control of controls) {
-        // No opaque fill at rest, except the one filled primary action per the
-        // PicThing reference. Hover fills are asserted separately below.
-        if (!String(control.className).includes("button-primary")) {
-          expect(control.fillAlpha, `${route}: "${control.label}" has an opaque fill (${control.fillAlpha})`)
-            .toBeLessThan(0.85);
+        const name = String(control.className);
+        // The destructive action keeps its red edge because that is its meaning.
+        if (!/button-danger|library-danger-trigger/.test(name)) {
+          const edgeAlpha = /rgba\([^)]*,\s*([\d.]+)\)/.exec(control.borderColour)?.[1];
+          const visibleEdge = control.borderWidth >= 1 && (edgeAlpha === undefined ? !/transparent/.test(control.borderColour) : Number(edgeAlpha) > 0);
+          expect(visibleEdge, `${route}: "${control.label}" draws an outline (${control.borderColour})`).toBe(false);
         }
-        // PicThing's 6–8px corners, and never a circle or a pill.
         expect(control.radius, `${route}: "${control.label}" radius is a circle`).not.toContain("50%");
         expect(control.radiusPx, `${route}: "${control.label}" radius ${control.radius} exceeds the control radius`)
           .toBeLessThanOrEqual(8);
         expect(control.radiusPx, `${route}: "${control.label}" is a pill`)
           .toBeLessThan(Math.min(control.width, control.height) / 2);
-        // A borderless transparent control has no affordance left; ghost
-        // buttons keep their 1px border and only make it transparent.
-        expect(control.borderWidth, `${route}: "${control.label}" has no border to carry the outline`)
-          .toBeGreaterThanOrEqual(1);
       }
     }
   });
@@ -186,7 +183,9 @@ test.describe("control style", () => {
         return out;
       });
 
-      expect(measured.length, `${route}: expected measurable controls`).toBeGreaterThan(0);
+      // Only inputs and the destructive action still draw an edge, so a route
+      // without either (Jobs) has nothing to measure; the sweep still does.
+      if (route !== "Jobs") expect(measured.length, `${route}: expected measurable controls`).toBeGreaterThan(0);
       const failing = measured.filter((control) => control.ratio < 3);
       expect(
         failing,
@@ -228,7 +227,7 @@ test.describe("workspace command bar", () => {
       source: { kind: "file", path: path.join(root, "test-video.mp4") },
     });
 
-    // The transport play control is the big white disc in the report's first
+    // The transport play control was the big white disc in the report's first
     // image, and an open project is the only state that renders it — the route
     // sweep above never reaches it, so it is asserted here, where one exists.
     const play = page.locator(".play-button");
@@ -238,7 +237,7 @@ test.describe("workspace command bar", () => {
     expect(transport.fillAlpha, `the play control has an opaque fill (${transport.fillAlpha})`).toBeLessThan(0.85);
     expect(transport.radius, "the play control is a disc").not.toContain("50%");
     expect(transport.radiusPx, `the play control radius ${transport.radius} exceeds the control radius`).toBeLessThanOrEqual(8);
-    expect(transport.borderWidth, "the play control has no border to carry the outline").toBeGreaterThanOrEqual(1);
+    expect(/transparent|rgba\([^)]*, 0\)/.test(transport.borderColour) || transport.borderWidth < 1, `the play control draws an outline (${transport.borderColour})`).toBe(true);
 
     const controls = page.locator(".workspace-controls");
     await expect(controls).toBeVisible();
