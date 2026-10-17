@@ -170,7 +170,29 @@ describe("ProcessChecklist – compact mode", () => {
   it("applies the compact class when compact prop is true", () => {
     const { container } = render(<ProcessChecklist steps={[complete, skipped]} compact jobState="complete" />);
     expect(container.querySelector(".checklist-panel")).toHaveClass("compact");
+    expect(screen.getByTestId("progress-step-list")).toHaveAttribute("aria-label", "Short creation progress");
+  });
+});
+
+// ---------------------------------------------------------------
+describe("ProcessChecklist – finished run", () => {
+// ---------------------------------------------------------------
+  it("folds a finished run to one line and reopens the steps on request", () => {
+    vi.useRealTimers();
+    render(<ProcessChecklist steps={[complete, skipped]} jobState="complete" />);
+    expect(screen.getByText("1 of 2 complete")).toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "Short creation progress" })).not.toBeInTheDocument();
+    const toggle = screen.getByRole("button", { name: "Show steps" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    act(() => { toggle.click(); });
     expect(screen.getByRole("list", { name: "Short creation progress" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Hide steps" })).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("keeps every step visible while work is still running", () => {
+    render(<ProcessChecklist steps={[complete, active]} jobState="active" />);
+    expect(screen.getByRole("list", { name: "Short creation progress" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /steps$/ })).not.toBeInTheDocument();
   });
 });
 
