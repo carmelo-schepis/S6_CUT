@@ -4,7 +4,7 @@ body.startup-loading { overflow: hidden; }
 .startup-loading .app-wallpaper { transition: none; }
 #startup-screen { position: fixed; inset: 0; z-index: 10000; display: grid; place-items: center; overflow: hidden; isolation: isolate; background: #000; }
 #startup-screen::before {
-  content: ""; position: absolute; inset: -8%; z-index: -1;
+  content: ""; position: absolute; inset: -8%; z-index: -1; opacity: .4;
   background: radial-gradient(ellipse at 48% 56%, rgba(0, 0, 0, .92) 0%, rgba(0, 0, 0, .6) 16%, transparent 48%),
     radial-gradient(ellipse at 0% 12%, #c6002d 0%, rgba(125, 0, 31, .85) 22%, transparent 55%),
     radial-gradient(ellipse at 100% 100%, #ff8352 0%, #e13a38 20%, transparent 52%),
