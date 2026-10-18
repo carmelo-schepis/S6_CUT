@@ -1,11 +1,15 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { revealApp } from "./startup";
 import { registerServiceWorker } from "./pwa";
 import "./styles.css";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("S6_cut could not find its application root.");
+
+// A stalled asset must not hide the existing offline/retry controls forever.
+window.setTimeout(revealApp, 30_000);
 
 createRoot(root).render(
   <StrictMode>

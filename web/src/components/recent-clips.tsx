@@ -16,7 +16,7 @@ function durationLabel(seconds?: number | null) {
   return minutes ? `${minutes}:${String(remainder).padStart(2, "0")}` : `${remainder}s`;
 }
 
-export function RecentClips({ onSelectAsset }: { onSelectAsset: (id: string) => void }) {
+export function RecentClips({ onSelectAsset, onReady }: { onReady?: (ready: boolean) => void; onSelectAsset: (id: string) => void }) {
   const [items, setItems] = useState<LibraryAsset[]>([]);
   const [folders, setFolders] = useState<LibraryFolder[]>([]);
   const [search, setSearch] = useState("");
@@ -25,6 +25,9 @@ export function RecentClips({ onSelectAsset }: { onSelectAsset: (id: string) => 
   const [total, setTotal] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    if (!loading) onReady?.(true);
+  }, [loading, onReady]);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<LibraryAsset | null>(null);
   const [previewOpener, setPreviewOpener] = useState<HTMLButtonElement | null>(null);

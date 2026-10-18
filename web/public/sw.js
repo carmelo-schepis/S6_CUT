@@ -1,8 +1,9 @@
-const CACHE = "s6-cut-shell-v5";
+const CACHE = "s6-cut-shell-v6";
 const CACHE_PREFIX = "s6-cut-shell-";
 const SHELL = [
   "/",
   "/index.html",
+  "/startup.css",
   "/manifest.webmanifest",
   "/favicon.png",
   "/app-icon.png",
@@ -52,7 +53,7 @@ self.addEventListener("message", (event) => {
 
 function isShellAsset(url, request) {
   if (request.headers.has("range")) return false;
-  if (url.pathname === "/manifest.webmanifest") return true;
+  if (["/manifest.webmanifest", "/startup.css"].includes(url.pathname)) return true;
   if (url.pathname.startsWith("/icons/")) return true;
   if (["/favicon.png", "/app-icon.png", "/brand-logo.png", "/legal-logo.png"].includes(url.pathname)) return true;
   return url.pathname.startsWith("/assets/") && ["script", "style"].includes(request.destination);

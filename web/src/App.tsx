@@ -14,6 +14,7 @@ import { PwaStatus } from "./components/pwa-status";
 import { hasLiveWork, jobPollInterval, workspaceActivity } from "./project-status";
 import { onLibraryChanged } from "./library-sync";
 import { usePoll } from "./use-poll";
+import { revealWhenReady } from "./startup";
 import type { Health, Job, Project, ProviderProfile } from "./types";
 
 type Page = "projects" | "library" | "workspace" | "shorts-editor" | "jobs" | "settings";
@@ -42,6 +43,13 @@ const nav: { id: Page; label: string; name: string; icon: typeof Film }[] = [
 ];
 
 export function App() {
+  const [initialDataLoaded, setInitialDataLoaded] = useState(false);
+  const [projectsReady, setProjectsReady] = useState(false);
+  const onProjectsReady = useCallback(() => setProjectsReady(true), []);
+  useEffect(() => {
+    if (initialDataLoaded && projectsReady) return revealWhenReady();
+  }, [initialDataLoaded, projectsReady]);
+
   const [page, setPage] = useState<Page>("projects");
   const [projects, setProjects] = useState<Project[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -130,6 +138,7 @@ export function App() {
     const jobsDone = runJobs();
 
     await Promise.allSettled([projectsDone, healthDone, profilesDone, jobsDone]);
+    setInitialDataLoaded(true);
   }, [runHealth, runJobs]);
 
   useEffect(() => {
@@ -271,7 +280,7 @@ export function App() {
       {error && <div className="global-alert" role="alert"><strong>Engine unavailable.</strong> {error} <button onClick={() => refresh()}>Retry</button></div>}
 
       <main id="main-content" tabIndex={-1}>
-        {page === "projects" && <ProjectsView health={health} healthChecked={healthChecked} providersLoaded={profilesLoaded} hasSelectedProvider={hasSelectedProvider} selectedProfile={profiles.find((profile) => profile.selected) || null} onConfigureProviders={openProviders} onCreated={onCreated} onSelectLibraryAsset={openLibraryAsset} />}
+        {page === "projects" && <ProjectsView onReady={onProjectsReady} health={health} healthChecked={healthChecked} providersLoaded={profilesLoaded} hasSelectedProvider={hasSelectedProvider} selectedProfile={profiles.find((profile) => profile.selected) || null} onConfigureProviders={openProviders} onCreated={onCreated} onSelectLibraryAsset={openLibraryAsset} />}
         {page === "library" && <LibraryView selectedAssetId={selectedLibraryAssetId} />}
         {page === "workspace" && <WorkspaceView key={selected?.id || "none"} project={selected} providersLoaded={profilesLoaded} hasSelectedProvider={hasSelectedProvider} onConfigureProviders={openProviders} onProjectUpdated={refresh} onGoProjects={() => setPage("projects")} />}
         {page === "shorts-editor" && <ShortsEditorView onJobCreated={refresh} />}

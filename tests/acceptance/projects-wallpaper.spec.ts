@@ -4,6 +4,7 @@ test.use({ serviceWorkers: "block" });
 
 test("Projects wallpaper keeps its tint and parallax and fades on tab changes", async ({ page }) => {
   await page.goto("/", { waitUntil: "domcontentloaded" });
+  await expect(page.locator("#startup-screen")).toHaveCount(0);
   const main = page.locator(".app-main");
   const wallpaper = page.locator(".app-wallpaper");
   await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
@@ -39,6 +40,7 @@ test("Projects wallpaper keeps its tint and parallax and fades on tab changes", 
 
 test("wallpaper fades in both directions for every tab", async ({ page }) => {
   await page.goto("/", { waitUntil: "domcontentloaded" });
+  await expect(page.locator("#startup-screen")).toHaveCount(0);
   const wallpaper = page.locator(".app-wallpaper");
   const opacity = () => wallpaper.evaluate((element) => Number(getComputedStyle(element).opacity));
   await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
@@ -58,6 +60,7 @@ test("wallpaper fades in both directions for every tab", async ({ page }) => {
 
 test("quick tab reversals settle correctly and reduced motion skips the fade", async ({ page }) => {
   await page.goto("/", { waitUntil: "domcontentloaded" });
+  await expect(page.locator("#startup-screen")).toHaveCount(0);
   const wallpaper = page.locator(".app-wallpaper");
   const opacity = () => wallpaper.evaluate((element) => Number(getComputedStyle(element).opacity));
   await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();

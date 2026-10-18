@@ -324,6 +324,7 @@ test.describe("page structure", () => {
     await mockEngine(page);
     await page.goto("/", { waitUntil: "domcontentloaded" });
     await expectEngineReady(page);
+    await expect(page.locator("#startup-screen")).toHaveCount(0);
 
     await page.keyboard.press("Tab");
     const skip = page.locator(".skip-link");
