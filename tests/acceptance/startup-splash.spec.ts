@@ -57,15 +57,14 @@ test("static black logo screen paints before application JavaScript arrives", as
     await page.goto("/", { waitUntil: "commit" });
     await expect.poll(gate.requested).toBe(true);
     await expectCovered(page);
-    const logo = page.locator("#startup-screen img");
-    await expect(logo).toHaveAttribute("alt", "S6 Cut");
+    const logo = page.getByRole("img", { name: "S6 Cut", exact: true });
+    await expect(logo).toBeVisible();
     await expect(page.locator(".startup-wordmark")).toHaveText("s6_cut");
     const motion = () => page.locator("#startup-screen").evaluate((element) => getComputedStyle(element, "::before").animationName);
     await expect.poll(motion).toBe("startup-drift");
     await page.emulateMedia({ reducedMotion: "reduce" });
     await expect.poll(motion).toBe("none");
     await page.emulateMedia({ reducedMotion: "no-preference" });
-    await expect.poll(() => logo.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
     await expect(page.locator("#root > *")).toHaveCount(0);
   } finally { gate.release(); }
   await expectRevealed(page);

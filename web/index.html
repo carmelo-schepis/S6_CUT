@@ -11,8 +11,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="S6_cut" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <link rel="stylesheet" href="/startup.css?v=2" />
-    <link rel="preload" href="/brand-logo.png" as="image" />
+    <link rel="stylesheet" href="/startup.css?v=3" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" type="image/png" sizes="64x64" href="/favicon.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
@@ -20,7 +19,10 @@
     <title>S6_cut — Local video studio</title>
   </head>
   <body class="startup-loading">
-    <div id="startup-screen" role="status" aria-label="Loading S6 Cut"><div class="startup-brand"><img src="/brand-logo.png" alt="S6 Cut" /><span class="startup-wordmark" aria-hidden="true">s6_cut</span></div></div>
+    <div id="startup-screen" role="status" aria-label="Loading S6 Cut"><div class="startup-brand"><svg class="startup-logo" viewBox="100 40 600 660" role="img" aria-label="S6 Cut" xmlns="http://www.w3.org/2000/svg">
+      <defs><linearGradient id="startup-logo-fill" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#bf8e6d" /><stop offset=".46" stop-color="#aa7e70" /><stop offset="1" stop-color="#302251" /></linearGradient></defs>
+      <path fill="url(#startup-logo-fill)" fill-rule="evenodd" d="M360 72Q400 49 440 72L650 193Q688 215 688 259V485Q688 533 649 555L440 676Q400 697 360 676L151 555Q113 533 113 485V259Q113 215 151 193Z M400 188a63 63 0 1 0 0 126a63 63 0 1 0 0-126Z M275 310a63 63 0 1 0 0 126a63 63 0 1 0 0-126Z M541 310a63 63 0 1 0 0 126a63 63 0 1 0 0-126Z M400 451a63 63 0 1 0 0 126a63 63 0 1 0 0-126Z" />
+    </svg><span class="startup-wordmark" aria-hidden="true">s6_cut</span></div></div>
     <div id="root" inert></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
