@@ -1,9 +1,9 @@
-const CACHE = "s6-cut-shell-v9";
+const CACHE = "s6-cut-shell-v10";
 const CACHE_PREFIX = "s6-cut-shell-";
 const SHELL = [
   "/",
   "/index.html",
-  "/startup.css?v=4",
+  "/startup.css?v=5",
   "/manifest.webmanifest",
   "/favicon.png",
   "/app-icon.png",

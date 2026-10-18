@@ -153,3 +153,81 @@ test("a permanently stalled initial request cannot hide the app indefinitely", a
     await expect(page.getByRole("button", { name: "Settings", exact: true })).toBeEnabled();
   } finally { gate.release(); }
 });
+
+test("entry and exit fade smoothly on load and reload without early interaction", async ({ page }) => {
+  await mockEngine(page);
+  for (const reload of [false, true]) {
+    const gate = await hold(page, "**/api/v1/library/recent-clips**");
+    if (reload) await page.reload({ waitUntil: "domcontentloaded" });
+    else await page.goto("/", { waitUntil: "domcontentloaded" });
+    await expect.poll(gate.requested).toBe(true);
+    await expectCovered(page);
+    const entry = await page.locator("#startup-screen").evaluate((screen) => {
+      const animation = screen.getAnimations().find((item) => item instanceof CSSAnimation && item.animationName === "startup-appear")!;
+      animation.pause();
+      animation.currentTime = 90;
+      return Number(getComputedStyle(screen).opacity);
+    });
+    expect(entry).toBeGreaterThan(0);
+    expect(entry).toBeLessThan(1);
+    // Sample the exit synchronously: mobile polling can miss a short transition.
+    await page.evaluate(() => {
+      const animate = Element.prototype.animate;
+      Element.prototype.animate = function (...args) {
+        const animation = animate.apply(this, args);
+        if (this.id === "startup-screen") {
+          animation.pause();
+          animation.currentTime = 110;
+          const root = document.getElementById("root")!;
+          root.querySelector<HTMLElement>("button")?.focus();
+          document.body.dataset.startupFade = JSON.stringify({
+            opacity: Number(getComputedStyle(this).opacity),
+            rootOpacity: getComputedStyle(root).opacity,
+            inert: root.hasAttribute("inert"),
+            focused: root.contains(document.activeElement),
+          });
+          animation.play();
+        }
+        return animation;
+      };
+    });
+    gate.release();
+    await expect(page.locator("body")).toHaveAttribute("data-startup-fade", /opacity/);
+    const exit = JSON.parse((await page.locator("body").getAttribute("data-startup-fade"))!);
+    expect(exit.opacity).toBeGreaterThan(0);
+    expect(exit.opacity).toBeLessThan(entry);
+    expect(exit.rootOpacity).toBe("1");
+    expect(exit.inert).toBe(true);
+    expect(exit.focused).toBe(false);
+    await expectRevealed(page);
+    await page.unroute("**/api/v1/library/recent-clips**");
+  }
+});
+
+test("reduced motion skips both fades", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await mockEngine(page);
+  const gate = await hold(page, "**/api/v1/library/recent-clips**");
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await expectCovered(page);
+  await expect(page.locator("#startup-screen")).toHaveCSS("animation-name", "none");
+  await expect(page.locator("#startup-screen")).toHaveCSS("opacity", "1");
+  await page.evaluate(() => {
+    Element.prototype.animate = () => { throw new Error("Reduced motion must not animate"); };
+  });
+  gate.release();
+  await expectRevealed(page);
+});
+
+
+test("an unavailable animation API cannot trap keyboard access", async ({ page }) => {
+  await mockEngine(page);
+  const gate = await hold(page, "**/api/v1/library/recent-clips**");
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await expectCovered(page);
+  await page.evaluate(() => {
+    Element.prototype.animate = () => { throw new Error("Animation unavailable"); };
+  });
+  gate.release();
+  await expectRevealed(page);
+});
