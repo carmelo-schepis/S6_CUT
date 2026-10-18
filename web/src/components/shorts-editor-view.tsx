@@ -12,6 +12,8 @@ import { usePoll } from "../use-poll";
 const aspects = ["9:16", "16:9", "1:1", "4:5"] as const;
 type AspectRatio = typeof aspects[number];
 type EditState = { start: number; end?: number; aspect: AspectRatio; subtitles: boolean; projectName?: string; muted?: boolean; volume?: number; filterPreset?: "none" | "warm" | "cool" | "black_white" | "tint" | "monochrome"; filterIntensity?: number; tintColor?: string; tintOpacity?: number; subscribeAnimation?: SubscribeAnimationConfig };
+type EditSnapshot = { edit: EditState; overlays: TextOverlay[] };
+type HistoryState = { past: EditSnapshot[]; future: EditSnapshot[] };
 type ClipRow = { job: Job; clip: Clip };
 type AssistantMessage = { id: number; role: "assistant" | "user"; text: string };
 type AssistantEdit = { edit: Partial<EditState>; explanation: string };
@@ -96,7 +98,13 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
   const [filter, setFilter] = useState("all");
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
   const [savedBaseline, setSavedBaseline] = useState<EditState>({ start: 0, end: undefined, aspect: "9:16", subtitles: true, projectName: "", muted: false, volume: 1, filterPreset: "none", filterIntensity: 1, tintColor: "#d58a55", tintOpacity: 0, subscribeAnimation: DEFAULT_SUBSCRIBE_ANIMATION });
-  const [history, setHistory] = useState<Array<{ edit: EditState; overlays: TextOverlay[] }>>([]);
+  const [history, setHistory] = useState<HistoryState>({ past: [], future: [] });
+  const [pendingHistoryChange, setPendingHistoryChange] = useState(false);
+  const historyRef = useRef<HistoryState>({ past: [], future: [] });
+  const currentSnapshot = useRef<EditSnapshot>({ edit: { start: 0, end: undefined, aspect: "9:16", subtitles: true, projectName: "", muted: false, volume: 1, filterPreset: "none", filterIntensity: 1, tintColor: "#d58a55", tintOpacity: 0, subscribeAnimation: DEFAULT_SUBSCRIBE_ANIMATION }, overlays: [] });
+  const historyGroup = useRef<EditSnapshot | null>(null);
+  const undoRef = useRef<() => void>(() => undefined);
+  const redoRef = useRef<() => void>(() => undefined);
   const [assistantInput, setAssistantInput] = useState("");
   const [assistantBusy, setAssistantBusy] = useState(false);
   const [assistantMessages, setAssistantMessages] = useState<AssistantMessage[]>([{ id: 1, role: "assistant", text: "Describe a safe trim or aspect-ratio change. I will propose the edit before applying it." }]);
@@ -115,6 +123,7 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
   const frameRef = useRef<HTMLDivElement>(null);
   const objectUrl = useRef<string | null>(null);
   const sourceLoadingRef = useRef(false);
+  const pendingConfirmedSourceMode = useRef<{ mode: VideoSourceMode } | null>(null);
   const editorPanelRef = useRef<HTMLElement>(null);
   const pointerStart = useRef<{ jobId: string; clipId: string; x: number; y: number; pointerId: number } | null>(null);
   const draggedClipRef = useRef<string | null>(null);
@@ -132,7 +141,7 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
       setJobs(nextJobs.filter((job) => job.mode === "clip"));
       setError(null);
     } catch (cause) { setError(readableError(cause)); }
-  }, []);
+  }, [setError]);
   useEffect(() => { queueMicrotask(() => void refresh()); return () => { if (objectUrl.current) URL.revokeObjectURL(objectUrl.current); }; }, [refresh]);
   useEffect(() => {
     const finish = (event: PointerEvent) => {
@@ -177,7 +186,7 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
       setJobs((await listJobs()).filter((job) => job.mode === "clip"));
       setError(null);
     } catch (cause) { setError(readableError(cause)); }
-  }, []);
+  }, [setError]);
   const hasUnsettledJobs = jobs.some((job) => ["queued", "active", "paused", "stalled", "recovered"].includes(job.state));
   usePoll(refreshJobs, hasUnsettledJobs ? 2_000 : 15_000);
 
@@ -194,12 +203,41 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
     return () => { URL.revokeObjectURL(nextUrl); if (objectUrl.current === nextUrl) objectUrl.current = null; };
   }, [file]);
 
+  const restoreSnapshot = (snapshot: EditSnapshot) => {
+    const previous = snapshot.edit;
+    setStart(String(previous.start)); setEnd(previous.end === undefined ? "" : String(previous.end)); setAspect(previous.aspect); setSubtitles(previous.subtitles); setProjectName(previous.projectName || ""); setMuted(previous.muted ?? false); setVolume(previous.volume ?? 1); setFilterPreset(previous.filterPreset ?? "none"); setTextOverlays(snapshot.overlays); setFilterIntensity(previous.filterIntensity ?? 1); setTintColor(previous.tintColor ?? "#d58a55"); setTintOpacity(previous.tintOpacity ?? 0); setSubscribeAnimation(previous.subscribeAnimation ?? DEFAULT_SUBSCRIBE_ANIMATION);
+    if (snapshot.overlays.length && !selectedOverlayId) { setSelectedOverlayId(snapshot.overlays.at(-1)?.id ?? null); setPropertiesOpen(true); }
+    currentSnapshot.current = snapshot;
+  };
+  const recordSnapshot = (next: EditSnapshot) => {
+    const before = currentSnapshot.current;
+    if (JSON.stringify(before) === JSON.stringify(next)) return;
+    pendingConfirmedSourceMode.current = null;
+    if (historyGroup.current) {
+      setPendingHistoryChange(true);
+      if (historyRef.current.future.length) { const state = { ...historyRef.current, future: [] }; historyRef.current = state; setHistory(state); }
+    } else { const state = { past: [...historyRef.current.past, before].slice(-100), future: [] }; historyRef.current = state; setHistory(state); }
+    currentSnapshot.current = next;
+  };
+  const beginHistoryGroup = () => { if (!historyGroup.current) { historyGroup.current = currentSnapshot.current; setPendingHistoryChange(false); } };
+  const endHistoryGroup = () => {
+    const before = historyGroup.current;
+    historyGroup.current = null;
+    setPendingHistoryChange(false);
+    if (!before || JSON.stringify(before) === JSON.stringify(currentSnapshot.current)) return;
+    const state = { past: [...historyRef.current.past, before].slice(-100), future: [] }; historyRef.current = state; setHistory(state);
+  };
+  const resetHistory = () => { historyGroup.current = null; setPendingHistoryChange(false); const state = { past: [], future: [] }; historyRef.current = state; setHistory(state); };
   const updateEdit = (next: Partial<EditState>) => {
-    setHistory((current) => [...current.slice(-9), { edit: editState, overlays: textOverlays }]);
+    const before = currentSnapshot.current;
+    const updated = { ...before.edit, ...next };
+    const snapshot: EditSnapshot = { edit: updated, overlays: before.overlays };
+    recordSnapshot(snapshot);
     if (next.start !== undefined) setStart(String(next.start));
     if ("end" in next) setEnd(next.end === undefined ? "" : String(next.end));
     if (next.aspect !== undefined) setAspect(next.aspect);
     if (next.subtitles !== undefined) setSubtitles(next.subtitles);
+    if (next.projectName !== undefined) setProjectName(next.projectName);
     if (next.muted !== undefined) setMuted(next.muted);
     if (next.volume !== undefined) setVolume(next.volume);
     if (next.filterPreset !== undefined) setFilterPreset(next.filterPreset);
@@ -208,24 +246,35 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
     if (next.tintOpacity !== undefined) setTintOpacity(next.tintOpacity);
   };
   const undo = () => {
-    const snapshot = history.at(-1);
-    if (!snapshot) return;
-    const previous = snapshot.edit;
-    setStart(String(previous.start)); setEnd(previous.end === undefined ? "" : String(previous.end)); setAspect(previous.aspect); setSubtitles(previous.subtitles); setProjectName(previous.projectName || ""); setMuted(previous.muted ?? false); setVolume(previous.volume ?? 1); setFilterPreset(previous.filterPreset ?? "none"); setTextOverlays(snapshot.overlays); setFilterIntensity(previous.filterIntensity ?? 1); setTintColor(previous.tintColor ?? "#d58a55"); setTintOpacity(previous.tintOpacity ?? 0); setSubscribeAnimation(previous.subscribeAnimation ?? DEFAULT_SUBSCRIBE_ANIMATION);
-    if (snapshot.overlays.length && !selectedOverlayId) { setSelectedOverlayId(snapshot.overlays.at(-1)?.id ?? null); setPropertiesOpen(true); }
-    setHistory((current) => current.slice(0, -1));
+    if (historyGroup.current) endHistoryGroup();
+    const current = historyRef.current;
+    const previous = current.past.at(-1);
+    if (!previous) return;
+    const present = currentSnapshot.current;
+    restoreSnapshot(previous);
+    const state = { past: current.past.slice(0, -1), future: [...current.future, present] }; historyRef.current = state; setHistory(state);
+  };
+  const redo = () => {
+    if (historyGroup.current) endHistoryGroup();
+    const current = historyRef.current;
+    const next = current.future.at(-1);
+    if (!next) return;
+    const present = currentSnapshot.current;
+    restoreSnapshot(next);
+    const state = { past: [...current.past, present].slice(-100), future: current.future.slice(0, -1) }; historyRef.current = state; setHistory(state);
   };
 
   const loadFile = (next: File | null, pickerError?: string) => {
     if (pickerError) { setError(pickerError); return; }
-    if (next && dirty && !window.confirm("Discard unsaved Shorts Editor changes?")) return;
+    if (next && dirty && pendingConfirmedSourceMode.current?.mode !== "file" && !window.confirm("Discard unsaved Shorts Editor changes?")) return;
     playRequestRef.current += 1;
     setError(null); setFile(next); setPreviewUrl(null); setPlaying(false); setCurrentTime(0); setSourceDuration(0); setSourceHasAudio(null);
     if (next) {
+      pendingConfirmedSourceMode.current = null;
       setMode("file"); setAssetId(""); setUrl(""); setSelectedClipId(null); setStart("0"); setEnd(""); setAspect("9:16"); setSubtitles(true); setProjectName(""); setMuted(false); setVolume(1); setFilterPreset("none"); setFilterIntensity(1); setTintColor("#d58a55"); setTintOpacity(0); setSubscribeAnimation(DEFAULT_SUBSCRIBE_ANIMATION); setEditorTool("media"); setSelectedProperty("video"); setPropertiesOpen(true);
       const baseline: EditState = { start: 0, end: undefined, aspect: "9:16", subtitles: true, projectName: "", muted: false, volume: 1, filterPreset: "none", filterIntensity: 1, tintColor: "#d58a55", tintOpacity: 0, subscribeAnimation: DEFAULT_SUBSCRIBE_ANIMATION };
-      setSavedBaseline(baseline); setTextOverlays([]); setOverlayBaseline("[]"); setSelectedOverlayId(null); setHistory([]); setPendingProposal(null);
-      setAssistantMessages([{ id: Date.now(), role: "assistant", text: `Loaded local video ${next.name}.` }]);
+      setSavedBaseline(baseline); setTextOverlays([]); setOverlayBaseline("[]"); setSelectedOverlayId(null); resetHistory(); currentSnapshot.current = { edit: baseline, overlays: [] }; setPendingProposal(null);
+      setAssistantMessages((current) => [{ id: (current.at(-1)?.id ?? 0) + 1, role: "assistant", text: `Loaded local video ${next.name}.` }]);
       setStatus(`Loaded local video ${next.name}.`);
     }
   };
@@ -242,12 +291,15 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
     if (mode === "file" && !file) return setError("Choose a local video first.");
     if (mode === "url" && !url.trim()) return setError("Paste a supported YouTube URL first.");
     if (mode === "library" && (sourceLoading || !assetId)) return setError("Choose a Library video first.");
+    const submittedSnapshot = { ...currentSnapshot.current, overlays: currentSnapshot.current.overlays.map((item) => ({ ...item })) };
     setAssistantBusy(true);
     try {
       setStatus(mode === "file" ? "Uploading and validating source…" : mode === "url" ? "Importing and validating YouTube source…" : "Validating Library source…");
       if (mode === "library") await createShortsJob({ assetId, name: projectName.trim() || undefined, burnSubtitles: subtitles, subscribeAnimation, start: from, end: to, aspectRatio: aspect, muted, volume, filterPreset, filterIntensity, tintColor, tintOpacity, textOverlays });
       else await createShortsSourceJob({ file: mode === "file" ? file || undefined : undefined, url: mode === "url" ? url.trim() : undefined, name: projectName.trim() || undefined, burnSubtitles: subtitles, subscribeAnimation, start: from, end: to, aspectRatio: aspect, muted, volume, filterPreset, filterIntensity, tintColor, tintOpacity, textOverlays });
-      setStatus("Short queued successfully."); setSavedBaseline(editState); setOverlayBaseline(JSON.stringify(textOverlays)); setHistory([]); await refresh(); onJobCreated();
+      const queuedBaseline = submittedSnapshot;
+      pendingConfirmedSourceMode.current = null;
+      setStatus("Short queued successfully."); setSavedBaseline(queuedBaseline.edit); setOverlayBaseline(JSON.stringify(queuedBaseline.overlays)); resetHistory(); await refresh(); onJobCreated();
     } catch (cause) { setError(readableError(cause)); setStatus(""); } finally { setAssistantBusy(false); }
     });
   };
@@ -295,22 +347,44 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
     }
   };
   const toggleMute = () => { const player = videoRef.current; const next = !previewMuted; if (player) player.muted = next; setPreviewMuted(next); };
-  const changeOverlays = (change: (items: TextOverlay[]) => TextOverlay[]) => { setHistory((current) => [...current.slice(-9), { edit: editState, overlays: textOverlays }]); setTextOverlays(change); };
+  const changeOverlays = (change: (items: TextOverlay[]) => TextOverlay[]) => {
+    const before = currentSnapshot.current;
+    const overlays = change(before.overlays);
+    recordSnapshot({ edit: before.edit, overlays });
+    setTextOverlays(overlays);
+  };
   useEffect(() => { const close = (event: KeyboardEvent) => { if (event.key === "Escape" && propertiesOpen) { setPropertiesOpen(false); [...document.querySelectorAll<HTMLElement>("[data-property-toggle]")].find((element) => element.getClientRects().length > 0)?.focus(); } }; window.addEventListener("keydown", close); return () => window.removeEventListener("keydown", close); }, [propertiesOpen]);
   // Fullscreen is requested on the aspect frame rather than the <video> so the
   // trim overlay and letterboxing expand with the picture.
   const expandPreview = () => { void (frameRef.current || videoRef.current)?.requestFullscreen?.().catch(() => undefined); };
   const sourcePreview = previewUrl || (mode === "library" ? assets.find((item) => item.id === assetId)?.previewUrl || null : null);
   const editState: EditState = { start: Number(start) || 0, end: end.trim() ? Number(end) : undefined, aspect, subtitles, projectName, muted, volume, filterPreset, filterIntensity, tintColor, tintOpacity, subscribeAnimation };
+  const canUndo = history.past.length > 0 || pendingHistoryChange;
+  useEffect(() => {
+    undoRef.current = undo;
+    redoRef.current = redo;
+  });
+  useEffect(() => {
+    const shortcut = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+      const target = event.target;
+      if (target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
+      const key = event.key.toLowerCase();
+      if (key === "z") { event.preventDefault(); if (event.shiftKey) redoRef.current(); else undoRef.current(); }
+      else if (key === "y" && !event.shiftKey) { event.preventDefault(); redoRef.current(); }
+    };
+    window.addEventListener("keydown", shortcut);
+    return () => window.removeEventListener("keydown", shortcut);
+  }, []);
   const dirty = !sameEditState(editState, savedBaseline) || JSON.stringify(textOverlays) !== overlayBaseline;
-  const updateSubscribeAnimation = (value: SubscribeAnimationConfig) => { setHistory((current) => [...current.slice(-9), { edit: editState, overlays: textOverlays }]); setSubscribeAnimation(value); };
+  const updateSubscribeAnimation = (value: SubscribeAnimationConfig) => { const snapshot = { edit: { ...currentSnapshot.current.edit, subscribeAnimation: value }, overlays: currentSnapshot.current.overlays }; recordSnapshot(snapshot); setSubscribeAnimation(value); };
   const changeSourceMode = (next: VideoSourceMode) => {
     if (next === mode) return;
     if (dirty && !window.confirm("Discard unsaved Shorts Editor changes?")) return;
-    playRequestRef.current += 1;
-    setMode(next); setFile(null); setPreviewUrl(null); setAssetId(""); setUrl(""); setSelectedClipId(null); setSourceDuration(0); setSourceHasAudio(null); setCurrentTime(0); setPlaying(false);
-    if (videoRef.current) { videoRef.current.pause(); videoRef.current.currentTime = 0; }
-    setStart("0"); setEnd(""); setAspect("9:16"); setSubtitles(true); setProjectName(""); setMuted(false); setVolume(1); setFilterPreset("none"); setFilterIntensity(1); setTintColor("#d58a55"); setTintOpacity(0); setSubscribeAnimation(DEFAULT_SUBSCRIBE_ANIMATION); setEditorTool("media"); setSelectedProperty("video"); setPropertiesOpen(true); setTextOverlays([]); setOverlayBaseline("[]"); setSelectedOverlayId(null); setSelectedProperty("video"); setHistory([]); setPendingProposal(null); setSavedBaseline({ start: 0, end: undefined, aspect: "9:16", subtitles: true, projectName: "", muted: false, volume: 1, filterPreset: "none", filterIntensity: 1, tintColor: "#d58a55", tintOpacity: 0, subscribeAnimation: DEFAULT_SUBSCRIBE_ANIMATION }); setStatus("");
+    // Selecting a source type only changes the pending picker mode. The current
+    // source and document remain live until loadFile/loadLibrarySource succeeds.
+    setMode(next);
+    pendingConfirmedSourceMode.current = dirty ? { mode: next } : null;
   };
   const overlayOutputDuration = (end.trim() ? Number(end) : sourceDuration) - (Number(start) || 0);
   const invalidOverlays = textOverlays.filter((item) => !Number.isFinite(item.start) || !Number.isFinite(item.duration) || item.start < 0 || item.duration <= 0 || item.start >= overlayOutputDuration || item.start + item.duration > overlayOutputDuration);
@@ -335,9 +409,10 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
       const currentClipAlreadyLoaded = identity && selectedClipId === identity.clipId && assetId === asset.id;
       const sameLibrarySource = !identity && selectedClipId === null && mode === "library" && assetId === asset.id;
       if (currentClipAlreadyLoaded || sameLibrarySource) return;
-      if (dirty && !window.confirm("Discard unsaved Shorts Editor changes?")) return;
+      if (dirty && pendingConfirmedSourceMode.current?.mode !== "library" && !window.confirm("Discard unsaved Shorts Editor changes?")) return;
 
       const row = freshClip && freshJob ? { clip: freshClip, job: freshJob } : undefined;
+      pendingConfirmedSourceMode.current = null;
       setAssets(freshAssets.filter((item) => item.mediaType.toLowerCase().startsWith("video/")));
       playRequestRef.current += 1;
       setMode("library"); setAssetId(asset.id); setFile(null); setUrl(""); setPreviewUrl(asset.previewUrl);
@@ -361,8 +436,8 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
       };
       setStart(String(nextBaseline.start)); setEnd(nextBaseline.end === undefined ? "" : String(nextBaseline.end));
       setAspect(nextBaseline.aspect); setSubtitles(nextBaseline.subtitles); setProjectName(""); setMuted(nextBaseline.muted ?? false); setVolume(nextBaseline.volume ?? 1); setFilterPreset(nextBaseline.filterPreset ?? "none"); setFilterIntensity(1); setTintColor("#d58a55"); setTintOpacity(0); setSubscribeAnimation(DEFAULT_SUBSCRIBE_ANIMATION); setEditorTool("media"); setSelectedProperty("video"); setPropertiesOpen(true);
-      setSavedBaseline(nextBaseline); setTextOverlays([]); setOverlayBaseline("[]"); setSelectedOverlayId(null); setHistory([]); setPendingProposal(null);
-      setAssistantMessages([{ id: Date.now(), role: "assistant", text: row ? `Loaded ${row.clip.title || `Clip ${row.clip.index}`} from Library. This source is the published generated video.` : `Library source changed to ${asset.title}.` }]);
+      setSavedBaseline(nextBaseline); setTextOverlays([]); setOverlayBaseline("[]"); setSelectedOverlayId(null); resetHistory(); currentSnapshot.current = { edit: nextBaseline, overlays: [] }; setPendingProposal(null);
+      setAssistantMessages((current) => [{ id: (current.at(-1)?.id ?? 0) + 1, role: "assistant", text: row ? `Loaded ${row.clip.title || `Clip ${row.clip.index}`} from Library. This source is the published generated video.` : `Library source changed to ${asset.title}.` }]);
       setStatus(row ? `Loaded ${row.clip.title || `Clip ${row.clip.index}`} from Library.` : `Loaded ${asset.title} from Library.`);
       closeDrawer();
     } catch (cause) { setError(readableError(cause)); }
@@ -394,7 +469,7 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
 
   return <div className="page shorts-workspace-page">
     <form className="shorts-workspace-form" onSubmit={submit}>
-    <header className="shorts-workspace-header"><div><h1>Editor</h1></div><div className="shorts-header-actions"><span className={dirty ? "edit-state dirty" : "edit-state"}>{dirty ? "Unsaved edits" : "All changes saved"}</span>{history.length > 0 && <Button type="button" onClick={undo}><RotateCcw size={14} /> Undo</Button>}<button ref={drawerToggleRef} type="button" className="button button-secondary" aria-expanded={drawerOpen} aria-controls="shorts-clip-drawer" onClick={() => setDrawerOpen((open) => !open)}><PanelRight size={14} /> Clips &amp; assistant <span className="count-pill">{rows.length}</span></button><Button type="submit" variant="primary" disabled={assistantBusy}><Scissors size={14} /> Queue short</Button></div></header>
+    <header className="shorts-workspace-header"><div><h1>Editor</h1></div><div className="shorts-header-actions"><span className={dirty ? "edit-state dirty" : "edit-state"}>{dirty ? "Unsaved edits" : "All changes saved"}</span><Button type="button" aria-label="Undo" disabled={!canUndo} onClick={undo}><RotateCcw size={14} /> Undo</Button><Button type="button" aria-label="Redo" disabled={!history.future.length} onClick={redo}><RotateCcw size={14} /> Redo</Button><button ref={drawerToggleRef} type="button" className="button button-secondary" aria-expanded={drawerOpen} aria-controls="shorts-clip-drawer" onClick={() => setDrawerOpen((open) => !open)}><PanelRight size={14} /> Clips &amp; assistant <span className="count-pill">{rows.length}</span></button><Button type="submit" variant="primary" disabled={assistantBusy}><Scissors size={14} /> Queue short</Button></div></header>
     {error && <div className="shorts-global-alert" role="alert"><X size={16} />{error}</div>}
     {/* A <main> here nested a second main landmark inside the shell's
         #main-content. This element only lays out the editor and its drawer — naming it
@@ -404,8 +479,8 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
       <section ref={editorPanelRef} className={`shorts-editor-panel ${dragOverEditor ? "clip-drop-active" : ""}`} aria-labelledby="editor-panel-title" onDragOver={(event) => { if (!(event.target instanceof Element && event.target.closest(".drop-zone"))) event.preventDefault(); }} onDrop={(event) => { if (event.target instanceof Element && event.target.closest(".drop-zone")) return; event.preventDefault(); if (event.dataTransfer.types.length) setError("Only completed clips from the Clips panel can be dropped into the Editor."); }}>
         <div className="workspace-panel-heading"><div><h2 id="editor-panel-title">{contextName}</h2></div><StatusBadge state={selectedRow ? selectedRow.job.state : "local"} label={selectedRow ? selectedRow.job.stageLabel : "Source ready"} /></div>
         {dragOverEditor && draggingClipId && <div className="clip-drop-overlay" aria-hidden="true">Drop to edit</div>}
-        {!sourcePreview && <div className="shorts-source-empty"><div className="empty-icon"><Film size={28} /></div><h3>Bring a source into the editor</h3><p>Choose a local file, authorised YouTube URL, or a video from your Library.</p><VideoSourcePicker mode={mode} onModeChange={changeSourceMode} file={file} onFile={loadFile} url={url} onUrl={setUrl}><div className="field"><label className="field-label" htmlFor="shorts-source">Library video</label><select id="shorts-source" value={assetId} onChange={(event) => { if (event.target.value) void loadLibrarySource(event.target.value); }} disabled={!assets.length}><option value="">{assets.length ? "Select Library video" : "No Library videos available"}</option>{assets.map((asset) => <option key={asset.id} value={asset.id}>{asset.title}</option>)}</select><small>{assets.length ? "Private media stays on this machine." : "Add a video in Library first."}</small></div></VideoSourcePicker><details className="shorts-collapsible-panel"><summary>Subscribe animation settings</summary><SubscribeAnimationControl value={subscribeAnimation} onChange={updateSubscribeAnimation} /></details><div className="trim-inputs shorts-empty-trim"><label>Start <input aria-label="Start seconds" type="number" min="0" step=".1" value={start} onChange={(event) => setStart(event.target.value)} /></label><label>End <input aria-label="End seconds" type="number" min="0" step=".1" value={end} onChange={(event) => setEnd(event.target.value)} placeholder="Source remainder" /></label><label>Aspect <select aria-label="Aspect ratio" value={aspect} onChange={(event) => updateEdit({ aspect: event.target.value as AspectRatio })}>{aspects.map((value) => <option key={value}>{value}</option>)}</select></label></div>{/* These are job settings rather than preview settings: a YouTube source has no local preview before import, so gating them behind playback would make them unreachable before import. */}<div className="editor-options"><label className="shorts-project-name">Project name <input value={projectName} maxLength={160} onChange={(event) => { setHistory((current) => [...current.slice(-9), { edit: editState, overlays: textOverlays }]); setProjectName(event.target.value); }} placeholder="Optional project name" /></label><label><input type="checkbox" checked={subtitles} onChange={(event) => updateEdit({ subtitles: event.target.checked })} /> Subtitles</label><label>Filter preset <select aria-label="Filter preset" value={filterPreset} onChange={(event) => updateEdit({ filterPreset: event.target.value as EditState["filterPreset"] })}><option value="none">Original</option><option value="warm">Warm</option><option value="cool">Cool</option><option value="black_white">Black &amp; White</option><option value="monochrome">Monochrome</option><option value="tint">Tint</option></select></label>{filterPreset !== "monochrome" && <label>Filter intensity <input aria-label="Filter intensity" type="range" min="0" max="1" step="0.01" value={filterIntensity} onChange={(event) => updateEdit({ filterIntensity: Number(event.target.value) })} /></label>}{filterPreset === "tint" && <><label>Tint color<input aria-label="Tint color" type="color" value={tintColor} onChange={(event) => updateEdit({ tintColor: event.target.value })} /></label><label>Tint transparency<input aria-label="Tint opacity" type="range" min="0" max="100" value={tintOpacity} onChange={(event) => updateEdit({ tintOpacity: Number(event.target.value) })} /><small>0% = fully opaque · 100% = invisible</small></label></>}<label>Output volume <input aria-label="Output volume" type="range" min="0" max="2" step="0.05" value={volume} onChange={(event) => updateEdit({ volume: Number(event.target.value) })} /></label><label><input type="checkbox" checked={muted} onChange={(event) => updateEdit({ muted: event.target.checked })} /> Mute export</label></div></div>}
-        {sourcePreview && <div className="video-editing-stage"><details className="shorts-collapsible-panel"><summary>Subscribe animation settings</summary><SubscribeAnimationControl value={subscribeAnimation} onChange={updateSubscribeAnimation} /></details><div className="viewer-header" aria-hidden="true"><span>{contextName}</span><span>{aspect}</span></div><div ref={frameRef} className={`shorts-video-frame aspect-${aspect.replace(":", "-")}`} role="group" aria-label="Video preview"><video ref={videoRef} muted={previewMuted} style={{ filter: filterPreset === "monochrome" ? "grayscale(1)" : filterPreset === "black_white" ? `grayscale(${filterIntensity})` : filterPreset === "warm" ? `sepia(${.35 * filterIntensity}) saturate(${1 + .25 * filterIntensity})` : filterPreset === "cool" ? `hue-rotate(${18 * filterIntensity}deg)` : undefined }} src={sourcePreview} onLoadedMetadata={(event) => { setSourceDuration(event.currentTarget.duration); const media = event.currentTarget as HTMLVideoElement & { audioTracks?: { length: number }; mozHasAudio?: boolean; captureStream?: () => MediaStream }; let audio = media.audioTracks ? media.audioTracks.length > 0 : typeof media.mozHasAudio === "boolean" ? media.mozHasAudio : null; if (audio === null && media.captureStream) { try { audio = media.captureStream().getAudioTracks().length > 0; } catch { audio = null; } } setSourceHasAudio(audio); }} aria-label="Source video preview" onTimeUpdate={(event) => { const time = event.currentTarget.currentTime; setCurrentTime(time); if (end.trim() && time >= Number(end)) { event.currentTarget.pause(); event.currentTarget.currentTime = Number(start) || 0; } }} onPlay={(event) => { if (currentTime < (Number(start) || 0) || (end.trim() && currentTime >= Number(end))) event.currentTarget.currentTime = Number(start) || 0; setPlaying(true); }} onPause={() => setPlaying(false)} controls={false} preload="metadata" playsInline />{filterPreset === "tint" && <div aria-hidden="true" className="shorts-preview-tint" style={{ backgroundColor: tintColor, opacity: (1 - tintOpacity / 100) * filterIntensity }} />}{textOverlays.filter((item) => currentTime - (Number(start) || 0) >= item.start && currentTime - (Number(start) || 0) < item.start + item.duration).map((item) => <button key={item.id} type="button" className={`shorts-text-overlay ${selectedOverlayId === item.id ? "selected" : ""}`} style={{ left: `${item.x * 100}%`, top: `${item.y * 100}%`, color: item.color, fontSize: `${item.size / 1920 * 100}cqh` }} aria-label={`Text overlay: ${item.text}`} onClick={() => { setSelectedOverlayId(item.id); setSelectedProperty(null); setEditorTool("text"); setPropertiesOpen(true); }} onKeyDown={(event) => { const step = event.shiftKey ? .05 : .01; if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) return; event.preventDefault(); changeOverlays((items) => items.map((overlay) => overlay.id === item.id ? { ...overlay, x: Math.max(0, Math.min(1, overlay.x + (event.key === "ArrowRight" ? step : event.key === "ArrowLeft" ? -step : 0))), y: Math.max(0, Math.min(1, overlay.y + (event.key === "ArrowDown" ? step : event.key === "ArrowUp" ? -step : 0))) } : overlay)); }} onPointerDown={(event) => { event.preventDefault(); setHistory((current) => [...current.slice(-9), { edit: editState, overlays: textOverlays }]); setSelectedOverlayId(item.id); const frame = frameRef.current; if (!frame) return; const bounds = frame.getBoundingClientRect(); const objectBounds = event.currentTarget.getBoundingClientRect(); const halfWidth = Math.min(.5, objectBounds.width / bounds.width / 2); const halfHeight = Math.min(.5, objectBounds.height / bounds.height / 2); const move = (pointer: PointerEvent) => setTextOverlays((current) => current.map((overlay) => overlay.id === item.id ? { ...overlay, x: Math.max(halfWidth, Math.min(1 - halfWidth, (pointer.clientX - bounds.left) / bounds.width)), y: Math.max(halfHeight, Math.min(1 - halfHeight, (pointer.clientY - bounds.top) / bounds.height)) } : overlay)); const stop = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", stop); }; window.addEventListener("pointermove", move); window.addEventListener("pointerup", stop, { once: true }); }}>{item.text}</button>)}</div><ShortsEditorToolbox activeTool={editorTool} setActiveTool={setEditorTool} selectedProperty={selectedProperty} setSelectedProperty={setSelectedProperty} propertiesOpen={propertiesOpen} setPropertiesOpen={setPropertiesOpen} aspect={aspect} projectName={projectName} setProjectName={(value) => { setHistory((items) => [...items.slice(-9), { edit: editState, overlays: textOverlays }]); setProjectName(value); }} subtitles={subtitles} setSubtitles={(value) => updateEdit({ subtitles: value })} captionWarning={Boolean(selectedClipId)} filterPreset={filterPreset || "none"} setFilterPreset={(value) => updateEdit({ filterPreset: value })} filterIntensity={filterIntensity} setFilterIntensity={(value) => { setHistory((items) => [...items.slice(-9), { edit: editState, overlays: textOverlays }]); setFilterIntensity(value); }} tintColor={tintColor} setTintColor={(value) => { setHistory((items) => [...items.slice(-9), { edit: editState, overlays: textOverlays }]); setTintColor(value); }} tintOpacity={tintOpacity} setTintOpacity={(value) => { setHistory((items) => [...items.slice(-9), { edit: editState, overlays: textOverlays }]); setTintOpacity(value); }} muted={muted} setMuted={(value) => updateEdit({ muted: value })} previewMuted={previewMuted} onTogglePreviewMute={toggleMute} volume={volume} setVolume={(value) => updateEdit({ volume: value })} overlays={textOverlays} invalidOverlays={invalidOverlays.length > 0} selectedOverlayId={selectedOverlayId} setSelectedOverlayId={setSelectedOverlayId} changeOverlays={changeOverlays} outputDuration={Math.max(0, (end.trim() ? Number(end) : sourceDuration) - (Number(start) || 0))} currentTime={currentTime} sourceDuration={sourceDuration} start={Number(start) || 0} end={end.trim() ? Number(end) : undefined} onTrim={(nextStart, nextEnd) => updateEdit({ start: nextStart, end: nextEnd })} onAspect={(value) => updateEdit({ aspect: value })} playing={playing} onTogglePlay={togglePlay} onSeek={seek} sourceHasAudio={sourceHasAudio} onExpand={expandPreview} /></div>}
+        {!sourcePreview && <div className="shorts-source-empty"><div className="empty-icon"><Film size={28} /></div><h3>Bring a source into the editor</h3><p>Choose a local file, authorised YouTube URL, or a video from your Library.</p><VideoSourcePicker mode={mode} onModeChange={changeSourceMode} file={file} onFile={loadFile} url={url} onUrl={setUrl}><div className="field"><label className="field-label" htmlFor="shorts-source">Library video</label><select id="shorts-source" value={assetId} onChange={(event) => { if (event.target.value) void loadLibrarySource(event.target.value); }} disabled={!assets.length}><option value="">{assets.length ? "Select Library video" : "No Library videos available"}</option>{assets.map((asset) => <option key={asset.id} value={asset.id}>{asset.title}</option>)}</select><small>{assets.length ? "Private media stays on this machine." : "Add a video in Library first."}</small></div></VideoSourcePicker><details className="shorts-collapsible-panel"><summary>Subscribe animation settings</summary><SubscribeAnimationControl value={subscribeAnimation} onChange={updateSubscribeAnimation} /></details><div className="trim-inputs shorts-empty-trim"><label>Start <input aria-label="Start seconds" type="number" min="0" step=".1" value={start} onFocus={beginHistoryGroup} onBlur={endHistoryGroup} onChange={(event) => updateEdit({ start: Number(event.target.value) })} /></label><label>End <input aria-label="End seconds" type="number" min="0" step=".1" value={end} onFocus={beginHistoryGroup} onBlur={endHistoryGroup} onChange={(event) => updateEdit({ end: event.target.value.trim() ? Number(event.target.value) : undefined })} placeholder="Source remainder" /></label><label>Aspect <select aria-label="Aspect ratio" value={aspect} onChange={(event) => updateEdit({ aspect: event.target.value as AspectRatio })}>{aspects.map((value) => <option key={value}>{value}</option>)}</select></label></div>{/* These are job settings rather than preview settings: a YouTube source has no local preview before import, so gating them behind playback would make them unreachable before import. */}<div className="editor-options"><label className="shorts-project-name">Project name <input value={projectName} maxLength={160} onFocus={beginHistoryGroup} onBlur={endHistoryGroup} onChange={(event) => updateEdit({ projectName: event.target.value })} placeholder="Optional project name" /></label><label><input type="checkbox" checked={subtitles} onChange={(event) => updateEdit({ subtitles: event.target.checked })} /> Subtitles</label><label>Filter preset <select aria-label="Filter preset" value={filterPreset} onChange={(event) => updateEdit({ filterPreset: event.target.value as EditState["filterPreset"] })}><option value="none">Original</option><option value="warm">Warm</option><option value="cool">Cool</option><option value="black_white">Black &amp; White</option><option value="monochrome">Monochrome</option><option value="tint">Tint</option></select></label>{filterPreset !== "monochrome" && <label>Filter intensity <input aria-label="Filter intensity" type="range" min="0" max="1" step="0.01" value={filterIntensity} onPointerDown={beginHistoryGroup} onPointerUp={endHistoryGroup} onPointerCancel={endHistoryGroup} onKeyDown={beginHistoryGroup} onKeyUp={endHistoryGroup} onBlur={endHistoryGroup} onChange={(event) => updateEdit({ filterIntensity: Number(event.target.value) })} /></label>}{filterPreset === "tint" && <><label>Tint color<input aria-label="Tint color" type="color" value={tintColor} onChange={(event) => updateEdit({ tintColor: event.target.value })} /></label><label>Tint transparency<input aria-label="Tint opacity" type="range" min="0" max="100" value={tintOpacity} onPointerDown={beginHistoryGroup} onPointerUp={endHistoryGroup} onPointerCancel={endHistoryGroup} onKeyDown={beginHistoryGroup} onKeyUp={endHistoryGroup} onBlur={endHistoryGroup} onChange={(event) => updateEdit({ tintOpacity: Number(event.target.value) })} /><small>0% = fully opaque · 100% = invisible</small></label></>}<label>Output volume <input aria-label="Output volume" type="range" min="0" max="2" step="0.05" value={volume} onPointerDown={beginHistoryGroup} onPointerUp={endHistoryGroup} onPointerCancel={endHistoryGroup} onKeyDown={beginHistoryGroup} onKeyUp={endHistoryGroup} onBlur={endHistoryGroup} onChange={(event) => updateEdit({ volume: Number(event.target.value) })} /></label><label><input type="checkbox" checked={muted} onChange={(event) => updateEdit({ muted: event.target.checked })} /> Mute export</label></div></div>}
+        {sourcePreview && <div className="video-editing-stage"><details className="shorts-collapsible-panel"><summary>Subscribe animation settings</summary><SubscribeAnimationControl value={subscribeAnimation} onChange={updateSubscribeAnimation} /></details><div className="viewer-header" aria-hidden="true"><span>{contextName}</span><span>{aspect}</span></div><div ref={frameRef} className={`shorts-video-frame aspect-${aspect.replace(":", "-")}`} role="group" aria-label="Video preview"><video ref={videoRef} muted={previewMuted} style={{ filter: filterPreset === "monochrome" ? "grayscale(1)" : filterPreset === "black_white" ? `grayscale(${filterIntensity})` : filterPreset === "warm" ? `sepia(${.35 * filterIntensity}) saturate(${1 + .25 * filterIntensity})` : filterPreset === "cool" ? `hue-rotate(${18 * filterIntensity}deg)` : undefined }} src={sourcePreview} onLoadedMetadata={(event) => { setSourceDuration(event.currentTarget.duration); const media = event.currentTarget as HTMLVideoElement & { audioTracks?: { length: number }; mozHasAudio?: boolean; captureStream?: () => MediaStream }; let audio = media.audioTracks ? media.audioTracks.length > 0 : typeof media.mozHasAudio === "boolean" ? media.mozHasAudio : null; if (audio === null && media.captureStream) { try { audio = media.captureStream().getAudioTracks().length > 0; } catch { audio = null; } } setSourceHasAudio(audio); }} aria-label="Source video preview" onTimeUpdate={(event) => { const time = event.currentTarget.currentTime; setCurrentTime(time); if (end.trim() && time >= Number(end)) { event.currentTarget.pause(); event.currentTarget.currentTime = Number(start) || 0; } }} onPlay={(event) => { if (currentTime < (Number(start) || 0) || (end.trim() && currentTime >= Number(end))) event.currentTarget.currentTime = Number(start) || 0; setPlaying(true); }} onPause={() => setPlaying(false)} controls={false} preload="metadata" playsInline />{filterPreset === "tint" && <div aria-hidden="true" className="shorts-preview-tint" style={{ backgroundColor: tintColor, opacity: (1 - tintOpacity / 100) * filterIntensity }} />}{textOverlays.filter((item) => currentTime - (Number(start) || 0) >= item.start && currentTime - (Number(start) || 0) < item.start + item.duration).map((item) => <button key={item.id} type="button" className={`shorts-text-overlay ${selectedOverlayId === item.id ? "selected" : ""}`} style={{ left: `${item.x * 100}%`, top: `${item.y * 100}%`, color: item.color, fontSize: `${item.size / 1920 * 100}cqh` }} aria-label={`Text overlay: ${item.text}`} onClick={() => { setSelectedOverlayId(item.id); setSelectedProperty(null); setEditorTool("text"); setPropertiesOpen(true); }} onKeyDown={(event) => { if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) beginHistoryGroup(); const step = event.shiftKey ? .05 : .01; if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) return; event.preventDefault(); changeOverlays((items) => items.map((overlay) => overlay.id === item.id ? { ...overlay, x: Math.max(0, Math.min(1, overlay.x + (event.key === "ArrowRight" ? step : event.key === "ArrowLeft" ? -step : 0))), y: Math.max(0, Math.min(1, overlay.y + (event.key === "ArrowDown" ? step : event.key === "ArrowUp" ? -step : 0))) } : overlay)); }} onKeyUp={endHistoryGroup} onBlur={endHistoryGroup} onPointerDown={(event) => { event.preventDefault(); beginHistoryGroup(); setSelectedOverlayId(item.id); const frame = frameRef.current; if (!frame) return; const bounds = frame.getBoundingClientRect(); const objectBounds = event.currentTarget.getBoundingClientRect(); const halfWidth = Math.min(.5, objectBounds.width / bounds.width / 2); const halfHeight = Math.min(.5, objectBounds.height / bounds.height / 2); const move = (pointer: PointerEvent) => changeOverlays((items) => items.map((overlay) => overlay.id === item.id ? { ...overlay, x: Math.max(halfWidth, Math.min(1 - halfWidth, (pointer.clientX - bounds.left) / bounds.width)), y: Math.max(halfHeight, Math.min(1 - halfHeight, (pointer.clientY - bounds.top) / bounds.height)) } : overlay)); const stop = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", stop); window.removeEventListener("pointercancel", stop); endHistoryGroup(); }; window.addEventListener("pointermove", move); window.addEventListener("pointerup", stop, { once: true }); window.addEventListener("pointercancel", stop, { once: true }); }}>{item.text}</button>)}</div><ShortsEditorToolbox activeTool={editorTool} setActiveTool={setEditorTool} selectedProperty={selectedProperty} setSelectedProperty={setSelectedProperty} propertiesOpen={propertiesOpen} setPropertiesOpen={setPropertiesOpen} aspect={aspect} projectName={projectName} setProjectName={(value) => updateEdit({ projectName: value })} subtitles={subtitles} setSubtitles={(value) => updateEdit({ subtitles: value })} captionWarning={Boolean(selectedClipId)} filterPreset={filterPreset || "none"} setFilterPreset={(value) => updateEdit({ filterPreset: value })} filterIntensity={filterIntensity} setFilterIntensity={(value) => updateEdit({ filterIntensity: value })} tintColor={tintColor} setTintColor={(value) => updateEdit({ tintColor: value })} tintOpacity={tintOpacity} setTintOpacity={(value) => updateEdit({ tintOpacity: value })} muted={muted} setMuted={(value) => updateEdit({ muted: value })} previewMuted={previewMuted} onTogglePreviewMute={toggleMute} volume={volume} setVolume={(value) => updateEdit({ volume: value })} overlays={textOverlays} invalidOverlays={invalidOverlays.length > 0} selectedOverlayId={selectedOverlayId} setSelectedOverlayId={setSelectedOverlayId} changeOverlays={changeOverlays} outputDuration={Math.max(0, (end.trim() ? Number(end) : sourceDuration) - (Number(start) || 0))} currentTime={currentTime} sourceDuration={sourceDuration} start={Number(start) || 0} end={end.trim() ? Number(end) : undefined} onTrim={(nextStart, nextEnd) => updateEdit({ start: nextStart, end: nextEnd })} onHistoryGroupStart={beginHistoryGroup} onHistoryGroupEnd={endHistoryGroup} onAspect={(value) => updateEdit({ aspect: value })} playing={playing} onTogglePlay={togglePlay} onSeek={seek} sourceHasAudio={sourceHasAudio} onExpand={expandPreview} /></div>}
         {sourcePreview && <details className="shorts-source-switcher"><summary>Choose another source</summary><VideoSourcePicker mode={mode} onModeChange={changeSourceMode} file={file} onFile={loadFile} url={url} onUrl={setUrl}><div className="field"><label className="field-label" htmlFor="shorts-source-loaded">Library video</label><select id="shorts-source-loaded" value={assetId} onChange={(event) => { if (event.target.value) void loadLibrarySource(event.target.value); }} disabled={!assets.length || sourceLoading}><option value="">Select another Library video</option>{assets.map((asset) => <option key={asset.id} value={asset.id}>{asset.title}</option>)}</select><small>Generated shorts are loaded from their published Library asset.</small></div></VideoSourcePicker></details>}
         {status && <div className="shorts-inline-status" role="status"><Clock3 size={15} />{status}</div>}
       </section>
