@@ -1,8 +1,9 @@
 html, body { background: #000; }
 body.startup-loading { overflow: hidden; }
 .startup-loading #root { opacity: 0; }
+.startup-loading.startup-revealing #root { opacity: 1; }
 .startup-loading .app-wallpaper { transition: none; }
-#startup-screen { position: fixed; inset: 0; z-index: 10000; display: grid; place-items: center; overflow: hidden; isolation: isolate; background: #000; }
+#startup-screen { position: fixed; inset: 0; z-index: 10000; display: grid; place-items: center; overflow: hidden; isolation: isolate; background: #000; animation: startup-appear 180ms ease-out both; }
 #startup-screen::before {
   content: ""; position: absolute; inset: -8%; z-index: -1; opacity: .4;
   background: radial-gradient(ellipse at 48% 56%, rgba(0, 0, 0, .92) 0%, rgba(0, 0, 0, .6) 16%, transparent 48%),
@@ -19,10 +20,14 @@ body.startup-loading { overflow: hidden; }
   color: #f4f0ed; background: linear-gradient(105deg, #dfb6a2, #faf7f4 35%, #f4f0ed 60%, #c7bce9 82%, #bccbdf);
   -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
 }
+@keyframes startup-appear {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
 @keyframes startup-drift {
   from { transform: translate(-1.5%, -1%) scale(1); }
   to { transform: translate(1.5%, 1%) scale(1.04); }
 }
 @media (prefers-reduced-motion: reduce) {
-  #startup-screen::before { animation: none; }
+  #startup-screen, #startup-screen::before { animation: none; }
 }

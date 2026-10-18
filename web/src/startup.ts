@@ -1,8 +1,31 @@
 /** Reveal even when startup fails, so the existing error and Retry stay usable. */
 export function revealApp() {
-  document.getElementById("startup-screen")?.remove();
-  document.getElementById("root")?.removeAttribute("inert");
-  document.body.classList.remove("startup-loading");
+  const screen = document.getElementById("startup-screen");
+  if (document.body.classList.contains("startup-revealing")) return;
+  const finish = () => {
+    screen?.remove();
+    document.getElementById("root")?.removeAttribute("inert");
+    document.body.classList.remove("startup-loading", "startup-revealing");
+  };
+  if (!screen || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    finish();
+    return;
+  }
+  document.body.classList.add("startup-revealing");
+  // A bounded fallback also releases keyboard access if animation completion stalls.
+  const timeout = window.setTimeout(finish, 350);
+  try {
+    const fade = screen.animate([{ opacity: getComputedStyle(screen).opacity }, { opacity: 0 }], {
+      duration: 220, easing: "ease-out", fill: "forwards",
+    });
+    void fade.finished.catch(() => undefined).then(() => {
+      window.clearTimeout(timeout);
+      finish();
+    });
+  } catch {
+    window.clearTimeout(timeout);
+    finish();
+  }
 }
 
 /** Called after initial data settles; retain layout while first-frame media loads. */
