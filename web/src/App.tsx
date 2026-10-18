@@ -262,7 +262,7 @@ export function App() {
       <header className="topbar">
         <div className="topbar-context">
           <span className="mobile-brand"><img src="/app-icon.png" alt="" /> <span><span className="brand-accent">S6</span>_cut</span></span>
-          {selected && page === "workspace" ? <><span className="muted">Workspace</span><span className="crumb">/</span><strong>{selected.name}</strong></> : <strong>{nav.find((item) => item.id === page)?.name}</strong>}
+          {selected && page === "workspace" ? <><span className="muted">Workspace</span><span className="crumb">/</span><strong>{selected.name}</strong></> : page !== "shorts-editor" && <strong>{nav.find((item) => item.id === page)?.name}</strong>}
         </div>
         <div className="topbar-state">
           {/* Steady-state reading only. Startup is announced once, by the

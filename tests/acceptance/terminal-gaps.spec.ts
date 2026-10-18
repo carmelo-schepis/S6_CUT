@@ -145,7 +145,7 @@ test("terminal exact viewport, screenshot, and ZIP evidence", async ({ browser, 
     await page.waitForTimeout(400);
     diagnostics.measurements.push(await measure(page, "workspace", { width, height }));
     await open(page, "Shorts Editor");
-    await expect(page.getByRole("heading", { name: "Shorts Editor" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Editor" })).toBeVisible();
     diagnostics.measurements.push(await measure(page, "shorts-editor", { width, height }));
     await page.screenshot({ path: path.join(artifacts, `${name}-shorts-editor.png`), fullPage: true });
     await open(page, "Jobs");

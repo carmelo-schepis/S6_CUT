@@ -123,8 +123,8 @@ test("Docker-served studio acceptance workflow", async ({ page, request }) => {
 
   // Shorts Editor: real source preview, local assistant proposal, and output list.
   await open(page, "Shorts Editor");
-  await expect(page.getByRole("heading", { name: "Shorts Editor" })).toBeVisible();
-  await expect(page.getByRole("heading", { level: 1, name: "Shorts Editor" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Editor" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Editor" })).toBeVisible();
   await expect(page.getByText("Trim an authorised video into a social-ready clip. Choose the section, output shape, and subtitles, then queue the render.")).toHaveCount(0);
   await page.setViewportSize({ width: 768, height: 1024 });
   const tabletMeasure = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth, innerWidth: window.innerWidth }));

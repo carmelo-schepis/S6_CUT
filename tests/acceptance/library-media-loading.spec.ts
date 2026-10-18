@@ -54,7 +54,7 @@ async function installLargeLibrary(page: Page) {
 async function openLibrary(page: Page) {
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await page.getByRole("button", { name: "Library", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Personal Media Library", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Library", exact: true })).toBeVisible();
 }
 
 test.describe("Library media loading", () => {

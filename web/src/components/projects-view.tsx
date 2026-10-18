@@ -210,7 +210,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
     <h1 className="sr-only">Projects</h1>
     <section className="create-panel" aria-labelledby="create-title">
       <div className="create-topline">
-        <div><h2 id="create-title">Create a project</h2><p>Nothing leaves this machine unless you use a URL or an enabled provider.</p></div>
+        <div><h2 id="create-title">Create a project</h2></div>
         <div className="create-mode-controls">
           <div className="segmented" aria-label="Creation mode">
             <button type="button" aria-pressed={sourceProfile === "speech"} className={sourceProfile === "speech" ? "active" : ""} onClick={() => { setError(null); setSourceProfile("speech"); }}><Film size={15} /> Clip mode</button>

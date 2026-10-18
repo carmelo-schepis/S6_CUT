@@ -225,7 +225,7 @@ async function createAndInspect(page: import("@playwright/test").Page, testInfo:
       "Auto without a provider resolves through the Fast path").toBeFalsy();
   }
   await page.getByRole("button", { name: "Library", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Personal Media Library" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Library" })).toBeVisible();
   const assetCard = page.locator(`.asset-card[data-asset-id="${clips[0].libraryAssetId}"]`);
   await expect(assetCard).toBeVisible();
   await assetCard.locator(".asset-preview-trigger").click();

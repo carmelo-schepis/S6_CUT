@@ -75,7 +75,7 @@ test.describe("isolated Library still-thumbnail acceptance", () => {
 
       await page.goto("/");
       await page.getByRole("button", { name: "Library", exact: true }).click();
-      await expect(page.getByRole("heading", { name: "Personal Media Library", exact: true })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Library", exact: true })).toBeVisible();
       const search = page.getByRole("textbox", { name: "Search media" });
       const thumbnailSources = new Set<string>();
       for (const fixture of media) {

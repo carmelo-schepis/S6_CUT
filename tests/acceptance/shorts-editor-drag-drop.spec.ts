@@ -30,7 +30,7 @@ async function openEditor(page) {
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await expect(page.locator("#main-content")).toBeVisible();
   await page.getByRole("button", { name: "Shorts Editor", exact: true }).first().click();
-  await expect(page.getByRole("heading", { level: 1, name: "Shorts Editor" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Editor" })).toBeVisible();
   await openClips(page);
   await expect(page.getByRole("button", { name: /Copper sunrise/ })).toBeVisible();
 }

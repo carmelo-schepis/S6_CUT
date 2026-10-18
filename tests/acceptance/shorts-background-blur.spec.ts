@@ -115,7 +115,7 @@ async function waitForComplete(name: string) {
 
 async function queueShorts(page: Page, name: string, aspect: Aspect, source: "url" | string) {
   await page.getByRole("button", { name: "Shorts Editor", exact: true }).first().click();
-  await expect(page.getByRole("heading", { name: "Shorts Editor", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Editor", exact: true })).toBeVisible();
   if (source === "url") {
     await page.getByRole("tab", { name: "YouTube", exact: true }).click();
     await page.getByLabel("YouTube URL").fill(approvedUrl);
