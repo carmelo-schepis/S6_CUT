@@ -2,6 +2,8 @@ import { expect, test } from "@playwright/test";
 import path from "node:path";
 import { mkdir } from "node:fs/promises";
 
+test.use({ serviceWorkers: "block" });
+
 const root = process.cwd();
 const artifacts = path.resolve(process.env.S6_PLAYWRIGHT_ARTIFACTS || "test-artifacts/shorts-editor-drag-drop");
 const now = "2026-10-14T00:00:00Z";

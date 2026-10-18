@@ -92,10 +92,11 @@ test.describe("Shorts Editor complete undo and redo", () => {
     await openEditor(page);
     await mediaTools(page).getByRole("tab", { name: "Text", exact: true }).click();
     await page.getByRole("button", { name: "Add text overlay" }).click();
+    await page.getByLabel("Overlay text").fill("Dragged line");
     const horizontal = page.getByLabel("Horizontal position");
     const vertical = page.getByLabel("Vertical position");
     const before = { x: await horizontal.inputValue(), y: await vertical.inputValue() };
-    const overlay = page.getByRole("button", { name: "Text overlay: Your text" });
+    const overlay = page.getByRole("button", { name: "Text overlay: Dragged line" });
     await expect(overlay).toBeVisible();
     await overlay.scrollIntoViewIfNeeded();
     const box = await overlay.boundingBox();
@@ -108,10 +109,14 @@ test.describe("Shorts Editor complete undo and redo", () => {
     await expect(vertical).not.toHaveValue(before.y);
 
     await undo(page).click();
+    await expect(page.getByLabel("Overlay text")).toHaveValue("Dragged line");
     await expect(horizontal).toHaveValue(before.x);
     await expect(vertical).toHaveValue(before.y);
     await redo(page).click();
     await expect(horizontal).not.toHaveValue(before.x);
+    await undo(page).click();
+    await undo(page).click();
+    await expect(page.getByLabel("Overlay text")).toHaveValue("Your text");
   });
 
   test("creates, edits, and deletes text overlays through undo and redo", async ({ page }, testInfo) => {
@@ -136,6 +141,43 @@ test.describe("Shorts Editor complete undo and redo", () => {
     await expect(page.getByRole("group", { name: "Text overlay 1" })).toHaveCount(0);
   });
 
+  test("undoes and redoes overlay color, size, position, and timing", async ({ page }) => {
+    await openEditor(page);
+    await mediaTools(page).getByRole("tab", { name: "Text", exact: true }).click();
+    await page.getByRole("button", { name: "Add text overlay" }).click();
+    const color = page.getByLabel("Text color");
+    const size = page.getByLabel("Text size");
+    const horizontal = page.getByLabel("Horizontal position");
+    const vertical = page.getByLabel("Vertical position");
+    const start = page.getByLabel("Overlay start seconds");
+    const duration = page.getByLabel("Overlay duration seconds");
+
+    await color.fill("#ff0000");
+    await size.fill("72");
+    await horizontal.fill("0.3");
+    await vertical.fill("0.7");
+    await start.fill("0.5");
+    await duration.fill("2");
+
+    await undo(page).click();
+    await expect(duration).toHaveValue("3");
+    await undo(page).click();
+    await expect(start).toHaveValue("0");
+    await undo(page).click();
+    await expect(vertical).toHaveValue("0.5");
+    await undo(page).click();
+    await expect(horizontal).toHaveValue("0.5");
+    await undo(page).click();
+    await expect(size).toHaveValue("48");
+    await undo(page).click();
+    await expect(color).toHaveValue("#ffffff");
+
+    for (const [field, value] of [[color, "#ff0000"], [size, "72"], [horizontal, "0.3"], [vertical, "0.7"], [start, "0.5"], [duration, "2"]] as const) {
+      await redo(page).click();
+      await expect(field).toHaveValue(value);
+    }
+  });
+
   test("keyboard shortcuts undo editor edits outside inputs while native text undo stays in editable fields", async ({ page }) => {
     await openEditor(page);
     const aspect = page.getByLabel("Aspect ratio");
@@ -154,6 +196,18 @@ test.describe("Shorts Editor complete undo and redo", () => {
     await name.press("Control+z");
     await expect(name).toHaveValue("Base title");
     await expect(aspect).toHaveValue("4:5");
+
+    const subtitles = page.getByLabel("Subtitles");
+    await subtitles.uncheck();
+    await page.keyboard.press("Control+z");
+    await expect(subtitles).toBeChecked();
+    await page.keyboard.press("Control+y");
+    await expect(subtitles).not.toBeChecked();
+    await page.getByRole("heading", { level: 1, name: "Editor" }).click();
+    await page.keyboard.press("Meta+z");
+    await expect(subtitles).toBeChecked();
+    await page.keyboard.press("Meta+Shift+z");
+    await expect(subtitles).not.toBeChecked();
   });
 
   test("does not create history for no-op edits and clears redo after a new edit", async ({ page }) => {
@@ -221,6 +275,27 @@ test.describe("Shorts Editor complete undo and redo", () => {
     await expect(undo(page)).toBeEnabled();
     await undo(page).click();
     await expect(page.getByLabel("Aspect ratio")).toHaveValue("9:16");
+  });
+
+  test("a confirmed YouTube source carries the selected edits and a failed request preserves history", async ({ page }) => {
+    await openEditor(page);
+    const aspect = page.getByLabel("Aspect ratio");
+    await aspect.selectOption("4:5");
+    page.once("dialog", async (dialog) => {
+      expect(dialog.message()).toContain("Use the current edit settings");
+      await dialog.accept();
+    });
+    await page.getByText("Choose another source", { exact: true }).click();
+    await page.getByRole("tab", { name: "YouTube", exact: true }).click();
+    await expect(page.getByRole("tab", { name: "YouTube", exact: true })).toHaveAttribute("aria-selected", "true");
+    await page.getByLabel("YouTube URL").fill("https://www.youtube.com/watch?v=authorized-fixture");
+    await postMultipartFields(page, 503);
+    await page.getByRole("button", { name: "Queue short", exact: true }).click();
+    await expect(page.getByRole("alert")).toContainText("Queue fixture rejected");
+    await expect(aspect).toHaveValue("4:5");
+    await expect(undo(page)).toBeEnabled();
+    await undo(page).click();
+    await expect(aspect).toHaveValue("9:16");
   });
 
   test("a failed queue preserves edited values and undo history", async ({ page }) => {
