@@ -1,4 +1,6 @@
 import { expect, test } from "@playwright/test";
+import { createServer, request as proxyRequest } from "node:http";
+import type { AddressInfo } from "node:net";
 
 function pngDimensions(bytes: Buffer) {
   expect(bytes.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
@@ -50,75 +52,98 @@ test("production PWA manifest, icons, and service worker are valid", async ({ re
   expect(serviceWorkerSource).not.toMatch(/install[\s\S]{0,500}skipWaiting\(\)/);
 });
 
-test("production PWA activates, works offline, and excludes API/media traffic from caches", async ({ page }) => {
-  const consoleErrors: string[] = [];
-  page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
-  page.on("pageerror", (error) => consoleErrors.push(error.message));
-
-  await page.goto("/direct-production-route", { waitUntil: "domcontentloaded" });
-  await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
-  await expect.poll(() => page.evaluate(() => navigator.serviceWorker?.controller?.scriptURL || ""), { timeout: 15_000 }).toContain("/sw.js");
-  const worker = await page.evaluate(async () => {
-    const registration = await navigator.serviceWorker.ready;
-    return { active: registration.active?.state, scriptURL: registration.active?.scriptURL };
+test("production PWA activates, works offline, and excludes API/media traffic from caches", async ({ page, baseURL }) => {
+  let offline = false;
+  const upstream = new URL(baseURL!);
+  const proxy = createServer((request, response) => {
+    if (offline) { request.socket.destroy(); return; }
+    const forward = proxyRequest(new URL(request.url!, upstream), {
+      method: request.method, headers: { ...request.headers, host: upstream.host },
+    }, (result) => {
+      response.writeHead(result.statusCode!, result.headers);
+      result.pipe(response);
+    });
+    forward.on("error", () => response.destroy());
+    response.on("close", () => forward.destroy());
+    request.pipe(forward);
   });
-  expect(worker).toEqual({ active: "activated", scriptURL: expect.stringContaining("/sw.js") });
+  await new Promise<void>((resolve) => proxy.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${(proxy.address() as AddressInfo).port}`;
 
-  const initialCaches = await page.evaluate(async () => {
-    const names = await caches.keys();
-    const entries = await Promise.all(names.map(async (name) => ({ name, urls: (await (await caches.open(name)).keys()).map((request) => new URL(request.url).pathname) })));
-    return entries;
-  });
-  expect(initialCaches.map((cache) => cache.name)).toContain("s6-cut-shell-v9");
-  expect(initialCaches.map((cache) => cache.name)).not.toContain("s6-cut-shell-v8");
-  expect(initialCaches.flatMap((cache) => cache.urls)).toContain("/");
-  expect(initialCaches.flatMap((cache) => cache.urls)).toContain("/startup.css");
-  expect(initialCaches.flatMap((cache) => cache.urls).some((url) => url.startsWith("/assets/"))).toBe(true);
+  try {
+    const consoleErrors: string[] = [];
+    page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
+    page.on("pageerror", (error) => consoleErrors.push(error.message));
 
-  const apiOnline = await page.evaluate(async () => (await fetch("/api/health")).ok);
-  expect(apiOnline).toBe(true);
-  const bundle = await page.locator('script[src*="/assets/"]').getAttribute("src");
-  expect(bundle).toBeTruthy();
-  await page.evaluate(async (asset) => {
-    await fetch(`${asset}?pwa-range-test=1`, { headers: { Range: "bytes=0-31" } });
-  }, bundle);
+    await page.goto(`${origin}/direct-production-route`, { waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
+    await expect.poll(() => page.evaluate(() => navigator.serviceWorker?.controller?.scriptURL || ""), { timeout: 15_000 }).toContain("/sw.js");
+    const worker = await page.evaluate(async () => {
+      const registration = await navigator.serviceWorker.ready;
+      return { active: registration.active?.state, scriptURL: registration.active?.scriptURL };
+    });
+    expect(worker).toEqual({ active: "activated", scriptURL: expect.stringContaining("/sw.js") });
 
-  const cachedUrls = await page.evaluate(async () => (await Promise.all((await caches.keys()).map(async (name) => (await (await caches.open(name)).keys()).map((request) => request.url)))).flat());
-  expect(cachedUrls.some((url) => url.includes("/api/") || url.includes("pwa-range-test"))).toBe(false);
-  expect(cachedUrls.some((url) => /\/files\/|\/download|\/export|\.mp4(?:$|\?)/i.test(url))).toBe(false);
+    const initialCaches = await page.evaluate(async () => {
+      const names = await caches.keys();
+      const entries = await Promise.all(names.map(async (name) => ({ name, urls: (await (await caches.open(name)).keys()).map((request) => new URL(request.url).pathname) })));
+      return entries;
+    });
+    expect(initialCaches.map((cache) => cache.name)).toContain("s6-cut-shell-v9");
+    expect(initialCaches.map((cache) => cache.name)).not.toContain("s6-cut-shell-v8");
+    expect(initialCaches.flatMap((cache) => cache.urls)).toContain("/");
+    expect(initialCaches.flatMap((cache) => cache.urls)).toContain("/startup.css");
+    expect(initialCaches.flatMap((cache) => cache.urls).some((url) => url.startsWith("/assets/"))).toBe(true);
 
-  // Network failures during the intentional offline phase are expected browser
-  // diagnostics, not application errors. Start the final console assertion at
-  // the online boundary.
-  consoleErrors.length = 0;
-  await page.context().setOffline(true);
-  await expect(page.getByTestId("pwa-offline-status")).toBeVisible();
-  await page.goto("/offline-production-route", { waitUntil: "domcontentloaded" });
-  await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
-  const apiOffline = await page.evaluate(async () => {
-    try {
-      await fetch("/api/health");
-      return true;
-    } catch {
-      return false;
-    }
-  });
-  expect(apiOffline).toBe(false);
+    const apiOnline = await page.evaluate(async () => (await fetch("/api/health")).ok);
+    expect(apiOnline).toBe(true);
+    const bundle = await page.locator('script[src*="/assets/"]').getAttribute("src");
+    expect(bundle).toBeTruthy();
+    await page.evaluate(async (asset) => {
+      await fetch(`${asset}?pwa-range-test=1`, { headers: { Range: "bytes=0-31" } });
+    }, bundle);
 
-  await page.context().setOffline(false);
-  // Chromium may keep navigator.onLine unchanged while a service worker serves
-  // the offline navigation; exercise the same browser event the app listens to
-  // once the network is restored.
-  await page.evaluate(() => window.dispatchEvent(new Event("online")));
-  await expect(page.getByTestId("pwa-online-status")).toBeVisible();
-  consoleErrors.length = 0;
-  await expect.poll(() => page.evaluate(async () => (await fetch("/api/health")).ok), { timeout: 15_000 }).toBe(true);
-  expect(consoleErrors).toEqual([]);
+    const cachedUrls = await page.evaluate(async () => (await Promise.all((await caches.keys()).map(async (name) => (await (await caches.open(name)).keys()).map((request) => request.url)))).flat());
+    expect(cachedUrls.some((url) => url.includes("/api/") || url.includes("pwa-range-test"))).toBe(false);
+    expect(cachedUrls.some((url) => /\/files\/|\/download|\/export|\.mp4(?:$|\?)/i.test(url))).toBe(false);
 
-  await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
-  expect(overflow).toBe(true);
+    // Network failures during the intentional offline phase are expected browser
+    // diagnostics, not application errors. Start the final console assertion at
+    // the online boundary.
+    consoleErrors.length = 0;
+    // A real network outage exercises the worker fallback in both engines;
+    // WebKit setOffline blocks its worker too. Proxy outages do not emit online
+    // events, so exercise the banners separately with their browser events.
+    offline = true;
+    await page.evaluate(() => window.dispatchEvent(new Event("offline")));
+    await expect(page.getByTestId("pwa-offline-status")).toBeVisible();
+    await page.goto(`${origin}/offline-production-route`, { waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
+    const apiOffline = await page.evaluate(async () => {
+      try {
+        await fetch("/api/health");
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    expect(apiOffline).toBe(false);
+
+    offline = false;
+    await page.evaluate(() => window.dispatchEvent(new Event("online")));
+    await expect(page.getByTestId("pwa-online-status")).toBeVisible();
+    consoleErrors.length = 0;
+    await expect.poll(() => page.evaluate(async () => (await fetch("/api/health")).ok), { timeout: 15_000 }).toBe(true);
+    expect(consoleErrors).toEqual([]);
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
+    expect(overflow).toBe(true);
+  } finally {
+    proxy.closeAllConnections();
+    await new Promise<void>((resolve, reject) => proxy.close((error) => error ? reject(error) : resolve()));
+  }
 });
 
 test("waiting PWA updates are user-controlled", async ({ page, request }) => {
@@ -127,6 +152,9 @@ test("waiting PWA updates are user-controlled", async ({ page, request }) => {
   const serviceWorkerSource = await (await request.get("/sw.js")).text();
   expect(serviceWorkerSource).toContain("Do not skip waiting here");
 
+  // Initial installation also changes the controller; finish it before
+  // simulating a waiting update so its activation cannot race the click.
+  await expect.poll(() => page.evaluate(() => navigator.serviceWorker?.controller?.scriptURL || ""), { timeout: 15_000 }).toContain("/sw.js");
   await page.evaluate(() => {
     const waiting = { postMessage: (message: { type: string }) => { Object.assign(window, { __pwaTestMessage: message.type }); } };
     window.dispatchEvent(new CustomEvent("s6-cut:pwa-update-ready", { detail: { waiting } }));
