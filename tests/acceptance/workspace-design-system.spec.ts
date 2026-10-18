@@ -45,13 +45,13 @@ const gateway = process.env.S6_ACCEPTANCE_URL || "http://127.0.0.1:8080";
 const GRID = 4;
 /** `--space-6`: the separation between two status bands, and the viewer's inset. */
 const BAND_GAP = 24;
-/** `--ws-box-gap`: the space between two boxed sections, and between panes. */
+/** `--box-gap`: the space between two boxed sections, and between panes. */
 const BOX_GAP = 16;
 /** The sections drawn as boxes (see "Workspace boxes" in styles.css). */
 const BOXED = ["notice-panel", "checklist-panel", "workspace-grid", "board-panel"];
-/** `--ws-box-gap` again: the gutter between two boxed panes. */
+/** `--box-gap` again: the gutter between two boxed panes. */
 const PANE_GUTTER = BOX_GAP;
-/** `--ws-box-radius`: the corner of every boxed section. */
+/** `--box-radius`: the corner of every boxed section. */
 const BOX_RADIUS = 20;
 /** The height of a pane's first chrome row — tabs, title, toolbar. */
 const CHROME_HEIGHT = 32;

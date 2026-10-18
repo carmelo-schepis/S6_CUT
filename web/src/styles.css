@@ -2767,12 +2767,12 @@ input[type="checkbox"]:checked::before {
    catching a little more light along the top, and a 20px corner. The boxes
    do the separating, so the gaps between them close to one 16px step. */
 :root {
-  --ws-box-bg: #101010;
-  --ws-box-edge: #181818;
-  --ws-box-edge-top: #1f1f1f;
-  --ws-box-radius: 20px;
-  --ws-box-pad: var(--space-6);
-  --ws-box-gap: var(--space-4);
+  --box-bg: #101010;
+  --box-edge: #181818;
+  --box-edge-top: #1f1f1f;
+  --box-radius: 20px;
+  --box-pad: var(--space-6);
+  --box-gap: var(--space-4);
   /* The side panes gain their box padding back, so the Details tabs still
      fit on one row. */
   --ws-rail-left: 320px;
@@ -2786,25 +2786,80 @@ input[type="checkbox"]:checked::before {
 .workspace-page .workspace-grid > .panel,
 .workspace-grid > .panel:first-child,
 .workspace-grid > .panel:last-child {
-  border: 1px solid var(--ws-box-edge);
-  border-top-color: var(--ws-box-edge-top);
-  border-radius: var(--ws-box-radius);
-  background: var(--ws-box-bg);
-  padding: var(--ws-box-pad);
+  border: 1px solid var(--box-edge);
+  border-top-color: var(--box-edge-top);
+  border-radius: var(--box-radius);
+  background: var(--box-bg);
+  padding: var(--box-pad);
 }
-.workspace-page > .notice-panel { background: color-mix(in srgb, var(--warning) 6%, var(--ws-box-bg)); }
+.workspace-page > .notice-panel { background: color-mix(in srgb, var(--warning) 6%, var(--box-bg)); }
 .workspace-page > .notice-panel :is(.notice-panel-head, .notice-list) { padding-inline: 0; }
 .workspace-page > .checklist-panel { padding-block: var(--space-3); }
-.workspace-page > :is(.notice-panel, .checklist-panel, .workspace-grid, .board-panel) { margin-top: var(--ws-box-gap); }
+.workspace-page > :is(.notice-panel, .checklist-panel, .workspace-grid, .board-panel) { margin-top: var(--box-gap); }
 .viewer-stage { background: transparent; }
 @media (min-width: 821px) {
-  .workspace-grid { column-gap: var(--ws-box-gap); }
+  .workspace-grid { column-gap: var(--box-gap); }
 }
 @media (max-width: 820px) {
-  .workspace-grid > .panel + .panel { margin-top: var(--ws-box-gap); }
+  .workspace-grid > .panel + .panel { margin-top: var(--box-gap); }
 }
 @media (max-width: 600px) {
-  :root { --ws-box-pad: var(--space-4); --ws-box-radius: 16px; }
+  :root { --box-pad: var(--space-4); --box-radius: 16px; }
+}
+
+/* --- Editor boxes: the same boxes as the Workspace ---------------------- */
+/* The tools column, the monitor, the inspector, the Subscribe panel and the
+   timeline are each one box, 16px apart, like the Workspace panes. Two boxes
+   span more than one grid area (the tool icons over their settings; the
+   viewer header, picture and transport), so rows meet with no gap and the
+   16px is a margin only where two different boxes meet. Header bars lose
+   their own shade; the box fill carries them. */
+.video-editing-stage { row-gap: 0; column-gap: var(--box-gap); }
+.shorts-editor-toolbox :is(.shorts-tool-rail, .shorts-tool-pane, .shorts-property-inspector, .shorts-track-list, .shorts-bottom-controls),
+.video-editing-stage > .shorts-collapsible-panel,
+.video-editing-stage > .viewer-header,
+.video-editing-stage::before {
+  border: 1px solid var(--box-edge);
+  border-top-color: var(--box-edge-top);
+  border-radius: var(--box-radius);
+  background: var(--box-bg);
+}
+.shorts-editor-toolbox .shorts-tool-rail { min-height: 40px; padding: var(--space-2) var(--space-4) 0; border-bottom: 0; border-radius: var(--box-radius) var(--box-radius) 0 0; }
+.shorts-editor-toolbox .shorts-tool-pane { margin-bottom: var(--box-gap); padding: var(--space-4); border-top: 0; border-radius: 0 0 var(--box-radius) var(--box-radius); }
+.video-editing-stage > .viewer-header { min-height: 40px; padding: var(--space-2) var(--space-4) 0; border-bottom: 0; border-radius: var(--box-radius) var(--box-radius) 0 0; }
+.video-editing-stage::before { border-block: 0; border-radius: 0; }
+.shorts-editor-toolbox .shorts-bottom-controls { padding: var(--space-1) var(--space-4) var(--space-2); border-top: 0; border-radius: 0 0 var(--box-radius) var(--box-radius); }
+.shorts-editor-toolbox .shorts-bottom-controls > span { background: var(--surface-2); }
+.shorts-editor-toolbox .shorts-property-inspector > strong { min-height: 40px; margin: 0 0 var(--space-2); padding: var(--space-2) var(--space-4) 0; background: transparent; }
+.shorts-editor-toolbox .shorts-property-inspector:is([aria-label="Text properties"]) { padding-top: calc(40px + var(--space-2)); background: var(--box-bg); }
+.shorts-editor-toolbox .shorts-property-inspector label, .shorts-editor-toolbox .shorts-property-inspector > p { padding-inline: var(--space-4); }
+.shorts-editor-toolbox .shorts-property-inspector button:not(.icon-button) { margin-inline: var(--space-4); padding-inline: var(--space-3); }
+.shorts-editor-toolbox .property-toggle { margin: var(--space-2) var(--space-3); }
+.video-editing-stage > .shorts-collapsible-panel { padding: var(--space-3) var(--space-4); }
+.shorts-editor-toolbox .shorts-track-list { margin-top: var(--box-gap); padding: var(--space-1) var(--space-4) var(--space-3); }
+/* The picture is sized from one height and its own ratio, so a narrow
+   monitor shrinks it whole instead of letterboxing it inside a black frame. */
+.video-editing-stage > .shorts-video-frame {
+  --frame-h: clamp(260px, calc(100dvh - 458px), 860px);
+  --frame-ratio: 9 / 16;
+  width: min(100% - 2 * var(--space-4), var(--frame-h) * var(--frame-ratio));
+  height: auto;
+  max-width: none;
+  max-height: none;
+  margin: var(--space-2) 0;
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+}
+.video-editing-stage > .shorts-video-frame.aspect-16-9 { --frame-ratio: 16 / 9; }
+.video-editing-stage > .shorts-video-frame.aspect-1-1 { --frame-ratio: 1; }
+.video-editing-stage > .shorts-video-frame.aspect-4-5 { --frame-ratio: 4 / 5; }
+@media (max-width: 1100px) {
+  /* The inspector stacks under the tools: a box of its own. */
+  .shorts-editor-toolbox .shorts-property-inspector { margin-bottom: var(--box-gap); }
+}
+@media (max-width: 700px) {
+  .video-editing-stage > .shorts-video-frame { --frame-h: min(420px, max(240px, calc(100dvh - 360px))); }
+  .shorts-editor-toolbox .shorts-tool-rail { margin-top: var(--box-gap); }
 }
 
 /* --- Library: folders, media and the inspector apart by gutters ---------- */
