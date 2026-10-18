@@ -1,0 +1,6 @@
+html, body { background: #000; }
+body.startup-loading { overflow: hidden; }
+.startup-loading #root { opacity: 0; }
+.startup-loading .app-wallpaper { transition: none; }
+#startup-screen { position: fixed; inset: 0; z-index: 10000; display: grid; place-items: center; background: #000; }
+#startup-screen img { display: block; width: min(280px, 65vw); height: auto; }

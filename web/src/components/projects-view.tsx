@@ -19,7 +19,8 @@ const styles: { id: Style; label: string; note: string }[] = [
   { id: "hype", label: "Hype", note: "Hooks & high energy" },
 ];
 
-export function ProjectsView({ health, healthChecked = true, providersLoaded = true, hasSelectedProvider = true, selectedProfile = null, onConfigureProviders = () => undefined, onCreated, onSelectLibraryAsset }: {
+export function ProjectsView({ health, healthChecked = true, providersLoaded = true, hasSelectedProvider = true, selectedProfile = null, onConfigureProviders = () => undefined, onCreated, onSelectLibraryAsset, onReady }: {
+  onReady?: () => void;
   health: Health | null;
   /** False while the very first health read is still outstanding. */
   healthChecked?: boolean;
@@ -64,6 +65,11 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
       return false;
     }
   });
+  const [foldersLoaded, setFoldersLoaded] = useState(false);
+  const [recentClipsLoaded, setRecentClipsLoaded] = useState(false);
+  useEffect(() => {
+    if (foldersLoaded && recentClipsLoaded) onReady?.();
+  }, [foldersLoaded, recentClipsLoaded, onReady]);
   const [folders, setFolders] = useState<LibraryFolder[]>([]);
   const [libraryFolderId, setLibraryFolderId] = useState("");
   const singleFlight = useSingleFlight();
@@ -85,7 +91,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
       const recent = localStorage.getItem(RECENT_FOLDER_KEY);
       const fallback = next.find((folder) => folder.system || folder.name === "Unsorted") || next[0];
       setLibraryFolderId(next.some((folder) => folder.id === recent) ? recent! : fallback?.id || "");
-    }).catch(() => undefined);
+    }).catch(() => undefined).finally(() => setFoldersLoaded(true));
   }, []);
 
   const addFolder = async () => {
@@ -330,7 +336,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
       </div>
     </section>
 
-    <RecentClips onSelectAsset={(assetId) => onSelectLibraryAsset?.(assetId)} />
+    <RecentClips onReady={setRecentClipsLoaded} onSelectAsset={(assetId) => onSelectLibraryAsset?.(assetId)} />
 
   </div>;
 }
