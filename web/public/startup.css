@@ -4,22 +4,24 @@ body.startup-loading { overflow: hidden; }
 .startup-loading .app-wallpaper { transition: none; }
 #startup-screen { position: fixed; inset: 0; z-index: 10000; display: grid; place-items: center; overflow: hidden; isolation: isolate; background: #000; }
 #startup-screen::before {
-  content: ""; position: absolute; inset: -20%; z-index: -1;
-  background: radial-gradient(ellipse at 20% 35%, rgba(174, 28, 64, .18), transparent 50%),
-    radial-gradient(ellipse at 80% 30%, rgba(47, 37, 147, .24), transparent 52%),
-    radial-gradient(ellipse at 65% 85%, rgba(185, 132, 104, .16), transparent 45%);
-  animation: startup-drift 12s ease-in-out infinite alternate;
+  content: ""; position: absolute; inset: -8%; z-index: -1;
+  background: radial-gradient(ellipse at 48% 56%, rgba(0, 0, 0, .92) 0%, rgba(0, 0, 0, .6) 16%, transparent 48%),
+    radial-gradient(ellipse at 0% 12%, #c6002d 0%, rgba(125, 0, 31, .85) 22%, transparent 55%),
+    radial-gradient(ellipse at 100% 100%, #ff8352 0%, #e13a38 20%, transparent 52%),
+    radial-gradient(ellipse at 100% 48%, #496c84 0%, transparent 48%),
+    radial-gradient(ellipse at 100% 0%, #060565 0%, #000a3c 30%, transparent 65%), #000;
+  animation: startup-drift 7s ease-in-out infinite alternate;
 }
 .startup-brand { display: grid; justify-items: center; gap: 24px; }
-#startup-screen img { display: block; width: min(240px, 58vw); height: auto; border-radius: 24px; }
+.startup-logo { display: block; width: clamp(160px, 15vw, 210px); height: auto; }
 .startup-wordmark {
   font: 600 clamp(30px, 5vw, 44px)/1.2 system-ui, sans-serif; letter-spacing: .12em;
   color: #f4f0ed; background: linear-gradient(105deg, #dfb6a2, #faf7f4 35%, #f4f0ed 60%, #c7bce9 82%, #bccbdf);
   -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
 }
 @keyframes startup-drift {
-  from { transform: translate(-3%, -2%) scale(1); }
-  to { transform: translate(3%, 2%) scale(1.08); }
+  from { transform: translate(-1.5%, -1%) scale(1); }
+  to { transform: translate(1.5%, 1%) scale(1.04); }
 }
 @media (prefers-reduced-motion: reduce) {
   #startup-screen::before { animation: none; }
