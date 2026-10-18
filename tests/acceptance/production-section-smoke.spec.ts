@@ -22,7 +22,8 @@ test("production sections load without client or request failures", async ({ pag
     // Route changes intentionally tear down distant lazy media. Those aborted
     // media fetches are covered separately by the bounded-preview regression;
     // this smoke check reports real non-navigation transport failures.
-    if (!request.isNavigationRequest() && request.failure()?.errorText !== "net::ERR_ABORTED") requestFailures.push(`${request.method()} ${request.url()}: ${request.failure()?.errorText || "failed"}`);
+    const cancelledMedia = request.resourceType() === "media" && ["net::ERR_ABORTED", "Load request cancelled"].includes(request.failure()?.errorText || "");
+    if (!request.isNavigationRequest() && !cancelledMedia) requestFailures.push(`${request.method()} ${request.url()}: ${request.failure()?.errorText || "failed"}`);
   });
   page.on("response", (response) => {
     if (response.status() >= 400 && response.request().resourceType() !== "document") badResponses.push(`${response.status()} ${response.url()}`);
