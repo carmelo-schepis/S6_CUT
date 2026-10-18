@@ -16,11 +16,12 @@
  *      uses and `.topbar` mirrors, so above a ~1600px viewport the content ran
  *      ~200px wider than the bar directly above it.
  *   2. Two vertical steps, never ad hoc ones: status bands 24px apart under
- *      the command bar, and 64px before the panes and before the clip board.
- *      ("Space, not lines": the section gap is what replaced the hairlines.)
+ *      the command bar, and 16px between the boxed sections (processing
+ *      notes, progress, the panes and the clip board), which each sit in a
+ *      rounded box.
  *   3. Whole pixels. The three panels measured 310.612 / 751.487 / 350.7px
- *      because the grid used fractional `fr` tracks. The panes are held apart
- *      by one 48px gutter, never by a rule.
+ *      because the grid used fractional `fr` tracks. The panes are boxes held
+ *      apart by one 16px gutter, never by a rule.
  *   4. Panel chrome sits on its pane's text column (no inset), and the first
  *      chrome row of every pane is one height.
  *   5. The progress ledger's status words share a single left edge. They used
@@ -44,18 +45,22 @@ const gateway = process.env.S6_ACCEPTANCE_URL || "http://127.0.0.1:8080";
 const GRID = 4;
 /** `--space-6`: the separation between two status bands, and the viewer's inset. */
 const BAND_GAP = 24;
-/** `--gap-section`: the space in front of the panes and the clip board. */
-const SECTION_GAP = 64;
-/** `--gap-pane`: the gutter between two panes. */
-const PANE_GUTTER = 48;
+/** `--box-gap`: the space between two boxed sections, and between panes. */
+const BOX_GAP = 16;
+/** The sections drawn as boxes (see "Workspace boxes" in styles.css). */
+const BOXED = ["notice-panel", "checklist-panel", "workspace-grid", "board-panel"];
+/** `--box-gap` again: the gutter between two boxed panes. */
+const PANE_GUTTER = BOX_GAP;
+/** `--box-radius`: the corner of every boxed section. */
+const BOX_RADIUS = 20;
 /** The height of a pane's first chrome row — tabs, title, toolbar. */
 const CHROME_HEIGHT = 32;
 /** The Projects content column every page shares (`--page-measure` is this
  *  plus the page inset on each side), mirrored by `.topbar`. */
 const CONTENT = 1240;
 /** `--ws-rail-left` / `--ws-rail-right` above the 1180px breakpoint. */
-const RAIL_LEFT = 300;
-const RAIL_RIGHT = 340;
+const RAIL_LEFT = 320;
+const RAIL_RIGHT = 380;
 
 const spread = (values: number[]) => Math.max(...values) - Math.min(...values);
 
@@ -178,7 +183,7 @@ test.describe("workspace design system", () => {
     }
   });
 
-  test("every band of the page separates by a 24px or a 64px section gap", async ({ page }) => {
+  test("every band of the page separates by a 24px band gap or a 16px box gap", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await openWorkspace(page, projectName!);
 
@@ -193,7 +198,7 @@ test.describe("workspace design system", () => {
 
     for (let index = 1; index < bands.length; index += 1) {
       const gap = bands[index].top - bands[index - 1].bottom;
-      const expected = ["workspace-grid", "board-panel"].includes(bands[index].cls) ? SECTION_GAP : BAND_GAP;
+      const expected = BOXED.includes(bands[index].cls) ? BOX_GAP : BAND_GAP;
       expect(gap, `gap between .${bands[index - 1].cls} and .${bands[index].cls}`).toBeCloseTo(expected, 0);
     }
     // Every band starts on the same column and runs the full measure.
@@ -228,13 +233,12 @@ test.describe("workspace design system", () => {
       expect(Math.abs(column - Math.round(column)), `column ${index} (${column}px) is fractional`).toBeLessThanOrEqual(0.5);
     }
 
-    // Open panes: one gutter apart, never a rule or a frame between them.
+    // Boxed panes: one 16px gutter apart, each in its own rounded box.
     for (let index = 1; index < grid.panels.length; index += 1) {
       expect(grid.panels[index].left - grid.panels[index - 1].right, `gutter between panel ${index - 1} and ${index}`).toBeCloseTo(PANE_GUTTER, 0);
     }
     expect(spread(grid.panels.map((panel) => panel.height)), "panels are different heights").toBeLessThanOrEqual(1);
-    expect(grid.panels[0].radius, "left panel is unframed").toBe("0px");
-    expect(grid.panels[2].radius, "right panel is unframed").toBe("0px");
+    for (const panel of grid.panels) expect(panel.radius, `.${panel.cls} is a rounded box`).toBe(`${BOX_RADIUS}px`);
   });
 
   test("panel chrome sits on its pane's text column, at one height", async ({ page }) => {
@@ -307,8 +311,9 @@ test.describe("workspace design system", () => {
     // A finished run is one line: the heading, its count and a toggle. The
     // 280-340px budget belongs to a run in progress (vertical-progress.spec.ts).
     const folded = await box(page, ".checklist-panel");
-    expect(folded.height, "a finished ledger is one line").toBeLessThanOrEqual(40);
-    expect(folded.radius, "progress panel is unframed").toBe(0);
+    // One line of heading plus the box's 12px top and bottom padding and 1px edges.
+    expect(folded.height, "a finished ledger is one line").toBeLessThanOrEqual(40 + 2 * 12 + 2);
+    expect(folded.radius, "progress panel is a rounded box").toBe(BOX_RADIUS);
     await expect(page.locator(".checklist-count")).toHaveText(/^\d+ of \d+ complete$/);
     const toggle = page.getByRole("button", { name: "Show steps" });
     await toggle.click();
