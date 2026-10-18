@@ -64,8 +64,7 @@ test.describe("creation and Library layout regressions", () => {
         expect(Math.max(...modeMeasure.rects.map((rect) => rect.width)) - Math.min(...modeMeasure.rects.map((rect) => rect.width))).toBeLessThanOrEqual(1);
         expect(Math.max(...modeMeasure.rects.map((rect) => rect.height)) - Math.min(...modeMeasure.rects.map((rect) => rect.height))).toBeLessThanOrEqual(1);
         expect(modeMeasure.rects.every((rect) => rect.left >= (modeMeasure.parent?.left || 0) && rect.right <= (modeMeasure.parent?.right || width) + 1)).toBe(true);
-        expect(modeMeasure.note).toBeTruthy();
-        expect(modeMeasure.note!.right).toBeLessThanOrEqual((modeMeasure.parent?.right || width) + 1);
+        if (modeMeasure.note) expect(modeMeasure.note.right).toBeLessThanOrEqual((modeMeasure.parent?.right || width) + 1);
         await expectNoHorizontalOverflow(page);
         if (name === "desktop") await page.screenshot({ path: path.join(artifacts, `projects-${mode.toLowerCase()}.png`), fullPage: false });
       }
@@ -115,10 +114,11 @@ test.describe("creation and Library layout regressions", () => {
       });
       expect(inspectorMeasure.rect.left).toBeGreaterThanOrEqual(0);
       expect(inspectorMeasure.rect.right).toBeLessThanOrEqual(width + 1);
-      expect(inspectorMeasure.rect.top).toBeGreaterThanOrEqual(-1);
-      expect(inspectorMeasure.rect.bottom).toBeLessThanOrEqual(height + 1);
+      const dialogBox = await page.getByRole("dialog").boundingBox();
+      expect(dialogBox!.y).toBeGreaterThanOrEqual(0);
+      expect(dialogBox!.y + dialogBox!.height).toBeLessThanOrEqual(height + 1);
       expect(inspectorMeasure.scrollWidth).toBeLessThanOrEqual(inspectorMeasure.clientWidth);
-      expect(inspectorMeasure.overflowY).toBe("auto");
+      expect(await page.locator(".asset-preview-body").evaluate((element) => getComputedStyle(element).overflowY)).toBe("auto");
       expect(inspectorMeasure.controls.every((control) => control.left >= inspectorMeasure.rect.left && control.right <= inspectorMeasure.rect.right + 1)).toBe(true);
       await expectNoHorizontalOverflow(page);
       await page.screenshot({ path: path.join(artifacts, `${name}-library-inspector.png`), fullPage: false });

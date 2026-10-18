@@ -131,11 +131,12 @@ test.describe("isolated Library still-thumbnail acceptance", () => {
       })).toBe(true);
       await page.getByRole("textbox", { name: "Search media" }).fill(media[0].title);
 
-      // Card selection and preview controls remain usable and separate.
+      // Bulk selection stays separate; details share the preview dialog.
       await page.getByRole("checkbox", { name: media[0].title }).check();
       await expect(page.getByRole("checkbox", { name: media[0].title })).toBeChecked();
       await page.getByRole("button", { name: `Select ${media[0].title} for Rule Inspector` }).click();
       await expect(page.locator(".asset-inspector input").first()).toHaveValue(media[0].title);
+      await page.getByRole("button", { name: "Close video preview", exact: true }).click();
       await page.getByRole("button", { name: `Preview ${media[0].title}` }).click();
       const dialog = page.getByRole("dialog", { name: `${media[0].title} video preview` });
       await expect(dialog.locator("video")).toBeVisible();

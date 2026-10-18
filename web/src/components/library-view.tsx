@@ -145,6 +145,7 @@ export function LibraryView({ selectedAssetId }: { selectedAssetId?: string | nu
       setAssets((current) => current.filter((asset) => asset.id !== selected.id));
       emitLibraryChanged();
       setSelected(null);
+      setPreviewAsset(null);
       setSelectedIds((current) => current.filter((id) => id !== selected.id));
     } catch (cause) { setError(readableError(cause)); }
   };
@@ -174,7 +175,7 @@ export function LibraryView({ selectedAssetId }: { selectedAssetId?: string | nu
     try { await removeFolder(folder.id, destination.id); setFolderId(destination.id); emitLibraryChanged(); await load(false); } catch (cause) { setError(readableError(cause)); }
   };
   const openPreview = (asset: LibraryAsset, opener: HTMLButtonElement) => {
-    if (!asset.mediaType.startsWith("video/") || !asset.previewUrl) return;
+    setSelected(asset);
     setPreviewOpener(opener);
     setPreviewAsset(asset);
   };
@@ -245,7 +246,7 @@ export function LibraryView({ selectedAssetId }: { selectedAssetId?: string | nu
         {deleteFeedback && <div className="library-feedback" role="status">{deleteFeedback}</div>}
         {titleError && <p className="form-error library-title-error" role="alert">{titleError}</p>}
         {titleFeedback && <div className="library-feedback" role="status" data-testid="seo-title-feedback">{titleFeedback.message}{titleFeedback.reasons.length > 0 && <ul className="seo-title-conflicts">{titleFeedback.reasons.map((reason, index) => <li key={index}>{reason}</li>)}</ul>}</div>}
-        {visibleAssets.length ? <><div className="asset-grid">{pagedAssets.map((asset) => <LibraryAssetCard key={asset.id} asset={asset} isSelected={selectedIds.includes(asset.id)} isInspected={selected?.id === asset.id} onPreview={openPreview} onInspect={setSelected} onToggleSelected={(assetId, checked) => setSelectedIds((current) => checked ? [...current, assetId] : current.filter((id) => id !== assetId))} />)}</div>
+        {visibleAssets.length ? <><div className="asset-grid">{pagedAssets.map((asset) => <LibraryAssetCard key={asset.id} asset={asset} isSelected={selectedIds.includes(asset.id)} isInspected={selected?.id === asset.id} onPreview={openPreview} onInspect={openPreview} onToggleSelected={(assetId, checked) => setSelectedIds((current) => checked ? [...current, assetId] : current.filter((id) => id !== assetId))} />)}</div>
           {remainingAssets > 0 && <button className="show-all-projects" onClick={() => setAssetLimit((value) => value + ASSET_PAGE)}>Show {Math.min(ASSET_PAGE, remainingAssets)} more of {visibleAssets.length}</button>}</>
           : loading && !assets.length ? <EmptyState icon={<Library size={30} />} title="Opening your Library">Reading local media from the engine…</EmptyState>
             : assets.length
@@ -253,7 +254,10 @@ export function LibraryView({ selectedAssetId }: { selectedAssetId?: string | nu
               : <EmptyState icon={<Library size={30} />} title="Build your private resolver" action={<Button variant="primary" onClick={() => setShowImport(true)}><Upload size={15} /> Import first asset</Button>}>Your Library has no assets yet. Import a video, image, or audio file to start the private, local media set that deterministic matching draws on.</EmptyState>}
         <p className="loading-note" role="status">{loading ? "Refreshing local media…" : visibleAssets.length ? `Showing ${pagedAssets.length} of ${visibleAssets.length} assets` : ""}</p>
       </section>
+    </div>
 
+    {titleSuggestions && <SeoTitleReviewDialog result={titleSuggestions} applying={applyingTitles} error={titleApplyError} onCancel={closeTitleReview} onApply={(items) => void applyTitles(items)} />}
+    {previewAsset && <VideoPreviewDialog asset={previewAsset} opener={previewOpener} onClose={closePreview}>
       <aside className="asset-inspector panel" aria-label="Rule Inspector"><div className="panel-title"><strong>Rule Inspector</strong>{selected && <span>{formatAge(selected.createdAt)}</span>}</div>{selected ? <div className="asset-fields">
         <FieldGroup title="Identity" headingLevel={2}>
           <Field label="Title"><input value={selected.title} onChange={(event) => setSelected({ ...selected, title: event.target.value })} onBlur={() => saveIfChanged("title")} /></Field>
@@ -277,10 +281,7 @@ export function LibraryView({ selectedAssetId }: { selectedAssetId?: string | nu
         </FieldGroup>
         <Button variant="ghost" className="asset-remove" disabled={selected.protected} onClick={() => void removeSelectedAsset()}>Remove Library record</Button>
       </div> : <p className="muted inspector-empty">Select an asset to edit its deterministic matching rules.</p>}</aside>
-    </div>
-
-    {titleSuggestions && <SeoTitleReviewDialog result={titleSuggestions} applying={applyingTitles} error={titleApplyError} onCancel={closeTitleReview} onApply={(items) => void applyTitles(items)} />}
-    {previewAsset && <VideoPreviewDialog asset={previewAsset} opener={previewOpener} onClose={closePreview} />}
+    </VideoPreviewDialog>}
     {deleteDialogOpen && selectedIds.length > 0 && <DeleteConfirmationDialog count={selectedIds.length} projectLinked={selectedIds.some((assetId) => assets.find((asset) => asset.id === assetId)?.sourceProjectId)} deleting={deleting} onCancel={() => { setDeleteDialogOpen(false); queueMicrotask(() => document.querySelector<HTMLButtonElement>('[data-delete-selected="true"]')?.focus()); }} onConfirm={() => void confirmDelete()} />}
 
   </div>;
@@ -311,7 +312,7 @@ function DeleteConfirmationDialog({ count, projectLinked, deleting, onCancel, on
   </div></div>;
 }
 
-function LibraryAssetCard({ asset, isSelected, isInspected, onPreview, onInspect, onToggleSelected }: { asset: LibraryAsset; isSelected: boolean; isInspected: boolean; onPreview: (asset: LibraryAsset, opener: HTMLButtonElement) => void; onInspect: (asset: LibraryAsset) => void; onToggleSelected: (assetId: string, checked: boolean) => void }) {
+function LibraryAssetCard({ asset, isSelected, isInspected, onPreview, onInspect, onToggleSelected }: { asset: LibraryAsset; isSelected: boolean; isInspected: boolean; onPreview: (asset: LibraryAsset, opener: HTMLButtonElement) => void; onInspect: (asset: LibraryAsset, opener: HTMLButtonElement) => void; onToggleSelected: (assetId: string, checked: boolean) => void }) {
   const canPreview = asset.mediaType.startsWith("video/") && !!asset.previewUrl;
   const handlePreview = (event: MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
@@ -321,7 +322,7 @@ function LibraryAssetCard({ asset, isSelected, isInspected, onPreview, onInspect
   const handleInspect = (event: MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
     event.stopPropagation();
-    onInspect(asset);
+    onInspect(asset, event.currentTarget);
   };
   const handleToggleSelected = (event: ChangeEvent<HTMLInputElement>) => {
     event.stopPropagation();

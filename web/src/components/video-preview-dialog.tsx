@@ -1,7 +1,7 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { LibraryAsset } from "../types";
 
-export function VideoPreviewDialog({ asset, opener, onClose, onMediaError }: { asset: LibraryAsset; opener: HTMLButtonElement | null; onClose: () => void; onMediaError?: () => void }) {
+export function VideoPreviewDialog({ asset, opener, onClose, onMediaError, children }: { asset: LibraryAsset; opener: HTMLButtonElement | null; onClose: () => void; onMediaError?: () => void; children?: ReactNode }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const [playing, setPlaying] = useState(false);
@@ -71,7 +71,7 @@ export function VideoPreviewDialog({ asset, opener, onClose, onMediaError }: { a
   return <div className="video-preview-backdrop" onClick={onClose}>
     <section
       id={`video-preview-${asset.id}`}
-      className="video-preview-dialog"
+      className={`video-preview-dialog${children ? " asset-preview-dialog" : ""}`}
       role="dialog"
       aria-modal="true"
       aria-labelledby={`video-preview-title-${asset.id}`}
@@ -79,10 +79,11 @@ export function VideoPreviewDialog({ asset, opener, onClose, onMediaError }: { a
       onClick={(event) => event.stopPropagation()}
     >
       <div className="video-preview-header">
-        <h2 id={`video-preview-title-${asset.id}`}>{asset.title} video preview</h2>
+        <h2 id={`video-preview-title-${asset.id}`}>{asset.title} {asset.mediaType.startsWith("video/") ? "video preview" : "details"}</h2>
         <button ref={closeRef} className="icon-button video-preview-close" type="button" aria-label="Close video preview" onClick={onClose}>×</button>
       </div>
-      <div className="video-preview-stage">
+      <div className="asset-preview-body">
+      {asset.mediaType.startsWith("video/") && asset.previewUrl && <div className="video-preview-stage">
         <video
           ref={videoRef}
           className="video-preview-video"
@@ -96,6 +97,8 @@ export function VideoPreviewDialog({ asset, opener, onClose, onMediaError }: { a
           onError={() => { setPlaying(false); setError("This video preview could not be loaded."); onMediaError?.(); }}
         />
         {!playing && <button className="video-preview-play" type="button" aria-label={hasPlayed ? "Replay video" : "Play video"} onClick={() => void play()}>{hasPlayed ? "Replay video" : "Play video"}</button>}
+      </div>}
+      {children}
       </div>
       {error && <p className="video-preview-error" role="alert">{error}</p>}
     </section>
