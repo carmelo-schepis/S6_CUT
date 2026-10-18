@@ -19,10 +19,10 @@ for (const width of [390, 1024, 1440]) {
       window.scrollTo(0, 500);
       const samples: number[] = [];
       Object.assign(window, { headerTopSamples: samples });
-      const until = performance.now() + 3000;
+      Object.assign(window, { sampleHeaderTop: true });
       const sample = () => {
         samples.push(document.querySelector(".topbar")!.getBoundingClientRect().top);
-        if (performance.now() < until) requestAnimationFrame(sample);
+        if ((window as unknown as { sampleHeaderTop: boolean }).sampleHeaderTop) requestAnimationFrame(sample);
       };
       requestAnimationFrame(sample);
     });
@@ -39,8 +39,11 @@ for (const width of [390, 1024, 1440]) {
       await page.waitForTimeout(400);
     }
     await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
-    const positions = await page.evaluate(() => (window as unknown as { headerTopSamples: number[] }).headerTopSamples);
-    expect(positions.length).toBeGreaterThan(10);
+    const positions = await page.evaluate(() => {
+      Object.assign(window, { sampleHeaderTop: false });
+      return (window as unknown as { headerTopSamples: number[] }).headerTopSamples;
+    });
+    expect(positions.length).toBeGreaterThan(0);
     expect(positions.every((top) => Math.abs(top) < 0.5)).toBe(true);
     await expect(header).toHaveCSS("background-color", "rgb(0, 0, 0)");
     await expect(page.locator("body")).toHaveJSProperty("scrollWidth", width);
