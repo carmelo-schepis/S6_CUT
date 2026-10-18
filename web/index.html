@@ -11,7 +11,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="S6_cut" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <link rel="stylesheet" href="/startup.css" />
+    <link rel="stylesheet" href="/startup.css?v=2" />
     <link rel="preload" href="/brand-logo.png" as="image" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" type="image/png" sizes="64x64" href="/favicon.png" />
@@ -20,7 +20,7 @@
     <title>S6_cut — Local video studio</title>
   </head>
   <body class="startup-loading">
-    <div id="startup-screen" role="status" aria-label="Loading S6 Cut"><img src="/brand-logo.png" alt="S6 Cut" /></div>
+    <div id="startup-screen" role="status" aria-label="Loading S6 Cut"><div class="startup-brand"><img src="/brand-logo.png" alt="S6 Cut" /><span class="startup-wordmark" aria-hidden="true">s6_cut</span></div></div>
     <div id="root" inert></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
