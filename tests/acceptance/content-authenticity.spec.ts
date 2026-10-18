@@ -93,7 +93,7 @@ test.describe("S6_cut generates real playable video", () => {
       { id: string; title: string; blobId: string }[];
 
     await page.getByRole("button", { name: "Library", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "Personal Media Library" })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("heading", { name: "Library" })).toBeVisible({ timeout: 30_000 });
     await page.getByLabel("Asset origin").selectOption("generated-clip");
     await expect(page.locator(".asset-card").first()).toBeVisible({ timeout: 30_000 });
 

@@ -208,7 +208,7 @@ test.describe("removed helper copy", () => {
     await mockEngine(page);
     await page.goto("/", { waitUntil: "domcontentloaded" });
     await navigate(page, "Shorts Editor");
-    await expect(page.getByRole("heading", { level: 1, name: "Shorts Editor" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "Editor" })).toBeVisible();
     await openClips(page);
     const assistantInput = page.getByRole("textbox", { name: "Editing request" });
     await expect(assistantInput).toBeVisible();
@@ -251,7 +251,7 @@ test.describe("removed helper copy", () => {
   test("Settings and each top-level screen stay copy-free", async ({ page }, testInfo) => {
     await mockEngine(page);
     await page.goto("/", { waitUntil: "domcontentloaded" });
-    for (const [screen, heading] of [["Projects", "Projects"], ["Library", "Personal Media Library"], ["Shorts Editor", "Shorts Editor"], ["Jobs", "Jobs & recovery"], ["Settings", "Settings"]] as const) {
+    for (const [screen, heading] of [["Projects", "Projects"], ["Library", "Library"], ["Shorts Editor", "Editor"], ["Jobs", "Jobs & recovery"], ["Settings", "Settings"]] as const) {
       if (screen !== "Projects") await navigate(page, screen);
       await expect(page.getByRole("heading", { level: 1, name: heading })).toBeVisible();
       await expectRemovedCopyAbsent(page);

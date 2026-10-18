@@ -2,9 +2,9 @@ import { expect, test } from "@playwright/test";
 
 const sections = [
   ["Projects", "Projects"],
-  ["Library", "Personal Media Library"],
+  ["Library", "Library"],
   ["Workspace", /.+/],
-  ["Shorts Editor", "Shorts Editor"],
+  ["Shorts Editor", "Editor"],
   ["Jobs", "Jobs & recovery"],
   ["Settings", "Settings"],
 ] as const;

@@ -6,7 +6,7 @@ async function openShortsEditor(page) {
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await expect(page.locator("#main-content")).toBeVisible();
   await page.getByRole("button", { name: "Shorts Editor", exact: true }).first().click();
-  await expect(page.getByRole("heading", { level: 1, name: "Shorts Editor" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Editor" })).toBeVisible();
 }
 
 test("YouTube editor controls validate trims and retain output settings without contacting YouTube", async ({ page }) => {
@@ -44,7 +44,7 @@ test("Shorts Editor keeps its source and editing controls usable without horizon
 
   for (const viewport of [{ width: 810, height: 1080 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(viewport);
-    await expect(page.getByRole("heading", { level: 1, name: "Shorts Editor" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "Editor" })).toBeVisible();
     await expect(page.getByLabel("Start seconds")).toBeVisible();
     await expect(page.getByLabel("Aspect ratio")).toBeVisible();
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);

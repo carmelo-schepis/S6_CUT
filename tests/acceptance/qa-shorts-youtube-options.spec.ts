@@ -11,7 +11,7 @@ test("Shorts Editor exposes output settings for a YouTube source", async ({ page
   await expect(page.locator("#main-content")).toBeVisible();
   await expect(page.getByRole("button", { name: "Shorts Editor", exact: true }).first()).toBeVisible();
   await page.getByRole("button", { name: "Shorts Editor", exact: true }).first().click();
-  await expect(page.getByRole("heading", { name: "Shorts Editor", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Editor", exact: true })).toBeVisible();
   await page.getByRole("tab", { name: "YouTube", exact: true }).click();
   await expect(page.getByLabel("YouTube URL")).toBeVisible();
   await page.getByRole("textbox", { name: /YouTube|URL/i }).first()

@@ -167,7 +167,7 @@ test.describe("S6_cut imports an authorised YouTube URL", () => {
     const listGenerated = async () => (await (await fetch(`${gateway}/api/v1/library/assets?origin=generated-clip`)).json()) as
       { id: string; title: string; blobId: string }[];
     await page.getByRole("button", { name: "Library", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "Personal Media Library" })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole("heading", { name: "Library" })).toBeVisible({ timeout: 30_000 });
     await page.getByLabel("Asset origin").selectOption("generated-clip");
     await expect(page.locator(".asset-card").first()).toBeVisible({ timeout: 30_000 });
     const publishedIds = clips.map((clip) => clip.libraryAssetId).filter(Boolean) as string[];
