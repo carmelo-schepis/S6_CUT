@@ -15,6 +15,7 @@ import time
 import uuid
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Annotated, Any, AsyncIterator, Literal
 
@@ -32,12 +33,13 @@ from .library import LibraryRules
 from .media import _SUBTITLE_PRESETS, MediaError, available, caption_font_mismatches, probe, probe_audio, validate_audio_track, validate_video_upload
 from .models import (
     Asset, AssetDelete, AssetDeleteResult, AssetMove, AssetOrigin, AssetUpdate, AssetPage, CaptionCue, CaptionDownload, CaptionReviewInput, Clip, FolderCreate, FolderMove, FolderUpdate, Health, Job, LibraryPurgeInput, LibraryPurgeResult,
-    LibraryFolder, MatchExplanation, RecentClipsPage, ContentFormat, ProcessingMode, ProfileInput, Project, ProjectFolderUpdate,
+    LibraryFolder, MatchExplanation, MobileClip, MobileDownload, MobileJob, MobileOverview, RecentClipsPage, ContentFormat, ProcessingMode, ProfileInput, Project, ProjectFolderUpdate,
     OpenRouterModel, ProviderProfile, SelectionInput, ShortsJobInput, SubscribeAnimationConfig, MusicPresentationConfig, YouTubeMetadataUpdate, now_iso,
 )
 from .providers import ProfileService, ProviderError
 from .security import MediaSigner, SecretVault, confined, safe_filename, validate_youtube_url
 from .seo_titles import SEO_PROMPT_VERSION, SEO_TITLE_RULES, normalize_seo_description, normalize_seo_title, source_context_title
+from .source_preview import PREVIEW_NAME, ensure_preview, has_preview, read_info_title
 from .thumbnails import get_thumbnail, prune_thumbnails
 from .title_backfill import TitleApplyRequest, TitleApplyResponse, TitleBackfill, TitleSuggestionRequest, TitleSuggestionResponse
 from .video_downloads import VideoDownloadInput, VideoDownloadManager, VideoDownloadTask
@@ -808,6 +810,102 @@ async def get_job(job_id: str) -> Job:
     return public_job(job)
 
 
+_LIVE_JOB_STATES = ("queued", "active", "paused", "stalled", "recovered")
+_MOBILE_CLIPS_PER_JOB = 8
+_MOBILE_DOWNLOADS = 30
+
+
+def _job_source_paths(job_id: str) -> tuple[Path, Path]:
+    source_dir = confined(settings.data_path, "jobs", job_id, "source")
+    return source_dir, confined(source_dir, PREVIEW_NAME)
+
+
+@app.get("/api/v1/jobs/{job_id}/source-thumbnail")
+# Poster for a source that is still downloading; once the source is registered
+# the Library thumbnail (from its immutable blob) is used instead.
+async def job_source_thumbnail(job_id: str, expires: int = Query(...), signature: str = Query(...)) -> FileResponse:
+    if db.get_job(job_id) is None:
+        raise _not_found("Job")
+    if not signer.verify(f"job-source-thumbnail:{job_id}:v1", expires, signature):
+        raise HTTPException(403, "Thumbnail link is invalid or expired")
+    try:
+        _, preview = _job_source_paths(job_id)
+    except ValueError as exc:
+        raise HTTPException(400, "Invalid job reference") from exc
+    if not has_preview(preview):
+        raise _not_found("Thumbnail")
+    return FileResponse(preview, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=300"})
+
+
+async def _early_job_poster(job: Job) -> tuple[str | None, str | None]:
+    """Title and poster URL for a job whose source has not been registered yet."""
+    try:
+        source_dir, preview = _job_source_paths(job.id)
+    except ValueError:
+        return None, None
+    title = await asyncio.to_thread(read_info_title, source_dir) if source_dir.is_dir() else None
+    if not has_preview(preview) and not await asyncio.to_thread(ensure_preview, source_dir, preview, settings.ffmpeg):
+        return title, None
+    expires, signature = signer.sign(f"job-source-thumbnail:{job.id}:v1")
+    return title, f"/api/v1/jobs/{job.id}/source-thumbnail?expires={expires}&signature={signature}"
+
+
+def _mobile_job(job: Job, project: Project | None, source: Asset | None, early_title: str | None, early_poster: str | None, *, live: bool) -> MobileJob:
+    public = public_job(job, include_caption_downloads=False)
+    complete = [clip for clip in public.clips if clip.state == "complete"]
+    shown = [clip for clip in complete if clip.preview_url or clip.thumbnail_url][:_MOBILE_CLIPS_PER_JOB]
+    clips = [
+        MobileClip(
+            id=clip.id, index=clip.index, duration=clip.duration, thumbnail_url=clip.thumbnail_url, preview_url=clip.preview_url,
+            title=" ".join((clip.title or clip.opening_line or "").split())[:120] or f"Clip {clip.index:02d}",
+        )
+        for clip in shown
+    ]
+    return MobileJob(
+        id=job.id, project_id=job.project_id, project_name=project.name if project else f"Project {job.project_id[:8]}",
+        mode=job.mode, state=job.state, stage=job.stage, stage_label=job.stage_label, progress=job.progress,
+        current_item=job.current_item, total_items=job.total_items, style=job.style, content_format=job.content_format,
+        download_progress=job.download_progress, steps=public.steps if live else [], queue_position=public.queue_position,
+        active_elapsed_seconds=job.active_elapsed_seconds, error=job.error, warnings=job.warnings[:3],
+        source_title=(project.source_title if project and project.source_title else None) or early_title,
+        source_thumbnail_url=(_thumbnail_url(source) if source else None) or early_poster,
+        clips_ready=len(complete), clips=clips, created_at=job.created_at, updated_at=job.updated_at,
+    )
+
+
+@app.get("/api/v1/mobile/overview", response_model=MobileOverview)
+async def mobile_overview(history: Annotated[int, Query(ge=0, le=100)] = 20) -> MobileOverview:
+    """Everything the iPhone/iPad status view shows, in one small read-only response.
+
+    `/jobs` carries every clip of every job (hundreds of KB), which is too much to
+    poll from a phone; this returns live jobs in full, a bounded page of finished
+    jobs, and only the clip thumbnails a card can actually show.
+    """
+    live_jobs = sorted(db.list_jobs(states=_LIVE_JOB_STATES), key=lambda job: (job.state != "active", job.created_at))
+    recent_jobs, recent_total = db.list_jobs_page(limit=history, exclude_states=_LIVE_JOB_STATES)
+    project_ids = [job.project_id for job in (*live_jobs, *recent_jobs)]
+    projects = {project_id: db.get_project(project_id) for project_id in set(project_ids)}
+    sources = db.project_source_assets(project_ids)
+    running: list[MobileJob] = []
+    for job in live_jobs:
+        early_title, early_poster = (None, None) if job.project_id in sources else await _early_job_poster(job)
+        running.append(_mobile_job(job, projects.get(job.project_id), sources.get(job.project_id), early_title, early_poster, live=True))
+    recent = [_mobile_job(job, projects.get(job.project_id), sources.get(job.project_id), None, None, live=False) for job in recent_jobs]
+    downloads: list[MobileDownload] = []
+    for task in video_downloads.list()[:_MOBILE_DOWNLOADS]:
+        task = _public_download(task)
+        downloads.append(MobileDownload(
+            id=task.id, state=task.state, phase=task.phase, downloaded_bytes=task.downloaded_bytes, total_bytes=task.total_bytes,
+            percent=None if task.percent is None else max(0.0, min(100.0, task.percent)), message=task.message, title=task.title,
+            thumbnail_url=task.thumbnail_url, error=task.error, created_at=task.created_at, updated_at=task.updated_at,
+        ))
+    since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    return MobileOverview(
+        running=running, recent=recent, recent_total=recent_total, downloads=downloads,
+        clips_last_day=db.count_generated_clips_since(since), failed_last_day=db.count_jobs_since("failed", since),
+    )
+
+
 @app.put("/api/v1/jobs/{job_id}/clips/{clip_id}/captions", response_model=Job)
 async def update_captions(job_id: str, clip_id: str, value: CaptionReviewInput) -> Job:
     job = db.get_job(job_id)
@@ -1308,10 +1406,31 @@ async def create_video_download(value: VideoDownloadInput, request: Request) -> 
     return task
 
 
+def _public_download(task: VideoDownloadTask) -> VideoDownloadTask:
+    """A response copy carrying a short-lived signed poster link, when a still exists."""
+    result = task.model_copy()
+    if video_downloads.has_preview(task.id):
+        expires, signature = signer.sign(f"video-download-thumbnail:{task.id}:v1")
+        result.thumbnail_url = f"/api/v1/video-downloads/{task.id}/thumbnail?expires={expires}&signature={signature}"
+    return result
+
+
 @app.get("/api/v1/video-downloads", response_model=list[dict[str, Any]])
 async def list_video_downloads() -> list[dict[str, Any]]:
     # Existing clients may still renew a signed URL through the by-id endpoint.
-    return [task.model_dump(by_alias=True, exclude={"download_url"}) for task in video_downloads.list()]
+    return [_public_download(task).model_dump(by_alias=True, exclude={"download_url"}) for task in video_downloads.list()]
+
+
+@app.get("/api/v1/video-downloads/{task_id}/thumbnail")
+# Own token and own route: /files only serves .mp4/.zip and must stay that way.
+async def video_download_thumbnail(task_id: str, expires: int = Query(...), signature: str = Query(...)) -> FileResponse:
+    if not re.fullmatch(r"[0-9a-f]{32}", task_id) or video_downloads.get(task_id) is None:
+        raise _not_found("Video download")
+    if not signer.verify(f"video-download-thumbnail:{task_id}:v1", expires, signature):
+        raise HTTPException(403, "Thumbnail link is invalid or expired")
+    if not video_downloads.has_preview(task_id):
+        raise _not_found("Thumbnail")
+    return FileResponse(video_downloads.preview_path(task_id), media_type="image/jpeg", headers={"Cache-Control": "private, max-age=300"})
 
 
 @app.get("/api/v1/video-downloads/{task_id}", response_model=VideoDownloadTask)
@@ -1336,7 +1455,7 @@ async def get_video_download(task_id: str) -> VideoDownloadTask:
                 result.download_url = f"/api/v1/files/{relative}?expires={expires}&signature={signature}"
             else:
                 result = video_downloads.mark_unavailable(task_id) or result
-    return result
+    return _public_download(result)
 
 
 @app.get("/api/v1/openrouter/models", response_model=list[OpenRouterModel], response_model_exclude_none=True)

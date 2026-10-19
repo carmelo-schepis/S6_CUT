@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { ChevronsLeft, ChevronsRight, CircleHelp, BriefcaseBusiness, Film, FolderKanban, Library, LoaderCircle, Scissors, Settings, SlidersHorizontal } from "lucide-react";
 import { getHealth, listJobs, listProfiles, listProjects, readableError } from "./api";
 import { JobsView } from "./components/jobs-view";
@@ -8,7 +8,6 @@ import { SettingsView } from "./components/settings-view";
 import { StatusBadge } from "./components/common";
 import { WorkspaceView } from "./components/workspace-view";
 import { WorkspaceProgressIndicator } from "./components/workspace-progress-indicator";
-import { IOSStatusView } from "./components/ios-status-view";
 import { ShortsEditorView } from "./components/shorts-editor-view";
 import { HelpDialog } from "./components/help-dialog";
 import { PwaStatus } from "./components/pwa-status";
@@ -43,6 +42,17 @@ const nav: { id: Page; label: string; name: string; icon: typeof Film }[] = [
   { id: "settings", label: "Settings", name: "Settings", icon: Settings },
 ];
 
+/**
+ * The iPhone/iPad status view is its own chunk: desktop browsers never download
+ * its code or styles. If the chunk cannot load (offline, or a deploy replaced
+ * it) the customer gets a way out instead of an empty screen.
+ */
+function MobileLoadFailed() {
+  useEffect(() => { revealApp(); }, []);
+  return <main className="m-load-failed" role="alert" style={{ display: "grid", gap: 12, justifyItems: "start", padding: 24 }}><p>The status view could not be loaded.</p><button type="button" onClick={() => window.location.reload()}>Reload</button></main>;
+}
+const MobileApp = lazy(() => import("./components/mobile/mobile-app").catch(() => ({ default: MobileLoadFailed })));
+
 function isIOSDevice(): boolean {
   if (typeof navigator === "undefined") return false;
   const ua = navigator.userAgent;
@@ -55,7 +65,8 @@ export function App() {
   const [projectsReady, setProjectsReady] = useState(false);
   const onProjectsReady = useCallback(() => setProjectsReady(true), []);
   useEffect(() => {
-    if (iosViewer) return revealApp();
+    // The status view reveals itself once its chunk has loaded.
+    if (iosViewer) return;
     if (initialDataLoaded && projectsReady) return revealWhenReady();
   }, [iosViewer, initialDataLoaded, projectsReady]);
 
@@ -220,7 +231,7 @@ export function App() {
   const hasSelectedProvider = profiles.some((profile) => profile.selected && profile.openrouterConfigured && profile.textStatus === "connected");
   const openProviders = () => setPage("settings");
 
-  if (iosViewer) return <IOSStatusView />;
+  if (iosViewer) return <Suspense fallback={null}><MobileApp /></Suspense>;
 
   return <div className="app-shell" data-rail={railCollapsed ? "collapsed" : "expanded"}>
     {/* First tab stop: lets keyboard users bypass the seven rail destinations

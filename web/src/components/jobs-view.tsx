@@ -11,7 +11,7 @@ const JOB_LIMIT = 20;
 
 // Jobs read as days rather than one even run of rows: the day heading and the
 // space around it do the separating that per-row hairlines used to.
-function dayLabel(iso: string, now = new Date()): string {
+export function dayLabel(iso: string, now = new Date()): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "Earlier";
   const start = (value: Date) => new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime();

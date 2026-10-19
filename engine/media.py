@@ -567,6 +567,7 @@ def download_youtube(
     cancellation_callback: Callable[[], bool] | None = None,
     resume: bool = True,
     max_seconds: int | None = None,
+    write_thumbnail: bool = False,
 ) -> Path:
     url = validate_youtube_url(url)
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -584,6 +585,10 @@ def download_youtube(
         common.extend(("--extractor-args", extractor_args))
     if resume:
         common.append("--continue")
+    if write_thumbnail:
+        # Poster image for the status views. Written next to the info sidecar
+        # before any media bytes arrive, so a preview exists while downloading.
+        common.append("--write-thumbnail")
     common.append(url)
     candidates = _run_ytdlp_download(common, target_dir, settings, progress_callback=progress_callback, cancellation_callback=cancellation_callback)
     if not candidates:

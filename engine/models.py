@@ -350,6 +350,72 @@ class Health(ApiModel):
     fallbacks: dict[str, str]
 
 
+# The iPhone/iPad status view polls every few seconds. The full job list carries
+# every clip of every job (about 480 KB for 69 jobs), so these compact read-only
+# views exist to keep that poll small. They are projections: nothing here is
+# persisted or accepted as input.
+class MobileClip(ApiModel):
+    id: str
+    index: int = Field(ge=1)
+    title: str
+    duration: float = Field(ge=0)
+    thumbnail_url: str | None = None
+    preview_url: str | None = None
+
+
+class MobileJob(ApiModel):
+    id: str
+    project_id: str
+    project_name: str
+    mode: Literal["clip", "script"]
+    state: JobState
+    stage: str
+    stage_label: str
+    progress: float = Field(ge=0, le=100)
+    current_item: int = Field(default=0, ge=0)
+    total_items: int = Field(default=0, ge=0)
+    style: Style
+    content_format: ContentFormat = "short"
+    download_progress: DownloadProgress | None = None
+    # Only live jobs carry their steps; finished ones are summarised by `clips`.
+    steps: list[ProcessingStep] = Field(default_factory=list)
+    queue_position: int | None = Field(default=None, ge=1)
+    active_elapsed_seconds: float | None = Field(default=None, ge=0)
+    error: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+    source_title: str | None = None
+    source_thumbnail_url: str | None = None
+    clips_ready: int = Field(default=0, ge=0)
+    clips: list[MobileClip] = Field(default_factory=list)
+    created_at: str
+    updated_at: str
+
+
+class MobileDownload(ApiModel):
+    id: str
+    state: Literal["queued", "active", "complete", "failed"]
+    phase: str
+    downloaded_bytes: int = Field(default=0, ge=0)
+    total_bytes: int | None = Field(default=None, ge=0)
+    percent: float | None = Field(default=None, ge=0, le=100)
+    message: str | None = None
+    title: str | None = None
+    thumbnail_url: str | None = None
+    error: str | None = None
+    created_at: str
+    updated_at: str
+
+
+class MobileOverview(ApiModel):
+    generated_at: str = Field(default_factory=now_iso)
+    running: list[MobileJob] = Field(default_factory=list)
+    recent: list[MobileJob] = Field(default_factory=list)
+    recent_total: int = Field(default=0, ge=0)
+    downloads: list[MobileDownload] = Field(default_factory=list)
+    clips_last_day: int = Field(default=0, ge=0)
+    failed_last_day: int = Field(default=0, ge=0)
+
+
 class SubscribeAnimationConfig(ApiModel):
     version: Literal[1] = 1
     enabled: bool = False

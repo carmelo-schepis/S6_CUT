@@ -84,7 +84,7 @@ export function downloadFacts(download: DownloadProgress): DownloadFacts {
 }
 
 /** The download only belongs on screen while it is still the live stage. */
-export function activeDownload(job: Job | null | undefined): DownloadProgress | null {
+export function activeDownload(job: Pick<Job, "downloadProgress"> | null | undefined): DownloadProgress | null {
   const download = job?.downloadProgress;
   if (!download || download.phase === "complete") return null;
   return download;
@@ -100,7 +100,7 @@ export type JobFacts = {
   indeterminate: boolean;
 };
 
-export function jobFacts(job: Job): JobFacts {
+export function jobFacts(job: Pick<Job, "downloadProgress" | "stageLabel" | "currentItem" | "totalItems" | "progress">): JobFacts {
   const download = activeDownload(job);
   const facts = download ? downloadFacts(download) : null;
   const items = job.currentItem > 0 && job.totalItems > 0 ? `${job.currentItem} of ${job.totalItems}` : null;

@@ -2937,33 +2937,3 @@ input[type="checkbox"]:checked::before {
 .library-page .asset-card-details-content > span:not(.origin-badge):not(.status) {
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
 }
-
-/* iPhone and iPad read-only status dashboard; mounted by device identity. */
-.ios-status-page { min-height: 100vh; width: min(100%, 820px); margin: 0 auto; padding: max(20px, env(safe-area-inset-top)) 20px max(32px, env(safe-area-inset-bottom)); color: var(--text-primary); }
-.ios-status-header, .ios-status-brand, .ios-status-card-heading, .ios-status-progress-label, .ios-status-transfer { display: flex; align-items: center; }
-.ios-status-header, .ios-status-card-heading, .ios-status-progress-label, .ios-status-transfer { justify-content: space-between; gap: 12px; }
-.ios-status-brand { gap: 10px; font-weight: 600; }
-.ios-status-brand img { width: 30px; height: 30px; border-radius: 7px; }
-.ios-status-refresh { min-width: 44px; min-height: 44px; display: grid; place-items: center; border: 1px solid var(--control-border); border-radius: 10px; background: var(--surface-1); color: var(--text-primary); }
-.ios-status-section { margin-top: 28px; }
-.ios-status-section > h1, .ios-status-empty h1 { margin: 0 0 12px; font-size: var(--type-heading-size); font-weight: var(--type-heading-weight); line-height: var(--type-heading-line); }
-.ios-status-list { display: grid; gap: 12px; }
-.ios-status-card { min-width: 0; padding: 16px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface-1); }
-.ios-status-card-heading > div { display: grid; min-width: 0; gap: 2px; }
-.ios-status-card-heading > div > span, .ios-status-summary, .ios-status-transfer, .ios-status-readonly, .ios-status-empty p { color: var(--text-muted); }
-.ios-status-card-heading .status { max-width: 52%; }
-.ios-status-progress { display: grid; gap: 8px; margin-top: 16px; }
-.ios-status-progress-label { font-weight: 500; }
-.ios-status-progress progress { width: 100%; height: 8px; accent-color: var(--copper); }
-.ios-status-transfer { font-variant-numeric: tabular-nums; }
-.ios-status-previews { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 12px; margin-top: 16px; }
-.ios-status-previews figure { min-width: 0; margin: 0; }
-.ios-status-previews video { display: block; width: 100%; max-height: 64vh; aspect-ratio: 9 / 16; object-fit: cover; border-radius: 10px; background: #000; }
-.ios-status-previews figcaption { margin-top: 6px; overflow-wrap: anywhere; }
-.ios-status-error { display: flex; justify-content: space-between; gap: 12px; margin-top: 20px; padding: 12px; border: 1px solid rgba(242,56,85,.45); border-radius: 10px; }
-.ios-status-error button { color: var(--text-primary); background: transparent; border: 0; text-decoration: underline; }
-.ios-status-empty { display: grid; justify-items: center; text-align: center; margin: 20vh auto 0; }
-.ios-status-empty h1 { margin: 12px 0 0; }
-.ios-status-empty p { margin: 4px 0; }
-.ios-status-readonly { margin: 24px 0 0; text-align: center; }
-@media (orientation: landscape) and (min-width: 700px) { .ios-status-page { width: min(100%, 1040px); } .ios-status-previews { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); } }
