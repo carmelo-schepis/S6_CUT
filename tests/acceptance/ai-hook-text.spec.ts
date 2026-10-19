@@ -159,7 +159,7 @@ test.describe("AI hook text acceptance", () => {
     liveProfileId = undefined;
   });
 
-  test("submits hook_text=true only after the checkbox is ticked", async ({ page }) => {
+  test("opens a custom hook field and submits entered text after the checkbox is ticked", async ({ page }) => {
     await mockConnectedProvider(page);
     const submittedBodies: string[] = [];
     await page.route("**/api/v1/jobs/clip", async (route) => {
@@ -181,9 +181,14 @@ test.describe("AI hook text acceptance", () => {
 
     await hook.check();
     await expect(hook).toBeChecked();
+    const customText = "The surprising detail nobody noticed";
+    const hookInput = page.getByRole("textbox", { name: "Hook text to display" });
+    await expect(hookInput).toBeVisible();
+    await hookInput.fill(customText);
     await create.click();
     await expect.poll(() => submittedBodies.length).toBe(2);
     expect(submittedBodies[1]).toMatch(/name="hook_text"\s+true/i);
+    expect(submittedBodies[1]).toContain(`name="manual_hook_text"\r\n\r\n${customText}`);
   });
 
   test("shows eligibility reasons without enabling unsupported configurations", async ({ page }) => {
@@ -332,5 +337,41 @@ test.describe("AI hook text acceptance", () => {
     const evidence = await verifyHookTextMedia(page, artifacts, `${testInfo.project.name}-ai-hook-text-timeout`, created.job.id, false);
     await fs.mkdir(artifacts, { recursive: true });
     await fs.writeFile(path.join(artifacts, `timeout-${Date.now()}.json`), JSON.stringify({ projectName, media: evidence }, null, 2));
+  });
+
+  test("custom hook text is burned into a locally rendered clip and plays in the browser", async ({ page }, testInfo) => {
+    test.skip(process.env.S6_RUN_MANUAL_HOOK_TEXT !== "1", "set S6_RUN_MANUAL_HOOK_TEXT=1 for isolated local-render verification");
+    test.skip(testInfo.project.name !== "Desktop Chromium", "manual hook media verification runs only on Desktop Chromium");
+    test.skip(!process.env.S6_AI_HOOK_TEXT_ENGINE_CONTAINER, "set S6_AI_HOOK_TEXT_ENGINE_CONTAINER to the isolated engine container");
+    test.setTimeout(25 * 60_000);
+    await openCreation(page);
+    await page.locator('input[aria-label="Choose video file"]').setInputFiles(path.join(root, "tests/fixtures/openrouter-fallback.mp4"));
+    await expect(page.locator(".drop-zone.has-file")).toBeVisible();
+    const projectName = `Manual hook render ${Date.now()}`;
+    await page.getByLabel("Project name").fill(projectName);
+    await page.getByRole("button", { name: "Smart", exact: true }).click();
+    await page.getByRole("button", { name: /Advanced controls/ }).click();
+    await page.getByLabel("Minimum seconds").fill("8");
+    await page.getByLabel("Maximum seconds").fill("10");
+    await page.getByRole("button", { name: "Engine only" }).click();
+    const count = page.locator(".count-control strong");
+    while (Number(await count.textContent()) > 1) await page.getByRole("button", { name: "Fewer clips", exact: true }).click();
+    await page.getByRole("checkbox", { name: /Hook text/i }).check();
+    const customText = "A surprising detail changes everything";
+    await page.getByRole("textbox", { name: "Hook text to display" }).fill(customText);
+    const createdResponse = page.waitForResponse((response) => response.url().includes("/api/v1/jobs/clip") && response.status() === 202);
+    await page.getByRole("button", { name: /^Create 1 short clip$/ }).click();
+    const created = await (await createdResponse).json();
+    await waitForReady(page, 1);
+    const jobResponse = await page.request.get(new URL(`/api/v1/jobs/${encodeURIComponent(created.job.id)}`, page.url()).toString());
+    expect(jobResponse.ok()).toBeTruthy();
+    const job = await jobResponse.json();
+    expect(job.clips).toHaveLength(1);
+    expect(job.clips[0].hookText).toBe(customText);
+    await page.getByRole("button", { name: "Captions", exact: true }).click();
+    await expect(page.locator(".inspector-section").filter({ hasText: "AI hook text" })).toContainText(customText);
+    const evidence = await verifyHookTextMedia(page, artifacts, `${testInfo.project.name}-manual-hook-text`, created.job.id);
+    await fs.mkdir(artifacts, { recursive: true });
+    await fs.writeFile(path.join(artifacts, `manual-${Date.now()}.json`), JSON.stringify({ projectName, customText, evidence }, null, 2));
   });
 });

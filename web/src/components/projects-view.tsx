@@ -61,6 +61,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
   const [sourceDuration, setSourceDuration] = useState<{ file: File; seconds: number } | null>(null);
   const [burnSubtitles, setBurnSubtitles] = useState(true);
   const [hookTextChoice, setHookTextChoice] = useState(false);
+  const [manualHookText, setManualHookText] = useState("");
   // null until the customer touches the toggle; until then it follows the
   // profile's "Auto-write SEO titles" default as eligibility changes.
   const [youtubeMetadataChoice, setYoutubeMetadataChoice] = useState<boolean | null>(null);
@@ -159,6 +160,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
           processingMode: sourceProfile === "music" ? "smart" : processingMode,
           sourceProfile, burnSubtitles: fastMode ? false : burnSubtitles,
           ...(hookTextEnabled ? { hookText: true } : {}),
+          ...(hookTextEnabled && manualHookText.trim() ? { manualHookText: manualHookText.trim() } : {}),
           // Eligible: always send the explicit choice so an untick is respected.
           ...(metadataDisabledReason === null ? { youtubeMetadata: youtubeMetadataActive } : {}),
           subscribeAnimation, libraryFolderId: libraryFolderId || undefined,
@@ -337,7 +339,8 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
           <SubscribeAnimationControl value={subscribeAnimation} onChange={setSubscribeAnimation} longForm={contentFormat === "long"} />
 
           {sourceProfile === "speech" && <label className="subtitle-toggle"><input type="checkbox" checked={fastMode ? false : burnSubtitles} disabled={fastMode} onChange={(event) => setBurnSubtitles(event.target.checked)} /> <span><strong>Burn in subtitles</strong><small>{fastMode ? "Fast mode skips transcription and captions. Choose Auto or Smart to enable them." : "Uses local word timing. Fast mode skips captions."}</small></span></label>}
-          <label className="subtitle-toggle"><input type="checkbox" aria-label="Hook text" checked={hookTextEnabled} disabled={!hookTextEligible} onChange={(event) => setHookTextChoice(event.target.checked)} /> <span><strong>Hook text</strong><small>{hookTextDisabledReason ?? "Off by default. Tick to add transcript-grounded hook text locally or with the API in Auto."}</small></span></label>
+          <label className="subtitle-toggle"><input type="checkbox" aria-label="Hook text" checked={hookTextEnabled} disabled={!hookTextEligible} onChange={(event) => setHookTextChoice(event.target.checked)} /> <span><strong>Hook text</strong><small>{hookTextDisabledReason ?? "Off by default. Tick to enter your own hook or leave blank to generate one from the transcript."}</small></span></label>
+          {hookTextEnabled && <Field label="Hook text to display" hint="Up to 150 characters. Your text will be shown on each clip."><textarea aria-label="Hook text to display" rows={2} maxLength={150} value={manualHookText} onChange={(event) => setManualHookText(event.target.value)} placeholder="Leave blank to generate a hook from the transcript" /></Field>}
           <label className="subtitle-toggle"><input type="checkbox" aria-label="Write SEO titles with AI (YouTube metadata)" data-testid="youtube-metadata-toggle" checked={youtubeMetadataActive} disabled={metadataDisabledReason !== null} onChange={(event) => setYoutubeMetadataChoice(event.target.checked)} /> <span><strong>Generate YouTube metadata</strong><small>{metadataDisabledReason ?? (processingMode === "fast" ? "Fast mode has no transcript. Choose Auto or Smart." : executionPolicy === "engine_only" ? "Uses transcript-based local descriptions and deterministic titles." : `${youtubeMetadataDefault ? "On by default (Settings › Auto-write SEO titles)" : "Off by default"}. Uses ${selectedProfile?.youtubeMetadataModelId || "the configured Settings model"} when available, with local fallback. Editable and separate from burned-in text.`)}</small></span></label>
 
           <button className="advanced-toggle" onClick={() => setAdvanced(!advanced)} aria-expanded={advanced}>Advanced controls <span aria-hidden="true">{advanced ? "−" : "+"}</span></button>

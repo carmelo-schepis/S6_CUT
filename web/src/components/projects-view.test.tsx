@@ -215,7 +215,7 @@ describe("Projects create flow", () => {
     const hookText = screen.getByRole("checkbox", { name: /Hook text/i });
     expect(hookText).toBeEnabled();
     expect(hookText).not.toBeChecked();
-    expect(hookText.parentElement).toHaveTextContent("Off by default. Tick to add transcript-grounded hook text locally or with the API in Auto.");
+    expect(hookText.parentElement).toHaveTextContent("Off by default. Tick to enter your own hook or leave blank to generate one from the transcript.");
   });
 
   it("sends hookText true only after an explicit opt-in", async () => {

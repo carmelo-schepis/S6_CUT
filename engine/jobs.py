@@ -1716,6 +1716,14 @@ class JobManager:
         interrupted = state.get("status") == "generating"
         self.start_step(job, "hook_text", detail="Writing transcript-grounded hooks", label="Writing hook text", progress=38, private=private)
         private["hook_text"] = {"enabled": True, "status": "generating"}
+        manual_text = state.get("manual_text")
+        if isinstance(manual_text, str) and manual_text.strip():
+            text = manual_text.strip()
+            for clip in job.clips:
+                clip.hook_text = text
+            private["hook_text"] = {"enabled": True, "status": "complete", "provider": "manual", "manual_text": text}
+            self.complete_step(job, "hook_text", detail=f"Custom text applied to {len(job.clips)} clips", private=private)
+            return
         if not job_allows_provider(job, private) or not private.get("use_openrouter", True) or interrupted or (planning_step and planning_step.status == "failed"):
             for clip in job.clips:
                 excerpt = " ".join(str(word.get("text", "")) for word in words if clip.start <= float(word.get("start", -1)) < clip.end)

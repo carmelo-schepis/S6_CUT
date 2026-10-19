@@ -224,6 +224,7 @@ type ClipJobInput = {
   musicTrackUrl?: string;
   musicTrackSpeed?: number;
   hookText?: boolean;
+  manualHookText?: string;
   youtubeMetadata?: boolean;
   youtubeMetadataModelId?: string;
 };
@@ -246,6 +247,7 @@ export async function createClipJob(input: ClipJobInput): Promise<{ project: Pro
   form.set("burn_subtitles", String(input.burnSubtitles ?? true));
   form.set("embed_subtitles", String(input.embedSubtitles ?? false));
   if (input.hookText === true) form.set("hook_text", "true");
+  if (input.manualHookText?.trim()) form.set("manual_hook_text", input.manualHookText.trim());
   // Omitted lets the engine follow the profile's auto-SEO-titles default; an
   // explicit false must reach it so a customer's opt-out is respected.
   if (input.youtubeMetadata !== undefined) form.set("youtube_metadata", String(input.youtubeMetadata));

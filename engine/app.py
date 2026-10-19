@@ -420,6 +420,7 @@ async def create_clip_job(
     music_presentation: Annotated[str, Form()] = "{}",
     music_top_text: Annotated[str, Form()] = "",
     hook_text: Annotated[bool, Form()] = False,
+    manual_hook_text: Annotated[str, Form(max_length=150)] = "",
     youtube_metadata: Annotated[bool | None, Form()] = None,
     youtube_metadata_model_id: Annotated[str | None, Form(max_length=200)] = None,
 ) -> dict[str, object]:
@@ -477,6 +478,9 @@ async def create_clip_job(
         # The metadata model is an independent Settings profile preference. A
         # job snapshots it so a later profile edit cannot rewrite queued work.
         youtube_metadata_model_id = selected_profile.youtube_metadata_model_id if selected_profile else None
+    manual_hook_text = manual_hook_text.strip()
+    if manual_hook_text and not hook_text:
+        raise HTTPException(422, "Enable Hook text before entering custom hook text.")
     if hook_text:
         if content_format != "short":
             raise HTTPException(422, "AI hook text is unavailable for Long form.")
@@ -502,7 +506,7 @@ async def create_clip_job(
         "presentation": presentation,
         "reaction_policy": {"version": 1, "name": "ironic_v1"} if source_profile == "speech" and burn_subtitles else None,
         "burn_subtitles": True if source_profile == "music" else burn_subtitles, "embed_subtitles": embed_subtitles,
-        "hook_text": {"enabled": hook_text, "status": "pending" if hook_text else "disabled"},
+        "hook_text": {"enabled": hook_text, "status": "pending" if hook_text else "disabled", **({"manual_text": manual_hook_text} if manual_hook_text else {})},
         "youtube_metadata": {"enabled": youtube_metadata, "model_id": youtube_metadata_model_id, "status": "pending" if youtube_metadata else "disabled"},
         "use_openrouter": execution_policy == "auto" and mode == "smart" and smart_available and source_profile == "speech" and batch_mode == "standard",
         "library_folder_id": library_folder_id,
