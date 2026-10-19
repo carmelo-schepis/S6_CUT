@@ -8,6 +8,7 @@ a reportable fault.
 from __future__ import annotations
 
 import shutil
+import subprocess
 
 import pytest
 
@@ -59,3 +60,30 @@ def test_styles_using_a_real_heavy_face_do_not_ask_for_synthetic_bold() -> None:
     for style in ("funny", "hype"):
         preset = _SUBTITLE_PRESETS[style]
         assert preset["bold"] == 0, f"{style} double-bolds {preset['fontname']}"
+
+
+@pytest.mark.parametrize("face", [False, True])
+@pytest.mark.parametrize("failure", ["timeout", "empty", "exit"])
+def test_font_lookup_recovers_after_transient_failure(monkeypatch, face, failure):
+    from engine import media
+
+    calls = []
+    def lookup(command, **kwargs):
+        calls.append(command)
+        if len(calls) == 1:
+            if failure == "timeout":
+                raise subprocess.TimeoutExpired(command, 10)
+            return subprocess.CompletedProcess(command, 1 if failure == "exit" else 0, stdout="")
+        return subprocess.CompletedProcess(command, 0, stdout="QA Font|Black" if face else "QA Font")
+
+    media._fontconfig_output.cache_clear()
+    monkeypatch.setattr(media.subprocess, "run", lookup)
+    resolve = lambda: media.resolve_font_face("QA Font", "Black") if face else media.resolve_font_family("QA Font")
+    try:
+        assert resolve() == ""
+        expected = "QA Font|Black" if face else "QA Font"
+        assert resolve() == expected
+        assert resolve() == expected
+        assert len(calls) == 2
+    finally:
+        media._fontconfig_output.cache_clear()

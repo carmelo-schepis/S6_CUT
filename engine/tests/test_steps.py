@@ -453,7 +453,7 @@ def test_music_smart_path_replaces_sparse_checkpoint_and_keeps_bounded_windows(m
     (tmp_path / "selected-song.mp3").write_bytes(b"selected-audio")
     extracted_from: list[Path] = []
     monkeypatch.setattr(test_manager, "_music_track_source", lambda *_args: tmp_path / "selected-song.mp3")
-    monkeypatch.setattr(media_module, "prepare_music_track", lambda source, _target, speed, _settings: (extracted_from.append(source), prepared_song)[1])
+    monkeypatch.setattr(media_module, "prepare_music_track", lambda source, _target, speed, _settings, **kwargs: (extracted_from.append(source), prepared_song)[1])
     monkeypatch.setattr(media_module, "probe_audio", lambda *_args, **_kwargs: {"duration": 100.0, "audio_codec": "mp3"})
     monkeypatch.setattr(media_module, "extract_audio_16k", lambda source, _settings, **_kwargs: (extracted_from.append(source), tmp_path / "song-audio.wav")[1])
     monkeypatch.setattr(media_module, "is_whisper_model_cached", lambda *_args, **_kwargs: True)

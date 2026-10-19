@@ -177,3 +177,13 @@ def test_download_cancellation_terminates_worker_and_keeps_partial_directory(tmp
             cancellation_callback=lambda: True,
         )
     assert tmp_path.is_dir()
+
+
+def test_repeated_unchanged_byte_counts_do_not_hide_a_stalled_download(tmp_path: Path, settings) -> None:
+    executable = fake_downloader(tmp_path, """
+        for _ in range(20):
+            print('download:downloading|100|1000|NA|0|9|10.0%', flush=True)
+            time.sleep(.1)
+    """)
+    with pytest.raises(DownloadStalled):
+        _run_ytdlp_download([str(executable)], tmp_path, replace(settings, ytdlp_inactivity_timeout=.3))

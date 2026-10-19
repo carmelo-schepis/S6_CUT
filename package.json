@@ -22,6 +22,7 @@
     "test:e2e:youtube": "node scripts/qa/youtube-import.mjs",
     "test:e2e:youtube-openrouter": "node scripts/qa/youtube-openrouter-fallback.mjs",
     "test:e2e:subtitle-emoji": "node scripts/qa/subtitle-emoji-acceptance.mjs",
+    "test:e2e:music-soundtrack": "node scripts/qa/verify-music-soundtrack.mjs",
     "qa:help-screenshots": "node scripts/qa/generate-help-screenshots.mjs"
   },
   "dependencies": {

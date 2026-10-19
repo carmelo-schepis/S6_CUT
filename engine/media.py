@@ -395,7 +395,7 @@ def probe_audio(path: Path, settings: Settings) -> dict[str, Any]:
     return {"duration": duration, "audio_codec": audio.get("codec_name")}
 
 
-def validate_audio_track(path: Path, settings: Settings, *, max_seconds: int | None = None) -> dict[str, Any]:
+def validate_audio_track(path: Path, settings: Settings, *, max_seconds: int | None = None, cancellation_callback: Callable[[], bool] | None = None) -> dict[str, Any]:
     """Probe and decode the full selected track so damaged frames are rejected."""
     metadata = probe_audio(path, settings)
     if metadata.get("audio_codec") != "mp3":
@@ -405,12 +405,12 @@ def validate_audio_track(path: Path, settings: Settings, *, max_seconds: int | N
         raise MediaError(f"Background song exceeds the {max_seconds}-second duration limit")
     timeout = max(120, min(7200, int(duration * 2 + 60)))
     run([settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-xerror", "-err_detect", "explode",
-         "-i", str(path), "-map", "0:a:0", "-vn", "-f", "null", "-"], timeout=timeout)
+         "-i", str(path), "-map", "0:a:0", "-vn", "-f", "null", "-"], timeout=timeout, cancellation_callback=cancellation_callback)
     return metadata
 
 
-def prepare_music_track(source: Path, target: Path, speed: float, settings: Settings) -> Path:
-    """Create a pitch-preserving-in-time-coordinate track for Music transcription.
+def prepare_music_track(source: Path, target: Path, speed: float, settings: Settings, *, duration: float | None = None, cancellation_callback: Callable[[], bool] | None = None) -> Path:
+    """Prepare the exact audible timeline shared by lyrics and video rendering.
 
     asetrate intentionally changes both pitch and tempo, matching the audible
     sped-up/slowed-down render option. The output timeline is video-time.
@@ -419,9 +419,14 @@ def prepare_music_track(source: Path, target: Path, speed: float, settings: Sett
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_suffix(".partial.mp3")
     temporary.unlink(missing_ok=True)
-    run([settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", str(source),
-         "-vn", "-af", f"aresample=48000,asetrate=48000*{speed:.3f},aresample=48000",
-         "-codec:a", "libmp3lame", "-q:a", "2", str(temporary)], timeout=7200)
+    command = [settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y"]
+    if duration is not None:
+        command.extend(["-stream_loop", "-1"])
+    command.extend(["-i", str(source), "-vn", "-af", f"aresample=48000,asetrate=48000*{speed:.3f},aresample=48000"])
+    if duration is not None:
+        command.extend(["-t", f"{duration:.6f}"])
+    command.extend(["-codec:a", "libmp3lame", "-q:a", "2", str(temporary)])
+    run(command, timeout=7200, cancellation_callback=cancellation_callback)
     probe_audio(temporary, settings)
     os.replace(temporary, target)
     return target
@@ -490,6 +495,7 @@ def _run_ytdlp_download(
     first_progress: float | None = None
     last_byte_progress = started
     last_output = started
+    last_downloaded_bytes = 0
     lines: list[str] = []
     process: subprocess.Popen[str] | None = None
     try:
@@ -512,8 +518,9 @@ def _run_ytdlp_download(
                     if update:
                         if first_progress is None:
                             first_progress = now
-                        if update["downloaded_bytes"] > 0:
+                        if update["downloaded_bytes"] > last_downloaded_bytes:
                             last_byte_progress = now
+                            last_downloaded_bytes = update["downloaded_bytes"]
                         _download_update(progress_callback, phase="downloading", **update)
                 elif process.poll() is not None:
                     break
@@ -616,10 +623,11 @@ def download_youtube_audio(
     if not target.is_file() or target.stat().st_size <= 0:
         raise MediaError("YouTube did not provide a usable background song")
     try:
-        validate_audio_track(target, settings, max_seconds=max_seconds)
+        validate_audio_track(target, settings, max_seconds=max_seconds, cancellation_callback=cancellation_callback)
     except MediaError:
         target.unlink(missing_ok=True)
         raise
+    _download_update(progress_callback, phase="complete", downloaded_bytes=target.stat().st_size, total_bytes=target.stat().st_size, percent=100.0, message="Background song downloaded and validated")
     return target
 
 
@@ -909,31 +917,30 @@ _CHAR_WIDTH_FACTOR = 0.55  # average Arial glyph width at 1em
 _SUBTITLE_PRESETS = {style: caption_preset(style) for style in known_styles()}
 
 
-@lru_cache(maxsize=32)
-def resolve_font_family(fontname: str) -> str:
-    """The family fontconfig actually hands libass for a requested name.
+@lru_cache(maxsize=64)
+def _fontconfig_output(pattern: str, output_format: str) -> str:
+    """Cache successful lookups; transient failures must remain retryable."""
+    result = subprocess.run(["fc-match", "-f", output_format, pattern], capture_output=True, text=True, timeout=10, check=False)
+    value = result.stdout.strip()
+    if result.returncode or not value:
+        raise OSError("Fontconfig did not return a usable font")
+    return value
 
-    Cached for the process: the installed font set is baked into the image and
-    cannot change under a running engine, and each lookup costs a subprocess.
-    """
+
+def resolve_font_family(fontname: str) -> str:
+    """The family fontconfig hands libass, retrying after a lookup failure."""
     try:
-        result = subprocess.run(["fc-match", "-f", "%{family}", fontname], capture_output=True, text=True, timeout=10, check=False)
+        return _fontconfig_output(fontname, "%{family}")
     except (OSError, subprocess.SubprocessError):
         return ""
-    return result.stdout.strip()
 
 
-@lru_cache(maxsize=8)
 def resolve_font_face(fontname: str, style: str) -> str:
     """Resolve an exact fontconfig family/style pair used by a presentation."""
     try:
-        result = subprocess.run(
-            ["fc-match", "-f", "%{family}|%{style}", f"{fontname}:style={style}"],
-            capture_output=True, text=True, timeout=10, check=False,
-        )
+        return _fontconfig_output(f"{fontname}:style={style}", "%{family}|%{style}")
     except (OSError, subprocess.SubprocessError):
         return ""
-    return result.stdout.strip()
 
 
 def caption_font_mismatches() -> dict[str, str]:

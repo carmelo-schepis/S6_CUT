@@ -459,7 +459,12 @@ def test_caption_rerender_preserves_music_presentation_and_clip_treatment(tmp_pa
 
     rendered = {}
     monkeypatch.setattr(media_module, "render_clip", lambda *args, **kwargs: rendered.update(kwargs))
-    monkeypatch.setattr(jobs_module, "probe", lambda *_args, **_kwargs: {"audio": True})
+    monkeypatch.setattr(jobs_module, "probe", lambda *_args, **_kwargs: {"audio": True, "duration": 100})
+    prepared = {}
+    def prepare(source, target, speed, settings, **kwargs):
+        prepared.update(source=source, speed=speed, **kwargs)
+        return tmp_path / "prepared-song.mp3"
+    monkeypatch.setattr(media_module, "prepare_music_track", prepare)
 
     manager = object.__new__(JobManager)
     manager.settings = SimpleNamespace(data_path=tmp_path)
@@ -492,8 +497,11 @@ def test_caption_rerender_preserves_music_presentation_and_clip_treatment(tmp_pa
     assert rendered["music_theme"] == "warm"
     assert rendered["music_top_text"] == "Exact title"
     assert rendered["music_treatment"] == "grayscale"
-    assert rendered["music_track"] == tmp_path / "saved-song.mp3"
-    assert rendered["music_track_speed"] == 1.25
+    assert prepared["source"] == tmp_path / "saved-song.mp3"
+    assert prepared["speed"] == 1.25
+    assert prepared["duration"] == 100
+    assert rendered["music_track"] == tmp_path / "prepared-song.mp3"
+    assert rendered["music_track_speed"] == 1.0
     assert rendered["words"] == [{"text": "edited", "start": 50.5, "end": 50.9}]
     assert clip.caption_cues[0].text == "edited"
     assert "caption_rerender" not in private

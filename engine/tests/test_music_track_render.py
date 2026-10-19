@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from engine.config import Settings
-from engine.media import MediaError, probe, render_clip, render_fast_clip
+from engine.media import MediaError, prepare_music_track, render_clip, render_fast_clip
 
 
 @pytest.fixture()
@@ -73,3 +73,23 @@ def test_corrupt_mp3_is_rejected_by_ffprobe(tmp_path: Path, settings: Settings) 
     with pytest.raises(MediaError):
         from engine.media import probe_audio
         probe_audio(corrupt, settings)
+
+
+@pytest.mark.parametrize("speed", [0.75, 1.0, 1.5])
+def test_prepared_song_loops_and_preserves_pitch_at_late_clip_offsets(tmp_path: Path, settings: Settings, speed: float) -> None:
+    import numpy as np
+
+    video, song = _fixtures(tmp_path, settings)
+    prepared = prepare_music_track(song, tmp_path / 'prepared.mp3', speed, settings, duration=2)
+    output = tmp_path / 'late.mp4'
+    render_clip(video, output, start=1, end=1.8, aspect='16:9', words=[], visuals=[], overlays=[],
+                settings=settings, has_audio=False, subtitles_enabled=False, music_track=prepared)
+    payload = _probe_audio(output, settings)
+    audio = next(stream for stream in payload['streams'] if stream['codec_type'] == 'audio')
+    assert float(audio['duration']) == pytest.approx(.8, abs=.08)
+    decoded = subprocess.run([settings.ffmpeg, '-v', 'error', '-i', str(output), '-vn', '-ac', '1', '-ar', '16000', '-f', 'f32le', '-'], check=True, capture_output=True).stdout
+    samples = np.frombuffer(decoded, dtype='<f4')[1600:9600]
+    assert np.sqrt(np.mean(samples ** 2)) > .02
+    spectrum = abs(np.fft.rfft(samples * np.hanning(len(samples))))
+    frequency = np.fft.rfftfreq(len(samples), 1 / 16000)[np.argmax(spectrum)]
+    assert frequency == pytest.approx(660 * speed, abs=12)

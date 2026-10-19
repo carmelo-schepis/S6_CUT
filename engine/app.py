@@ -825,6 +825,8 @@ async def update_captions(job_id: str, clip_id: str, value: CaptionReviewInput) 
         raise HTTPException(409, "Caption revision is stale")
     duration = clip.duration
     private = db.get_job_private(job_id)
+    if (private.get("caption_rerender") or {}).get("clip_id") == clip_id:
+        raise HTTPException(409, "Wait for the current caption rerender before editing this clip again")
     presentation_snapshot = private.get("presentation")
     presentation = presentation_snapshot.get("caption") if isinstance(presentation_snapshot, dict) and presentation_snapshot.get("version") in {1, 2} else None
     from .captions import normalize_and_validate
@@ -1103,13 +1105,27 @@ async def rerender_captions(job_id: str, clip_id: str, revision: int = Query(...
     running = private.get("caption_rerender")
     if isinstance(running, dict) and running.get("clip_id") == clip_id:
         raise HTTPException(409, "Caption rerender is already queued or active")
+    if job.state not in {"complete", "partial", "failed", "cancelled_kept"} or running:
+        raise HTTPException(409, "Wait for this job's current work to finish before rerendering captions")
+    if clip.state != "complete" or not clip.output_name:
+        raise HTTPException(409, "Only a completed clip can rerender reviewed captions")
     if manager.queue.full():
         raise HTTPException(429, "The local render queue is full")
-    private["caption_rerender"] = {"clip_id": clip_id, "revision": revision, "run_id": uuid.uuid4().hex}
+    previous_job = job.model_copy(deep=True)
+    private["caption_rerender"] = {
+        "clip_id": clip_id, "revision": revision, "run_id": uuid.uuid4().hex,
+        "previous_state": job.state, "previous_error": job.error,
+    }
     private.pop("caption_rerender_error", None)
+    manager._reset_steps_for_retry(job)
     job.state, job.stage, job.stage_label = "queued", "render", f"Caption revision {revision} queued"
     db.save_job(job, private)
-    await manager.enqueue(job.id)
+    try:
+        await manager.enqueue(job.id)
+    except QueueFullError as exc:
+        private.pop("caption_rerender", None)
+        db.save_job(previous_job, private)
+        raise HTTPException(429, str(exc)) from exc
     return public_job(job)
 
 
