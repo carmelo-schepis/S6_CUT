@@ -383,6 +383,19 @@ describe("ShortsEditorView", () => {
     expect(screen.getByLabelText("Filter preset")).toHaveValue("tint");
   });
 
+  it("groups tint colour changes on the empty editor screen", async () => {
+    render(<ShortsEditorView onJobCreated={vi.fn()} />);
+    fireEvent.change(await screen.findByLabelText("Filter preset"), { target: { value: "tint" } });
+    const tint = screen.getByLabelText("Tint color");
+    fireEvent.focus(tint);
+    fireEvent.change(tint, { target: { value: "#123456" } });
+    fireEvent.change(tint, { target: { value: "#654321" } });
+    fireEvent.blur(tint);
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(tint).toHaveValue("#d58a55");
+    expect(screen.getByLabelText("Filter preset")).toHaveValue("tint");
+  });
+
   it("restores project name, trims, tint settings, and subscribe animation snapshots", async () => {
     vi.mocked(listAssets).mockResolvedValue([{ ...asset, previewUrl: "/preview.mp4" }]);
     render(<ShortsEditorView onJobCreated={vi.fn()} />);
