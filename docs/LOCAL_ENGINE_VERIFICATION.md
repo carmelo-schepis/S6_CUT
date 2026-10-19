@@ -30,3 +30,14 @@ The real render harness is scripts/qa/local-engine-verification.py. Docker clean
 Connected-provider responses and failures were instrumented stubs; no live API credentials or paid calls were used. Local hooks select transcript text rather than using a bundled local language model. Cached models are required for offline transcription, and YouTube source/song acquisition requires network access.
 
 Evidence remains under .qa/local-engine-verification in the verification worktree: report.json, browser screenshots and reports, and the saved Engine only output. The code corrections were merged locally; this verification did not push or deploy them.
+
+
+## Real Playwright playback verification — 2026-10-19
+
+An isolated Docker build of this branch was tested with the committed spoken-video fixture through the real UI and backend. No API routes or provider responses were mocked in this phase. The engine used cached Whisper models and an internal Docker network without internet access; a separate gateway network exposed only the test web interface.
+
+Both Engine only and disconnected Auto completed successfully in Playwright (2 passed). Each run uploaded the fixture, enabled subtitles, hooks and local metadata, created one clip, waited for completion, played the video, sought to the middle and end, downloaded it, reloaded the page and played the saved clip again. The browser reported no JavaScript or media errors. The first clip advanced 1.149 seconds during the playback check and decoded 228 frames.
+
+The beginning, middle and end of both outputs were visually inspected. The source pattern changes across frames, the hook stays within the picture, and the bottom subtitles change with the spoken excerpt. Both downloaded files are 1080x1920 H.264/AAC, 12.459 seconds long. Complete FFmpeg decoding passed, mean audio volume was -20.4 dB, and frame analysis found visible motion in the source region (maximum mean frame change 11.47 over 12 samples).
+
+The opt-in repeatable test is tests/acceptance/local-execution-live.spec.ts. Run it only with S6_LOCAL_ENGINE_LIVE=1 and S6_ACCEPTANCE_ISOLATED=1 against disposable data. Browser reports, screenshots, MP4 downloads and forensic results are retained in the main checkout under test-artifacts/local-engine-release-20261019. Publishing, production rebuild and removal of completed branch resources follow only after the other S6_CUT branches finish.
