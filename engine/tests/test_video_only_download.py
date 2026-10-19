@@ -128,3 +128,24 @@ def test_signed_job_mp4_route_serves_only_confined_valid_links(tmp_path: Path, m
     assert tampered.status_code == 403
     traversal = client.get("/api/v1/files/jobs/%2e%2e/outside.mp4", params={"expires": expires, "signature": signature})
     assert traversal.status_code == 403
+
+
+def test_video_download_list_hides_signed_download_urls(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapi.testclient import TestClient
+
+    from engine import app as app_module
+    from engine.video_downloads import VideoDownloadTask
+
+    task = VideoDownloadTask(
+        id="a" * 32, url="https://www.youtube.com/watch?v=fixture", state="complete",
+        phase="complete", downloaded_bytes=100, total_bytes=100, percent=100,
+        filename="youtube-video.mp4", download_url="/api/v1/files/signed",
+        created_at="2026-01-01T00:00:00Z", updated_at="2026-01-01T00:00:00Z",
+    )
+    monkeypatch.setattr(app_module.video_downloads, "list", lambda: [task])
+    response = TestClient(app_module.app).get("/api/v1/video-downloads")
+
+    assert response.status_code == 200
+    assert "downloadUrl" not in response.json()[0]
+    # The existing id-specific desktop path remains capable of returning a URL.
+    assert task.download_url == "/api/v1/files/signed"

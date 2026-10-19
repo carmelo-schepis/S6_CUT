@@ -1278,6 +1278,12 @@ async def create_video_download(value: VideoDownloadInput, request: Request) -> 
     return task
 
 
+@app.get("/api/v1/video-downloads", response_model=list[dict[str, Any]])
+async def list_video_downloads() -> list[dict[str, Any]]:
+    # Existing clients may still renew a signed URL through the by-id endpoint.
+    return [task.model_dump(by_alias=True, exclude={"download_url"}) for task in video_downloads.list()]
+
+
 @app.get("/api/v1/video-downloads/{task_id}", response_model=VideoDownloadTask)
 async def get_video_download(task_id: str) -> VideoDownloadTask:
     if not re.fullmatch(r"[0-9a-f]{32}", task_id):

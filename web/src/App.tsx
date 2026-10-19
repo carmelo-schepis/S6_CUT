@@ -8,6 +8,7 @@ import { SettingsView } from "./components/settings-view";
 import { StatusBadge } from "./components/common";
 import { WorkspaceView } from "./components/workspace-view";
 import { WorkspaceProgressIndicator } from "./components/workspace-progress-indicator";
+import { IOSStatusView } from "./components/ios-status-view";
 import { ShortsEditorView } from "./components/shorts-editor-view";
 import { HelpDialog } from "./components/help-dialog";
 import { PwaStatus } from "./components/pwa-status";
@@ -42,7 +43,14 @@ const nav: { id: Page; label: string; name: string; icon: typeof Film }[] = [
   { id: "settings", label: "Settings", name: "Settings", icon: Settings },
 ];
 
+function isIOSDevice(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent;
+  return /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
+}
+
 export function App() {
+  const iosViewer = isIOSDevice();
   const [initialDataLoaded, setInitialDataLoaded] = useState(false);
   const [projectsReady, setProjectsReady] = useState(false);
   const onProjectsReady = useCallback(() => setProjectsReady(true), []);
@@ -90,7 +98,7 @@ export function App() {
     .finally(() => setHealthChecked(true)), []);
   // Owns the first health read as well: routing every read through one poll is
   // what keeps a slow engine from accumulating parallel /health requests.
-  const runHealth = usePoll(pollHealth, HEALTH_POLL_MS, true, true);
+  const runHealth = usePoll(pollHealth, HEALTH_POLL_MS, !iosViewer, true);
 
   const jobsPollMs = jobPollInterval(jobs);
   const latestJobsSnapshot = useRef<Job[]>([]);
@@ -101,7 +109,7 @@ export function App() {
   const pollJobs = useCallback(() => listJobs()
     .then((value) => { latestJobsSnapshot.current = value; setJobs(value); })
     .catch((cause) => setError(readableError(cause))), []);
-  const jobsPollingEnabled = page === "projects" || hasLiveWork(jobs);
+  const jobsPollingEnabled = !iosViewer && (page === "projects" || hasLiveWork(jobs));
   const runJobs = usePoll(pollJobs, jobsPollMs, jobsPollingEnabled);
 
   // Each read applies its own slice the moment it settles. Gating all four on a
@@ -142,12 +150,14 @@ export function App() {
   }, [runHealth, runJobs]);
 
   useEffect(() => {
+    if (iosViewer) return;
     void Promise.resolve().then(refresh).catch((cause) => setError(readableError(cause)));
-  }, [refresh]);
+  }, [iosViewer, refresh]);
 
-  useEffect(() => onLibraryChanged(() => {
-    void refresh();
-  }), [refresh]);
+  useEffect(() => {
+    if (iosViewer) return;
+    return onLibraryChanged(() => { void refresh(); });
+  }, [iosViewer, refresh]);
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "auto" });
@@ -208,6 +218,8 @@ export function App() {
     : "";
   const hasSelectedProvider = profiles.some((profile) => profile.selected && profile.openrouterConfigured && profile.textStatus === "connected");
   const openProviders = () => setPage("settings");
+
+  if (iosViewer) return <IOSStatusView />;
 
   return <div className="app-shell" data-rail={railCollapsed ? "collapsed" : "expanded"}>
     {/* First tab stop: lets keyboard users bypass the seven rail destinations

@@ -155,6 +155,10 @@ export async function createVideoOnlyDownload(url: string): Promise<VideoDownloa
   }));
 }
 
+export async function listVideoOnlyDownloads(): Promise<VideoDownloadTask[]> {
+  return videoDownloadTaskSchema.array().parse(await request("/video-downloads", { timeoutMs: READ_TIMEOUT_MS }));
+}
+
 export async function getVideoOnlyDownload(id: string): Promise<VideoDownloadTask> {
   return videoDownloadTaskSchema.parse(await request(`/video-downloads/${encodeURIComponent(id)}`));
 }
