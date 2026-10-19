@@ -714,6 +714,7 @@ def test_finished_clip_media_survives_job_directory_pruning() -> None:
             live = client.get("/api/v1/jobs/prune-job").json()["clips"][0]
             # A published clip is served from its durable Library copy.
             assert live["downloadUrl"].startswith(f"/api/v1/library/assets/{asset.id}/preview")
+            assert live["thumbnailUrl"].startswith(f"/api/v1/library/assets/{asset.id}/thumbnail?")
 
             # Retention prunes the job working directory; the blob is untouched.
             output.unlink()
@@ -721,6 +722,7 @@ def test_finished_clip_media_survives_job_directory_pruning() -> None:
             assert pruned["state"] == "complete"
             assert pruned["downloadUrl"] == live["downloadUrl"].split("?")[0] + "?" + pruned["downloadUrl"].split("?")[1]
             assert pruned["previewUrl"] == pruned["downloadUrl"]
+            assert pruned["thumbnailUrl"].startswith(f"/api/v1/library/assets/{asset.id}/thumbnail?")
             # Caption sidecars live beside the job output and go with it.
             assert pruned["captionDownloads"] == []
             # The link must still serve the media, not 404.

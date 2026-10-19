@@ -18,6 +18,7 @@ const job = (progress: number) => ({
     id: "clip-1", index: 1, state: "complete", start: 0, end: 4, duration: 4,
     openingLine: "A good first clip", selected: true, outputName: "clip.mp4", blobId: "blob-1",
     previewUrl: "/api/v1/library/assets/asset-1/preview?expires=100&signature=old",
+    thumbnailUrl: "/api/v1/library/assets/asset-1/thumbnail?expires=100&signature=thumb",
     downloadUrl: "/api/v1/files/jobs/clip.mp4?expires=100&signature=download",
   }],
   createdAt: "2026-10-18T10:00:00Z", updatedAt: "2026-10-18T10:01:00Z",
@@ -31,6 +32,7 @@ const health = {
 async function stubApi(page: Page) {
   const mutations: string[] = [];
   let jobReads = 0;
+  let thumbnailReads = 0;
   await page.route("**/api/v1/**", async (route: Route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -41,6 +43,7 @@ async function stubApi(page: Page) {
     }
     if (path.endsWith("/health")) return route.fulfill({ json: health });
     if (path.endsWith("/video-downloads")) return route.fulfill({ json: [] });
+    if (path.endsWith("/thumbnail")) { thumbnailReads += 1; return route.fulfill({ status: 200, contentType: "image/png", body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/zWQAAAAASUVORK5CYII=", "base64") }); }
     if (path.endsWith("/jobs")) {
       jobReads += 1;
       return route.fulfill({ json: [job(jobReads > 1 ? 48 : 42)] });
@@ -48,12 +51,12 @@ async function stubApi(page: Page) {
     if (path.endsWith("/projects")) return route.fulfill({ json: [project] });
     return route.fulfill({ json: [] });
   });
-  return { mutations, jobReads: () => jobReads };
+  return { mutations, jobReads: () => jobReads, thumbnailReads: () => thumbnailReads };
 }
 
 test("iOS devices get read-only status, live progress and stable inline previews", async ({ page }, testInfo) => {
   test.skip((!testInfo.project.name.startsWith("iPhone") && !testInfo.project.name.startsWith("iPad")) || testInfo.project.name === "iPad WebKit desktop mode", "iOS device routing is covered separately for desktop-mode iPad");
-  const { mutations, jobReads } = await stubApi(page);
+  const { mutations, jobReads, thumbnailReads } = await stubApi(page);
   const downloads: string[] = [];
   page.on("download", (download) => downloads.push(download.suggestedFilename()));
 
@@ -68,6 +71,8 @@ test("iOS devices get read-only status, live progress and stable inline previews
   const video = page.locator(".ios-status-previews video");
   await expect(video).toHaveAttribute("controlslist", /nodownload/);
   await expect(video).toHaveAttribute("src", /signature=old/);
+  await expect(video).toHaveAttribute("poster", /signature=thumb/);
+  await expect.poll(thumbnailReads).toBeGreaterThan(0);
   await expect(page.getByRole("button", { name: /download|edit|create|pause|resume|retry|settings/i })).toHaveCount(0);
 
   await page.getByRole("button", { name: "Refresh status" }).click();

@@ -173,7 +173,7 @@ def _download_url(relative: str) -> str:
     return f"/api/v1/files/{relative}?expires={expires}&signature={signature}"
 
 
-def _clip_media(job_id: str, clip: Clip) -> tuple[str, str] | None:
+def _clip_media(job_id: str, clip: Clip) -> tuple[str, str, str | None] | None:
     """Signed media URLs for a finished clip.
 
     Prefer the published Library copy: it is content-addressed and immutable,
@@ -191,7 +191,7 @@ def _clip_media(job_id: str, clip: Clip) -> tuple[str, str] | None:
         if asset and asset.blob_id == blob_id:
             expires, signature = signer.sign(f"library-asset:{asset_id}:{blob_id}")
             url = f"/api/v1/library/assets/{asset_id}/preview?expires={expires}&signature={signature}"
-            return url, url
+            return url, url, _thumbnail_url(asset)
     # A completed clip keeps its immutable clip-output blob reference even when
     # its Library record is removed. Serve that durable blob so deleting a
     # Library item never turns the project's ready output into a dead link.
@@ -205,7 +205,7 @@ def _clip_media(job_id: str, clip: Clip) -> tuple[str, str] | None:
             if blob and blob.is_file():
                 expires, signature = signer.sign(f"library-blob:{blob_id}")
                 url = f"/api/v1/library/blobs/{blob_id}/preview?expires={expires}&signature={signature}"
-                return url, url
+                return url, url, None
     # No published Library copy (an unusual, repairable state): fall back to the
     # job output, but only advertise it if the file is really there. This branch
     # is rare, so its filesystem check does not affect normal listings.
@@ -216,7 +216,7 @@ def _clip_media(job_id: str, clip: Clip) -> tuple[str, str] | None:
             return None
         if output.is_file():
             download = _download_url(f"jobs/{job_id}/clips/{clip.output_name}")
-            return download, f"{download}&inline=1"
+            return download, f"{download}&inline=1", None
     return None
 
 
@@ -259,10 +259,10 @@ def public_job(job: Job, *, include_caption_downloads: bool = True) -> Job:
             media = _clip_media(job.id, clip)
             if media is None:
                 # Nothing serveable: advertise no links rather than a dead one.
-                clip.download_url = clip.preview_url = None
+                clip.download_url = clip.preview_url = clip.thumbnail_url = None
                 clip.caption_downloads = []
                 continue
-            clip.download_url, clip.preview_url = media
+            clip.download_url, clip.preview_url, clip.thumbnail_url = media
             sidecars: list[CaptionDownload] = []
             # Caption sidecars live beside the job output, so they disappear when
             # retention prunes the job directory even though the clip plays on.
