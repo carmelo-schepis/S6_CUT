@@ -395,6 +395,38 @@ def probe_audio(path: Path, settings: Settings) -> dict[str, Any]:
     return {"duration": duration, "audio_codec": audio.get("codec_name")}
 
 
+def validate_audio_track(path: Path, settings: Settings, *, max_seconds: int | None = None) -> dict[str, Any]:
+    """Probe and decode the full selected track so damaged frames are rejected."""
+    metadata = probe_audio(path, settings)
+    if metadata.get("audio_codec") != "mp3":
+        raise MediaError("Background song uploads must contain MP3 audio")
+    duration = float(metadata["duration"])
+    if max_seconds is not None and duration > max_seconds:
+        raise MediaError(f"Background song exceeds the {max_seconds}-second duration limit")
+    timeout = max(120, min(7200, int(duration * 2 + 60)))
+    run([settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-xerror", "-err_detect", "explode",
+         "-i", str(path), "-map", "0:a:0", "-vn", "-f", "null", "-"], timeout=timeout)
+    return metadata
+
+
+def prepare_music_track(source: Path, target: Path, speed: float, settings: Settings) -> Path:
+    """Create a pitch-preserving-in-time-coordinate track for Music transcription.
+
+    asetrate intentionally changes both pitch and tempo, matching the audible
+    sped-up/slowed-down render option. The output timeline is video-time.
+    """
+    speed = min(1.5, max(0.75, float(speed)))
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_suffix(".partial.mp3")
+    temporary.unlink(missing_ok=True)
+    run([settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", str(source),
+         "-vn", "-af", f"aresample=48000,asetrate=48000*{speed:.3f},aresample=48000",
+         "-codec:a", "libmp3lame", "-q:a", "2", str(temporary)], timeout=7200)
+    probe_audio(temporary, settings)
+    os.replace(temporary, target)
+    return target
+
+
 def validate_video_upload(path: Path, original_name: str, settings: Settings, *, max_seconds: int | None = None) -> dict[str, Any]:
     if Path(original_name).suffix.casefold() not in ALLOWED_VIDEO_SUFFIXES:
         raise MediaError("Unsupported video type. Use MP4, MOV, WebM, MKV, M4V, or AVI.")
@@ -559,21 +591,46 @@ def download_youtube(
     return source
 
 
-def download_youtube_audio(url: str, target: Path, settings: Settings) -> Path:
-    """Download a public YouTube song as MP3 for a Music mode render."""
+def download_youtube_audio(
+    url: str, target: Path, settings: Settings, *,
+    progress_callback: DownloadCallback | None = None,
+    cancellation_callback: Callable[[], bool] | None = None,
+    max_seconds: int | None = None,
+) -> Path:
+    """Download and validate a public YouTube soundtrack as an MP3."""
     url = validate_youtube_url(url)
     target.parent.mkdir(parents=True, exist_ok=True)
-    command = [settings.ytdlp, "--no-playlist", "--no-warnings", "--socket-timeout", str(settings.ytdlp_connect_timeout),
-               "--retries", "3", "--max-filesize", str(settings.max_upload_bytes), "--extract-audio", "--audio-format", "mp3",
-               "--audio-quality", "0", "--output", str(target.with_suffix(".%(ext)s")), url]
+    target.unlink(missing_ok=True)
+    command = [settings.ytdlp, "--no-playlist", "--no-warnings", "--restrict-filenames",
+               "--newline", "--progress", "--progress-delta", "1", "--socket-timeout", str(settings.ytdlp_connect_timeout),
+               "--retries", "3", "--fragment-retries", "3", "--max-filesize", str(settings.max_upload_bytes), "--write-info-json",
+               "--format", "bestaudio/best", "--extract-audio", "--audio-format", "mp3", "--audio-quality", "0",
+               "--output", str(target.with_suffix(".%(ext)s")),
+               "--progress-template", "download:%(progress.status)s|%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s|%(progress._percent_str)s", url]
     command[-1:-1] = ["--extractor-args", YOUTUBE_EXTRACTOR_ARGS[0], "--extractor-args", YOUTUBE_EXTRACTOR_ARGS[1]]
-    try:
-        subprocess.run(command, check=True, capture_output=True, text=True, timeout=1800)
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise MediaError("Could not download the background song from YouTube") from exc
+    _run_ytdlp_download(command, target.parent, settings, progress_callback=progress_callback, cancellation_callback=cancellation_callback)
+    if not target.is_file():
+        candidates = sorted(target.parent.glob(target.stem + ".*.mp3"))
+        if candidates:
+            candidates[-1].replace(target)
     if not target.is_file() or target.stat().st_size <= 0:
         raise MediaError("YouTube did not provide a usable background song")
+    try:
+        validate_audio_track(target, settings, max_seconds=max_seconds)
+    except MediaError:
+        target.unlink(missing_ok=True)
+        raise
     return target
+
+
+def downloaded_audio_title(path: Path) -> str | None:
+    """Read a safely normalized title from yt-dlp's local info sidecar."""
+    sidecar = path.with_suffix(".info.json")
+    try:
+        payload = json.loads(sidecar.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return _metadata_text(payload.get("title"), 200) if isinstance(payload, dict) else None
 
 
 def _metadata_text(value: object, limit: int) -> str | None:
@@ -2377,7 +2434,7 @@ def render_clip(source: Path, output: Path, *, start: float, end: float, aspect:
     music_track_input = None
     if music_track is not None:
         music_track_input = 1 + len(overlays) + len(subscribe_animations) + len(emoji_inputs) + (1 if embed_subtitles else 0)
-        command.extend(["-stream_loop", "-1", "-ss", f"{start:.3f}", "-i", str(music_track)])
+        command.extend(["-stream_loop", "-1", "-ss", f"{start * min(1.5, max(0.75, float(music_track_speed))):.3f}", "-i", str(music_track)])
     source_dimensions = (src_width, src_height)
     sample_aspect_ratio = float(source_meta.get("sample_aspect_ratio") or 1.0)
     if source_meta["rotation"] % 180:
@@ -2389,10 +2446,11 @@ def render_clip(source: Path, output: Path, *, start: float, end: float, aspect:
         emoji_filters = _smart_speech_emoji_filters(emoji_plan, 1 + len(overlays) + len(subscribe_animations), emoji_inputs)
         filters = f"{filters};{emoji_filters}"
         mapped = f"emojiout{len(emoji_plan) - 1}"
-    command.extend(["-t", f"{duration:.3f}", "-filter_complex", filters, "-map", f"[{mapped}]"])
     if music_track_input is not None:
         speed = min(1.5, max(0.75, float(music_track_speed)))
         filters += f";[{music_track_input}:a:0]asetpts=PTS-STARTPTS,aresample=48000,asetrate=48000*{speed:.3f},aresample=48000,atrim=duration={duration:.3f},volume=1.0[songout]"
+    command.extend(["-t", f"{duration:.3f}", "-filter_complex", filters, "-map", f"[{mapped}]"])
+    if music_track_input is not None:
         command.extend(["-map", "[songout]", "-c:a", DELIVERY_AUDIO_CODEC, "-b:a", DELIVERY_AUDIO_BITRATE, "-ar", DELIVERY_AUDIO_RATE])
     elif has_audio and not muted:
         command.extend(["-map", "0:a:0", "-af", f"volume={max(0.0, min(2.0, volume)):.3f}", "-c:a", DELIVERY_AUDIO_CODEC, "-b:a", DELIVERY_AUDIO_BITRATE, "-ar", DELIVERY_AUDIO_RATE])
@@ -2669,6 +2727,8 @@ def render_fast_clip(
     tint_color: str = "#d58a55",
     tint_opacity: int = 0,
     text_overlays: list[dict[str, Any]] | None = None,
+    music_track: Path | None = None,
+    music_track_speed: float = 1.0,
 ) -> None:
     """Render a fast clip with optional captions and no overlays or visual beats.
 
@@ -2724,6 +2784,7 @@ def render_fast_clip(
             subtitles_enabled=subtitles_enabled, hook_text=hook_text,
             muted=muted, volume=volume, filter_preset=filter_preset, filter_intensity=filter_intensity,
             tint_color=tint_color, tint_opacity=tint_opacity, text_overlays=text_overlays,
+            music_track=music_track, music_track_speed=music_track_speed,
         )
         return
 
@@ -2741,6 +2802,7 @@ def render_fast_clip(
             music_top_text=music_top_text, music_treatment=music_treatment,
             muted=muted, volume=volume, filter_preset=filter_preset, filter_intensity=filter_intensity,
             tint_color=tint_color, tint_opacity=tint_opacity, text_overlays=text_overlays,
+            music_track=music_track, music_track_speed=music_track_speed,
         )
         return
 
@@ -2800,6 +2862,9 @@ def render_fast_clip(
     subtitle_index = 1 + len(subscribe_animations)
     if embed_subtitles:
         command.extend(["-i", str(output.with_suffix(".srt"))])
+    if music_track is not None:
+        speed = min(1.5, max(0.75, float(music_track_speed)))
+        command.extend(["-stream_loop", "-1", "-ss", f"{start * speed:.3f}", "-i", str(music_track)])
     command.extend(["-t", f"{duration:.3f}"])
     if subscribe_animations:
         graph = [f"[0:v]{vf}[base]"]
@@ -2826,7 +2891,9 @@ def render_fast_clip(
         "-movflags",
         "+faststart",
     ])
-    if has_audio and not muted:
+    if music_track is not None:
+        command.extend(["-map", f"{1 + len(subscribe_animations) + (1 if embed_subtitles else 0)}:a:0", "-af", f"aresample=48000,asetrate=48000*{speed:.3f},aresample=48000,atrim=duration={duration:.3f}", "-c:a", DELIVERY_AUDIO_CODEC, "-b:a", DELIVERY_AUDIO_BITRATE, "-ar", DELIVERY_AUDIO_RATE])
+    elif has_audio and not muted:
         command.extend([
             "-map",
             "0:a:0",
@@ -2853,7 +2920,7 @@ def render_fast_clip(
             f"Fast clip failed delivery validation: expected {width}x{height}, "
             f"got {result['width']}x{result['height']}"
         )
-    if has_audio and not muted and not result["audio"]:
+    if (music_track is not None or (has_audio and not muted)) and not result["audio"]:
         raise MediaError("Fast clip expected audio but the output has no audio track")
     if abs(float(result["duration"]) - duration) > max(0.75, duration * 0.05):
         raise MediaError("Fast clip failed duration validation")

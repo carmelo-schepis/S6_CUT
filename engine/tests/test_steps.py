@@ -447,8 +447,15 @@ def test_music_downloaded_source_rejects_impossible_count_after_probe(monkeypatc
 
 def test_music_smart_path_replaces_sparse_checkpoint_and_keeps_bounded_windows(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     test_db, test_manager = _cluster(tmp_path)
-    monkeypatch.setattr("engine.jobs.probe", _fake_probe)
-    monkeypatch.setattr(media_module, "extract_audio_16k", _fake_extract)
+    monkeypatch.setattr("engine.jobs.probe", lambda *_args, **_kwargs: {**_fake_probe(None, settings), "audio": False})
+    prepared_song = tmp_path / "prepared-song.mp3"
+    prepared_song.write_bytes(b"prepared-audio")
+    (tmp_path / "selected-song.mp3").write_bytes(b"selected-audio")
+    extracted_from: list[Path] = []
+    monkeypatch.setattr(test_manager, "_music_track_source", lambda *_args: tmp_path / "selected-song.mp3")
+    monkeypatch.setattr(media_module, "prepare_music_track", lambda source, _target, speed, _settings: (extracted_from.append(source), prepared_song)[1])
+    monkeypatch.setattr(media_module, "probe_audio", lambda *_args, **_kwargs: {"duration": 100.0, "audio_codec": "mp3"})
+    monkeypatch.setattr(media_module, "extract_audio_16k", lambda source, _settings, **_kwargs: (extracted_from.append(source), tmp_path / "song-audio.wav")[1])
     monkeypatch.setattr(media_module, "is_whisper_model_cached", lambda *_args, **_kwargs: True)
     monkeypatch.setattr("engine.jobs.render_clip", _fake_render_clip)
     source = tmp_path / "music-source.mp4"
@@ -459,6 +466,7 @@ def test_music_smart_path_replaces_sparse_checkpoint_and_keeps_bounded_windows(m
     job.source_profile = "music"
     private["transcript"] = {"language": "en", "words": [{"text": "old", "start": 0, "end": 1}], "segments": []}
     private["transcript_cache_key"] = "transcript:v2:legacy"
+    private["music_track_speed"] = 1.25
     test_db.save_job(job, private)
     calls: list[dict[str, Any]] = []
     lyric_words = []
@@ -481,6 +489,7 @@ def test_music_smart_path_replaces_sparse_checkpoint_and_keeps_bounded_windows(m
     assert calls and calls[0]["profile"] == "music"
     assert saved["transcript_cache_key"].startswith("transcript:v3:")
     assert saved["transcript"]["words"][0]["text"] == "Lyric0"
+    assert extracted_from == [tmp_path / "selected-song.mp3", prepared_song]
     assert len(result.clips) == 4
     assert all(10 <= clip.duration <= 30 for clip in result.clips)
     assert all(left.end <= right.start for left, right in zip(result.clips, result.clips[1:]))

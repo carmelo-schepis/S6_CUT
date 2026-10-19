@@ -29,7 +29,7 @@ from .config import settings
 from .database import Database, MAX_FOLDER_DEPTH, MetadataGenerationClaimError, UNSORTED_FOLDER_ID
 from .jobs import JobManager, ProjectDeletingError, QueueFullError, RetiredScriptJobError, SwitchFastError, can_retry_import, resolve_batch_target, uses_fast_pipeline
 from .library import LibraryRules
-from .media import _SUBTITLE_PRESETS, MediaError, available, caption_font_mismatches, probe, probe_audio, validate_video_upload
+from .media import _SUBTITLE_PRESETS, MediaError, available, caption_font_mismatches, probe, probe_audio, validate_audio_track, validate_video_upload
 from .models import (
     Asset, AssetDelete, AssetDeleteResult, AssetMove, AssetOrigin, AssetUpdate, AssetPage, CaptionCue, CaptionDownload, CaptionReviewInput, Clip, FolderCreate, FolderMove, FolderUpdate, Health, Job, LibraryPurgeInput, LibraryPurgeResult,
     LibraryFolder, MatchExplanation, RecentClipsPage, ContentFormat, ProcessingMode, ProfileInput, Project, ProjectFolderUpdate,
@@ -519,19 +519,6 @@ async def create_clip_job(
                 private["music_track_url"] = validate_youtube_url(music_track_url.strip())
             except ValueError as exc:
                 raise HTTPException(422, "Only public HTTPS YouTube URLs are supported for the background song") from exc
-        if music_track_file:
-            original_track = safe_filename(music_track_file.filename or "background.mp3", "background.mp3")
-            if Path(original_track).suffix.casefold() != ".mp3":
-                raise HTTPException(415, "Background song upload must be an MP3 file")
-            track_path = settings.data_path / "jobs" / job_id / "source" / "background.mp3"
-            _, track_hash = await _stream_upload(music_track_file, track_path, settings.max_upload_bytes)
-            try:
-                await asyncio.to_thread(probe_audio, track_path, settings)
-            except MediaError as exc:
-                track_path.unlink(missing_ok=True)
-                raise HTTPException(422, "The uploaded MP3 could not be read") from exc
-            private["music_track_path"] = str(track_path)
-            private["music_track_hash"] = track_hash
     if file:
         original = safe_filename(file.filename or "source.mp4", "source.mp4")
         suffix = Path(original).suffix.casefold()
@@ -561,6 +548,36 @@ async def create_clip_job(
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         source_name, source_kind = "YouTube import", "youtube"
+    music_track_snapshot = None
+    if source_profile == "music" and music_track_file:
+        original_track = safe_filename(music_track_file.filename or "background.mp3", "background.mp3")
+        if Path(original_track).suffix.casefold() != ".mp3":
+            if file:
+                source.unlink(missing_ok=True)
+            raise HTTPException(415, "Background song upload must be an MP3 file")
+        track_path = settings.data_path / "jobs" / job_id / "source" / "background.mp3"
+        try:
+            _, track_hash = await _stream_upload(music_track_file, track_path, settings.max_upload_bytes)
+            track_metadata = await asyncio.to_thread(validate_audio_track, track_path, settings, max_seconds=settings.max_source_seconds)
+            asset = rules.register_file(track_path, title=Path(original_track).stem[:200] or "Background song", media_type="audio/mpeg", origin="manual-import", folder_id=library_folder_id, content_hash=track_hash, filename=original_track, metadata={"duration": track_metadata["duration"]})
+        except HTTPException:
+            track_path.unlink(missing_ok=True)
+            if file:
+                source.unlink(missing_ok=True)
+            raise
+        except (MediaError, ValueError) as exc:
+            track_path.unlink(missing_ok=True)
+            if file:
+                source.unlink(missing_ok=True)
+            raise HTTPException(422, "The uploaded MP3 could not be read") from exc
+        private["music_track_path"] = str(track_path)
+        private["music_track_hash"] = track_hash
+        private["music_track_asset_id"] = asset.id
+        private["music_track_title"] = asset.title
+        private["music_track_source"] = "upload"
+        music_track_snapshot = {"asset_id": asset.id, "title": asset.title, "source": "upload", "speed": music_track_speed}
+    elif source_profile == "music" and private.get("music_track_url"):
+        music_track_snapshot = {"title": "YouTube soundtrack", "source": "youtube", "speed": music_track_speed}
     private["source_kind"] = source_kind
     if isinstance(private.get("source_metadata"), dict):
         effective_target, cap_explanation = resolve_batch_target(count, batch_mode, float(private["source_metadata"]["duration"]))
@@ -568,9 +585,17 @@ async def create_clip_job(
         private["cap_explanation"] = cap_explanation
     elif batch_mode == "high_volume":
         cap_explanation = "Effective target will be confirmed after YouTube download and FFprobe validation."
-    project = Project(id=project_id, name=_project_name(name, Path(source_name).stem), name_is_auto=not _project_name(name, ""), mode="clip", style=style, state="queued", source_name=source_name, source_kind=source_kind, requested_count=count, batch_mode=batch_mode, effective_target=effective_target, cap_explanation=cap_explanation, content_format=content_format, source_profile=source_profile, latest_job_id=job_id, library_folder_id=library_folder_id)
+    project = Project(id=project_id, name=_project_name(name, Path(source_name).stem), name_is_auto=not _project_name(name, ""), mode="clip", style=style, state="queued", source_name=source_name, source_kind=source_kind, requested_count=count, batch_mode=batch_mode, effective_target=effective_target, cap_explanation=cap_explanation, content_format=content_format, source_profile=source_profile, music_track=music_track_snapshot, latest_job_id=job_id, library_folder_id=library_folder_id)
     high_volume_smart_landscape = batch_mode == "high_volume" and content_format == "long" and mode == "smart"
     steps = manager._fast_steps() if uses_fast_pipeline(mode, content_format) and not high_volume_smart_landscape else manager._smart_steps(bool(private["use_openrouter"]), source_profile, include_hook_text=hook_text)
+    music_step = next((step for step in steps if step.id == "music_track"), None)
+    if music_step:
+        if music_track_snapshot is None:
+            music_step.status, music_step.detail = "skipped", "No optional background song selected"
+            music_step.started_at = music_step.completed_at = now_iso()
+        elif music_track_snapshot.get("source") == "upload":
+            music_step.status, music_step.detail = "complete", "Uploaded song decoded and saved to the Media Library"
+            music_step.started_at = music_step.completed_at = now_iso()
     if batch_mode == "high_volume" and mode == "smart":
         provider_step = next((step for step in steps if step.id == "openrouter"), None)
         if provider_step:
@@ -584,7 +609,7 @@ async def create_clip_job(
             steps[1].status = "complete"
             steps[1].detail = f"Source validated - {float(source_metadata['duration']):.1f}s"
             steps[1].started_at = steps[1].completed_at = checkpoint_time
-    job = Job(id=job_id, project_id=project_id, library_folder_id=library_folder_id, mode="clip", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style=style, processing_mode=mode, content_format=content_format, source_profile=source_profile, music_presentation=music_config if source_profile == "music" else None, music_top_text=(music_top_text if music_top_text.strip() else None) if source_profile == "music" else None, requested_count=count, batch_mode=batch_mode, effective_target=effective_target, cap_explanation=cap_explanation, burn_subtitles=True if source_profile == "music" else burn_subtitles, embed_subtitles=embed_subtitles, hook_text_enabled=hook_text, youtube_metadata_enabled=youtube_metadata, youtube_metadata_model_id=youtube_metadata_model_id, steps=steps)
+    job = Job(id=job_id, project_id=project_id, library_folder_id=library_folder_id, mode="clip", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style=style, processing_mode=mode, content_format=content_format, source_profile=source_profile, music_presentation=music_config if source_profile == "music" else None, music_top_text=(music_top_text if music_top_text.strip() else None) if source_profile == "music" else None, music_track=music_track_snapshot, requested_count=count, batch_mode=batch_mode, effective_target=effective_target, cap_explanation=cap_explanation, burn_subtitles=True if source_profile == "music" else burn_subtitles, embed_subtitles=embed_subtitles, hook_text_enabled=hook_text, youtube_metadata_enabled=youtube_metadata, youtube_metadata_model_id=youtube_metadata_model_id, steps=steps)
     db.save_project(project)
     db.save_job(job, private)
     try:

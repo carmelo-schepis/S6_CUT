@@ -33,6 +33,8 @@ export const musicThemeSchema = z.enum(["clean", "warm", "serif", "reference_whi
 export type MusicTheme = z.infer<typeof musicThemeSchema>;
 export const musicPresentationSchema = z.object({ version: z.literal(1), subtitleTheme: musicThemeSchema });
 export type MusicPresentationConfig = z.infer<typeof musicPresentationSchema>;
+export const musicTrackSchema = z.object({ assetId: z.string().nullable().optional(), title: z.string(), source: z.enum(["upload", "youtube"]), speed: z.union([z.literal(.75), z.literal(.85), z.literal(1), z.literal(1.25), z.literal(1.5)]) });
+export type MusicTrack = z.infer<typeof musicTrackSchema>;
 
 export const subscribeAnimationSchema = z.object({
   enabled: z.boolean(),
@@ -138,6 +140,7 @@ export const clipSchema = z.object({
   creatorCredit: z.string().nullable().optional(),
   musicTopText: z.string().max(100).nullable().optional(),
   musicTreatment: z.enum(["color", "grayscale"]).nullable().optional(),
+  musicTrack: musicTrackSchema.nullable().optional(),
   downloadUrl: z.string().nullable().optional(),
   error: z.string().nullable().optional(),
   fallbackUsed: z.boolean().default(false),
@@ -234,6 +237,7 @@ export const jobSchema = z.object({
   successfulCount: z.number().int().min(0).max(500).optional(),
   musicPresentation: musicPresentationSchema.nullable().optional(),
   musicTopText: z.string().max(100).nullable().optional(),
+  musicTrack: musicTrackSchema.nullable().optional(),
   hookTextEnabled: z.boolean().optional(),
   youtubeMetadataEnabled: z.boolean().optional(),
   youtubeMetadataModelId: z.string().nullable().optional(),
@@ -284,6 +288,7 @@ export const projectSchema = z.object({
   capExplanation: z.string().nullable().optional(),
   contentFormat: contentFormatSchema.default("short"),
   sourceProfile: sourceProfileSchema.optional(),
+  musicTrack: musicTrackSchema.nullable().optional(),
   latestJobId: z.string().nullable().optional(),
   libraryFolderId: z.string().optional(),
   sourceBlobId: z.string().nullable().optional(),
