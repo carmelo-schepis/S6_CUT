@@ -136,7 +136,7 @@ def _rate_limit(request: Request) -> None:
 
 def resolve_processing_mode(requested: Literal["fast", "smart", "auto"], smart_available: bool) -> ProcessingMode:
     if requested == "auto":
-        return "smart" if smart_available else "fast"
+        return "smart"
     return requested
 
 
@@ -460,7 +460,7 @@ async def create_clip_job(
     cap_explanation: str | None = None
     smart_available = profiles.smart_available()
     # Auto keeps local transcription available when the optional provider is absent.
-    mode = "smart" if source_profile == "music" else ("fast" if processing_mode == "fast" else "smart")
+    mode = "smart" if source_profile == "music" else resolve_processing_mode(processing_mode, smart_available)
     selected_profile = next((profile for profile in profiles.db.list_profiles() if profile.selected), None)
     if youtube_metadata is None:
         # Not specified by the client: SEO titles follow the profile's
@@ -469,15 +469,9 @@ async def create_clip_job(
             selected_profile and selected_profile.auto_seo_titles and smart_available
             and content_format == "short" and mode == "smart" and processing_mode != "fast" and batch_mode != "high_volume"
         )
-    if youtube_metadata and processing_mode == "auto" and mode != "smart":
-        # The default-on SEO toggle must not block an Auto job that resolved to
-        # Fast because OpenRouter is not reachable right now.
-        youtube_metadata = False
     if youtube_metadata:
         if content_format != "short" or processing_mode == "fast" or mode != "smart":
             raise HTTPException(422, "YouTube metadata is unavailable in Fast or Long form jobs.")
-        if execution_policy != "engine_only" and smart_available and not selected_profile:
-            raise HTTPException(422, "YouTube metadata generation requires a connected OpenRouter provider.")
         # The metadata model is an independent Settings profile preference. A
         # job snapshots it so a later profile edit cannot rewrite queued work.
         youtube_metadata_model_id = selected_profile.youtube_metadata_model_id if selected_profile else None
@@ -502,6 +496,7 @@ async def create_clip_job(
         "count": count, "batch_mode": batch_mode, "min_duration": min_duration, "max_duration": max_duration,
         "aspect_ratio": aspect_ratio, "content_format": content_format, "processing_mode": mode,
         "execution_policy": execution_policy,
+        "provider_available": execution_policy == "auto" and smart_available,
         "presentation": presentation,
         "reaction_policy": {"version": 1, "name": "ironic_v1"} if source_profile == "speech" and burn_subtitles else None,
         "burn_subtitles": True if source_profile == "music" else burn_subtitles, "embed_subtitles": embed_subtitles,
@@ -951,6 +946,24 @@ async def generate_youtube_metadata(job_id: str, clip_id: str, regenerate: bool 
         job.updated_at = now_iso()
         manager._save(job, private)
         raise HTTPException(422, "This clip has insufficient saved transcript context for metadata generation")
+    if job.execution_policy == "engine_only" or private.get("execution_policy") == "engine_only":
+        if clip.library_asset_id is None:
+            raise HTTPException(409, "The completed clip has no linked Library asset")
+        try:
+            _, saved_job, updated_clip = db.update_generated_clip_metadata(
+                clip.library_asset_id, clip.title or f"Clip {clip.index}",
+                normalize_seo_description(excerpt), clip.youtube_metadata_revision,
+                metadata_status="fallback", metadata_reason="Transcript based local metadata",
+                title_source=clip.title_source or "auto",
+            )
+        except ValueError as exc:
+            raise HTTPException(409, "Metadata changed before the local suggestion could be applied") from exc
+        local_private = db.get_job_private(job_id)
+        local_private.setdefault("youtube_metadata_generation", {})[clip_id] = {
+            "status": "fallback", "provider": "local", "updated_at": time.time(),
+        }
+        manager._save(saved_job, local_private)
+        return public_job(saved_job)
     calls = private.get("youtube_metadata_generation_calls", 0)
     if type(calls) is not int or calls < 0 or calls >= 5:
         raise HTTPException(429, "This job has reached its five-request YouTube metadata generation limit")

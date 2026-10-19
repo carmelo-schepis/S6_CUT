@@ -62,9 +62,9 @@ def _clip_job(db_: Database, job_id: str, project_id: str, *, mode: str = "fast"
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_auto_needs_selected_connected_profile() -> None:
+def test_resolve_auto_keeps_local_transcription_without_provider() -> None:
     assert resolve_processing_mode("auto", True) == "smart"
-    assert resolve_processing_mode("auto", False) == "fast"
+    assert resolve_processing_mode("auto", False) == "smart"
     assert resolve_processing_mode("fast", True) == "fast"
     assert resolve_processing_mode("smart", False) == "smart"
 
@@ -517,7 +517,7 @@ def test_api_auto_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr("engine.app.profiles.smart_available", lambda: False)
         fast = client.post("/api/v1/jobs/clip", data=data, files=files)
         assert fast.status_code == 202, fast.text
-        assert fast.json()["job"]["processingMode"] == "fast"
+        assert fast.json()["job"]["processingMode"] == "smart"
 
         # Explicit fast is never upgraded
         data["processing_mode"] = "fast"

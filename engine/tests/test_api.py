@@ -87,7 +87,7 @@ def test_hook_text_rejects_ineligible_jobs_with_specific_reason(monkeypatch, ove
     assert reason in response.json()["detail"]
 
 
-def test_hook_text_requires_connected_provider(monkeypatch) -> None:
+def test_hook_text_without_provider_is_queued_for_local_generation(monkeypatch) -> None:
     from engine import app as app_module
 
     monkeypatch.setattr(app_module, "validate_youtube_url", lambda value: value)
@@ -95,8 +95,14 @@ def test_hook_text_requires_connected_provider(monkeypatch) -> None:
     response = client.post("/api/v1/jobs/clip", data={
         "url": "https://www.youtube.com/watch?v=fixture", "hook_text": "true", "processing_mode": "smart",
     })
-    assert response.status_code == 422
-    assert "connected OpenRouter provider" in response.json()["detail"]
+    assert response.status_code == 202, response.text
+    try:
+        payload = response.json()
+        assert payload["job"]["hookTextEnabled"] is True
+        assert payload["job"]["processingMode"] == "smart"
+        assert app_module.db.get_job_private(payload["job"]["id"])["use_openrouter"] is False
+    finally:
+        app_module.db.delete_project(response.json()["project"]["id"])
 
 
 @pytest.mark.parametrize(

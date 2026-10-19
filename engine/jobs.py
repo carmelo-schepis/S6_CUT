@@ -271,6 +271,11 @@ def job_processing_mode(job: Job, private: dict[str, Any]) -> ProcessingMode:
     return value if value in {"fast", "smart"} else "smart"
 
 
+def job_allows_provider(job: Job, private: dict[str, Any]) -> bool:
+    """Either durable copy can veto cloud use, including after checkpoint recovery."""
+    return job.execution_policy != "engine_only" and private.get("execution_policy") != "engine_only"
+
+
 def job_content_format(job: Job, private: dict[str, Any]) -> ContentFormat:
     value = private.get("content_format") or job.content_format or "short"
     return value if value in {"short", "long"} else "short"
@@ -1589,7 +1594,7 @@ class JobManager:
             )
         if not pool:
             return []
-        if high_volume or not private.get("use_openrouter"):
+        if high_volume or not private.get("use_openrouter") or not job_allows_provider(job, private):
             self.start_step(job, "local_planning", detail="Using deterministic local planning", label="Planning clips locally", progress=33, private=private)
             chosen = pool[:requested]
             self.complete_step(job, "local_planning", detail=f"{len(chosen)} candidates planned locally", private=private)
@@ -1644,19 +1649,12 @@ class JobManager:
             self.fail_step(job, "hook_text", detail="AI hook text is not eligible for this job", private=private)
             return
         planning_step = next((item for item in job.steps if item.id == "openrouter"), None)
-        if state.get("status") == "generating":
-            reason = "previous hook generation was interrupted"
-            warning = f"AI hook text unavailable: {reason}. Local hook text was used where a transcript excerpt supported it."
-            private["hook_text"] = {"enabled": True, "status": "failed", "reason": reason}
-            if warning not in job.warnings:
-                job.warnings.append(warning)
-            self.fail_step(job, "hook_text", detail=warning, private=private)
-            return
+        interrupted = state.get("status") == "generating"
         self.start_step(job, "hook_text", detail="Writing transcript-grounded hooks", label="Writing hook text", progress=38, private=private)
         private["hook_text"] = {"enabled": True, "status": "generating"}
-        if private.get("execution_policy", "auto") == "engine_only" or not private.get("use_openrouter") or (planning_step and planning_step.status == "failed"):
+        if not job_allows_provider(job, private) or not private.get("use_openrouter", True) or interrupted or (planning_step and planning_step.status == "failed"):
             for clip in job.clips:
-                excerpt = " ".join(str(word.get("text", "")) for word in words if clip.start <= float(word.get("start", -1)) <= clip.end)
+                excerpt = " ".join(str(word.get("text", "")) for word in words if clip.start <= float(word.get("start", -1)) < clip.end)
                 clip.hook_text = local_hook_text(excerpt)
             private["hook_text"] = {"enabled": True, "status": "complete" if any(clip.hook_text for clip in job.clips) else "failed", "provider": "local"}
             if not any(clip.hook_text for clip in job.clips):
@@ -1670,7 +1668,7 @@ class JobManager:
         title = (project.name if project else None) or str(private.get("source_name") or "")
         excerpts = []
         for clip in job.clips:
-            excerpt = " ".join(str(word.get("text", "")) for word in words if clip.start <= float(word.get("start", -1)) <= clip.end)
+            excerpt = " ".join(str(word.get("text", "")) for word in words if clip.start <= float(word.get("start", -1)) < clip.end)
             excerpts.append({
                 "index": clip.index,
                 "style": job.style.title(),
@@ -1714,16 +1712,17 @@ class JobManager:
             reason = " ".join(redact(provider_runtime_message(exc, "OpenRouter")).split()).strip(" .") or "provider request failed"
             for clip in job.clips:
                 clip.hook_text = None
-        if reason and private.get("execution_policy", "auto") == "auto":
+        local_count = 0
+        if reason:
             for clip in job.clips:
                 if not clip.hook_text:
-                    excerpt = " ".join(str(word.get("text", "")) for word in words if clip.start <= float(word.get("start", -1)) <= clip.end)
+                    excerpt = " ".join(str(word.get("text", "")) for word in words if clip.start <= float(word.get("start", -1)) < clip.end)
                     clip.hook_text = local_hook_text(excerpt)
+                    local_count += int(bool(clip.hook_text))
         if reason:
-            warning = f"AI hook text unavailable: {reason}. Clips were rendered without hook text."
+            warning = f"AI hook text unavailable: {reason}. Local transcript hooks supplied for {local_count} clips."
             if warning not in job.warnings:
                 job.warnings.append(warning)
-            local_count = sum(bool(clip.hook_text) for clip in job.clips) if private.get("execution_policy", "auto") == "auto" else 0
             private["hook_text"] = {"enabled": True, "status": "failed" if not any(clip.hook_text for clip in job.clips) else "complete", "reason": reason, "local_fallback_count": local_count}
             if any(clip.hook_text for clip in job.clips):
                 self.complete_step(job, "hook_text", detail=f"{sum(bool(clip.hook_text) for clip in job.clips)} of {len(job.clips)} clips; local fallback for {local_count}", private=private)
@@ -1820,7 +1819,7 @@ class JobManager:
         self._save(job, private)
         if not pending:
             return
-        if private.get("execution_policy", "auto") == "engine_only" or not private.get("use_openrouter"):
+        if not job_allows_provider(job, private) or not private.get("provider_available", True):
             state = private.setdefault("youtube_metadata_generation", {})
             for clip, excerpt, cache_key in pending:
                 clip.youtube_description = normalize_seo_description(excerpt)
@@ -2708,6 +2707,7 @@ class JobManager:
         new_job = Job(
             id=new_id, project_id=job.project_id, library_folder_id=job.library_folder_id,
             source_blob_id=job.source_blob_id, mode="clip", content_format=job.content_format, processing_mode="fast",
+            execution_policy="auto" if job_allows_provider(job, private) else "engine_only",
             requested_count=job.requested_count, batch_mode=job.batch_mode, effective_target=job.effective_target,
             cap_explanation=job.cap_explanation, state="queued", stage="queued", stage_label="Queued on this machine",
             progress=0, style=job.style, burn_subtitles=bool(new_private.get("burn_subtitles", job.burn_subtitles)), steps=self._fast_steps(),

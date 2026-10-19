@@ -215,7 +215,7 @@ describe("Projects create flow", () => {
     const hookText = screen.getByRole("checkbox", { name: /Hook text/i });
     expect(hookText).toBeEnabled();
     expect(hookText).not.toBeChecked();
-    expect(hookText.parentElement).toHaveTextContent("Off by default. Tick to have OpenRouter write a short curiosity hook at the top of each short.");
+    expect(hookText.parentElement).toHaveTextContent("Off by default. Tick to add transcript-grounded hook text locally or with the API in Auto.");
   });
 
   it("sends hookText true only after an explicit opt-in", async () => {
@@ -260,7 +260,6 @@ describe("Projects create flow", () => {
 
   it.each([
     ["Fast", "Fast mode does not support AI hook text."],
-    ["No provider", "No connected provider; AI hook text is unavailable."],
     ["Long form", "Long form does not support AI hook text."],
     ["High-volume", "High-volume batches do not support AI hook text."],
     ["Music", "Music mode does not support AI hook text; Music keeps its manual Top text."],
@@ -275,7 +274,7 @@ describe("Projects create flow", () => {
     expect(checkbox.parentElement).toHaveTextContent(message);
   });
 
-  it("defaults to Auto mode and resolves no-provider auto to a Fast local cut note", () => {
+  it("defaults to Auto mode with local transcription available without a provider", () => {
     render(<ProjectsView health={health} hasSelectedProvider={false} onCreated={vi.fn()} />);
     expect(screen.getByRole("button", { name: "Auto" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("heading", { name: "Processing mode" })).toBeInTheDocument();
@@ -283,7 +282,7 @@ describe("Projects create flow", () => {
 
   it.each([
     { label: "Auto while profiles are pending", providersLoaded: false, hasSelectedProvider: false, mode: "Auto", expectedMode: "auto", burnSubtitles: true },
-    { label: "Auto without a provider", providersLoaded: true, hasSelectedProvider: false, mode: "Auto", expectedMode: "auto", burnSubtitles: false },
+    { label: "Auto without a provider", providersLoaded: true, hasSelectedProvider: false, mode: "Auto", expectedMode: "auto", burnSubtitles: true },
     { label: "Auto with a connected provider", providersLoaded: true, hasSelectedProvider: true, mode: "Auto", expectedMode: "auto", burnSubtitles: true },
     { label: "Fast with a connected provider", providersLoaded: true, hasSelectedProvider: true, mode: "Fast", expectedMode: "fast", burnSubtitles: false },
     { label: "Smart without a provider", providersLoaded: true, hasSelectedProvider: false, mode: "Smart", expectedMode: "smart", burnSubtitles: true },
@@ -300,14 +299,14 @@ describe("Projects create flow", () => {
   it("keeps the provider callout absent while /profiles is pending", () => {
     render(<ProjectsView health={health} providersLoaded={false} hasSelectedProvider={false} onCreated={vi.fn()} />);
     expect(screen.queryByText(/No provider is connected/i)).not.toBeInTheDocument();
-    expect(screen.getAllByText(/Checking connected providers/i).length).toBeGreaterThan(0);
+    expect(screen.getByRole("checkbox", { name: /Hook text/i })).toBeEnabled();
     // The "add a provider" callout is the same claim in another shape.
     expect(screen.queryByText(/Add optional AI providers/i)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Smart" }));
     expect(screen.getByRole("button", { name: "Smart" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.queryByText(/No provider is connected/i)).not.toBeInTheDocument();
-    expect(screen.getAllByText(/Checking connected providers/i).length).toBeGreaterThan(0);
+    expect(screen.getByRole("checkbox", { name: /Hook text/i })).toBeEnabled();
   });
 
   it("shows the optional-provider callout only after /profiles confirms disconnection", () => {
@@ -363,7 +362,7 @@ describe("Projects create flow", () => {
       mockCreateClipJob.mockResolvedValue({ project, job: undefinedJob });
       render(<ProjectsView health={health} providersLoaded hasSelectedProvider selectedProfile={profile} onCreated={vi.fn()} />);
       expect(screen.getByRole("checkbox", { name: /Write SEO titles with AI/ })).toBe(toggle());
-      expect(screen.getByText("Write SEO titles with AI")).toBeInTheDocument();
+      expect(screen.getByText("Generate YouTube metadata")).toBeInTheDocument();
       expect(toggle()).toBeChecked();
       submitUrl();
       await waitFor(() => expect(mockCreateClipJob).toHaveBeenCalledWith(expect.objectContaining({ youtubeMetadata: true })));
@@ -380,7 +379,7 @@ describe("Projects create flow", () => {
 
     it("follows the default as eligibility changes until touched", () => {
       const { rerender } = render(<ProjectsView health={health} providersLoaded={false} hasSelectedProvider={false} selectedProfile={null} onCreated={vi.fn()} />);
-      expect(toggle()).toBeDisabled();
+      expect(toggle()).toBeEnabled();
       expect(toggle()).not.toBeChecked();
       rerender(<ProjectsView health={health} providersLoaded hasSelectedProvider selectedProfile={profile} onCreated={vi.fn()} />);
       expect(toggle()).toBeEnabled();
@@ -415,5 +414,24 @@ describe("Projects create flow", () => {
       await waitFor(() => expect(mockCreateClipJob).toHaveBeenCalled());
       expect(mockCreateClipJob.mock.calls[0][0]).not.toHaveProperty("youtubeMetadata");
     });
+  });
+});
+
+
+describe("Local execution selection", () => {
+  it.each([false, true])("submits captions and hooks with Engine only (provider connected: %s)", async (connected) => {
+    mockCreateClipJob.mockReset();
+    mockCreateClipJob.mockResolvedValue({ project, job: undefinedJob });
+    render(<ProjectsView health={health} providersLoaded hasSelectedProvider={connected} onCreated={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Engine only" }));
+    expect(screen.getByRole("button", { name: "Engine only" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("checkbox", { name: /Burn in subtitles/ })).toBeEnabled();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Hook text" }));
+    fireEvent.click(screen.getByRole("tab", { name: "YouTube" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "YouTube URL" }), { target: { value: "https://www.youtube.com/watch?v=fixture" } });
+    fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
+    await waitFor(() => expect(mockCreateClipJob).toHaveBeenCalledWith(expect.objectContaining({
+      executionPolicy: "engine_only", processingMode: "auto", burnSubtitles: true, hookText: true,
+    })));
   });
 });
