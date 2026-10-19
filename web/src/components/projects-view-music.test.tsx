@@ -67,6 +67,27 @@ describe("Music presentation creation controls", () => {
     expect(payload).toMatchObject({ sourceProfile: "music", processingMode: "smart", contentFormat: "short", aspectRatio: "9:16", musicTopText: topText, musicPresentation: { version: 1, subtitleTheme: "warm" } });
   });
 
+  it("offers audio combination only after a song is selected and submits the choice", async () => {
+    vi.mocked(createClipJob).mockResolvedValue({ project: { ...project, sourceProfile: "music" }, job: undefined as never });
+    render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    fireEvent.click(mode("Music"));
+    const only = screen.getByRole("button", { name: "Song only" });
+    const mix = screen.getByRole("button", { name: "Original audio + song" });
+    expect(only).toBeDisabled();
+    expect(mix).toBeDisabled();
+    expect(screen.getByText("Add a song to choose how audio is combined.")).toBeVisible();
+    fireEvent.change(screen.getByLabelText("Background song MP3"), { target: { files: [new File(["song"], "song.mp3", { type: "audio/mpeg" })] } });
+    expect(only).toBeEnabled();
+    expect(mix).toBeEnabled();
+    expect(only).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(mix);
+    expect(mix).toHaveAttribute("aria-pressed", "true");
+    chooseFile();
+    fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
+    await waitFor(() => expect(createClipJob).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(createClipJob).mock.calls[0][0]).toMatchObject({ sourceProfile: "music", musicAudioMode: "mix_original" });
+  });
+
   it("forces short vertical music output and resets captions when switching from long-form Clip mode", () => {
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: /Long form · 16:9/i }));
@@ -86,6 +107,7 @@ describe("Music presentation creation controls", () => {
     await waitFor(() => expect(createClipJob).toHaveBeenCalledTimes(1));
     expect(vi.mocked(createClipJob).mock.calls[0][0]).not.toHaveProperty("musicPresentation");
     expect(vi.mocked(createClipJob).mock.calls[0][0]).not.toHaveProperty("musicTopText");
+    expect(vi.mocked(createClipJob).mock.calls[0][0]).not.toHaveProperty("musicAudioMode");
 
     fireEvent.click(mode("Music"));
     fireEvent.click(screen.getByRole("checkbox", { name: "Hook text" }));

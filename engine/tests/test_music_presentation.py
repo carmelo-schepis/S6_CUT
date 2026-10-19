@@ -505,3 +505,63 @@ def test_caption_rerender_preserves_music_presentation_and_clip_treatment(tmp_pa
     assert rendered["words"] == [{"text": "edited", "start": 50.5, "end": 50.9}]
     assert clip.caption_cues[0].text == "edited"
     assert "caption_rerender" not in private
+
+
+def test_music_audio_mode_defaults_and_validates_on_legacy_models() -> None:
+    from engine.models import MusicAudioMode
+
+    project = Project.model_validate({
+        "id": "legacy-project", "name": "Legacy", "mode": "clip", "style": "serious",
+        "state": "complete", "source_name": "old.mp4", "source_kind": "upload", "requested_count": 1,
+    })
+    job = Job.model_validate({
+        "id": "legacy-job", "project_id": project.id, "mode": "clip", "state": "complete",
+        "stage": "complete", "stage_label": "Done", "progress": 100, "style": "serious",
+    })
+    clip = Clip.model_validate({
+        "id": "legacy-clip", "index": 1, "state": "complete", "start": 0, "end": 1,
+        "duration": 1, "opening_line": "line",
+    })
+    assert project.music_audio_mode == job.music_audio_mode == clip.music_audio_mode == MusicAudioMode.SONG_ONLY
+    assert job.music_song_gain == clip.music_song_gain == 1
+    with pytest.raises(ValidationError):
+        Job.model_validate({
+            "id": "bad-job", "project_id": "p", "mode": "clip", "state": "complete",
+            "stage": "complete", "stage_label": "Done", "progress": 100, "style": "serious",
+            "music_audio_mode": "duck_speech",
+        })
+
+
+def test_music_mix_audio_mode_is_persisted_and_rejected_for_speech(monkeypatch) -> None:
+    from engine import app as app_module
+
+    monkeypatch.setattr(app_module, "validate_video_upload", lambda *args, **kwargs: {"duration": 40.0, "width": 640, "height": 360, "audio": True})
+    monkeypatch.setattr(app_module.profiles, "smart_available", lambda: False)
+    monkeypatch.setattr(app_module.manager.queue, "full", lambda: False)
+
+    async def enqueue(_: str) -> None:
+        return None
+
+    monkeypatch.setattr(app_module.manager, "enqueue", enqueue)
+    folder = app_module.db.list_folders()[0]
+    fields = {
+        "source_profile": "music", "processing_mode": "smart", "count": "1", "min_duration": "8",
+        "max_duration": "20", "library_folder_id": folder.id, "music_audio_mode": "mix_original",
+    }
+    accepted = client.post("/api/v1/jobs/clip", data=fields, files={"file": ("song.mp4", b"fixture", "video/mp4")})
+    assert accepted.status_code == 202, accepted.text
+    payload = accepted.json()
+    assert payload["project"]["musicAudioMode"] == "mix_original"
+    assert payload["project"]["musicSongGain"] == pytest.approx(0.25)
+    assert payload["project"]["musicOriginalAudioGain"] == pytest.approx(1)
+    assert payload["job"]["musicAudioMode"] == "mix_original"
+    private = app_module.db.get_job_private(payload["job"]["id"])
+    assert private["music_audio_mode"] == "mix_original"
+    assert private["music_song_gain"] == pytest.approx(0.25)
+
+    rejected = client.post(
+        "/api/v1/jobs/clip",
+        data={**fields, "source_profile": "speech"},
+        files={"file": ("speech.mp4", b"fixture", "video/mp4")},
+    )
+    assert rejected.status_code == 422

@@ -58,6 +58,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
   const musicTrackInput = useRef<HTMLInputElement>(null);
   const [musicTrackUrl, setMusicTrackUrl] = useState("");
   const [musicTrackSpeed, setMusicTrackSpeed] = useState("1");
+  const [musicAudioMode, setMusicAudioMode] = useState<"song_only" | "mix_original">("song_only");
   const [sourceDuration, setSourceDuration] = useState<{ file: File; seconds: number } | null>(null);
   const [burnSubtitles, setBurnSubtitles] = useState(true);
   const [hookTextChoice, setHookTextChoice] = useState(false);
@@ -166,7 +167,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
           ...(metadataDisabledReason === null ? { youtubeMetadata: youtubeMetadataActive } : {}),
           subscribeAnimation, libraryFolderId: libraryFolderId || undefined,
           ...(sourceProfile === "music" ? { musicPresentation: { version: 1 as const, subtitleTheme: musicTheme }, musicTopText: musicHookTextEnabled ? musicTopText : "" } : {}),
-          ...(sourceProfile === "music" ? { musicTrackFile: musicTrackFile || undefined, musicTrackUrl: musicTrackUrl.trim() || undefined, musicTrackSpeed: Number(musicTrackSpeed) } : {}),
+          ...(sourceProfile === "music" ? { musicTrackFile: musicTrackFile || undefined, musicTrackUrl: musicTrackUrl.trim() || undefined, musicTrackSpeed: Number(musicTrackSpeed), musicAudioMode } : {}),
         });
       if (libraryFolderId) localStorage.setItem(RECENT_FOLDER_KEY, libraryFolderId);
       onCreated(result.project);
@@ -333,9 +334,10 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
             <div className="folder-picker"><Field label="Business folder"><select aria-label="Business folder" value={libraryFolderId} onChange={(event) => setLibraryFolderId(event.target.value)}>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></Field><Button variant="ghost" onClick={addFolder}><Plus size={13} /> New folder</Button></div>
           </FieldGroup>
 
-          {sourceProfile === "music" && <FieldGroup title="Background song" hint="Optional · upload an MP3 or paste a public YouTube song URL. When supplied, this replaces the video's original audio in each clip.">
+          {sourceProfile === "music" && <FieldGroup title="Background song" hint="Optional · upload an MP3 or paste a public YouTube song URL. Choose whether the song replaces or accompanies the video audio.">
             <label className="field"><span className="field-label">MP3 upload</span><input ref={musicTrackInput} aria-label="Background song MP3" type="file" accept="audio/mpeg,.mp3" onChange={(event) => { const next = event.target.files?.[0] || null; setMusicTrackFile(next); if (next) setMusicTrackUrl(""); }} /><small>{musicTrackFile?.name || "MP3 audio only"}</small>{musicTrackFile && <button type="button" className="button button-quiet" onClick={() => { setMusicTrackFile(null); if (musicTrackInput.current) musicTrackInput.current.value = ""; }}>Remove song</button>}</label>
             <Field label="YouTube song URL"><input aria-label="YouTube song URL" type="url" value={musicTrackUrl} onChange={(event) => { setMusicTrackUrl(event.target.value); if (event.target.value) { setMusicTrackFile(null); if (musicTrackInput.current) musicTrackInput.current.value = ""; } }} placeholder="https://www.youtube.com/watch?v=..." /></Field>
+            <div className="field"><span className="field-label">Audio</span><div role="group" aria-label="Music audio mode" className="segmented mode-tabs"><button type="button" aria-pressed={musicAudioMode === "song_only"} className={musicAudioMode === "song_only" ? "active" : ""} disabled={!musicTrackFile && !musicTrackUrl.trim()} onClick={() => setMusicAudioMode("song_only")}>Song only</button><button type="button" aria-pressed={musicAudioMode === "mix_original"} className={musicAudioMode === "mix_original" ? "active" : ""} disabled={!musicTrackFile && !musicTrackUrl.trim()} onClick={() => setMusicAudioMode("mix_original")}>Original audio + song</button></div>{!musicTrackFile && !musicTrackUrl.trim() && <small>Add a song to choose how audio is combined.</small>}{musicAudioMode === "mix_original" && <small>Original audio at full volume · song at 25% volume</small>}</div>
             <Field label="Song speed"><select aria-label="Song speed" value={musicTrackSpeed} onChange={(event) => setMusicTrackSpeed(event.target.value)}><option value="1">Standard speed</option><option value="1.25">Speed up · 1.25×</option><option value="1.5">Sped-up · 1.5×</option><option value="0.85">Slow down · 0.85×</option><option value="0.75">Slowed · 0.75×</option></select></Field>
           </FieldGroup>}
 

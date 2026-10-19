@@ -87,7 +87,7 @@ def test_corrupt_mp3_is_rejected_by_ffprobe(tmp_path: Path, settings: Settings) 
         probe_audio(corrupt, settings)
 
 
-@pytest.mark.parametrize("speed", [0.75, 1.0, 1.5])
+@pytest.mark.parametrize("speed", [0.75, 0.85, 1.0, 1.25, 1.5])
 def test_prepared_song_loops_and_preserves_pitch_at_late_clip_offsets(tmp_path: Path, settings: Settings, speed: float) -> None:
     import numpy as np
 
@@ -105,3 +105,76 @@ def test_prepared_song_loops_and_preserves_pitch_at_late_clip_offsets(tmp_path: 
     spectrum = abs(np.fft.rfft(samples * np.hanning(len(samples))))
     frequency = np.fft.rfftfreq(len(samples), 1 / 16000)[np.argmax(spectrum)]
     assert frequency == pytest.approx(660 * speed, abs=12)
+
+
+def _with_original_tone(video: Path, target: Path, settings: Settings) -> Path:
+    subprocess.run([
+        settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", str(video),
+        "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100:duration=2",
+        "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-shortest", str(target),
+    ], check=True, capture_output=True)
+    return target
+
+
+def _tone_amplitude(path: Path, frequency: float, settings: Settings) -> float:
+    import numpy as np
+
+    decoded = subprocess.run([
+        settings.ffmpeg, "-v", "error", "-i", str(path), "-vn", "-ac", "1", "-ar", "16000", "-f", "f32le", "-",
+    ], check=True, capture_output=True).stdout
+    samples = np.frombuffer(decoded, dtype="<f4")
+    samples = samples[int(.15 * 16000):int(.95 * 16000)]
+    times = np.arange(len(samples)) / 16000
+    window = np.hanning(len(samples))
+    projection = 2 * np.sum(samples * window * np.exp(-2j * np.pi * frequency * times)) / np.sum(window)
+    return float(abs(projection))
+
+
+@pytest.mark.parametrize("renderer", ["complex", "fast"])
+def test_real_mix_keeps_original_and_quieter_song(tmp_path: Path, settings: Settings, renderer: str) -> None:
+    silent, song = _fixtures(tmp_path, settings)
+    source = _with_original_tone(silent, tmp_path / "with-original.mp4", settings)
+    output = tmp_path / f"mix-{renderer}.mp4"
+    if renderer == "complex":
+        render_clip(
+            source, output, start=.2, end=1.4, aspect="16:9", words=[], visuals=[], overlays=[],
+            settings=settings, has_audio=True, subtitles_enabled=False, music_track=song,
+            music_audio_mode="mix_original", music_song_gain=.25, music_original_audio_gain=1,
+        )
+    else:
+        render_fast_clip(
+            source, output, start=.2, end=1.4, aspect="16:9", settings=settings,
+            has_audio=True, subtitles_enabled=False, music_track=song, music_audio_mode="mix_original",
+            music_song_gain=.25, music_original_audio_gain=1,
+        )
+    original = _tone_amplitude(output, 440, settings)
+    background = _tone_amplitude(output, 660, settings)
+    assert original > .05
+    assert background > .01
+    assert background / original == pytest.approx(.25, abs=.08)
+    assert float(_probe_audio(output, settings)["format"]["duration"]) == pytest.approx(1.2, abs=.15)
+
+
+def test_real_song_only_excludes_audible_source(tmp_path: Path, settings: Settings) -> None:
+    silent, song = _fixtures(tmp_path, settings)
+    source = _with_original_tone(silent, tmp_path / "with-original.mp4", settings)
+    output = tmp_path / "song-only.mp4"
+    render_clip(
+        source, output, start=.2, end=1.4, aspect="16:9", words=[], visuals=[], overlays=[],
+        settings=settings, has_audio=True, subtitles_enabled=False, music_track=song,
+        music_audio_mode="song_only", music_song_gain=1,
+    )
+    assert _tone_amplitude(output, 440, settings) < .01
+    assert _tone_amplitude(output, 660, settings) > .05
+
+
+def test_real_mix_mode_still_renders_song_for_silent_video(tmp_path: Path, settings: Settings) -> None:
+    video, song = _fixtures(tmp_path, settings)
+    output = tmp_path / "silent-mix.mp4"
+    render_clip(
+        video, output, start=.2, end=1.4, aspect="16:9", words=[], visuals=[], overlays=[],
+        settings=settings, has_audio=False, subtitles_enabled=False, music_track=song,
+        music_audio_mode="mix_original", music_song_gain=.25,
+    )
+    assert _tone_amplitude(output, 660, settings) > .01
+    assert not any(abs(value) > .01 for value in [_tone_amplitude(output, 440, settings)])

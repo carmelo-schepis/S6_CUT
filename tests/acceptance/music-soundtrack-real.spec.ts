@@ -9,12 +9,48 @@ import { assertPlayback, checkPlayback, zipEntry } from './support/workspace';
 
 const fixtures = process.env.S6_SOUNDTRACK_FIXTURES;
 const container = process.env.S6_SOUNDTRACK_CONTAINER;
-const cases = [
+const cases: { source: string; speed: number; audioMode?: 'song_only' | 'mix_original'; silentVideo?: boolean }[] = [
   { source: 'upload', speed: 1 },
   { source: 'upload', speed: 1.5 },
+  { source: 'upload', speed: 0.85 },
+  { source: 'upload', speed: 1.25 },
   { source: 'youtube', speed: .75 },
   { source: 'none', speed: 1 },
+  { source: 'none', speed: 1, audioMode: 'mix_original' as const },
+  { source: 'upload', speed: 1, audioMode: 'mix_original' as const },
+  { source: 'upload', speed: 1, audioMode: 'mix_original' as const, silentVideo: true },
 ];
+
+function toneAmplitude(raw: Buffer, frequency: number) {
+  const rate = 16000;
+  const start = Math.floor(.15 * rate), end = Math.min(raw.length / 4, Math.floor(.95 * rate));
+  let real = 0, imaginary = 0, windowTotal = 0;
+  for (let index = start; index < end; index++) {
+    const position = index - start;
+    const window = .5 - .5 * Math.cos(2 * Math.PI * position / Math.max(1, end - start - 1));
+    const value = raw.readFloatLE(index * 4) * window;
+    const angle = 2 * Math.PI * frequency * index / rate;
+    real += value * Math.cos(angle);
+    imaginary -= value * Math.sin(angle);
+    windowTotal += window;
+  }
+  return 2 * Math.hypot(real, imaginary) / windowTotal;
+}
+
+function verifySongAtQuarterGain(filename: string) {
+  const raw = execFileSync('docker', ['exec', container!, 'ffmpeg', '-v', 'error', '-i', `/qa/${filename}`, '-vn', '-ac', '1', '-ar', '16000', '-f', 'f32le', '-']);
+  expect(toneAmplitude(raw, 660)).toBeGreaterThan(.01);
+  expect(toneAmplitude(raw, 660)).toBeLessThan(.08);
+}
+
+function verifyMix(filename: string) {
+  const raw = execFileSync('docker', ['exec', container!, 'ffmpeg', '-v', 'error', '-i', `/qa/${filename}`, '-vn', '-ac', '1', '-ar', '16000', '-f', 'f32le', '-']);
+  const original = toneAmplitude(raw, 220), song = toneAmplitude(raw, 660);
+  expect(original).toBeGreaterThan(.05);
+  expect(song).toBeGreaterThan(.01);
+  expect(song / original).toBeGreaterThan(.15);
+  expect(song / original).toBeLessThan(.36);
+}
 
 function verifyAudio(filename: string, frequency: number) {
   const raw = execFileSync('docker', ['exec', container!, 'ffmpeg', '-v', 'error', '-ss', '0.2', '-i', `/qa/${filename}`, '-t', '1', '-vn', '-ac', '1', '-ar', '16000', '-f', 'f32le', '-']);
@@ -31,21 +67,26 @@ function verifyAudio(filename: string, frequency: number) {
 }
 
 for (const item of cases) {
-  test(`real soundtrack: ${item.source} at ${item.speed}x`, async ({ page, request }, testInfo) => {
+  test(`real soundtrack: ${item.source} at ${item.speed}x ${item.audioMode || 'song-only'}${item.silentVideo ? ' silent video' : ''}`, async ({ page, request }, testInfo) => {
     test.skip(!fixtures || !container, 'Use the isolated soundtrack verification harness');
     test.skip(testInfo.project.name.startsWith('iPhone') || testInfo.project.name.startsWith('iPad'), 'iOS provides a read-only status view');
     test.setTimeout(900_000);
     const name = `Soundtrack ${item.source} ${item.speed} ${Date.now()}`;
     await page.goto('/');
     await expect(page.getByRole('heading', { name: 'Create a project' })).toBeVisible();
-    await page.getByLabel('Choose video file').setInputFiles(path.join(fixtures!, item.source === 'none' ? 'with-audio.mp4' : 'silent.mp4'));
+    const videoFixture = item.source === 'none' || (item.audioMode === 'mix_original' && !item.silentVideo) ? 'with-audio.mp4' : 'silent.mp4';
+    await page.getByLabel('Choose video file').setInputFiles(path.join(fixtures!, videoFixture));
     await page.getByRole('button', { name: 'Music / sung vocals' }).click();
     while (Number(await page.locator('.count-control strong').textContent()) > 1) {
       await page.getByRole('button', { name: 'Fewer clips' }).click();
     }
     // The title deliberately matches a lyric: audio must never become a visual overlay.
-    if (item.source === 'upload') await page.getByLabel('Background song MP3').setInputFiles({ name: 'song.mp3', mimeType: 'audio/mpeg', buffer: await fs.readFile(path.join(fixtures!, 'short-song.mp3')) });
+    if (item.source === 'upload' || (item.source === 'none' && item.audioMode)) await page.getByLabel('Background song MP3').setInputFiles({ name: 'song.mp3', mimeType: 'audio/mpeg', buffer: await fs.readFile(path.join(fixtures!, 'short-song.mp3')) });
     if (item.source === 'youtube') await page.getByLabel('YouTube song URL').fill('https://music.youtube.com/watch?v=BaW_jenozKc');
+    if (item.audioMode) {
+      await page.getByRole('button', { name: 'Original audio + song' }).click();
+      if (item.source === 'none') await page.getByRole('button', { name: 'Remove song' }).click();
+    }
     await page.getByLabel('Song speed').selectOption(String(item.speed));
     await page.getByRole('button', { name: 'Advanced controls' }).click();
     await page.getByLabel('Minimum seconds').fill('8');
@@ -69,6 +110,7 @@ for (const item of cases) {
     }, { timeout: 300_000, intervals: [500, 1000] }).toBe(true);
     let finished = await readJob();
     expect(finished.clips).toHaveLength(1);
+    if (item.audioMode) expect(finished.musicAudioMode).toBe(item.audioMode);
     expect(finished.steps.every((step: { status: string }) => ['complete', 'skipped'].includes(step.status))).toBe(true);
     if (item.source === 'none') expect(finished.musicTrack).toBeNull();
     else expect(finished.musicTrack).toMatchObject({ source: item.source === 'upload' ? 'upload' : 'youtube', speed: item.speed });
@@ -76,13 +118,18 @@ for (const item of cases) {
     await page.locator('.clip-tile.complete').getByRole('button', { name: 'Preview', exact: true }).click();
     checkPlayback(await assertPlayback(page), name);
     let clip = finished.clips[0];
-    const filename = `output-${item.source}-${item.speed}.mp4`;
+    const filename = `output-${item.source}-${item.speed}-${item.audioMode || 'song-only'}.mp4`;
     const output = await request.get(clip.downloadUrl);
     expect(output.ok()).toBeTruthy();
     await fs.writeFile(path.join(fixtures!, filename), await output.body());
-    verifyAudio(filename, item.source === 'none' ? 220 : 660 * item.speed);
+    if (item.source === 'none') verifyAudio(filename, 220);
+    else if (item.audioMode === 'mix_original' && item.silentVideo) {
+      verifySongAtQuarterGain(filename);
+      expect(finished.warnings.some((warning: string) => warning.includes('Original audio was unavailable'))).toBe(true);
+    } else if (item.audioMode === 'mix_original') verifyMix(filename);
+    else verifyAudio(filename, item.source === 'none' ? 220 : 660 * item.speed);
 
-    if (item.source === 'upload' && item.speed === 1) {
+    if (item.source === 'upload' && item.speed === 1 && !item.silentVideo) {
       // Retention and restart must leave both the original footage and song usable.
       execFileSync('docker', ['exec', container!, 'python', '-c', 'import shutil,sys; shutil.rmtree("/app/data/jobs/"+sys.argv[1])', queued.id]);
       execFileSync('docker', ['restart', '--timeout=1', container!]);
@@ -105,7 +152,8 @@ for (const item of cases) {
       clip = finished.clips[0];
       const revised = await request.get(clip.downloadUrl);
       await fs.writeFile(path.join(fixtures!, 'reviewed.mp4'), await revised.body());
-      verifyAudio('reviewed.mp4', 660);
+      if (item.audioMode === 'mix_original') verifyMix('reviewed.mp4');
+      else verifyAudio('reviewed.mp4', 660);
       const sidecar = clip.captionDownloads.find((value: { format: string }) => value.format === 'srt');
       expect(await (await request.get(sidecar.url)).text()).toContain('Reviewed background song');
     }
@@ -115,12 +163,18 @@ for (const item of cases) {
     const downloadPromise = page.waitForEvent('download');
     await page.getByRole('button', { name: /Download ZIP/ }).click();
     const download = await downloadPromise;
-    const archive = path.join(fixtures!, `export-${item.source}-${item.speed}.zip`);
+    const archive = path.join(fixtures!, `export-${item.source}-${item.speed}-${item.audioMode || 'song-only'}.zip`);
     await download.saveAs(archive);
     const manifest = JSON.parse(zipEntry(archive, `${name}/manifest.json`));
     const credits = JSON.parse(zipEntry(archive, `${name}/credits.json`));
+    if (item.audioMode) {
+      expect(manifest.outputs[0].music_audio.mode).toBe(item.audioMode);
+      expect(manifest.outputs[0].music_audio.song_gain).toBe(.25);
+    }
     if (item.source !== 'none') {
       expect(manifest.outputs[0].music_track.speed).toBe(item.speed);
+      expect(manifest.outputs[0].music_audio.mode).toBe(item.audioMode || 'song_only');
+      expect(manifest.outputs[0].music_audio.song_gain).toBe(item.audioMode === 'mix_original' ? .25 : 1);
       expect(credits.credits.some((credit: { music_track?: { speed: number } }) => credit.music_track?.speed === item.speed)).toBe(true);
     }
     await testInfo.attach('persisted-job', { body: JSON.stringify(finished, null, 2), contentType: 'application/json' });

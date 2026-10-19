@@ -223,6 +223,7 @@ type ClipJobInput = {
   musicTrackFile?: File;
   musicTrackUrl?: string;
   musicTrackSpeed?: number;
+  musicAudioMode?: "song_only" | "mix_original";
   hookText?: boolean;
   manualHookText?: string;
   youtubeMetadata?: boolean;
@@ -260,6 +261,7 @@ export async function createClipJob(input: ClipJobInput): Promise<{ project: Pro
     if (input.musicTrackFile) form.set("music_track_file", input.musicTrackFile);
     if (input.musicTrackUrl) form.set("music_track_url", input.musicTrackUrl);
     if (input.musicTrackSpeed !== undefined) form.set("music_track_speed", String(input.musicTrackSpeed));
+    if (input.musicAudioMode !== undefined) form.set("music_audio_mode", input.musicAudioMode);
   }
   const value = await request<{ project: unknown; job: unknown }>("/jobs/clip", { method: "POST", body: form });
   return { project: projectSchema.parse(value.project), job: jobSchema.parse(value.job) };

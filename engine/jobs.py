@@ -1518,6 +1518,7 @@ class JobManager:
                 **_creator_render_kwargs(render, youtube_creator_credit(job, private)),
                 **_presentation_render_kwargs(render, private), **music_kwargs,
                 **({"music_track": music_track, "music_track_speed": 1.0} if music_track else {}),
+                **({"music_audio_mode": job.music_audio_mode, "music_song_gain": job.music_song_gain, "music_original_audio_gain": job.music_original_audio_gain} if job.source_profile == "music" else {}),
             }
             render(source, output, **_compatible_render_kwargs(render, rerender_kwargs))
             # publish_clip_output reuses the stable asset identity in its transaction.
@@ -2065,6 +2066,10 @@ class JobManager:
         if not metadata["audio"] and music_track is None:
             requirement = "readable sung vocals" if job.source_profile == "music" else "speech"
             raise MediaError(f"This video has no readable audio track. Automatic clips require {requirement}; retain it as a source for manual editing.")
+        if job.source_profile == "music" and job.music_audio_mode.value == "mix_original" and music_track is not None and not metadata["audio"]:
+            warning = "Original audio was unavailable; the background song was rendered at 25% volume."
+            if warning not in job.warnings:
+                job.warnings.append(warning)
         source_duration = float(metadata["duration"])
         transcript_source = source
         transcript_duration = float(metadata["duration"])
@@ -2180,6 +2185,10 @@ class JobManager:
                 clip = clip_from_candidate(candidate, index)
                 clip.id = str(uuid.uuid4())
                 clip.music_track = job.music_track if profile == "music" else None
+                if profile == "music":
+                    clip.music_audio_mode = job.music_audio_mode
+                    clip.music_song_gain = job.music_song_gain
+                    clip.music_original_audio_gain = job.music_original_audio_gain
                 excerpt = " ".join(str(word["text"]) for word in candidate.words)
                 visual = self.rules.resolve(excerpt)
                 clip.visual_label = visual.label
@@ -2259,6 +2268,7 @@ class JobManager:
             try:
                 render_kwargs = {
                     "start": clip.start, "end": clip.end, "aspect": private["aspect_ratio"],
+                    "has_audio": bool(metadata["audio"]),
                     "muted": bool(private.get("muted", False)), "volume": float(private.get("volume", 1.0)),
                     "filter_preset": str(private.get("filter_preset", "none")), "filter_intensity": float(private.get("filter_intensity", 1.0)),
                     "tint_color": str(private.get("tint_color", "#d58a55")), "tint_opacity": int(private.get("tint_opacity", 0)),
@@ -2282,6 +2292,7 @@ class JobManager:
                         clip.music_top_text, clip.music_treatment,
                     ) if profile == "music" else {}),
                     **({"music_track": music_track, "music_track_speed": 1.0} if music_track else {}),
+                    **({"music_audio_mode": job.music_audio_mode, "music_song_gain": job.music_song_gain, "music_original_audio_gain": job.music_original_audio_gain} if job.source_profile == "music" else {}),
                 }
                 try:
                     render_clip(source, output, **_compatible_render_kwargs(render_clip, render_kwargs))
@@ -2499,6 +2510,8 @@ class JobManager:
                 render_kwargs.update(_format_render_kwargs(render, job_content_format(job, private)))
                 render_kwargs.update(_presentation_render_kwargs(render, private))
                 render_kwargs.update(_reaction_policy_render_kwargs(render, private, job.source_profile, subtitles_enabled))
+                if job.source_profile == "music":
+                    render_kwargs.update({"music_audio_mode": job.music_audio_mode, "music_song_gain": job.music_song_gain, "music_original_audio_gain": job.music_original_audio_gain})
                 render(source, output, **_compatible_render_kwargs(render, render_kwargs))
                 job, clip, _ = self._publish_output(job, clip, output, private)
             except Exception as exc:
@@ -2853,6 +2866,7 @@ class JobManager:
                 "blob_id": clip.blob_id,
                 "provenance": [record.model_dump(mode="json") for record in clip.provenance],
                 "music_track": clip.music_track.model_dump(mode="json") if clip.music_track else None,
+                "music_audio": {"mode": clip.music_audio_mode.value, "song_gain": clip.music_song_gain, "original_audio_gain": clip.music_original_audio_gain},
             })
             if clip.creator_credit or clip.provenance:
                 credits.append({
@@ -2877,6 +2891,7 @@ class JobManager:
                 "source_name": project.source_name if project else None,
                 "source_creator": project.source_creator if project else None,
                 "music_track": project.music_track.model_dump(mode="json") if project and project.music_track else None,
+                "music_audio": {"mode": project.music_audio_mode.value, "song_gain": project.music_song_gain, "original_audio_gain": project.music_original_audio_gain} if project else None,
             },
             "job": {
                 "id": job.id,
@@ -2885,6 +2900,7 @@ class JobManager:
                 "created_at": job.created_at,
                 "updated_at": job.updated_at,
                 "music_track": job.music_track.model_dump(mode="json") if job.music_track else None,
+                "music_audio": {"mode": job.music_audio_mode.value, "song_gain": job.music_song_gain, "original_audio_gain": job.music_original_audio_gain},
             },
             "outputs": manifest_outputs,
         }

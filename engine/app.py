@@ -402,6 +402,7 @@ async def create_clip_job(
     url: Annotated[str | None, Form()] = None,
     music_track_url: Annotated[str | None, Form()] = None,
     music_track_speed: Annotated[float, Form()] = 1.0,
+    music_audio_mode: Annotated[Literal["song_only", "mix_original"], Form()] = "song_only",
     name: Annotated[str | None, Form()] = None,
     style: Annotated[Literal["funny", "serious", "educational", "hype"], Form()] = "educational",
     processing_mode: Annotated[Literal["fast", "smart", "auto"], Form()] = "auto",
@@ -451,6 +452,8 @@ async def create_clip_job(
         raise HTTPException(422, "Background songs are only available in Music mode")
     if music_track_file and music_track_url and music_track_url.strip():
         raise HTTPException(422, "Choose an MP3 upload or a YouTube song link, not both")
+    if source_profile != "music" and music_audio_mode != "song_only":
+        raise HTTPException(422, "Background song audio options are only available in Music mode")
     if music_track_speed not in {0.75, 0.85, 1.0, 1.25, 1.5}:
         raise HTTPException(422, "Song speed must be one of the available speed options")
     if content_format == "short" and max_duration > 180:
@@ -516,6 +519,9 @@ async def create_clip_job(
         private["music_presentation"] = music_config.model_dump()
         private["music_top_text"] = music_top_text if music_top_text.strip() else None
         private["music_track_speed"] = music_track_speed
+        private["music_audio_mode"] = music_audio_mode
+        private["music_song_gain"] = 0.25 if music_audio_mode == "mix_original" else 1.0
+        private["music_original_audio_gain"] = 1.0
         if music_track_url and music_track_url.strip():
             try:
                 private["music_track_url"] = validate_youtube_url(music_track_url.strip())
@@ -587,7 +593,7 @@ async def create_clip_job(
         private["cap_explanation"] = cap_explanation
     elif batch_mode == "high_volume":
         cap_explanation = "Effective target will be confirmed after YouTube download and FFprobe validation."
-    project = Project(id=project_id, name=_project_name(name, Path(source_name).stem), name_is_auto=not _project_name(name, ""), mode="clip", style=style, state="queued", source_name=source_name, source_kind=source_kind, requested_count=count, batch_mode=batch_mode, effective_target=effective_target, cap_explanation=cap_explanation, content_format=content_format, source_profile=source_profile, music_track=music_track_snapshot, latest_job_id=job_id, library_folder_id=library_folder_id)
+    project = Project(id=project_id, name=_project_name(name, Path(source_name).stem), name_is_auto=not _project_name(name, ""), mode="clip", style=style, state="queued", source_name=source_name, source_kind=source_kind, requested_count=count, batch_mode=batch_mode, effective_target=effective_target, cap_explanation=cap_explanation, content_format=content_format, source_profile=source_profile, music_track=music_track_snapshot, music_audio_mode=music_audio_mode if source_profile == "music" else "song_only", music_song_gain=float(private.get("music_song_gain", 1.0)), music_original_audio_gain=float(private.get("music_original_audio_gain", 1.0)), latest_job_id=job_id, library_folder_id=library_folder_id)
     high_volume_smart_landscape = batch_mode == "high_volume" and content_format == "long" and mode == "smart"
     steps = manager._fast_steps() if uses_fast_pipeline(mode, content_format) and not high_volume_smart_landscape else manager._smart_steps(bool(private["use_openrouter"]), source_profile, include_hook_text=hook_text)
     music_step = next((step for step in steps if step.id == "music_track"), None)
@@ -611,7 +617,7 @@ async def create_clip_job(
             steps[1].status = "complete"
             steps[1].detail = f"Source validated - {float(source_metadata['duration']):.1f}s"
             steps[1].started_at = steps[1].completed_at = checkpoint_time
-    job = Job(id=job_id, project_id=project_id, library_folder_id=library_folder_id, mode="clip", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style=style, processing_mode=mode, execution_policy=execution_policy, content_format=content_format, source_profile=source_profile, music_presentation=music_config if source_profile == "music" else None, music_top_text=(music_top_text if music_top_text.strip() else None) if source_profile == "music" else None, music_track=music_track_snapshot, requested_count=count, batch_mode=batch_mode, effective_target=effective_target, cap_explanation=cap_explanation, burn_subtitles=True if source_profile == "music" else burn_subtitles, embed_subtitles=embed_subtitles, hook_text_enabled=hook_text, youtube_metadata_enabled=youtube_metadata, youtube_metadata_model_id=youtube_metadata_model_id, steps=steps)
+    job = Job(id=job_id, project_id=project_id, library_folder_id=library_folder_id, mode="clip", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style=style, processing_mode=mode, execution_policy=execution_policy, content_format=content_format, source_profile=source_profile, music_presentation=music_config if source_profile == "music" else None, music_top_text=(music_top_text if music_top_text.strip() else None) if source_profile == "music" else None, music_track=music_track_snapshot, music_audio_mode=music_audio_mode if source_profile == "music" else "song_only", music_song_gain=float(private.get("music_song_gain", 1.0)), music_original_audio_gain=float(private.get("music_original_audio_gain", 1.0)), requested_count=count, batch_mode=batch_mode, effective_target=effective_target, cap_explanation=cap_explanation, burn_subtitles=True if source_profile == "music" else burn_subtitles, embed_subtitles=embed_subtitles, hook_text_enabled=hook_text, youtube_metadata_enabled=youtube_metadata, youtube_metadata_model_id=youtube_metadata_model_id, steps=steps)
     db.save_project(project)
     db.save_job(job, private)
     try:

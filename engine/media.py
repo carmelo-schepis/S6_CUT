@@ -2412,7 +2412,33 @@ def _smart_speech_emoji_filters(plan: list[tuple[Path, float, float, int, int, i
     return ";".join(filters)
 
 
-def render_clip(source: Path, output: Path, *, start: float, end: float, aspect: str, words: list[dict[str, Any]], visuals: list[tuple[str, float, float]], overlays: list[tuple[Path, float, float]], settings: Settings, style: str = "educational", has_audio: bool = True, embed_subtitles: bool = False, subtitle_language: str = "und", creator_credit: str | None = None, content_format: str | None = None, centered_partial_fill: bool = False, subscribe_animation: dict[str, Any] | None = None, music_theme: str | None = None, music_top_text: str | None = None, music_treatment: str | None = None, hook_text: str | None = None, presentation: str | None = None, reaction_policy: str | None = None, source_profile: str = "speech", subtitles_enabled: bool = True, muted: bool = False, volume: float = 1.0, filter_preset: str = "none", filter_intensity: float = 1.0, tint_color: str = "#d58a55", tint_opacity: int = 0, text_overlays: list[dict[str, Any]] | None = None, music_track: Path | None = None, music_track_speed: float = 1.0) -> None:
+def _music_audio_filters(*, source_audio: bool, muted: bool, source_volume: float, mode: str, song_gain: float, original_gain: float, duration: float, song_input: int, speed: float) -> tuple[list[str], str, bool]:
+    """Build the soundtrack audio graph; return filters, output label, mixed flag."""
+    speed = min(1.5, max(0.75, float(speed)))
+    song_gain = min(2.0, max(0.0, float(song_gain)))
+    original_gain = min(2.0, max(0.0, float(original_gain)))
+    original_active = mode == "mix_original" and source_audio and not muted
+    filters = []
+    filters.append(
+        f"[{song_input}:a:0]asetpts=PTS-STARTPTS,aresample=48000,asetrate=48000*{speed:.3f},"
+        f"aresample=48000,atrim=duration={duration:.6f},volume={song_gain:.6f}[songout]"
+    )
+    if not original_active:
+        return filters, "songout", False
+    original_level = min(2.0, max(0.0, float(source_volume) * original_gain))
+    filters.append(
+        f"[0:a:0]asetpts=PTS-STARTPTS,aresample=48000,atrim=duration={duration:.6f},"
+        f"volume={original_level:.6f}[originalaudio]"
+    )
+    filters.append(
+        "[originalaudio][songout]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,"
+        "alimiter=limit=0.95:level=false:latency=1,"
+        f"atrim=duration={duration:.6f},asetpts=PTS-STARTPTS[mixedout]"
+    )
+    return filters, "mixedout", True
+
+
+def render_clip(source: Path, output: Path, *, start: float, end: float, aspect: str, words: list[dict[str, Any]], visuals: list[tuple[str, float, float]], overlays: list[tuple[Path, float, float]], settings: Settings, style: str = "educational", has_audio: bool = True, embed_subtitles: bool = False, subtitle_language: str = "und", creator_credit: str | None = None, content_format: str | None = None, centered_partial_fill: bool = False, subscribe_animation: dict[str, Any] | None = None, music_theme: str | None = None, music_top_text: str | None = None, music_treatment: str | None = None, hook_text: str | None = None, presentation: str | None = None, reaction_policy: str | None = None, source_profile: str = "speech", subtitles_enabled: bool = True, muted: bool = False, volume: float = 1.0, filter_preset: str = "none", filter_intensity: float = 1.0, tint_color: str = "#d58a55", tint_opacity: int = 0, text_overlays: list[dict[str, Any]] | None = None, music_track: Path | None = None, music_track_speed: float = 1.0, music_audio_mode: str = "song_only", music_song_gain: float = 1.0, music_original_audio_gain: float = 1.0) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     has_supported_emoji = presentation in {"smart_speech_v1", "smart_speech_v2"} and any(find_emoji_sequences(str(word.get("text", ""))) for word in words)
     separate_burn_script = bool(creator_credit or hook_text or not subtitles_enabled or has_supported_emoji)
@@ -2461,12 +2487,18 @@ def render_clip(source: Path, output: Path, *, start: float, end: float, aspect:
         emoji_filters = _smart_speech_emoji_filters(emoji_plan, 1 + len(overlays) + len(subscribe_animations), emoji_inputs)
         filters = f"{filters};{emoji_filters}"
         mapped = f"emojiout{len(emoji_plan) - 1}"
+    audio_output = None
+    mixed_audio = False
     if music_track_input is not None:
-        speed = min(1.5, max(0.75, float(music_track_speed)))
-        filters += f";[{music_track_input}:a:0]asetpts=PTS-STARTPTS,aresample=48000,asetrate=48000*{speed:.3f},aresample=48000,atrim=duration={duration:.3f},volume=1.0[songout]"
+        audio_filters, audio_output, mixed_audio = _music_audio_filters(
+            source_audio=has_audio, muted=muted, source_volume=volume, mode=str(music_audio_mode),
+            song_gain=music_song_gain, original_gain=music_original_audio_gain,
+            duration=duration, song_input=music_track_input, speed=music_track_speed,
+        )
+        filters += ";" + ";".join(audio_filters)
     command.extend(["-t", f"{duration:.3f}", "-filter_complex", filters, "-map", f"[{mapped}]"])
-    if music_track_input is not None:
-        command.extend(["-map", "[songout]", "-c:a", DELIVERY_AUDIO_CODEC, "-b:a", DELIVERY_AUDIO_BITRATE, "-ar", DELIVERY_AUDIO_RATE])
+    if audio_output is not None:
+        command.extend(["-map", f"[{audio_output}]", "-c:a", DELIVERY_AUDIO_CODEC, "-b:a", DELIVERY_AUDIO_BITRATE, "-ar", DELIVERY_AUDIO_RATE])
     elif has_audio and not muted:
         command.extend(["-map", "0:a:0", "-af", f"volume={max(0.0, min(2.0, volume)):.3f}", "-c:a", DELIVERY_AUDIO_CODEC, "-b:a", DELIVERY_AUDIO_BITRATE, "-ar", DELIVERY_AUDIO_RATE])
     else:
@@ -2744,6 +2776,9 @@ def render_fast_clip(
     text_overlays: list[dict[str, Any]] | None = None,
     music_track: Path | None = None,
     music_track_speed: float = 1.0,
+    music_audio_mode: str = "song_only",
+    music_song_gain: float = 1.0,
+    music_original_audio_gain: float = 1.0,
 ) -> None:
     """Render a fast clip with optional captions and no overlays or visual beats.
 
@@ -2800,6 +2835,8 @@ def render_fast_clip(
             muted=muted, volume=volume, filter_preset=filter_preset, filter_intensity=filter_intensity,
             tint_color=tint_color, tint_opacity=tint_opacity, text_overlays=text_overlays,
             music_track=music_track, music_track_speed=music_track_speed,
+            music_audio_mode=music_audio_mode, music_song_gain=music_song_gain,
+            music_original_audio_gain=music_original_audio_gain,
         )
         return
 
@@ -2818,6 +2855,8 @@ def render_fast_clip(
             muted=muted, volume=volume, filter_preset=filter_preset, filter_intensity=filter_intensity,
             tint_color=tint_color, tint_opacity=tint_opacity, text_overlays=text_overlays,
             music_track=music_track, music_track_speed=music_track_speed,
+            music_audio_mode=music_audio_mode, music_song_gain=music_song_gain,
+            music_original_audio_gain=music_original_audio_gain,
         )
         return
 
@@ -2881,7 +2920,17 @@ def render_fast_clip(
         speed = min(1.5, max(0.75, float(music_track_speed)))
         command.extend(["-stream_loop", "-1", "-ss", f"{start * speed:.3f}", "-i", str(music_track)])
     command.extend(["-t", f"{duration:.3f}"])
-    if subscribe_animations:
+    graph_audio_output = None
+    if music_track is not None:
+        song_input = 1 + len(subscribe_animations) + (1 if embed_subtitles else 0)
+        audio_filters, graph_audio_output, _ = _music_audio_filters(
+            source_audio=has_audio, muted=muted, source_volume=volume, mode=str(music_audio_mode),
+            song_gain=music_song_gain, original_gain=music_original_audio_gain,
+            duration=duration, song_input=song_input, speed=music_track_speed,
+        )
+    else:
+        audio_filters = []
+    if subscribe_animations or music_track is not None:
         graph = [f"[0:v]{vf}[base]"]
         current = "base"
         current = _composite_subscribe_animations(graph, current, subscribe_animations)
@@ -2889,7 +2938,10 @@ def render_fast_clip(
             graph.append(f"[{current}]subtitles={ass.name}[outv]")
         else:
             graph.append(f"[{current}]null[outv]")
+        graph.extend(audio_filters)
         command.extend(["-filter_complex", ";".join(graph), "-map", "[outv]"])
+        if graph_audio_output:
+            command.extend(["-map", f"[{graph_audio_output}]"])
     else:
         if ass:
             vf = f"{vf},subtitles={ass.name}"
@@ -2907,7 +2959,7 @@ def render_fast_clip(
         "+faststart",
     ])
     if music_track is not None:
-        command.extend(["-map", f"{1 + len(subscribe_animations) + (1 if embed_subtitles else 0)}:a:0", "-af", f"aresample=48000,asetrate=48000*{speed:.3f},aresample=48000,atrim=duration={duration:.3f}", "-c:a", DELIVERY_AUDIO_CODEC, "-b:a", DELIVERY_AUDIO_BITRATE, "-ar", DELIVERY_AUDIO_RATE])
+        command.extend(["-c:a", DELIVERY_AUDIO_CODEC, "-b:a", DELIVERY_AUDIO_BITRATE, "-ar", DELIVERY_AUDIO_RATE])
     elif has_audio and not muted:
         command.extend([
             "-map",

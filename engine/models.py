@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from enum import StrEnum
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -126,6 +127,11 @@ class YouTubeMetadataUpdate(ApiModel):
         return cleaned
 
 
+class MusicAudioMode(StrEnum):
+    SONG_ONLY = "song_only"
+    MIX_ORIGINAL = "mix_original"
+
+
 class MusicTrackSnapshot(ApiModel):
     asset_id: str | None = None
     title: str = Field(min_length=1, max_length=200)
@@ -169,6 +175,9 @@ class Clip(ApiModel):
     youtube_metadata_cost_kind: Literal["actual", "estimated"] | None = None
     music_treatment: Literal["color", "grayscale"] | None = None
     music_track: "MusicTrackSnapshot | None" = None
+    music_audio_mode: MusicAudioMode = MusicAudioMode.SONG_ONLY
+    music_song_gain: float = Field(default=1.0, ge=0, le=2)
+    music_original_audio_gain: float = Field(default=1.0, ge=0, le=2)
     # DO-NOT-CHANGE: engine-set only, after the publication transaction commits —
     # the UI never displays this from optimistic state
     library_asset_id: str | None = None
@@ -261,6 +270,9 @@ class Job(ApiModel):
     music_presentation: MusicPresentationConfig | None = None
     music_top_text: str | None = Field(default=None, max_length=100)
     music_track: MusicTrackSnapshot | None = None
+    music_audio_mode: MusicAudioMode = MusicAudioMode.SONG_ONLY
+    music_song_gain: float = Field(default=1.0, ge=0, le=2)
+    music_original_audio_gain: float = Field(default=1.0, ge=0, le=2)
     # Snapshot of the user's caption choice; legacy payloads default safely on.
     burn_subtitles: bool = True
     embed_subtitles: bool = False
@@ -326,6 +338,9 @@ class Project(ApiModel):
     content_format: ContentFormat = "short"
     source_profile: Literal["speech", "music"] = "speech"
     music_track: MusicTrackSnapshot | None = None
+    music_audio_mode: MusicAudioMode = MusicAudioMode.SONG_ONLY
+    music_song_gain: float = Field(default=1.0, ge=0, le=2)
+    music_original_audio_gain: float = Field(default=1.0, ge=0, le=2)
     latest_job_id: str | None = None
     library_folder_id: str = UNSORTED_LIBRARY_FOLDER_ID
     source_blob_id: str | None = None

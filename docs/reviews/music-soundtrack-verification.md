@@ -1,9 +1,11 @@
 # Music soundtrack verification
 
-The optional song replaces the video's audio in Music mode. Lyrics use that
-song's adjusted timeline. Short songs loop across the footage, and each clip
-uses its position on that continuous timeline. Leaving the song blank uses the
-video's original audio. Speed changes pitch and tempo together.
+Music mode lets the optional song replace the video's audio or play underneath
+it. Song-only is the default; mixed mode keeps the original audio at normal
+level and plays the song at 25% linear gain. Leaving the song blank keeps the
+video's original audio. Lyrics use the song's adjusted timeline. Short songs
+loop across the footage, and each clip uses its position on that timeline.
+Speed changes pitch and tempo together.
 
 ## Additional defects repaired during verification
 
@@ -50,9 +52,13 @@ under `.qa`. This avoids storage stalls without changing production storage.
 Set `S6_MUSIC_BROWSER_ROOT=/dev/shm` as well to record browser traces/video in RAM;
 the runner copies the completed reports into `.qa` and removes the RAM folder.
 
-Four cases cover standard/faster uploaded songs, a slower YouTube Music URL, and
-no optional song. Assertions cover persisted terminal steps, browser playback,
-decoded audio amplitude and pitch, ZIP provenance, and caption editing after
+Nine cases cover songs at all five supported speeds (four uploads and one
+YouTube Music URL), no song, retained mode after song removal, original-audio
+mixing, and mixing over silent video.
+The mix case uses distinct 220 Hz source and 660 Hz song tones and checks both
+frequencies and their relative level. Assertions also cover persisted terminal
+steps, browser playback, decoded audio amplitude and pitch, ZIP provenance, and
+caption editing after
 deleting the transient job directory and restarting the engine. Rerendering must
 keep the stable library asset identity while publishing a new video blob and
 updated caption sidecars.
@@ -87,6 +93,11 @@ read-only status view and is covered by the separate iOS status acceptance test.
   YouTube Music at 0.75×, no-song original audio, playback, restart recovery,
   caption rerender, and ZIP export. Evidence is in
   `.qa/s6-music-check-1792380020327-1806340/playwright`.
+- Original-audio mix gate on 2026-10-20: 9 passed in 3.4 minutes in isolated
+  containers. It verified all five song speeds, both source/song tones and their
+  25% level ratio, preserving source audio after song removal, the silent-video
+  mix case, restart recovery, caption rerender, and ZIP composition metadata.
+  Evidence is in `.qa/s6-music-check-1792444906330-879872/playwright`.
 - An additional real API/worker/FFmpeg check on the integrated backend used
   silent footage, Engine only and a matching `song.mp3` title at 1.5×. All 12
   steps completed, nine caption cues were saved, and decoded audio measured
