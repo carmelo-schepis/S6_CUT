@@ -58,6 +58,7 @@ test("iOS devices get read-only status, live progress and stable inline previews
   page.on("download", (download) => downloads.push(download.suggestedFilename()));
 
   await page.goto("/", { waitUntil: "domcontentloaded" });
+  await expect(page.locator("#startup-screen")).toHaveCount(0);
   await expect(page.locator(".ios-status-page")).toBeVisible();
   await expect(page.locator(".ios-status-brand")).toContainText("S6_cut status");
   await expect(page.getByRole("heading", { name: "Project work" })).toBeVisible();
@@ -96,6 +97,7 @@ test("iPad desktop browsing identity still routes to the status view", async ({ 
   await page.addInitScript(() => Object.defineProperty(navigator, "maxTouchPoints", { configurable: true, value: 5 }));
   await stubApi(page);
   await page.goto("/", { waitUntil: "domcontentloaded" });
+  await expect(page.locator("#startup-screen")).toHaveCount(0);
   await expect(page.locator(".ios-status-page")).toBeVisible();
   await expect(page.locator(".ios-status-brand")).toContainText("S6_cut status");
   await expect(page.getByRole("heading", { name: "Project work" })).toBeVisible();
