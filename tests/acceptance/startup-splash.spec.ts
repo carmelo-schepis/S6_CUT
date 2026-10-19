@@ -33,6 +33,38 @@ async function hold(page: Page, pattern: string | RegExp) {
   return { release, requested: () => requested };
 }
 
+// The splash waits 800ms before it appears, so a normal load never shows it. These tests choose the
+// delay they need by rewriting the stylesheet response, which keeps them independent of how fast the
+// machine happens to load the page.
+async function withSplashDelay(page: Page, delay: string) {
+  await page.route("**/startup.css*", async (route) => {
+    const response = await route.fetch();
+    const original = await response.text();
+    const css = original.replace(/(startup-appear\s+(?:180ms\s+ease-out|1ms\s+linear))\s+800ms/g, `$1 ${delay}`);
+    expect(css).not.toBe(original);
+    await route.fulfill({ response, body: css });
+  });
+}
+
+// Records when the splash first paints and when it leaves, frame by frame, from before the page runs.
+async function watchSplash(page: Page) {
+  await page.addInitScript(() => {
+    const record = { firstVisible: null as number | null, removed: null as number | null, maxOpacity: 0 };
+    (window as unknown as { __splash: typeof record }).__splash = record;
+    const tick = () => {
+      const screen = document.getElementById("startup-screen");
+      if (screen) {
+        const opacity = Number(getComputedStyle(screen).opacity);
+        record.maxOpacity = Math.max(record.maxOpacity, opacity);
+        if (opacity > 0.02 && record.firstVisible === null) record.firstVisible = performance.now();
+      } else if (document.body && record.removed === null) record.removed = performance.now();
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+  return () => page.evaluate(() => (window as unknown as { __splash: { firstVisible: number | null; removed: number | null; maxOpacity: number } }).__splash);
+}
+
 async function expectCovered(page: Page) {
   const splash = page.locator("#startup-screen");
   await expect(splash).toBeVisible();
@@ -50,13 +82,66 @@ async function expectRevealed(page: Page) {
   await expect(page.getByRole("heading", { name: "Create a project", exact: true })).toBeVisible();
 }
 
+test("a quick load never shows the splash", async ({ page }) => {
+  await mockEngine(page);
+  // Longer than any load here, so the splash cannot appear: the delay is the only thing under test.
+  await withSplashDelay(page, "60s");
+  const read = await watchSplash(page);
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await expectRevealed(page);
+  expect((await read()).maxOpacity).toBe(0);
+  await expect(page.locator("#root")).toHaveCSS("opacity", "1");
+  // The loading state ends with the splash: it is what holds the wallpaper's transition off, so a
+  // lingering class would silently disable the tab-change fade.
+  await expect(page.locator("body")).not.toHaveClass(/startup-loading/);
+  await expect(page.locator(".app-wallpaper")).toHaveCSS("transition-duration", "1s");
+});
+
+test("a slow load shows the splash only after the grace period, and removes it when ready", async ({ page }) => {
+  await mockEngine(page);
+  await withSplashDelay(page, "700ms");
+  const gate = await hold(page, "**/api/v1/library/recent-clips**");
+  try {
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await expect.poll(gate.requested).toBe(true);
+    // Grace period: plain black, the app hidden and inert, but no splash yet.
+    await expectCovered(page);
+    await expect(page.locator("#startup-screen")).toHaveCSS("opacity", "0");
+    // Still loading after it: now the splash appears.
+    await expect(page.locator("#startup-screen")).toHaveCSS("opacity", "1", { timeout: 10_000 });
+    await expectCovered(page);
+  } finally { gate.release(); }
+  await expectRevealed(page);
+});
+
+test("once the splash has appeared it stays long enough to read, never a flash", async ({ page }) => {
+  await mockEngine(page);
+  await withSplashDelay(page, "100ms");
+  const read = await watchSplash(page);
+  const gate = await hold(page, "**/api/v1/library/recent-clips**");
+  try {
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await expect.poll(gate.requested).toBe(true);
+    await expect.poll(async () => (await read()).firstVisible).not.toBeNull();
+    // Release only once it is clearly on screen. (One that has barely begun to fade in is discarded instead.)
+    await expect(page.locator("#startup-screen")).toHaveCSS("opacity", "1");
+  } finally { gate.release(); }
+  await expectRevealed(page);
+  await expect.poll(async () => (await read()).removed).not.toBeNull();
+  const { firstVisible, removed } = await read();
+  expect(removed! - firstVisible!).toBeGreaterThanOrEqual(330);
+});
+
 test("static black logo screen paints before application JavaScript arrives", async ({ page }) => {
   await mockEngine(page);
+  await withSplashDelay(page, "200ms");
   const gate = await hold(page, /\/(?:src\/main\.tsx|assets\/[^/]+\.js)(?:\?.*)?$/);
   try {
     await page.goto("/", { waitUntil: "commit" });
     await expect.poll(gate.requested).toBe(true);
     await expectCovered(page);
+    // The grace period needs no JavaScript: the logo appears on its own if loading is slow.
+    await expect(page.locator("#startup-screen")).toHaveCSS("opacity", "1", { timeout: 10_000 });
     const logo = page.getByRole("img", { name: "S6 Cut", exact: true });
     await expect(logo).toBeVisible();
     await expect(page.locator(".startup-wordmark")).toHaveText("s6_cut");
@@ -156,17 +241,23 @@ test("a permanently stalled initial request cannot hide the app indefinitely", a
 
 test("entry and exit fade smoothly on load and reload without early interaction", async ({ page }) => {
   await mockEngine(page);
+  await withSplashDelay(page, "50ms");
   for (const reload of [false, true]) {
     const gate = await hold(page, "**/api/v1/library/recent-clips**");
     if (reload) await page.reload({ waitUntil: "domcontentloaded" });
     else await page.goto("/", { waitUntil: "domcontentloaded" });
     await expect.poll(gate.requested).toBe(true);
     await expectCovered(page);
+    // Wait until the splash has fully appeared, so the exit has a full-opacity starting point.
+    await expect(page.locator("#startup-screen")).toHaveCSS("opacity", "1", { timeout: 10_000 });
     const entry = await page.locator("#startup-screen").evaluate((screen) => {
       const animation = screen.getAnimations().find((item) => item instanceof CSSAnimation && item.animationName === "startup-appear")!;
+      const delay = Number(animation.effect!.getComputedTiming().delay);
       animation.pause();
-      animation.currentTime = 90;
-      return Number(getComputedStyle(screen).opacity);
+      animation.currentTime = delay + 90;
+      const mid = Number(getComputedStyle(screen).opacity);
+      animation.finish();
+      return mid;
     });
     expect(entry).toBeGreaterThan(0);
     expect(entry).toBeLessThan(1);
@@ -204,14 +295,16 @@ test("entry and exit fade smoothly on load and reload without early interaction"
   }
 });
 
-test("reduced motion skips both fades", async ({ page }) => {
+test("reduced motion skips both fades but keeps the grace period", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await mockEngine(page);
+  await withSplashDelay(page, "300ms");
   const gate = await hold(page, "**/api/v1/library/recent-clips**");
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await expectCovered(page);
-  await expect(page.locator("#startup-screen")).toHaveCSS("animation-name", "none");
-  await expect(page.locator("#startup-screen")).toHaveCSS("opacity", "1");
+  // No fade: the entrance is a 1ms step after the same grace period.
+  expect(await page.locator("#startup-screen").evaluate((screen) => Number.parseFloat(getComputedStyle(screen).animationDuration))).toBeLessThanOrEqual(0.002);
+  await expect(page.locator("#startup-screen")).toHaveCSS("opacity", "1", { timeout: 10_000 });
   await page.evaluate(() => {
     Element.prototype.animate = () => { throw new Error("Reduced motion must not animate"); };
   });
