@@ -26,7 +26,9 @@
   color: var(--text);
 }
 
-/* --- Wallpaper: Home only, faded to black on every other tab ------------- */
+/* --- Wallpaper: Home only, faded to black on every other tab -------------
+   Held dark (86% black) so the artwork reads as atmosphere behind the text,
+   not as a bright backdrop; the desktop Projects wallpaper keeps its own 62%. */
 .m-wallpaper {
   position: fixed;
   inset: 0 0 0 var(--m-rail);
@@ -34,7 +36,7 @@
   pointer-events: none;
   opacity: 0;
   transition: opacity 1s ease-in-out;
-  background: linear-gradient(rgba(0, 0, 0, .62), rgba(0, 0, 0, .62)), url("/mobile-wallpaper.jpg") center / cover no-repeat;
+  background: linear-gradient(rgba(0, 0, 0, .86), rgba(0, 0, 0, .86)), url("/mobile-wallpaper.jpg") center / cover no-repeat;
 }
 .m-app[data-tab="home"] .m-wallpaper { opacity: 1; }
 @media (prefers-reduced-motion: reduce) { .m-wallpaper { transition: none; } }

@@ -94,7 +94,12 @@ export function workFacts(item: WorkItem): WorkFacts {
   const { job } = item;
   const facts = jobFacts(job);
   const live = job.downloadProgress && job.downloadProgress.phase !== "complete" ? downloadFacts(job.downloadProgress) : null;
-  const detail = [facts.detail, live?.speed, live?.eta].filter(Boolean).join(" · ");
+  // Some stages count something other than clips (words checked, for instance), which reads as "856 of 5".
+  // Item counts are shown only when they make sense; a live download's transfer line always does.
+  // The stage label often says it already ("Rendering clip 2 of 5"); repeating it would read "… · 2 of 5".
+  const counted = job.currentItem <= job.totalItems && !facts.stage.includes(`${job.currentItem} of ${job.totalItems}`);
+  const items = live || counted ? facts.detail : null;
+  const detail = [items, live?.speed, live?.eta].filter(Boolean).join(" · ");
   return {
     title: job.projectName,
     subtitle: jobSubtitle(job),
