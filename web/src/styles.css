@@ -2389,6 +2389,38 @@ select option { background: var(--surface-2); }
 .drop-zone:hover { border-color: var(--text-muted); background: var(--surface-2); }
 .drop-zone.drag-active { border-color: var(--text); background: var(--surface-2); box-shadow: none; }
 
+/* Keep the wallpaper mounted so changing tabs can fade it over the black
+   canvas. Its negative layer stays inside the shell, behind every control. */
+.app-wallpaper {
+  position: fixed;
+  inset: 0 0 0 var(--rail);
+  z-index: -1;
+  pointer-events: none;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity 1s ease-in-out;
+}
+.app-wallpaper::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  height: var(--projects-height, 100%);
+  transform: translateY(calc(-1 * var(--projects-scroll-y, 0px)));
+  background-image: linear-gradient(rgba(0, 0, 0, .62), rgba(0, 0, 0, .62)), url("/projects-wallpaper.jpg");
+  background-size: cover;
+  background-position: center calc(50% + var(--projects-scroll, 0px));
+}
+.app-main:has(.projects-page) .app-wallpaper { opacity: 1; }
+
+@media (max-width: 820px) {
+  .app-wallpaper { left: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-wallpaper { transition: none; }
+  .app-wallpaper::before { background-attachment: fixed; background-position: center; }
+}
+
+
 /* ===========================================================================
    SHORTS EDITOR — Final Cut Pro elements
    ---------------------------------------------------------------------------
