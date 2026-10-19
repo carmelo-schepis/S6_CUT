@@ -46,49 +46,41 @@ describe("ProcessingState – stage, progress & items", () => {
     expect(screen.getByText("2 of 5 items")).toBeInTheDocument();
   });
 
-  it("shows 'Working from saved project state' when item count is zero", () => {
+  it("omits the detail line when item count is zero", () => {
     const zeroItem: Job = { ...activeJob, currentItem: 0, totalItems: 0 };
     render(<ProcessingState job={zeroItem} />);
-    const headingSmall = document.querySelector(".processing-heading small")!;
-    expect(headingSmall).toHaveTextContent("Working from saved project state");
+    expect(document.querySelector(".processing-heading small")).toBeNull();
     expect(screen.queryByText("0 of 0 items")).not.toBeInTheDocument();
   });
 
   it("renders the reassurance paragraph", () => {
     render(<ProcessingState job={activeJob} />);
     expect(
-      screen.getByText("Processing continues in the local engine if you leave this screen."),
+      screen.getByText("Processing continues if you leave this screen."),
     ).toBeInTheDocument();
   });
 
   it("clamps progress to 100% when over", () => {
     const over: Job = { ...activeJob, progress: 130 };
-    const { container } = render(<ProcessingState job={over} />);
+    render(<ProcessingState job={over} />);
     expect(screen.getByText("100%")).toBeInTheDocument();
-    expect(container.querySelectorAll(".processing-track span.active")).toHaveLength(5);
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "100");
   });
 
   it("clamps progress to 0% when negative", () => {
     const under: Job = { ...activeJob, progress: -5 };
-    const { container } = render(<ProcessingState job={under} />);
+    render(<ProcessingState job={under} />);
     expect(screen.getByText("0%")).toBeInTheDocument();
-    expect(container.querySelectorAll(".processing-track span.active")).toHaveLength(1);
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "0");
   });
 });
 
 // ---------------------------------------------------------------
-describe("ProcessingState – filmstrip blocks", () => {
-  it("activates blocks based on progress (37% → 2 blocks)", () => {
+describe("ProcessingState – progress bar", () => {
+  it("fills the single progress bar to the job progress", () => {
     const { container } = render(<ProcessingState job={activeJob} />);
-    const blocks = container.querySelectorAll(".processing-track span");
-    expect(blocks).toHaveLength(5);
-    expect(container.querySelectorAll(".processing-track span.active")).toHaveLength(2);
-  });
-
-  it("renders playhead at correct position", () => {
-    const { container } = render(<ProcessingState job={activeJob} />);
-    const playhead = container.querySelector(".processing-track i") as HTMLElement;
-    expect(playhead.style.left).toBe("37%");
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "37");
+    expect((container.querySelector(".processing-progress-bar span") as HTMLElement).style.width).toBe("37%");
   });
 });
 
@@ -187,19 +179,37 @@ describe("ProcessingState – accessibility", () => {
     expect(live!.className).toContain("sr-only");
   });
 
-  it("marks the filmstrip as aria-hidden", () => {
-    const { container } = render(<ProcessingState job={activeJob} />);
-    const filmstrip = container.querySelector(".processing-filmstrip");
-    expect(filmstrip).toHaveAttribute("aria-hidden", "true");
-  });
 });
 
 // ---------------------------------------------------------------
 describe("ProcessingState – meta row", () => {
-  it("renders elapsed and item count in the meta row", () => {
+  it("renders elapsed time once, with the item count only in the heading", () => {
     render(<ProcessingState job={activeJob} />);
     const meta = document.querySelector(".processing-meta");
     expect(meta).toHaveTextContent(/Elapsed\s*0:00/);
-    expect(meta).toHaveTextContent(/Item\s*2 of 5/);
+    expect(meta).not.toHaveTextContent(/2 of 5/);
+  });
+});
+
+// ---------------------------------------------------------------
+describe("ProcessingState – download", () => {
+  const download = {
+    downloadedBytes: 7_340_032, totalBytes: 50_000_000, percent: 14.68, phase: "downloading" as const,
+    lastProgressAt: "2026-08-13T00:00:00Z", speedBytesPerSecond: 1_200_000, etaSeconds: 36,
+    message: "Receiving the source", resumable: true,
+  };
+
+  it("shows a download panel while the download is live", () => {
+    render(<ProcessingState job={{ ...activeJob, downloadProgress: download }} />);
+    const panel = screen.getByRole("region", { name: "Download status" });
+    expect(panel).toHaveTextContent("15%");
+    expect(panel).toHaveTextContent("Receiving the source");
+  });
+
+  it("collapses a finished download into one Source fact", () => {
+    const done = { ...download, downloadedBytes: 50_000_000, percent: 100, phase: "complete" as const, message: null };
+    render(<ProcessingState job={{ ...activeJob, downloadProgress: done }} />);
+    expect(screen.queryByRole("region", { name: "Download status" })).not.toBeInTheDocument();
+    expect(document.querySelector(".processing-meta")).toHaveTextContent(/Source/);
   });
 });
