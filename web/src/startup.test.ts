@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SPLASH_MIN_VISIBLE_MS, SPLASH_NOTICEABLE_MS, revealApp, splashVisibleFor } from "./startup";
+import { SPLASH_MIN_VISIBLE_MS, SPLASH_NOTICEABLE_MS, revealApp, revealWhenReady, splashVisibleFor } from "./startup";
 
 // The splash enters after a grace period, so whether it is "visible" is read from its own animation.
 function fakeAnimation(elapsed: number, delay = 800) {
@@ -88,5 +88,53 @@ describe("startup splash", () => {
     vi.advanceTimersByTime(SPLASH_MIN_VISIBLE_MS);
     expect(screen.isConnected).toBe(false);
     expect(screen.animate).not.toHaveBeenCalled();
+  });
+});
+
+describe("revealWhenReady", () => {
+  class FakeImage extends EventTarget {
+    complete = false;
+    set src(_value: string) { setTimeout(() => { this.complete = true; this.dispatchEvent(new Event("load")); }, 5); }
+    decode() { return Promise.resolve(); }
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubGlobal("Image", FakeImage);
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => setTimeout(() => callback(performance.now()), 16) as unknown as number);
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => clearTimeout(id));
+    window.matchMedia = ((query: string) => ({ matches: false, media: query })) as unknown as typeof window.matchMedia;
+    document.body.className = "startup-loading";
+    document.body.innerHTML = '<div id="startup-screen"></div><div id="root" inert></div>';
+  });
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); document.body.className = ""; document.body.innerHTML = ""; });
+
+  const lazyVideo = () => {
+    const video = document.createElement("video");
+    video.setAttribute("src", "/clip.mp4");
+    video.getBoundingClientRect = () => ({ width: 200, height: 100, top: 0, left: 0, bottom: 100, right: 200, x: 0, y: 0, toJSON: () => ({}) });
+    document.getElementById("root")!.appendChild(video);
+    return video;
+  };
+
+  it("reveals once the wallpaper is ready and nothing visible is still loading", async () => {
+    revealWhenReady();
+    await vi.advanceTimersByTimeAsync(300);
+    expect(document.getElementById("startup-screen")).toBeNull();
+    expect(document.getElementById("root")).not.toHaveAttribute("inert");
+  });
+
+  it("still waits for media that only appears a few frames after the first scan", async () => {
+    revealWhenReady();
+    // Lazy thumbnails get their media after an IntersectionObserver callback, a couple of frames in.
+    await vi.advanceTimersByTimeAsync(40);
+    const video = lazyVideo();
+    await vi.advanceTimersByTimeAsync(400);
+    expect(document.getElementById("startup-screen")).not.toBeNull();
+    expect(document.getElementById("root")).toHaveAttribute("inert");
+    video.dispatchEvent(new Event("loadeddata"));
+    await vi.advanceTimersByTimeAsync(300);
+    expect(document.getElementById("startup-screen")).toBeNull();
+    expect(document.getElementById("root")).not.toHaveAttribute("inert");
   });
 });

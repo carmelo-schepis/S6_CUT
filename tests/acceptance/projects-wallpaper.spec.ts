@@ -30,7 +30,8 @@ test("Projects wallpaper keeps its tint and parallax and fades on tab changes", 
   const projectsGeometry = await geometry();
 
   await page.getByRole("button", { name: "Library", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Library" })).toBeVisible();
+  // Exact: while the Library is still opening, "Opening your Library" is a heading too.
+  await expect(page.getByRole("heading", { name: "Library", exact: true })).toBeVisible();
   await expect.poll(() => wallpaper.evaluate((element) => getComputedStyle(element).opacity)).toBe("0");
   expect(await geometry()).toEqual(projectsGeometry);
   await page.getByRole("button", { name: "Projects", exact: true }).click();

@@ -23,6 +23,9 @@ export function splashVisibleFor(screen: HTMLElement): number | null {
   return Number.parseFloat(getComputedStyle(screen).opacity) > 0.02 ? SPLASH_MIN_VISIBLE_MS : null;
 }
 
+/** Consecutive frames with no new visible media before the page is considered settled enough to reveal. */
+const QUIET_FRAMES_BEFORE_REVEAL = 3;
+
 let revealScheduled = false;
 
 /**
@@ -147,20 +150,32 @@ export function revealWhenReady(): () => void {
     document.fonts?.ready,
   ]);
 
-  // IntersectionObserver assigns lazy thumbnail sources after the first layout.
-  frame = window.requestAnimationFrame(() => {
-    frame = window.requestAnimationFrame(() => {
-      if (cancelled) return;
-      const media = Array.from(document.querySelectorAll<HTMLImageElement | HTMLVideoElement>("#root img, #root video"))
-        .filter((element) => {
-          const bounds = element.getBoundingClientRect();
-          return bounds.width > 0 && bounds.height > 0 && bounds.bottom > 0 && bounds.right > 0 && bounds.top < window.innerHeight && bounds.left < window.innerWidth;
-        });
-      void Promise.allSettled([
-        assets,
-        ...media.map((element) => element instanceof HTMLImageElement ? decoded(element) : loaded(element)),
-      ]).then(finish);
+  // Lazy thumbnails get their media only after an IntersectionObserver callback, which can land a few
+  // frames after the page first renders. A single scan can therefore run before the media it should wait
+  // for exists, and reveal the page ahead of its first frames. Keep scanning until a few consecutive frames
+  // bring nothing new, then wait for everything seen.
+  const visibleMedia = () => Array.from(document.querySelectorAll<HTMLImageElement | HTMLVideoElement>("#root img, #root video"))
+    .filter((element) => {
+      const bounds = element.getBoundingClientRect();
+      return bounds.width > 0 && bounds.height > 0 && bounds.bottom > 0 && bounds.right > 0 && bounds.top < window.innerHeight && bounds.left < window.innerWidth;
     });
-  });
+  const seen = new Set<Element>();
+  const waiting: Promise<unknown>[] = [assets];
+  let quietFrames = 0;
+  const scan = () => {
+    if (cancelled) return;
+    const fresh = visibleMedia().filter((element) => !seen.has(element));
+    for (const element of fresh) {
+      seen.add(element);
+      waiting.push(element instanceof HTMLImageElement ? decoded(element) : loaded(element));
+    }
+    quietFrames = fresh.length ? 0 : quietFrames + 1;
+    if (quietFrames >= QUIET_FRAMES_BEFORE_REVEAL) {
+      void Promise.allSettled(waiting).then(finish);
+      return;
+    }
+    frame = window.requestAnimationFrame(scan);
+  };
+  frame = window.requestAnimationFrame(() => { frame = window.requestAnimationFrame(scan); });
   return () => { cancelled = true; cleanup(); };
 }
