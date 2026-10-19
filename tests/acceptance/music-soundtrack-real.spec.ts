@@ -33,6 +33,7 @@ function verifyAudio(filename: string, frequency: number) {
 for (const item of cases) {
   test(`real soundtrack: ${item.source} at ${item.speed}x`, async ({ page, request }, testInfo) => {
     test.skip(!fixtures || !container, 'Use the isolated soundtrack verification harness');
+    test.skip(testInfo.project.name.startsWith('iPhone') || testInfo.project.name.startsWith('iPad'), 'iOS provides a read-only status view');
     test.setTimeout(900_000);
     const name = `Soundtrack ${item.source} ${item.speed} ${Date.now()}`;
     await page.goto('/');
@@ -42,7 +43,8 @@ for (const item of cases) {
     while (Number(await page.locator('.count-control strong').textContent()) > 1) {
       await page.getByRole('button', { name: 'Fewer clips' }).click();
     }
-    if (item.source === 'upload') await page.getByLabel('Background song MP3').setInputFiles(path.join(fixtures!, 'short-song.mp3'));
+    // The title deliberately matches a lyric: audio must never become a visual overlay.
+    if (item.source === 'upload') await page.getByLabel('Background song MP3').setInputFiles({ name: 'song.mp3', mimeType: 'audio/mpeg', buffer: await fs.readFile(path.join(fixtures!, 'short-song.mp3')) });
     if (item.source === 'youtube') await page.getByLabel('YouTube song URL').fill('https://music.youtube.com/watch?v=BaW_jenozKc');
     await page.getByLabel('Song speed').selectOption(String(item.speed));
     await page.getByRole('button', { name: 'Advanced controls' }).click();
@@ -62,6 +64,7 @@ for (const item of cases) {
     const terminalSteps = (value: { steps: { status: string }[] }) => value.steps.every(step => ['complete', 'skipped'].includes(step.status));
     await expect.poll(async () => {
       const latest = await readJob();
+      if (['failed', 'partial', 'stalled', 'cancelled_kept'].includes(latest.state)) throw new Error(JSON.stringify(latest));
       return latest.state === 'complete' && terminalSteps(latest);
     }, { timeout: 300_000, intervals: [500, 1000] }).toBe(true);
     let finished = await readJob();
@@ -82,10 +85,10 @@ for (const item of cases) {
     if (item.source === 'upload' && item.speed === 1) {
       // Retention and restart must leave both the original footage and song usable.
       execFileSync('docker', ['exec', container!, 'python', '-c', 'import shutil,sys; shutil.rmtree("/app/data/jobs/"+sys.argv[1])', queued.id]);
-      execFileSync('docker', ['restart', container!]);
+      execFileSync('docker', ['restart', '--timeout=1', container!]);
       await expect.poll(async () => {
         try { return (await request.get('/api/v1/health')).status(); } catch { return 0; }
-      }, { timeout: 120_000 }).toBe(200);
+      }, { timeout: 300_000 }).toBe(200);
       const edited = await request.put(`/api/v1/jobs/${queued.id}/clips/${clip.id}/captions`, { data: { revision: clip.captionRevision, cues: [{ id: 'review', start: 0, end: 1.5, text: 'Reviewed background song' }] } });
       expect(edited.ok(), await edited.text()).toBeTruthy();
       const revision = (await edited.json()).clips[0].captionRevision;

@@ -383,7 +383,10 @@ def probe(path: Path, settings: Settings, *, max_seconds: int | None = None) -> 
 
 
 def probe_audio(path: Path, settings: Settings) -> dict[str, Any]:
-    result = run([settings.ffprobe, "-v", "error", "-show_streams", "-show_format", "-of", "json", str(path)], timeout=120)
+    try:
+        result = run([settings.ffprobe, "-v", "error", "-show_streams", "-show_format", "-of", "json", str(path)], timeout=120)
+    except subprocess.TimeoutExpired as exc:
+        raise MediaError("Audio inspection timed out; FFprobe or local storage did not respond") from exc
     try:
         payload = json.loads(result.stdout)
         audio = next((item for item in payload.get("streams", []) if item.get("codec_type") == "audio"), None)

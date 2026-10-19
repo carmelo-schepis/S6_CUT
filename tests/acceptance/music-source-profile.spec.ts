@@ -3,6 +3,9 @@ import path from "node:path";
 import { readFileSync } from "node:fs";
 
 const now = "2026-01-01T00:00:00Z";
+test.beforeEach(({}, testInfo) => {
+  test.skip(testInfo.project.name.startsWith("iPhone") || testInfo.project.name.startsWith("iPad"), "iOS provides a read-only status view; creation uses the desktop or Android workspace");
+});
 const backgroundSong = readFileSync(path.resolve("tests/fixtures/background-song.mp3"));
 const folder = { id: "unsorted", name: "Unsorted", description: "", color: null, parentId: null, archived: false, system: true, createdAt: now, updatedAt: now };
 const health = { status: "ready", version: "fixture", database: true, ffmpeg: true, ffprobe: true, whisper: true, ytdlp: true, localTts: false, dataPath: "Local mounted data directory", freeBytes: 10000000, configuredWorkers: 1, activeWorkers: 0, queuedJobs: 0, fallbacks: {} };

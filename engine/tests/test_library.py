@@ -38,6 +38,23 @@ def test_expired_required_asset_is_excluded_before_ranking(tmp_path) -> None:
     assert result.rejected[0]["reason"] == "Active date range has ended"
 
 
+@pytest.mark.parametrize("media_type", ["audio/mpeg", "audio/mp4", "audio/wav"])
+def test_soundtrack_cannot_match_as_a_visual_even_when_required(tmp_path, media_type):
+    db = Database(tmp_path / "db.sqlite3")
+    song = asset("song", "song", "required", ["song"])
+    song.media_type = media_type
+    db.save_asset(song)
+    rules = LibraryRules(db, tmp_path / "library")
+    query = "Follow the selected background song through this whole video"
+    explanation = rules.explain(query)
+    assert explanation.selected is None
+    assert explanation.rejected == [{"assetId": song.id, "title": song.title, "reason": "This asset has no visual media for an overlay"}]
+    assert rules.resolve(query).asset is None
+    picture = asset("picture", "Song picture", "neutral", ["song"])
+    db.save_asset(picture)
+    assert rules.explain(query).selected.id == picture.id
+
+
 def test_managed_video_registration_is_idempotent_and_independently_durable(tmp_path) -> None:
     db = Database(tmp_path / "db.sqlite3")
     rules = LibraryRules(db, tmp_path / "library")

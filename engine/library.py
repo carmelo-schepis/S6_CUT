@@ -117,6 +117,9 @@ class LibraryRules:
         ranked: list[tuple[float, Asset, list[str], str]] = []
         rejected: list[dict[str, str]] = []
         for asset in self.db.list_assets():
+            if not asset.media_type.casefold().startswith(("image/", "video/")):
+                rejected.append({"assetId": asset.id, "title": asset.title, "reason": "This asset has no visual media for an overlay"})
+                continue
             if asset.policy == "never":
                 rejected.append({"assetId": asset.id, "title": asset.title, "reason": "Never policy excludes it before ranking"})
                 continue

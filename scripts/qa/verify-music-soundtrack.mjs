@@ -2,7 +2,7 @@
 /** Isolated real media integration gate. ASR timestamps and yt-dlp transport are
  * controlled to make speed, loops, persistence and recovery reproducible. */
 import { spawn } from 'node:child_process';
-import { mkdir, writeFile, chmod } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, rm, writeFile, chmod } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,6 +14,8 @@ const engine = `${id}-engine`, web = `${id}-web`, network = `${id}-net`, volume 
 const engineImage = process.env.S6_MUSIC_ENGINE_IMAGE || `${id}-engine`;
 const webImage = process.env.S6_MUSIC_WEB_IMAGE || `${id}-web`;
 await mkdir(artifacts, { recursive: true });
+const bindData = process.env.S6_MUSIC_DATA_ROOT ? await mkdtemp(join(resolve(process.env.S6_MUSIC_DATA_ROOT), 's6-music-data-')) : null;
+const browserTemp = process.env.S6_MUSIC_BROWSER_ROOT ? await mkdtemp(join(resolve(process.env.S6_MUSIC_BROWSER_ROOT), 's6-music-browser-')) : null;
 function run(command, args, env = process.env) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { cwd: root, env, stdio: 'inherit' });
@@ -52,14 +54,18 @@ try {
   if (!process.env.S6_MUSIC_ENGINE_IMAGE) await run('docker', ['build', '-f', 'engine/Dockerfile', '-t', engineImage, '.']);
   if (!process.env.S6_MUSIC_WEB_IMAGE) await run('docker', ['build', '-f', 'Dockerfile', '-t', webImage, '.']);
   await run('npm', ['run', 'build']);
-  const ffmpeg = args => run('docker', ['run', '--rm', '--user', '0', '--network', 'none', '-v', `${artifacts}:/out`, '--entrypoint', 'ffmpeg', engineImage, '-hide_banner', '-loglevel', 'error', '-y', ...args]);
-  await ffmpeg(['-f', 'lavfi', '-i', 'color=c=navy:s=320x180:r=12:d=30', '-an', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '/out/silent.mp4']);
-  await ffmpeg(['-i', '/out/silent.mp4', '-f', 'lavfi', '-i', 'sine=frequency=220:duration=30', '-c:v', 'copy', '-c:a', 'aac', '-shortest', '/out/with-audio.mp4']);
-  await ffmpeg(['-f', 'lavfi', '-i', 'sine=frequency=660:sample_rate=44100:duration=4', '-codec:a', 'libmp3lame', '-q:a', '4', '/out/short-song.mp3']);
+  const fixtureCommands = [
+    ['-f', 'lavfi', '-i', 'color=c=navy:s=320x180:r=12:d=30', '-an', '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '/out/silent.mp4'],
+    ['-i', '/out/silent.mp4', '-f', 'lavfi', '-i', 'sine=frequency=220:duration=30', '-c:v', 'copy', '-c:a', 'aac', '-shortest', '/out/with-audio.mp4'],
+    ['-f', 'lavfi', '-i', 'sine=frequency=660:sample_rate=44100:duration=4', '-codec:a', 'libmp3lame', '-q:a', '4', '/out/short-song.mp3'],
+  ];
+  await run('docker', ['run', '--rm', '--user', '0', '--network', 'none', '-v', `${artifacts}:/out`, '--entrypoint', 'python', engineImage, '-c', 'import json,subprocess,sys\nfor args in json.loads(sys.argv[1]): subprocess.run(["ffmpeg","-hide_banner","-loglevel","error","-y",*args],check=True)', JSON.stringify(fixtureCommands)]);
   provisioned = true;
   await run('docker', ['network', 'create', network]);
-  await run('docker', ['volume', 'create', volume]);
-  await run('docker', ['run', '-d', '--name', engine, '--network', network, '--network-alias', 'engine', '--mount', `type=volume,source=${volume},target=/app/data`, '--tmpfs', '/tmp:rw,size=512m', '-v', `${root}/engine:/app/engine:ro`, '-v', `${artifacts}:/qa:ro`, '--env-file', join(artifacts, 'runtime.env'), engineImage]);
+  if (!bindData) await run('docker', ['volume', 'create', volume]);
+  const dataMount = bindData ? `type=bind,source=${bindData},target=/app/data` : `type=volume,source=${volume},target=/app/data`;
+  const dataUser = bindData ? ['--user', `${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}`] : [];
+  await run('docker', ['run', '-d', '--name', engine, ...dataUser, '--network', network, '--network-alias', 'engine', '--mount', dataMount, '--tmpfs', '/tmp:rw,size=512m', '-v', `${root}/engine:/app/engine:ro`, '-v', `${artifacts}:/qa:ro`, '--env-file', join(artifacts, 'runtime.env'), engineImage]);
   await run('docker', ['run', '-d', '--name', web, '--network', network, '-p', `127.0.0.1:${port}:8080`, '-v', `${root}/web/dist:/usr/share/nginx/html:ro`, '-v', `${root}/docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro`, webImage]);
   const url = `http://127.0.0.1:${port}`;
   let healthy = false;
@@ -69,12 +75,17 @@ try {
   }
   if (!healthy) throw new Error('Isolated gateway did not become ready');
   console.log(`Real media verification at ${url}; evidence: ${artifacts}`);
-  await run('npx', ['playwright', 'test', '--config', 'playwright.config.ts', 'tests/acceptance/music-soundtrack-real.spec.ts', '--project=Desktop Chromium'], { ...process.env, S6_ACCEPTANCE_URL: url, S6_SOUNDTRACK_FIXTURES: artifacts, S6_SOUNDTRACK_CONTAINER: engine, S6_PLAYWRIGHT_ARTIFACTS: join(artifacts, 'playwright') });
+  await run('npx', ['playwright', 'test', '--config', 'playwright.config.ts', 'tests/acceptance/music-soundtrack-real.spec.ts', '--project=Desktop Chromium'], { ...process.env, S6_ACCEPTANCE_URL: url, S6_SOUNDTRACK_FIXTURES: artifacts, S6_SOUNDTRACK_CONTAINER: engine, S6_PLAYWRIGHT_ARTIFACTS: browserTemp || join(artifacts, 'playwright') });
 } finally {
   if (provisioned) {
     await run('docker', ['logs', engine]).catch(() => {});
     await run('docker', ['rm', '-f', web, engine]).catch(() => {});
     await run('docker', ['network', 'rm', network]).catch(() => {});
-    await run('docker', ['volume', 'rm', volume]).catch(() => {});
+    if (!bindData) await run('docker', ['volume', 'rm', volume]).catch(() => {});
+  }
+  if (bindData) await rm(bindData, { recursive: true, force: true });
+  if (browserTemp) {
+    await cp(browserTemp, join(artifacts, 'playwright'), { recursive: true });
+    await rm(browserTemp, { recursive: true, force: true });
   }
 }

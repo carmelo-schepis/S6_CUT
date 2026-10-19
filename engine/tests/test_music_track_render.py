@@ -11,6 +11,18 @@ from engine.config import Settings
 from engine.media import MediaError, prepare_music_track, render_clip, render_fast_clip
 
 
+def test_audio_inspection_timeout_has_no_private_path(settings, monkeypatch):
+    from engine import media
+
+    path = Path('/private/soundtracks/secret-song.mp3')
+    def timeout(command, **kwargs):
+        raise subprocess.TimeoutExpired(command, 120)
+    monkeypatch.setattr(media, 'run', timeout)
+    with pytest.raises(MediaError, match='Audio inspection timed out') as error:
+        media.probe_audio(path, settings)
+    assert str(path) not in str(error.value)
+
+
 @pytest.fixture()
 def settings() -> Settings:
     return Settings.from_env()

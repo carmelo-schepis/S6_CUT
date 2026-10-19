@@ -22,6 +22,11 @@ video's original audio. Speed changes pitch and tempo together.
 - Import retry authorization is consumed when a worker starts so a subsequent
   stop wins. Audio decoding and timeline preparation support cancellation.
 - Repeated unchanged download byte counts no longer reset stall detection.
+- Soundtracks whose titles match lyrics are excluded from visual matching.
+  Previously, a song titled `song` could be selected as an overlay and fail
+  FFmpeg's video-stream mapping. Existing visual ranking stays unchanged.
+- Audio-inspection timeouts now return an actionable error without exposing
+  the private soundtrack path or command arguments.
 - Font lookups no longer cache timeouts, failed commands or empty results.
   Health checks can recover after a transient fontconfig failure; successful
   lookups remain cached. Regression tests cover family and face lookups.
@@ -37,6 +42,13 @@ data volume, generates valid silent and audible MP4s and a short MP3 with FFmpeg
 and launches Playwright against the real API and worker. Existing compatible
 images can be reused with `S6_MUSIC_ENGINE_IMAGE` and `S6_MUSIC_WEB_IMAGE`; current
 engine source and the freshly built frontend are mounted into them.
+
+On a busy Linux host, set `S6_MUSIC_DATA_ROOT=/dev/shm` to place isolated job data
+in a temporary RAM directory owned by the current user. The directory survives
+engine container restarts and is deleted after the run. Output evidence stays
+under `.qa`. This avoids storage stalls without changing production storage.
+Set `S6_MUSIC_BROWSER_ROOT=/dev/shm` as well to record browser traces/video in RAM;
+the runner copies the completed reports into `.qa` and removes the RAM folder.
 
 Four cases cover standard/faster uploaded songs, a slower YouTube Music URL, and
 no optional song. Assertions cover persisted terminal steps, browser playback,
@@ -55,3 +67,27 @@ the production downloader.
 Evidence, including failed-run traces and output MP4s/ZIPs, remains in the
 worktree's ignored `.qa/s6-music-check-*` directories. The runner removes its own
 containers, network and data volume afterward.
+
+## Integration checks
+
+The local execution and iOS status changes from main were preserved. Creation
+checks run on the desktop and Android workspace; iOS deliberately exposes a
+read-only status view and is covered by the separate iOS status acceptance test.
+
+- Full Docker engine suite before the final visual-eligibility fix: 822 passed.
+- Combined host engine suite after the final fixes: 739 passed, 99 skipped for missing
+  host media tools or optional runtime dependencies. An isolated fontconfig file
+  points at vendored fonts; system font configuration was not changed.
+- Combined frontend suite: 358 passed; lint, provider checks, typecheck and build
+  passed. The existing large-bundle build warning remains.
+- Desktop/Android form acceptance: 10 passed. iPhone status acceptance: 1 passed,
+  2 inapplicable project cases skipped.
+- Final real-browser soundtrack gate: 4 passed in 2.8 minutes against an isolated
+  API, worker, database, FFmpeg and browser. It covered upload at 1× and 1.5×,
+  YouTube Music at 0.75×, no-song original audio, playback, restart recovery,
+  caption rerender, and ZIP export. Evidence is in
+  `.qa/s6-music-check-1792380020327-1806340/playwright`.
+- An additional real API/worker/FFmpeg check on the integrated backend used
+  silent footage, Engine only and a matching `song.mp3` title at 1.5×. All 12
+  steps completed, nine caption cues were saved, and decoded audio measured
+  989 Hz against the expected 990 Hz. Its database was isolated under `/tmp`.
