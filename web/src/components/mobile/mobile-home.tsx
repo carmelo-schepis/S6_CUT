@@ -55,20 +55,6 @@ export function MobileHome({ overview, groups, onOpenTab, onPreview }: { overvie
       <div className="m-list">{running.map((item) => <RunningRow key={item.key} item={item} onOpen={() => onOpenTab("jobs")} />)}</div>
     </section>}
 
-    {clips && clips.items.length > 0 && <section className="m-section m-clips" aria-labelledby="m-home-clips">
-      <div className="m-section-head"><h2 id="m-home-clips">Recent clips</h2><span className="m-count">{clips.total}</span><button type="button" className="m-link" onClick={() => onOpenTab("library")}>Library ›</button></div>
-      <ul className="m-shelf">
-        {clips.items.map((asset) => <li key={asset.id}>
-          <button type="button" className="m-shelf-item" aria-label={`Preview ${asset.title}`} disabled={!asset.previewUrl}
-            onClick={(event) => onPreview(asset, event.currentTarget)}>
-            <Poster src={asset.thumbnailUrl} />
-            <strong className="m-clamp">{asset.title}</strong>
-            <span className="m-muted">Generated clip</span>
-          </button>
-        </li>)}
-      </ul>
-    </section>}
-
     {runs.length > 0 && <section className="m-section m-runs" aria-labelledby="m-home-runs">
       <div className="m-section-head"><h2 id="m-home-runs">Recent runs</h2><button type="button" className="m-link" onClick={() => onOpenTab("jobs")}>All jobs ›</button></div>
       <div className="m-list">
@@ -81,6 +67,20 @@ export function MobileHome({ overview, groups, onOpenTab, onPreview }: { overvie
           </button>;
         })}
       </div>
+    </section>}
+
+    {clips && clips.items.length > 0 && <section className="m-section m-clips" aria-labelledby="m-home-clips">
+      <div className="m-section-head"><h2 id="m-home-clips">Recent clips</h2><span className="m-count">{clips.total}</span><button type="button" className="m-link" onClick={() => onOpenTab("library")}>Library ›</button></div>
+      <ul className="m-shelf">
+        {clips.items.map((asset) => <li key={asset.id}>
+          <button type="button" className="m-shelf-item" aria-label={`Preview ${asset.title}`} disabled={!asset.previewUrl}
+            onClick={(event) => onPreview(asset, event.currentTarget)}>
+            <Poster src={asset.thumbnailUrl} />
+            <strong className="m-clamp">{asset.title}</strong>
+            <span className="m-muted">Generated clip</span>
+          </button>
+        </li>)}
+      </ul>
     </section>}
 
     {!hasContent && <p className="m-empty m-muted">Nothing to show yet. Start a project in the desktop app and its progress and clips will appear here.</p>}

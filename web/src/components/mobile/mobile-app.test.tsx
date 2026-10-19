@@ -48,6 +48,10 @@ describe("iPhone/iPad status view", () => {
     expect(screen.getByText("How I edit Shorts")).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "Preview Scene 12 – Hal Jordan" })).toBeInTheDocument();
     expect(screen.getByText("Podcast ep 12")).toBeInTheDocument();
+    // Recent clips close the page, under Recent runs, so they get the remaining space.
+    const order = ["Running now", "Recent runs", "Recent clips"].map((name) => screen.getByRole("heading", { level: 2, name }));
+    expect(order[0].compareDocumentPosition(order[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(order[1].compareDocumentPosition(order[2]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("switches tabs from the navigation, keeps the tab in the address, and only Home carries the wallpaper", async () => {

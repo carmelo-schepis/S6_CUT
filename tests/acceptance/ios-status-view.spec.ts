@@ -90,6 +90,10 @@ test("iOS devices get Home, Library and Jobs: live progress, still previews, one
   await expect(page.getByRole("button", { name: /14 new clips/ })).toBeVisible();
   await expect(page.getByText("Studio session").first()).toBeVisible();
   await expect(page.getByRole("button", { name: "Preview Scene 12 – Hal Jordan" })).toBeVisible();
+  // Recent clips sit under Recent runs (on every screen size), so they get the remaining space.
+  const runsBox = await page.getByRole("heading", { level: 2, name: "Recent runs" }).boundingBox();
+  const clipsBox = await page.getByRole("heading", { level: 2, name: "Recent clips" }).boundingBox();
+  expect(clipsBox!.y).toBeGreaterThan(runsBox!.y);
   // A phone never opens a media connection just to draw a list.
   await expect(page.locator("video")).toHaveCount(0);
 
