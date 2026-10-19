@@ -29,7 +29,7 @@ from .config import settings
 from .database import Database, MAX_FOLDER_DEPTH, MetadataGenerationClaimError, UNSORTED_FOLDER_ID
 from .jobs import JobManager, ProjectDeletingError, QueueFullError, RetiredScriptJobError, SwitchFastError, can_retry_import, resolve_batch_target, uses_fast_pipeline
 from .library import LibraryRules
-from .media import _SUBTITLE_PRESETS, MediaError, available, caption_font_mismatches, probe, validate_video_upload
+from .media import _SUBTITLE_PRESETS, MediaError, available, caption_font_mismatches, probe, probe_audio, validate_video_upload
 from .models import (
     Asset, AssetDelete, AssetDeleteResult, AssetMove, AssetOrigin, AssetUpdate, AssetPage, CaptionCue, CaptionDownload, CaptionReviewInput, Clip, FolderCreate, FolderMove, FolderUpdate, Health, Job, LibraryPurgeInput, LibraryPurgeResult,
     LibraryFolder, MatchExplanation, RecentClipsPage, ContentFormat, ProcessingMode, ProfileInput, Project, ProjectFolderUpdate,
@@ -396,7 +396,10 @@ async def _stream_upload(upload: UploadFile, target: Path, max_bytes: int) -> tu
 async def create_clip_job(
     request: Request,
     file: Annotated[UploadFile | None, File()] = None,
+    music_track_file: Annotated[UploadFile | None, File()] = None,
     url: Annotated[str | None, Form()] = None,
+    music_track_url: Annotated[str | None, Form()] = None,
+    music_track_speed: Annotated[float, Form()] = 1.0,
     name: Annotated[str | None, Form()] = None,
     style: Annotated[Literal["funny", "serious", "educational", "hype"], Form()] = "educational",
     processing_mode: Annotated[Literal["fast", "smart", "auto"], Form()] = "auto",
@@ -440,6 +443,12 @@ async def create_clip_job(
         raise HTTPException(422, "High-volume batches are available for Speech sources; Music keeps its existing non-overlapping planner.")
     if source_profile == "music" and content_format != "short":
         raise HTTPException(422, "Music / sung vocals is currently available for short clips only")
+    if source_profile != "music" and (music_track_file or music_track_url):
+        raise HTTPException(422, "Background songs are only available in Music mode")
+    if music_track_file and music_track_url and music_track_url.strip():
+        raise HTTPException(422, "Choose an MP3 upload or a YouTube song link, not both")
+    if music_track_speed not in {0.75, 0.85, 1.0, 1.25, 1.5}:
+        raise HTTPException(422, "Song speed must be one of the available speed options")
     if content_format == "short" and max_duration > 180:
         raise HTTPException(422, "Short form clips support a maximum duration of 180 seconds")
     if content_format == "long":
@@ -504,6 +513,25 @@ async def create_clip_job(
     if source_profile == "music":
         private["music_presentation"] = music_config.model_dump()
         private["music_top_text"] = music_top_text if music_top_text.strip() else None
+        private["music_track_speed"] = music_track_speed
+        if music_track_url and music_track_url.strip():
+            try:
+                private["music_track_url"] = validate_youtube_url(music_track_url.strip())
+            except ValueError as exc:
+                raise HTTPException(422, "Only public HTTPS YouTube URLs are supported for the background song") from exc
+        if music_track_file:
+            original_track = safe_filename(music_track_file.filename or "background.mp3", "background.mp3")
+            if Path(original_track).suffix.casefold() != ".mp3":
+                raise HTTPException(415, "Background song upload must be an MP3 file")
+            track_path = settings.data_path / "jobs" / job_id / "source" / "background.mp3"
+            _, track_hash = await _stream_upload(music_track_file, track_path, settings.max_upload_bytes)
+            try:
+                await asyncio.to_thread(probe_audio, track_path, settings)
+            except MediaError as exc:
+                track_path.unlink(missing_ok=True)
+                raise HTTPException(422, "The uploaded MP3 could not be read") from exc
+            private["music_track_path"] = str(track_path)
+            private["music_track_hash"] = track_hash
     if file:
         original = safe_filename(file.filename or "source.mp4", "source.mp4")
         suffix = Path(original).suffix.casefold()

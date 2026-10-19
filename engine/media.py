@@ -559,6 +559,23 @@ def download_youtube(
     return source
 
 
+def download_youtube_audio(url: str, target: Path, settings: Settings) -> Path:
+    """Download a public YouTube song as MP3 for a Music mode render."""
+    url = validate_youtube_url(url)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    command = [settings.ytdlp, "--no-playlist", "--no-warnings", "--socket-timeout", str(settings.ytdlp_connect_timeout),
+               "--retries", "3", "--max-filesize", str(settings.max_upload_bytes), "--extract-audio", "--audio-format", "mp3",
+               "--audio-quality", "0", "--output", str(target.with_suffix(".%(ext)s")), url]
+    command[-1:-1] = ["--extractor-args", YOUTUBE_EXTRACTOR_ARGS[0], "--extractor-args", YOUTUBE_EXTRACTOR_ARGS[1]]
+    try:
+        subprocess.run(command, check=True, capture_output=True, text=True, timeout=1800)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise MediaError("Could not download the background song from YouTube") from exc
+    if not target.is_file() or target.stat().st_size <= 0:
+        raise MediaError("YouTube did not provide a usable background song")
+    return target
+
+
 def _metadata_text(value: object, limit: int) -> str | None:
     """Normalise extractor text before it can become a title or ASS event."""
     if not isinstance(value, str):
@@ -2323,7 +2340,7 @@ def _smart_speech_emoji_filters(plan: list[tuple[Path, float, float, int, int, i
     return ";".join(filters)
 
 
-def render_clip(source: Path, output: Path, *, start: float, end: float, aspect: str, words: list[dict[str, Any]], visuals: list[tuple[str, float, float]], overlays: list[tuple[Path, float, float]], settings: Settings, style: str = "educational", has_audio: bool = True, embed_subtitles: bool = False, subtitle_language: str = "und", creator_credit: str | None = None, content_format: str | None = None, centered_partial_fill: bool = False, subscribe_animation: dict[str, Any] | None = None, music_theme: str | None = None, music_top_text: str | None = None, music_treatment: str | None = None, hook_text: str | None = None, presentation: str | None = None, reaction_policy: str | None = None, source_profile: str = "speech", subtitles_enabled: bool = True, muted: bool = False, volume: float = 1.0, filter_preset: str = "none", filter_intensity: float = 1.0, tint_color: str = "#d58a55", tint_opacity: int = 0, text_overlays: list[dict[str, Any]] | None = None) -> None:
+def render_clip(source: Path, output: Path, *, start: float, end: float, aspect: str, words: list[dict[str, Any]], visuals: list[tuple[str, float, float]], overlays: list[tuple[Path, float, float]], settings: Settings, style: str = "educational", has_audio: bool = True, embed_subtitles: bool = False, subtitle_language: str = "und", creator_credit: str | None = None, content_format: str | None = None, centered_partial_fill: bool = False, subscribe_animation: dict[str, Any] | None = None, music_theme: str | None = None, music_top_text: str | None = None, music_treatment: str | None = None, hook_text: str | None = None, presentation: str | None = None, reaction_policy: str | None = None, source_profile: str = "speech", subtitles_enabled: bool = True, muted: bool = False, volume: float = 1.0, filter_preset: str = "none", filter_intensity: float = 1.0, tint_color: str = "#d58a55", tint_opacity: int = 0, text_overlays: list[dict[str, Any]] | None = None, music_track: Path | None = None, music_track_speed: float = 1.0) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     has_supported_emoji = presentation in {"smart_speech_v1", "smart_speech_v2"} and any(find_emoji_sequences(str(word.get("text", ""))) for word in words)
     separate_burn_script = bool(creator_credit or hook_text or not subtitles_enabled or has_supported_emoji)
@@ -2357,6 +2374,10 @@ def render_clip(source: Path, output: Path, *, start: float, end: float, aspect:
     subtitle_index = 1 + len(overlays) + len(subscribe_animations) + len(emoji_inputs)
     if embed_subtitles:
         command.extend(["-i", str(output.with_suffix(".srt"))])
+    music_track_input = None
+    if music_track is not None:
+        music_track_input = 1 + len(overlays) + len(subscribe_animations) + len(emoji_inputs) + (1 if embed_subtitles else 0)
+        command.extend(["-stream_loop", "-1", "-ss", f"{start:.3f}", "-i", str(music_track)])
     source_dimensions = (src_width, src_height)
     sample_aspect_ratio = float(source_meta.get("sample_aspect_ratio") or 1.0)
     if source_meta["rotation"] % 180:
@@ -2369,7 +2390,11 @@ def render_clip(source: Path, output: Path, *, start: float, end: float, aspect:
         filters = f"{filters};{emoji_filters}"
         mapped = f"emojiout{len(emoji_plan) - 1}"
     command.extend(["-t", f"{duration:.3f}", "-filter_complex", filters, "-map", f"[{mapped}]"])
-    if has_audio and not muted:
+    if music_track_input is not None:
+        speed = min(1.5, max(0.75, float(music_track_speed)))
+        filters += f";[{music_track_input}:a:0]asetpts=PTS-STARTPTS,aresample=48000,asetrate=48000*{speed:.3f},aresample=48000,atrim=duration={duration:.3f},volume=1.0[songout]"
+        command.extend(["-map", "[songout]", "-c:a", DELIVERY_AUDIO_CODEC, "-b:a", DELIVERY_AUDIO_BITRATE, "-ar", DELIVERY_AUDIO_RATE])
+    elif has_audio and not muted:
         command.extend(["-map", "0:a:0", "-af", f"volume={max(0.0, min(2.0, volume)):.3f}", "-c:a", DELIVERY_AUDIO_CODEC, "-b:a", DELIVERY_AUDIO_BITRATE, "-ar", DELIVERY_AUDIO_RATE])
     else:
         command.append("-an")
@@ -2378,7 +2403,7 @@ def render_clip(source: Path, output: Path, *, start: float, end: float, aspect:
     command.extend(["-c:v", DELIVERY_VIDEO_CODEC, "-preset", DELIVERY_PRESET, "-crf", DELIVERY_CRF, "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-t", f"{duration:.3f}", str(temp)])
     run(command, cwd=output.parent, timeout=7200)
     metadata = probe(temp, settings)
-    if metadata["width"] != width or metadata["height"] != height or (has_audio and not muted and not metadata["audio"]):
+    if metadata["width"] != width or metadata["height"] != height or ((music_track is not None or (has_audio and not muted)) and not metadata["audio"]):
         raise MediaError("Rendered clip failed structural output validation")
     os.replace(temp, output)
 

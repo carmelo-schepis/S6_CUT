@@ -42,13 +42,59 @@ test("Music / sung vocals opts into Smart and sends the durable music profile", 
   await expect(page.getByText(/always uses Smart transcription locally.*VAD disabled.*word timestamps retained/i)).toBeVisible();
   await page.getByRole("tab", { name: "YouTube" }).click();
   await page.getByLabel("YouTube URL").fill("https://www.youtube.com/watch?v=music-fixture");
+  await expect(page.getByLabel("YouTube song URL")).toBeVisible();
+  await page.getByLabel("YouTube song URL").fill("https://www.youtube.com/watch?v=song-fixture");
+  await page.getByLabel("Song speed").selectOption("1.5");
   await page.getByRole("button", { name: /Create \d+ short clips?/ }).click();
 
   await expect(page.getByRole("heading", { name: "Lyric acceptance" })).toBeVisible();
   expect(submittedForm).toMatch(/name="source_profile"\s+music/);
   expect(submittedForm).toMatch(/name="processing_mode"\s+smart/);
   expect(submittedForm).toMatch(/name="min_duration"\s+20/);
+  expect(submittedForm).toMatch(/name="music_track_url"\s+https:\/\/www\.youtube\.com\/watch\?v=song-fixture/);
+  expect(submittedForm).toMatch(/name="music_track_speed"\s+1\.5/);
   await expect(page.getByText(/smart processing/i)).toBeVisible();
+});
+
+test("Music mode uploads an MP3 background song with the selected slow speed", async ({ page }) => {
+  const project = {
+    schemaVersion: 1, id: "song-project", name: "Song upload", mode: "clip", style: "educational", state: "queued",
+    sourceName: "YouTube import", sourceKind: "youtube", requestedCount: 2, contentFormat: "short", sourceProfile: "music",
+    latestJobId: "song-job", libraryFolderId: folder.id, createdAt: now, updatedAt: now,
+  };
+  const job = {
+    schemaVersion: 1, id: "song-job", projectId: project.id, mode: "clip", state: "queued", stage: "queued",
+    stageLabel: "Queued on this machine", progress: 0, currentItem: 0, totalItems: 0, style: "educational",
+    processingMode: "smart", contentFormat: "short", sourceProfile: "music", warnings: [], clips: [], beats: [], steps: [],
+    createdAt: now, updatedAt: now,
+  };
+  let submittedForm = "";
+  await page.route("**/api/v1/health", (route) => route.fulfill({ json: health }));
+  await page.route("**/api/v1/profiles", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/library/folders", (route) => route.fulfill({ json: [folder] }));
+  await page.route("**/api/v1/library/assets**", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/projects", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/jobs", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/jobs/clip", async (route) => {
+    submittedForm = route.request().postData() || "";
+    await route.fulfill({ status: 202, json: { project, job } });
+  });
+  await page.route("**/api/v1/jobs/song-job/events", (route) => route.fulfill({ status: 200, contentType: "text/event-stream", body: ": keep-alive\n\n" }));
+  await page.route("**/api/v1/jobs/song-job", (route) => route.fulfill({ json: job }));
+
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.getByRole("button", { name: "Music / sung vocals" }).click();
+  await page.getByRole("tab", { name: "YouTube" }).click();
+  await page.getByLabel("YouTube URL").fill("https://www.youtube.com/watch?v=music-fixture");
+  await page.getByLabel("Background song MP3").setInputFiles({ name: "backing-track.mp3", mimeType: "audio/mpeg", buffer: Buffer.from("mp3-fixture") });
+  await page.getByLabel("Song speed").selectOption("0.75");
+  await page.getByRole("button", { name: /Create \d+ short clips?/ }).click();
+
+  await expect(page.getByRole("heading", { name: "Song upload" })).toBeVisible();
+  expect(submittedForm).toContain('name="music_track_file"');
+  expect(submittedForm).toContain('filename="backing-track.mp3"');
+  expect(submittedForm).toMatch(/name="music_track_speed"\s+0\.75/);
+  expect(submittedForm).not.toContain('name="music_track_url"');
 });
 
 test("known-short sources show music duration infeasibility before submission", async ({ page }) => {
