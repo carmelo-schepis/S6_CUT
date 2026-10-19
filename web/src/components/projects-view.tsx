@@ -50,6 +50,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
   const [maxDuration, setMaxDuration] = useState(60);
   const [aspectRatio, setAspectRatio] = useState("9:16");
   const [processingMode, setProcessingMode] = useState<ProcessingMode>("auto");
+  const [executionPolicy, setExecutionPolicy] = useState<"auto" | "engine_only">("auto");
   const [sourceProfile, setSourceProfile] = useState<SourceProfile>("speech");
   const [musicTheme, setMusicTheme] = useState<MusicTheme>("clean");
   const [musicTopText, setMusicTopText] = useState("");
@@ -154,7 +155,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
           url: sourceType === "url" ? url.trim() : undefined,
           name: projectName.trim() || undefined, style, count: requestedCount, minDuration, maxDuration,
           aspectRatio: contentFormat === "long" ? "16:9" : aspectRatio,
-          contentFormat, batchMode,
+          contentFormat, batchMode, executionPolicy,
           processingMode: sourceProfile === "music" ? "smart" : processingMode,
           sourceProfile, burnSubtitles: fastMode ? false : burnSubtitles,
           ...(hookTextEnabled ? { hookText: true } : {}),
@@ -176,15 +177,13 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
   // Until /profiles answers we do not know whether a provider is connected, and
   // must not assert that none is: that read can take several seconds, and the
   // claim was wrong for the whole of it whenever a provider was in fact set up.
-  const fastMode = sourceProfile === "speech" && (processingMode === "fast" || (processingMode === "auto" && providersLoaded && !hasSelectedProvider));
+  const fastMode = sourceProfile === "speech" && processingMode === "fast";
   const knownSourceDuration = sourceType === "file" && sourceDuration?.file === file ? sourceDuration.seconds : null;
   const hookTextDisabledReason = sourceProfile === "music" ? "Music mode does not support AI hook text; Music keeps its manual Top text."
     : processingMode === "fast" ? "Fast mode does not support AI hook text."
       : contentFormat === "long" ? "Long form does not support AI hook text."
         : batchMode === "high_volume" ? "High-volume batches do not support AI hook text."
-          : !providersLoaded ? "Checking connected providers…"
-            : !hasSelectedProvider ? "No connected provider; AI hook text is unavailable."
-              : null;
+          : null;
   const hookTextEligible = hookTextDisabledReason === null;
   const [previousHookTextEligibility, setPreviousHookTextEligibility] = useState(hookTextEligible);
   if (previousHookTextEligibility !== hookTextEligible) {
@@ -194,9 +193,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
   const hookTextEnabled = hookTextEligible && hookTextChoice;
   const metadataDisabledReason = contentFormat !== "short" ? "Available for Short form only."
       : sourceProfile === "speech" && processingMode === "fast" ? "Fast mode does not support metadata generation. Choose Auto or Smart."
-        : !providersLoaded ? "Checking connected providers…"
-          : !hasSelectedProvider ? "Connect an OpenRouter profile to enable this optional feature."
-            : null;
+        : null;
   // Mirrors the engine's own default: Smart-capable short, standard batches.
   const youtubeMetadataDefault = hasSelectedProvider && selectedProfile?.autoSeoTitles !== false && batchMode !== "high_volume";
   const youtubeMetadataActive = metadataDisabledReason === null && (youtubeMetadataChoice ?? youtubeMetadataDefault);
@@ -304,6 +301,13 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
               {batchMode === "high_volume" && sourceType === "file" && knownSourceDuration === null && <p className="form-hint">Choose a local source to check its duration; FFprobe remains authoritative.</p>}
             </FieldGroup>
 
+            <FieldGroup title="Execution">
+              <div className="segmented mode-tabs" aria-label="Execution policy">
+                <button type="button" aria-pressed={executionPolicy === "auto"} className={executionPolicy === "auto" ? "active" : ""} onClick={() => setExecutionPolicy("auto")}>Auto · API with local fallback</button>
+                <button type="button" aria-pressed={executionPolicy === "engine_only"} className={executionPolicy === "engine_only" ? "active" : ""} onClick={() => setExecutionPolicy("engine_only")}>Engine only</button>
+              </div>
+              <p className="form-hint">{executionPolicy === "engine_only" ? "All processing stays on this machine; no API calls are made." : "Uses a connected API for supported text features and falls back to local processing."}</p>
+            </FieldGroup>
             {sourceProfile === "speech" && <FieldGroup title="Processing mode">
               <div className="segmented mode-tabs processing-mode-tabs" aria-label="Processing mode">
                 <button type="button" aria-pressed={processingMode === "auto"} className={processingMode === "auto" ? "active" : ""} onClick={() => setProcessingMode("auto")}><Sparkles size={13} /> <span>Auto</span></button>
@@ -332,9 +336,9 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
 
           <SubscribeAnimationControl value={subscribeAnimation} onChange={setSubscribeAnimation} longForm={contentFormat === "long"} />
 
-          {sourceProfile === "speech" && <label className="subtitle-toggle"><input type="checkbox" checked={fastMode ? false : burnSubtitles} disabled={fastMode} onChange={(event) => setBurnSubtitles(event.target.checked)} /> <span><strong>Burn in subtitles</strong><small>{fastMode ? "Fast mode skips transcription and captions. Choose Smart mode to enable them." : "Uses local word timing. Fast mode skips captions."}</small></span></label>}
-          <label className="subtitle-toggle"><input type="checkbox" aria-label="Hook text" checked={hookTextEnabled} disabled={!hookTextEligible} onChange={(event) => setHookTextChoice(event.target.checked)} /> <span><strong>Hook text</strong><small>{hookTextDisabledReason ?? "Off by default. Tick to have OpenRouter write a short curiosity hook at the top of each short."}</small></span></label>
-          <label className="subtitle-toggle"><input type="checkbox" aria-label="Write SEO titles with AI (YouTube metadata)" data-testid="youtube-metadata-toggle" checked={youtubeMetadataActive} disabled={metadataDisabledReason !== null} onChange={(event) => setYoutubeMetadataChoice(event.target.checked)} /> <span><strong>Write SEO titles with AI</strong><small>{metadataDisabledReason ?? (processingMode === "fast" ? "Fast mode has no transcript and never calls providers. Choose Auto or Smart." : `${youtubeMetadataDefault ? "On by default (Settings › Auto-write SEO titles)" : "Off by default"}. Uses ${selectedProfile?.youtubeMetadataModelId || "the configured Settings model"} for each clip's YouTube title and description; at most five small requests and $0.05 estimated per job. Editable and separate from burned-in text.`)}</small></span></label>
+          {sourceProfile === "speech" && <label className="subtitle-toggle"><input type="checkbox" checked={fastMode ? false : burnSubtitles} disabled={fastMode} onChange={(event) => setBurnSubtitles(event.target.checked)} /> <span><strong>Burn in subtitles</strong><small>{fastMode ? "Fast mode skips transcription and captions. Choose Auto or Smart to enable them." : "Uses local word timing. Fast mode skips captions."}</small></span></label>}
+          <label className="subtitle-toggle"><input type="checkbox" aria-label="Hook text" checked={hookTextEnabled} disabled={!hookTextEligible} onChange={(event) => setHookTextChoice(event.target.checked)} /> <span><strong>Hook text</strong><small>{hookTextDisabledReason ?? "Off by default. Tick to add transcript-grounded hook text locally or with the API in Auto."}</small></span></label>
+          <label className="subtitle-toggle"><input type="checkbox" aria-label="Write SEO titles with AI (YouTube metadata)" data-testid="youtube-metadata-toggle" checked={youtubeMetadataActive} disabled={metadataDisabledReason !== null} onChange={(event) => setYoutubeMetadataChoice(event.target.checked)} /> <span><strong>Generate YouTube metadata</strong><small>{metadataDisabledReason ?? (processingMode === "fast" ? "Fast mode has no transcript. Choose Auto or Smart." : executionPolicy === "engine_only" ? "Uses transcript-based local descriptions and deterministic titles." : `${youtubeMetadataDefault ? "On by default (Settings › Auto-write SEO titles)" : "Off by default"}. Uses ${selectedProfile?.youtubeMetadataModelId || "the configured Settings model"} when available, with local fallback. Editable and separate from burned-in text.`)}</small></span></label>
 
           <button className="advanced-toggle" onClick={() => setAdvanced(!advanced)} aria-expanded={advanced}>Advanced controls <span aria-hidden="true">{advanced ? "−" : "+"}</span></button>
           {advanced && <div className="advanced-grid">

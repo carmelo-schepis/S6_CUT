@@ -1,6 +1,6 @@
 # Local engine subtitles and hook text: diagnosis and implementation brief
 
-Date: 2026-10-19. Inspected origin/main at 8a01de1. Diagnosis only; no application behavior changed.
+Date: 2026-10-19. Inspected origin/main at 8a01de1. This document records the original diagnosis and implementation brief. The follow-up implementation is summarized at the end.
 
 ## Confirmed cause
 
@@ -58,3 +58,10 @@ Use isolated test data and ports, never production job storage. Run npm run chec
 - Captions use local word timing, with honest reporting for silence/missing models.
 - Retries/restarts retain job execution policy; unrelated provider settings stay intact.
 - Existing Fast, Music, high-volume, long-form and completed-job behavior remains compatible.
+
+
+## Follow-up implementation (2026-10-19)
+
+The diagnosis branch now carries an initial implementation: Auto uses local Smart transcription when no provider is connected; the Projects view exposes Auto with local fallback and Engine only; Engine only is snapshotted on the Job and blocks provider planning, hooks and metadata model lookup; hooks use transcript sentence selection locally when Engine only is selected, no provider is connected, planning fails, or hook generation fails; and enabled metadata gets a transcript-based local description in local execution. Provider-backed Auto still uses connected OpenRouter text features. Fast remains the explicit no-transcription mode.
+
+Verification completed: Python syntax compilation and `npm run build` passed. Tests were not run. Live caption/hook render behavior and no-network instrumentation still need end-to-end verification. YouTube imports and YouTube song URLs require network access even when all AI generation is local.

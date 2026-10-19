@@ -204,6 +204,7 @@ type ClipJobInput = {
   contentFormat?: ContentFormat;
   batchMode?: BatchMode;
   processingMode?: ProcessingMode;
+  executionPolicy?: "auto" | "engine_only";
   /** Serialized as the engine's snake_case multipart field; responses use sourceProfile. */
   sourceProfile?: SourceProfile;
   burnSubtitles?: boolean;
@@ -233,6 +234,7 @@ export async function createClipJob(input: ClipJobInput): Promise<{ project: Pro
   form.set("content_format", input.contentFormat ?? "short");
   form.set("batch_mode", input.batchMode ?? "standard");
   if (input.processingMode) form.set("processing_mode", input.processingMode);
+  if (input.executionPolicy) form.set("execution_policy", input.executionPolicy);
   form.set("source_profile", input.sourceProfile ?? "speech");
   form.set("burn_subtitles", String(input.burnSubtitles ?? true));
   form.set("embed_subtitles", String(input.embedSubtitles ?? false));

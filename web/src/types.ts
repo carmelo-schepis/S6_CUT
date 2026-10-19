@@ -227,6 +227,7 @@ export const jobSchema = z.object({
   totalItems: z.number().default(0),
   style: styleSchema,
   processingMode: processingModeSchema.default("smart"),
+  executionPolicy: z.enum(["auto", "engine_only"]).optional(),
   contentFormat: contentFormatSchema.default("short"),
   sourceProfile: sourceProfileSchema.optional(),
   requestedCount: z.number().int().min(1).max(500).optional(),

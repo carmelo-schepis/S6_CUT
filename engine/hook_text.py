@@ -113,3 +113,20 @@ def normalize_hook_text(value: object):
         if category[0] == "S":
             return None
     return text
+
+
+def local_hook_text(transcript: str) -> str | None:
+    """Choose a transcript sentence as an honest offline hook; never invent context."""
+    text = " ".join(str(transcript or "").split())
+    if not text:
+        return None
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+    candidates = [sentence.strip() for sentence in sentences if len(sentence.strip()) >= 20]
+    if not candidates and len(text) >= 20:
+        candidates = [text]
+    for candidate in candidates:
+        candidate = candidate[:HOOK_TEXT_MAX_LENGTH].rsplit(" ", 1)[0] if len(candidate) > HOOK_TEXT_MAX_LENGTH else candidate
+        value = normalize_hook_text(candidate)
+        if value:
+            return value
+    return None

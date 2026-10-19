@@ -248,6 +248,7 @@ class Job(ApiModel):
     total_items: int = Field(default=0, ge=0)
     style: Style
     processing_mode: ProcessingMode = "smart"
+    execution_policy: Literal["auto", "engine_only"] = "auto"
     content_format: ContentFormat = "short"
     source_profile: Literal["speech", "music"] = "speech"
     requested_count: int = Field(default=1, ge=1, le=500)

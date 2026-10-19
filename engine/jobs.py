@@ -29,7 +29,7 @@ from .models import (
     Asset, CaptionCue, Clip, ContentFormat, Job, ProcessingMode, ProcessingStep, ProvenanceRecord, ScoreBreakdown, YouTubeMetadataUpdate, now_iso,
 )
 from .seo_titles import SEO_PROMPT_VERSION, SEO_TITLE_RULES, fallback_clip_title, normalize_seo_description, normalize_seo_title, project_name_is_auto, source_context_title
-from .hook_text import HOOK_TEXT_RULES, hook_text_clips, hook_text_schema, normalize_hook_text
+from .hook_text import HOOK_TEXT_RULES, hook_text_clips, hook_text_schema, local_hook_text, normalize_hook_text
 from .providers import ProfileService, ProviderError, provider_runtime_message
 from .security import confined, redact, safe_archive_title, safe_filename
 from .selection import Candidate, _score, _timed_words, candidate_quality, clip_from_candidate, select_candidates, select_music_candidates
@@ -1644,18 +1644,9 @@ class JobManager:
             self.fail_step(job, "hook_text", detail="AI hook text is not eligible for this job", private=private)
             return
         planning_step = next((item for item in job.steps if item.id == "openrouter"), None)
-        if planning_step and planning_step.status == "failed":
-            reason = planning_step.detail or "OpenRouter planning failed"
-            warning = f"AI hook text unavailable: {reason.rstrip('.')} . Clips were rendered without hook text."
-            warning = warning.replace(" .", ".")
-            private["hook_text"] = {"enabled": True, "status": "failed", "reason": reason}
-            if warning not in job.warnings:
-                job.warnings.append(warning)
-            self.fail_step(job, "hook_text", detail=warning, private=private)
-            return
         if state.get("status") == "generating":
             reason = "previous hook generation was interrupted"
-            warning = f"AI hook text unavailable: {reason}. Clips were rendered without hook text."
+            warning = f"AI hook text unavailable: {reason}. Local hook text was used where a transcript excerpt supported it."
             private["hook_text"] = {"enabled": True, "status": "failed", "reason": reason}
             if warning not in job.warnings:
                 job.warnings.append(warning)
@@ -1663,6 +1654,17 @@ class JobManager:
             return
         self.start_step(job, "hook_text", detail="Writing transcript-grounded hooks", label="Writing hook text", progress=38, private=private)
         private["hook_text"] = {"enabled": True, "status": "generating"}
+        if private.get("execution_policy", "auto") == "engine_only" or not private.get("use_openrouter") or (planning_step and planning_step.status == "failed"):
+            for clip in job.clips:
+                excerpt = " ".join(str(word.get("text", "")) for word in words if clip.start <= float(word.get("start", -1)) <= clip.end)
+                clip.hook_text = local_hook_text(excerpt)
+            private["hook_text"] = {"enabled": True, "status": "complete" if any(clip.hook_text for clip in job.clips) else "failed", "provider": "local"}
+            if not any(clip.hook_text for clip in job.clips):
+                job.warnings.append("Local hook text unavailable: transcript excerpts were too short or unsuitable.")
+                self.fail_step(job, "hook_text", detail="No suitable transcript text for local hooks", private=private)
+            else:
+                self.complete_step(job, "hook_text", detail=f"{sum(bool(clip.hook_text) for clip in job.clips)} of {len(job.clips)} clips · local", private=private)
+            return
         self._save(job, private)
         project = self.db.get_project(job.project_id)
         title = (project.name if project else None) or str(private.get("source_name") or "")
@@ -1712,13 +1714,19 @@ class JobManager:
             reason = " ".join(redact(provider_runtime_message(exc, "OpenRouter")).split()).strip(" .") or "provider request failed"
             for clip in job.clips:
                 clip.hook_text = None
+        if reason and private.get("execution_policy", "auto") == "auto":
+            for clip in job.clips:
+                if not clip.hook_text:
+                    excerpt = " ".join(str(word.get("text", "")) for word in words if clip.start <= float(word.get("start", -1)) <= clip.end)
+                    clip.hook_text = local_hook_text(excerpt)
         if reason:
             warning = f"AI hook text unavailable: {reason}. Clips were rendered without hook text."
             if warning not in job.warnings:
                 job.warnings.append(warning)
-            private["hook_text"] = {"enabled": True, "status": "failed" if not any(clip.hook_text for clip in job.clips) else "complete", "reason": reason}
+            local_count = sum(bool(clip.hook_text) for clip in job.clips) if private.get("execution_policy", "auto") == "auto" else 0
+            private["hook_text"] = {"enabled": True, "status": "failed" if not any(clip.hook_text for clip in job.clips) else "complete", "reason": reason, "local_fallback_count": local_count}
             if any(clip.hook_text for clip in job.clips):
-                self.complete_step(job, "hook_text", detail=f"{sum(bool(clip.hook_text) for clip in job.clips)} of {len(job.clips)} clips", private=private)
+                self.complete_step(job, "hook_text", detail=f"{sum(bool(clip.hook_text) for clip in job.clips)} of {len(job.clips)} clips; local fallback for {local_count}", private=private)
             else:
                 self.fail_step(job, "hook_text", detail=warning, private=private)
         else:
@@ -1811,6 +1819,15 @@ class JobManager:
             private["youtube_metadata_spend_estimate_usd"] = 0.05
         self._save(job, private)
         if not pending:
+            return
+        if private.get("execution_policy", "auto") == "engine_only" or not private.get("use_openrouter"):
+            state = private.setdefault("youtube_metadata_generation", {})
+            for clip, excerpt, cache_key in pending:
+                clip.youtube_description = normalize_seo_description(excerpt)
+                clip.youtube_metadata_status = "fallback" if clip.youtube_description else "unavailable"
+                clip.youtube_metadata_reason = "Transcript based local metadata"
+                state[clip.id] = {"status": clip.youtube_metadata_status, "cache_key": cache_key, "provider": "local", "updated_at": time.time()}
+            self._save(job, private)
             return
 
         try:

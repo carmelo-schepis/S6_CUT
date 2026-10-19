@@ -403,6 +403,7 @@ async def create_clip_job(
     name: Annotated[str | None, Form()] = None,
     style: Annotated[Literal["funny", "serious", "educational", "hype"], Form()] = "educational",
     processing_mode: Annotated[Literal["fast", "smart", "auto"], Form()] = "auto",
+    execution_policy: Annotated[Literal["auto", "engine_only"], Form()] = "auto",
     source_profile: Annotated[Literal["speech", "music"], Form()] = "speech",
     count: Annotated[int, Form(ge=1, le=500)] = 5,
     batch_mode: Annotated[Literal["standard", "high_volume"], Form()] = "standard",
@@ -458,7 +459,8 @@ async def create_clip_job(
     effective_target: int | None = None
     cap_explanation: str | None = None
     smart_available = profiles.smart_available()
-    mode = "smart" if source_profile == "music" else resolve_processing_mode(processing_mode, smart_available)
+    # Auto keeps local transcription available when the optional provider is absent.
+    mode = "smart" if source_profile == "music" else ("fast" if processing_mode == "fast" else "smart")
     selected_profile = next((profile for profile in profiles.db.list_profiles() if profile.selected), None)
     if youtube_metadata is None:
         # Not specified by the client: SEO titles follow the profile's
@@ -467,18 +469,18 @@ async def create_clip_job(
             selected_profile and selected_profile.auto_seo_titles and smart_available
             and content_format == "short" and mode == "smart" and processing_mode != "fast" and batch_mode != "high_volume"
         )
-    if youtube_metadata and processing_mode == "auto" and (mode != "smart" or not smart_available):
+    if youtube_metadata and processing_mode == "auto" and mode != "smart":
         # The default-on SEO toggle must not block an Auto job that resolved to
         # Fast because OpenRouter is not reachable right now.
         youtube_metadata = False
     if youtube_metadata:
         if content_format != "short" or processing_mode == "fast" or mode != "smart":
             raise HTTPException(422, "YouTube metadata is unavailable in Fast or Long form jobs.")
-        if not smart_available or not selected_profile:
+        if execution_policy != "engine_only" and smart_available and not selected_profile:
             raise HTTPException(422, "YouTube metadata generation requires a connected OpenRouter provider.")
         # The metadata model is an independent Settings profile preference. A
         # job snapshots it so a later profile edit cannot rewrite queued work.
-        youtube_metadata_model_id = selected_profile.youtube_metadata_model_id
+        youtube_metadata_model_id = selected_profile.youtube_metadata_model_id if selected_profile else None
     if hook_text:
         if content_format != "short":
             raise HTTPException(422, "AI hook text is unavailable for Long form.")
@@ -488,8 +490,6 @@ async def create_clip_job(
             raise HTTPException(422, "AI hook text is unavailable for High-volume jobs.")
         if processing_mode == "fast":
             raise HTTPException(422, "AI hook text is unavailable in Fast mode.")
-        if not smart_available:
-            raise HTTPException(422, "AI hook text requires a connected OpenRouter provider.")
         if mode != "smart":
             raise HTTPException(422, "AI hook text is unavailable in Fast mode.")
     presentation = {
@@ -501,12 +501,13 @@ async def create_clip_job(
     private: dict[str, object] = {
         "count": count, "batch_mode": batch_mode, "min_duration": min_duration, "max_duration": max_duration,
         "aspect_ratio": aspect_ratio, "content_format": content_format, "processing_mode": mode,
+        "execution_policy": execution_policy,
         "presentation": presentation,
         "reaction_policy": {"version": 1, "name": "ironic_v1"} if source_profile == "speech" and burn_subtitles else None,
         "burn_subtitles": True if source_profile == "music" else burn_subtitles, "embed_subtitles": embed_subtitles,
         "hook_text": {"enabled": hook_text, "status": "pending" if hook_text else "disabled"},
         "youtube_metadata": {"enabled": youtube_metadata, "model_id": youtube_metadata_model_id, "status": "pending" if youtube_metadata else "disabled"},
-        "use_openrouter": mode == "smart" and smart_available and source_profile == "speech" and batch_mode == "standard",
+        "use_openrouter": execution_policy == "auto" and mode == "smart" and smart_available and source_profile == "speech" and batch_mode == "standard",
         "library_folder_id": library_folder_id,
         "subscribe_animation": _subscribe_animation_request(subscribe_animation).model_dump(),
     }
@@ -609,7 +610,7 @@ async def create_clip_job(
             steps[1].status = "complete"
             steps[1].detail = f"Source validated - {float(source_metadata['duration']):.1f}s"
             steps[1].started_at = steps[1].completed_at = checkpoint_time
-    job = Job(id=job_id, project_id=project_id, library_folder_id=library_folder_id, mode="clip", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style=style, processing_mode=mode, content_format=content_format, source_profile=source_profile, music_presentation=music_config if source_profile == "music" else None, music_top_text=(music_top_text if music_top_text.strip() else None) if source_profile == "music" else None, music_track=music_track_snapshot, requested_count=count, batch_mode=batch_mode, effective_target=effective_target, cap_explanation=cap_explanation, burn_subtitles=True if source_profile == "music" else burn_subtitles, embed_subtitles=embed_subtitles, hook_text_enabled=hook_text, youtube_metadata_enabled=youtube_metadata, youtube_metadata_model_id=youtube_metadata_model_id, steps=steps)
+    job = Job(id=job_id, project_id=project_id, library_folder_id=library_folder_id, mode="clip", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style=style, processing_mode=mode, execution_policy=execution_policy, content_format=content_format, source_profile=source_profile, music_presentation=music_config if source_profile == "music" else None, music_top_text=(music_top_text if music_top_text.strip() else None) if source_profile == "music" else None, music_track=music_track_snapshot, requested_count=count, batch_mode=batch_mode, effective_target=effective_target, cap_explanation=cap_explanation, burn_subtitles=True if source_profile == "music" else burn_subtitles, embed_subtitles=embed_subtitles, hook_text_enabled=hook_text, youtube_metadata_enabled=youtube_metadata, youtube_metadata_model_id=youtube_metadata_model_id, steps=steps)
     db.save_project(project)
     db.save_job(job, private)
     try:
