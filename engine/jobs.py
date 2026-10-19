@@ -1398,6 +1398,9 @@ class JobManager:
                 kwargs = {}
             elif "max_seconds" not in parameters:
                 kwargs.pop("max_seconds", None)
+            if "write_thumbnail" in parameters:
+                # Only a status-view poster; the job never reads it.
+                kwargs["write_thumbnail"] = True
             try:
                 source = download_youtube(private["url"], target_dir, self.settings, **kwargs)
             except DownloadStalled as stalled:

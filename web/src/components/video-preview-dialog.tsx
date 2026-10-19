@@ -1,7 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { LibraryAsset } from "../types";
 
-export function VideoPreviewDialog({ asset, opener, onClose, onMediaError, children }: { asset: LibraryAsset; opener: HTMLButtonElement | null; onClose: () => void; onMediaError?: () => void; children?: ReactNode }) {
+export type PreviewableAsset = Pick<LibraryAsset, "id" | "title" | "mediaType" | "previewUrl">;
+
+export function VideoPreviewDialog({ asset, opener, onClose, onMediaError, children }: { asset: PreviewableAsset; opener: HTMLButtonElement | null; onClose: () => void; onMediaError?: () => void; children?: ReactNode }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const [playing, setPlaying] = useState(false);

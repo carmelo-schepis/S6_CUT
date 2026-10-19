@@ -54,6 +54,7 @@ export const videoDownloadTaskSchema = z.object({
   downloadedBytes: z.number().nonnegative(), totalBytes: z.number().nonnegative().nullable().optional(),
   percent: z.number().min(0).max(100).nullable().optional(), message: z.string().nullable().optional(),
   filename: z.string().nullable().optional(), downloadUrl: z.string().nullable().optional(), error: z.string().nullable().optional(),
+  title: z.string().nullable().optional(), thumbnailUrl: z.string().nullable().optional(),
   createdAt: z.string(), updatedAt: z.string(),
 });
 export type VideoDownloadTask = z.infer<typeof videoDownloadTaskSchema>;
@@ -459,5 +460,40 @@ export type MatchExplanation = {
   reason: string;
   rejected: { assetId: string; title: string; reason: string }[];
 };
+
+// Compact, read-only projections for the iPhone/iPad status view (engine MobileOverview).
+export const mobileClipSchema = z.object({
+  id: z.string(), index: z.number().int().positive(), title: z.string(), duration: z.number().nonnegative(),
+  thumbnailUrl: z.string().nullable().optional(), previewUrl: z.string().nullable().optional(),
+});
+export type MobileClip = z.infer<typeof mobileClipSchema>;
+
+export const mobileJobSchema = z.object({
+  id: z.string(), projectId: z.string(), projectName: z.string(), mode: z.enum(["clip", "script"]), state: jobStateSchema,
+  stage: z.string(), stageLabel: z.string(), progress: z.number(), currentItem: z.number().default(0), totalItems: z.number().default(0),
+  style: styleSchema, contentFormat: contentFormatSchema.default("short"), downloadProgress: downloadProgressSchema.nullable().optional(),
+  steps: z.array(processingStepSchema).default([]), queuePosition: z.number().nullable().optional(),
+  activeElapsedSeconds: z.number().nullable().optional(), error: z.string().nullable().optional(), warnings: z.array(z.string()).default([]),
+  sourceTitle: z.string().nullable().optional(), sourceThumbnailUrl: z.string().nullable().optional(),
+  clipsReady: z.number().default(0), clips: z.array(mobileClipSchema).default([]),
+  createdAt: z.string(), updatedAt: z.string(),
+});
+export type MobileJob = z.infer<typeof mobileJobSchema>;
+
+export const mobileDownloadSchema = z.object({
+  id: z.string(), state: z.enum(["queued", "active", "complete", "failed"]), phase: z.string(),
+  downloadedBytes: z.number().nonnegative(), totalBytes: z.number().nonnegative().nullable().optional(),
+  percent: z.number().min(0).max(100).nullable().optional(), message: z.string().nullable().optional(),
+  title: z.string().nullable().optional(), thumbnailUrl: z.string().nullable().optional(), error: z.string().nullable().optional(),
+  createdAt: z.string(), updatedAt: z.string(),
+});
+export type MobileDownload = z.infer<typeof mobileDownloadSchema>;
+
+export const mobileOverviewSchema = z.object({
+  generatedAt: z.string(), running: z.array(mobileJobSchema).default([]), recent: z.array(mobileJobSchema).default([]),
+  recentTotal: z.number().int().nonnegative().default(0), downloads: z.array(mobileDownloadSchema).default([]),
+  clipsLastDay: z.number().int().nonnegative().default(0), failedLastDay: z.number().int().nonnegative().default(0),
+});
+export type MobileOverview = z.infer<typeof mobileOverviewSchema>;
 
 export const SCHEMA_VERSION = 1 as const;

@@ -1,0 +1,246 @@
+/* ===========================================================================
+   iPhone and iPad status view (components/mobile/).
+
+   This stylesheet ships only inside the status view's own chunk, so desktop
+   browsers never load it, and every rule is scoped under .m-app. It is built
+   from the shared tokens in styles.css and declares no colour, font size or
+   radius of its own: the type roles, the 4px spacing ladder (8 / 16 / 32 / 64),
+   the 6px control corner, the grey accent and the logo-gradient marker are the
+   desktop's. Space separates things here exactly as it does on the desktop
+   Projects, Library and Jobs pages: there are no cards and no rules.
+
+   Layout follows the desktop's own breakpoints:
+     < 744px     phone: a sticky top bar with three text tabs
+     >= 744px    tablet: the desktop sidebar, icons only up to 1180px and
+                 labelled from 1181px, with the page title in the top bar
+   =========================================================================== */
+
+.m-app {
+  --m-rail: 0px;
+  --m-header: 48px;
+  position: relative;
+  min-height: 100vh;
+  min-height: 100dvh;
+  isolation: isolate;
+  background: var(--canvas);
+  color: var(--text);
+}
+
+/* --- Wallpaper: Home only, faded to black on every other tab ------------- */
+.m-wallpaper {
+  position: fixed;
+  inset: 0 0 0 var(--m-rail);
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 1s ease-in-out;
+  background: linear-gradient(rgba(0, 0, 0, .62), rgba(0, 0, 0, .62)), url("/mobile-wallpaper.jpg") center / cover no-repeat;
+}
+.m-app[data-tab="home"] .m-wallpaper { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .m-wallpaper { transition: none; } }
+
+/* --- Navigation: top bar on phones --------------------------------------- */
+.m-rail {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  height: calc(var(--m-header) + env(safe-area-inset-top));
+  padding: env(safe-area-inset-top) calc(var(--page-inset) + env(safe-area-inset-right)) 0 calc(var(--page-inset) + env(safe-area-inset-left));
+  background: var(--canvas);
+}
+.m-brand { display: flex; align-items: center; gap: var(--space-2); flex: none; font-weight: 700; letter-spacing: -.2px; color: var(--text-muted); }
+.m-brand img { display: block; width: 24px; height: 24px; border-radius: var(--radius-md); object-fit: cover; }
+.m-brand > span { display: none; }
+.m-nav { display: flex; align-self: stretch; gap: var(--space-5); min-width: 0; }
+.m-nav-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+}
+.m-nav-item svg { display: none; }
+.m-nav-item.active { color: var(--text); font-weight: var(--type-emphasis-weight); }
+.m-nav-item.active::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; border-radius: 2px; background: var(--logo-gradient); }
+.m-badge { min-width: 18px; padding: 0 var(--space-1); border: 1px solid var(--control-border); border-radius: var(--radius-control); color: var(--text); text-align: center; font-variant-numeric: tabular-nums; }
+
+/* The engine reading sits at the right end of the bar, as in the desktop top bar. */
+.m-topbar {
+  position: fixed;
+  z-index: 21;
+  top: env(safe-area-inset-top);
+  right: calc(var(--page-inset) + env(safe-area-inset-right));
+  height: var(--m-header);
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+}
+.m-topbar-title { display: none; }
+.m-engine { display: flex; align-items: center; }
+.m-engine .status { border-color: transparent; background: transparent; padding-inline: 0; }
+@media (max-width: 420px) { .m-engine .status > span { display: none; } }
+
+.m-main { min-width: 0; }
+.m-content { max-width: var(--page-measure); margin: 0 auto; padding: 0 var(--page-inset) calc(var(--gap-group) + env(safe-area-inset-bottom)); outline: none; }
+.m-banner { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--page-inset); background: var(--surface-2); color: var(--text-primary); }
+.m-banner-error { justify-content: space-between; background: rgba(242, 56, 85, .16); }
+
+/* --- Shared page furniture ------------------------------------------------ */
+.m-page { padding-top: var(--space-5); }
+.m-page > :first-child { margin-top: 0; }
+.m-page-head { display: flex; align-items: baseline; gap: var(--space-3); margin-bottom: var(--space-5); }
+.m-page h1 { margin: 0; font-size: var(--type-title-size); line-height: var(--type-title-line); font-weight: var(--type-title-weight); letter-spacing: var(--type-title-tracking); }
+.m-section { margin-top: var(--gap-group); }
+.m-section-head { display: flex; align-items: baseline; gap: var(--space-2); margin-bottom: var(--space-3); }
+.m-section-head h2 { margin: 0; font-size: var(--type-section-size); line-height: var(--type-section-line); font-weight: var(--type-heading-weight); letter-spacing: var(--type-heading-tracking); }
+.m-count { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+/* A 44px hit area around a text link that stays one line tall. */
+.m-link { margin: -12px 0 -12px auto; min-height: 44px; padding: 0 var(--space-1); border: 0; background: transparent; color: var(--text-muted); }
+.m-muted { color: var(--text-muted); }
+.m-clamp, .m-clamp-1 { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.m-clamp { -webkit-line-clamp: 2; }
+.m-clamp-1 { -webkit-line-clamp: 1; }
+.m-empty { margin: var(--gap-group) 0 0; text-align: center; }
+.m-status { margin: var(--space-4) 0 0; text-align: center; }
+.m-more { display: flex; justify-content: center; margin-top: var(--gap-group); }
+.m-sentinel { height: 1px; }
+.m-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
+
+/* --- A still from the engine ---------------------------------------------- */
+.m-poster { position: relative; display: grid; place-items: center; aspect-ratio: 16 / 9; overflow: hidden; border-radius: var(--radius-md); background: var(--surface-2); color: var(--text-muted); }
+.m-poster img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+
+/* --- Home ------------------------------------------------------------------ */
+.m-hero { display: grid; justify-items: center; gap: var(--space-2); padding-top: var(--gap-group); text-align: center; }
+.m-hero-mark { width: 48px; height: 48px; margin-bottom: var(--space-2); border-radius: var(--radius-xl); object-fit: cover; }
+.m-hero h1, .m-hero p { margin: 0; }
+.m-chips { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-2); margin-top: var(--space-3); }
+/* Quick links are the desktop's secondary button; the pseudo-element lifts its hit area to 44px. */
+.m-chip { position: relative; gap: var(--space-2); }
+.m-chip::after { content: ""; position: absolute; inset: -6px -2px; }
+.m-chip svg { flex: none; }
+
+.m-list { display: grid; gap: var(--space-1); }
+.m-row { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: var(--space-3); align-items: center; width: 100%; min-height: 44px; padding: var(--space-2) 0; border: 0; background: transparent; color: inherit; text-align: left; }
+.m-row-body { display: grid; gap: 2px; min-width: 0; }
+.m-row .progress-wrap, .m-work .progress-wrap { min-width: 0; }
+.m-run { display: flex; align-items: center; gap: var(--space-3); width: 100%; min-height: 44px; padding: var(--space-2) 0; border: 0; background: transparent; color: inherit; text-align: left; }
+.m-run > strong { flex: 1 1 auto; min-width: 0; }
+.m-age { flex: none; white-space: nowrap; }
+
+.m-shelf { display: flex; gap: var(--space-3); margin: 0 calc(-1 * var(--page-inset)); padding: 0 var(--page-inset); list-style: none; overflow-x: auto; scroll-snap-type: x proximity; scroll-padding-inline: var(--page-inset); scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.m-shelf::-webkit-scrollbar { display: none; }
+.m-shelf > li { flex: 0 0 min(60vw, 220px); scroll-snap-align: start; }
+.m-shelf-item { display: grid; align-content: start; gap: var(--space-1); width: 100%; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; }
+.m-shelf-item .m-poster { margin-bottom: var(--space-1); }
+
+/* --- Library --------------------------------------------------------------- */
+.m-toolbar { display: grid; gap: var(--space-2); margin-bottom: var(--space-6); }
+.m-search { position: relative; }
+.m-search svg { position: absolute; left: var(--space-2); top: 0; bottom: 0; margin-block: auto; color: var(--text-muted); pointer-events: none; }
+.m-search input { padding-left: var(--space-8); }
+.m-toolbar :is(input, select) { min-height: 44px; }
+.m-filters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2); }
+.m-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--gap-group) var(--space-3); margin: 0; padding: 0; list-style: none; }
+.m-grid-item { display: grid; align-content: start; gap: var(--space-1); width: 100%; min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; }
+.m-grid-item .m-poster { margin-bottom: var(--space-1); }
+
+/* --- Jobs ------------------------------------------------------------------- */
+.m-work-list { display: grid; gap: var(--gap-group); }
+.m-work { display: grid; gap: var(--space-3); min-width: 0; }
+.m-work-head { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: var(--space-3); align-items: start; }
+.m-work-title { display: grid; gap: var(--space-1); justify-items: start; min-width: 0; }
+.m-work-detail { margin: 0; }
+.m-work-clips { display: grid; gap: var(--space-2); }
+.m-toggle { display: flex; align-items: center; gap: var(--space-2); min-height: 44px; margin-block: calc(-1 * var(--space-2)); padding: 0; border: 0; background: transparent; color: var(--text-muted); text-align: left; }
+.m-toggle > span { margin-left: auto; }
+/* The desktop step checklist, restyled as plain rows: the heading and the panel chrome belong to the Workspace page. */
+.m-app .checklist-panel { margin: 0; border-radius: 0; background: transparent; }
+.m-app .checklist-heading { display: none; }
+.m-app .process-checklist { padding: 0; }
+.m-app .process-checklist::before { left: 8px; }
+.m-app .checklist-step { padding-inline: 0; }
+/* Done and waiting steps are their own message (a tick, an empty ring); only the live step needs words. */
+.m-app .checklist-step:is(.status-complete, .status-pending) .checklist-status-text { display: none; }
+/* Always the stacked arrangement the desktop uses on phones: label above its status line, nothing clipped. */
+.m-app .checklist-step-body { display: grid; gap: 0; }
+.m-app .checklist-step-meta { width: 100%; flex-basis: auto; justify-content: flex-start; text-align: left; }
+.m-app .checklist-detail { flex-wrap: wrap; overflow: visible; max-width: none; }
+.m-app .checklist-detail-text { overflow: visible; text-overflow: clip; white-space: normal; max-width: none; }
+
+.m-clip-strip { display: flex; gap: var(--space-2); margin: 0; padding: 0; list-style: none; overflow-x: auto; scrollbar-width: none; }
+.m-clip-strip::-webkit-scrollbar { display: none; }
+.m-clip-strip > li { flex: 0 0 96px; }
+.m-clip { display: block; width: 100%; min-height: 44px; padding: 0; border: 0; background: transparent; }
+
+.m-queued { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; gap: var(--space-3); align-items: center; min-height: 44px; padding: var(--space-2) 0; }
+.m-done { display: grid; }
+.m-done-main { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; gap: var(--space-3); align-items: center; width: 100%; min-height: 44px; padding: var(--space-2) 0; border: 0; background: transparent; color: inherit; text-align: left; }
+.m-note { margin: 0 0 var(--space-2) calc(64px + var(--space-3)); }
+.m-done .m-clip-strip { margin-bottom: var(--space-2); }
+.m-load-failed button { min-height: 44px; }
+
+/* --- Tablet: the desktop sidebar ------------------------------------------- */
+@media (min-width: 744px) {
+  .m-app { --m-rail: 68px; }
+  .m-rail {
+    position: fixed;
+    inset: 0 auto 0 0;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+    width: var(--m-rail);
+    height: auto;
+    padding: var(--space-3);
+    background: var(--surface-1);
+  }
+  .m-brand { height: var(--control-height-large); margin-bottom: var(--space-4); padding: 0 var(--space-2); }
+  .m-nav { flex-direction: column; align-self: auto; gap: 2px; }
+  .m-nav-item { justify-content: center; gap: 10px; width: 100%; min-height: 44px; padding: 0 var(--space-2); border-radius: var(--radius-md); }
+  .m-nav-item svg { display: block; flex: none; }
+  .m-nav-label { display: none; }
+  .m-nav-item:hover:not(.active) { background: var(--surface-2); }
+  .m-nav-item.active { background: var(--surface-3); }
+  .m-nav-item.active::after { top: 8px; bottom: 8px; left: 0; right: auto; width: 2px; height: auto; }
+  .m-badge { position: absolute; top: -2px; right: -4px; background: var(--surface-1); }
+  .m-main { margin-left: var(--m-rail); }
+  .m-topbar { position: sticky; top: 0; right: auto; z-index: 15; justify-content: space-between; gap: var(--space-4); padding-inline: var(--page-inset); background: var(--canvas); pointer-events: auto; }
+  .m-topbar-title { display: block; font-weight: var(--type-emphasis-weight); }
+  .m-banner { padding-inline: var(--page-inset); }
+  .m-section { margin-top: var(--gap-section); }
+  .m-hero { padding-top: var(--gap-section); }
+  .m-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--gap-group) var(--space-4); }
+  .m-toolbar { grid-template-columns: minmax(220px, 1fr) auto; align-items: center; }
+  .m-filters { grid-template-columns: repeat(3, 140px); }
+  .m-shelf { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); margin: 0; padding: 0; overflow: visible; }
+  .m-work-head { grid-template-columns: 160px minmax(0, 1fr); }
+  .m-clip-strip > li { flex-basis: 120px; }
+}
+@media (min-width: 1024px) {
+  .m-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  /* Home splits into work on the left and clips on the right. */
+  .m-home { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); column-gap: var(--gap-pane); align-items: start; }
+  .m-home > .m-hero, .m-home > .m-empty { grid-column: 1 / -1; }
+  .m-home > .m-clips { grid-column: 2; grid-row: 2 / span 3; margin-top: var(--gap-section); }
+  .m-home > .m-running, .m-home > .m-runs { grid-column: 1; }
+  .m-work { grid-template-columns: minmax(0, 640px) minmax(240px, 380px); column-gap: var(--gap-pane); align-items: start; }
+  .m-work > :not(.m-work-clips) { grid-column: 1; }
+  .m-work > .m-work-clips { grid-column: 2; grid-row: 1 / span 5; }
+  .m-work-clips .m-clip-strip { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); overflow: visible; }
+  .m-work-clips .m-clip-strip > li { flex: none; }
+}
+@media (min-width: 1181px) {
+  .m-app { --m-rail: 224px; }
+  .m-brand > span { display: inline; }
+  .m-nav-item { justify-content: flex-start; }
+  .m-nav-label { display: inline; }
+  .m-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 22px 18px; }
+  .m-badge { position: static; margin-left: auto; }
+}

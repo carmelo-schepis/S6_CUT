@@ -10,6 +10,7 @@ import {
   jobSchema,
   libraryFolderSchema,
   libraryPurgeResultSchema,
+  mobileOverviewSchema,
   profileSchema,
   openRouterModelSchema,
   projectSchema,
@@ -18,6 +19,7 @@ import {
   type AssetOrigin,
   type LibraryAsset,
   type LibraryFolder,
+  type MobileOverview,
   type RecentClipsPage,
   type MatchExplanation,
   type ContentFormat,
@@ -161,6 +163,11 @@ export async function listVideoOnlyDownloads(): Promise<VideoDownloadTask[]> {
 
 export async function getVideoOnlyDownload(id: string): Promise<VideoDownloadTask> {
   return videoDownloadTaskSchema.parse(await request(`/video-downloads/${encodeURIComponent(id)}`));
+}
+
+/** One small read for the iPhone/iPad status view; `/jobs` is far too large to poll from a phone. */
+export async function getMobileOverview(history = 20, signal?: AbortSignal): Promise<MobileOverview> {
+  return mobileOverviewSchema.parse(await request(`/mobile/overview?history=${encodeURIComponent(String(history))}`, { timeoutMs: READ_TIMEOUT_MS, signal }));
 }
 
 export async function getHealth(): Promise<Health> {

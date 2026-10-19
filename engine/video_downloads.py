@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import threading
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -18,6 +19,7 @@ from .config import Settings
 from .media import MediaError, download_youtube, probe, run
 from .models import ApiModel, now_iso
 from .security import MediaSigner, confined, redact, safe_filename, validate_youtube_url
+from .source_preview import PREVIEW_NAME, ensure_preview, frame_preview, has_preview, read_info_title
 
 
 class VideoDownloadTask(ApiModel):
@@ -32,6 +34,10 @@ class VideoDownloadTask(ApiModel):
     filename: str | None = None
     download_url: str | None = None
     error: str | None = None
+    # Read from yt-dlp's own metadata while the download runs. The signed poster
+    # link is attached per response (like `download_url`) and never persisted.
+    title: str | None = None
+    thumbnail_url: str | None = None
     created_at: str
     updated_at: str
 
@@ -235,6 +241,15 @@ class VideoDownloadManager:
         with self.lock:
             return self.tasks.get(task_id)
 
+    def preview_path(self, task_id: str) -> Path:
+        return confined(self._directory(task_id), PREVIEW_NAME)
+
+    def has_preview(self, task_id: str) -> bool:
+        try:
+            return has_preview(self.preview_path(task_id))
+        except ValueError:
+            return False
+
     def list(self):
         with self.lock:
             return sorted(self.tasks.values(), key=lambda task: (task.created_at, task.id), reverse=True)
@@ -273,7 +288,44 @@ class VideoDownloadManager:
         directory = self._directory(task_id)
         self._update(task_id, state="active", phase="connecting", message="Connecting to YouTube", error=None)
 
+        source_dir = confined(directory, "source")
+        preview = confined(directory, PREVIEW_NAME)
+        last_capture = 0.0
+        capture_lock = threading.Lock()
+
+        def capture(force: bool = False):
+            """Title and poster appear before the first byte; pick them up once."""
+            nonlocal last_capture
+            with capture_lock:
+                now = time.monotonic()
+                if not force and now - last_capture < 1.0:
+                    return
+                last_capture = now
+                current = self.get(task_id)
+                if current is None:
+                    return
+                if not current.title:
+                    title = read_info_title(source_dir)
+                    if title:
+                        self._update(task_id, title=title)
+                ensure_preview(source_dir, preview, self.settings.ffmpeg)
+
+        # yt-dlp prints nothing while it prepares the download, which can take a
+        # minute, yet it writes the title and poster as soon as it has them. A
+        # watcher makes them visible then instead of at the first progress line.
+        finished = threading.Event()
+
+        def watch():
+            while not finished.wait(1.0):
+                try:
+                    capture()
+                except Exception:  # a status preview must never disturb the download
+                    pass
+
+        threading.Thread(target=watch, name=f"video-download-preview-{task_id[:8]}", daemon=True).start()
+
         def progress(value: dict[str, Any]):
+            capture()
             phase = value.get("phase", "downloading")
             message = value.get("message")
             if phase == "complete":
@@ -282,8 +334,8 @@ class VideoDownloadManager:
             self._update(task_id, phase=phase, downloaded_bytes=value.get("downloaded_bytes", 0), total_bytes=value.get("total_bytes"), percent=value.get("percent"), message=message)
 
         try:
-            source_dir = confined(directory, "source")
-            source = download_youtube(task.url, source_dir, self.settings, progress_callback=progress, max_seconds=self.settings.max_long_source_seconds)
+            source = download_youtube(task.url, source_dir, self.settings, progress_callback=progress, max_seconds=self.settings.max_long_source_seconds, write_thumbnail=True)
+            capture(force=True)
             self._update(task_id, phase="preparing", percent=None, message="Preparing MP4")
             filename = safe_filename("youtube-video.mp4", "video.mp4")
             final = confined(directory, filename)
@@ -291,6 +343,8 @@ class VideoDownloadManager:
             if not final.is_file() or final.stat().st_size <= 0 or final.stat().st_size > self.settings.max_upload_bytes:
                 final.unlink(missing_ok=True)
                 raise MediaError("Prepared MP4 is empty or exceeds the configured media size limit")
+            if not has_preview(preview):
+                frame_preview(final, preview, self.settings.ffmpeg)
             relative = final.relative_to(self.settings.data_path).as_posix()
             expires, signature = self.signer.sign(relative)
             url = f"/api/v1/files/{relative}?expires={expires}&signature={signature}"
@@ -304,3 +358,5 @@ class VideoDownloadManager:
             message = redact(str(exc)).replace(str(self.settings.data_path), "media storage")
             message = message.replace(str(directory), "download workspace")
             self._update(task_id, state="failed", phase="failed", filename=None, download_url=None, error=message[:500], message="MP4 download failed. You can retry.")
+        finally:
+            finished.set()

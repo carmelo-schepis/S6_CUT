@@ -458,6 +458,40 @@ class Database:
                 rows = db.execute("SELECT payload,library_folder_id FROM jobs ORDER BY updated_at DESC").fetchall()
         return [Job.model_validate_json(row["payload"]).model_copy(update={"library_folder_id": row["library_folder_id"] or UNSORTED_FOLDER_ID}) for row in rows]
 
+    def list_jobs_page(self, *, limit: int, offset: int = 0, exclude_states: tuple[str, ...] = ()) -> tuple[list[Job], int]:
+        """One bounded page of jobs, newest first, with the total that match.
+
+        The mobile overview polls every few seconds, so it must not parse the
+        whole job history the way `list_jobs` does.
+        """
+        where, values = "", tuple(exclude_states)
+        if values:
+            where = " WHERE state NOT IN (" + ",".join("?" for _ in values) + ")"
+        with self._connect() as db:
+            total = int(db.execute("SELECT COUNT(*) FROM jobs" + where, values).fetchone()[0])
+            rows = db.execute("SELECT payload,library_folder_id FROM jobs" + where + " ORDER BY updated_at DESC LIMIT ? OFFSET ?", (*values, limit, offset)).fetchall()
+        jobs = [Job.model_validate_json(row["payload"]).model_copy(update={"library_folder_id": row["library_folder_id"] or UNSORTED_FOLDER_ID}) for row in rows]
+        return jobs, total
+
+    def count_jobs_since(self, state: str, since: str) -> int:
+        with self._connect() as db:
+            return int(db.execute("SELECT COUNT(*) FROM jobs WHERE state=? AND updated_at>=?", (state, since)).fetchone()[0])
+
+    def count_generated_clips_since(self, since: str) -> int:
+        """Library clips published since `since` (assets store their creation time as updated_at)."""
+        with self._connect() as db:
+            return int(db.execute("SELECT COUNT(*) FROM assets WHERE origin='generated-clip' AND updated_at>=?", (since,)).fetchone()[0])
+
+    def project_source_assets(self, project_ids: list[str]) -> dict[str, Asset]:
+        """The registered `project-source` asset for each project that has one."""
+        ids = sorted(set(project_ids))
+        if not ids:
+            return {}
+        marks = ",".join("?" for _ in ids)
+        with self._connect() as db:
+            rows = db.execute(f"SELECT * FROM assets WHERE origin='project-source' AND source_project_id IN ({marks})", ids).fetchall()
+        return {str(row["source_project_id"]): self._asset_from_row(row) for row in rows}
+
     def save_profile(self, profile: ProviderProfile, secret_payload: bytes | None = None) -> None:
         with self._lock, self._connect() as db:
             if profile.selected:
