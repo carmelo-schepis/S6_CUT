@@ -955,21 +955,27 @@ main { min-width: 0; }
 .workspace-grid:has(.processing-state) { min-height: 0; align-items: start; }
 .viewer-panel:has(.processing-state) { grid-template-rows: auto auto auto; align-self: start; }
 .viewer-stage:has(.processing-state) { min-height: 0; padding: 12px; }
+.viewer-frame:has(.processing-state) { container-type: inline-size; }
 
-/* Processing state loader (viewer filmstrip) */
+/* Processing state: the stage, one progress bar and a few quiet facts,
+   centred in the frame with the reassurance line on the floor.
+   EXCLUDED from the two typography roles on purpose (owner request,
+   2026-10-19): the card sits inside a small output frame and reads as a
+   quiet overlay, so it carries its own smaller pair of sizes. Line boxes stay
+   whole pixels for the same subpixel reason as the global roles. */
 .processing-state {
   --state-accent: var(--theme-primary-hover);
-  --state-accent-soft: var(--brand-border);
+  --processing-title-size: 13px;
+  --processing-title-line: 18px;
+  --processing-text-size: 11px;
+  --processing-text-line: 16px;
+  font-size: var(--processing-text-size);
+  line-height: var(--processing-text-line);
   position: relative;
   inset: auto;
-  display: grid;
-  /* Ordinary processing has three visible blocks (header, progress, footer).
-     The optional download panel becomes an implicit fourth row, which keeps a
-     footer pinned to the frame floor without reserving an empty row below it. */
-  grid-template-rows: auto auto auto;
-  align-content: space-between;
-  justify-items: stretch;
-  gap: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
   box-sizing: border-box;
   width: 100%;
   height: 100%;
@@ -980,157 +986,61 @@ main { min-width: 0; }
   overflow-x: hidden;
   overflow-y: auto;
   text-align: left;
-  background:
-    radial-gradient(circle at 50% 42%, var(--surface-2) 0, var(--surface-1) 55%, var(--canvas) 100%);
+  background: var(--surface-1);
   animation: processing-in .38s ease both;
 }
+/* Free space splits above the header and above the footer, which centres
+   the content and pins the footer; both collapse to 0 when it overflows. */
+.processing-header, .processing-help { margin-top: auto; }
 .processing-section { min-width: 0; }
-.processing-header { display: grid; }
 .processing-progress { display: grid; gap: var(--space-2); min-width: 0; }
-.processing-state.state-paused { --state-accent: var(--warning); --state-accent-soft: rgba(240,168,75,.38); }
-.processing-state.state-partial { --state-accent: var(--warning); --state-accent-soft: rgba(240,168,75,.38); }
-.processing-state.state-failed { --state-accent: var(--error); --state-accent-soft: rgba(242,56,85,.38); }
-.processing-state.state-complete { --state-accent: var(--success); --state-accent-soft: rgba(76,183,130,.38); }
-.processing-state.state-recovered { --state-accent: var(--theme-primary-hover); --state-accent-soft: var(--brand-border); }
-.processing-state.state-cancelled_kept { --state-accent: var(--text-muted); --state-accent-soft: rgba(127,122,124,.38); }
+.processing-state.state-paused { --state-accent: var(--warning); }
+.processing-state.state-partial { --state-accent: var(--warning); }
+.processing-state.state-failed { --state-accent: var(--error); }
+.processing-state.state-complete { --state-accent: var(--success); }
+.processing-state.state-cancelled_kept { --state-accent: var(--text-muted); }
 
 .processing-heading {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 9px;
-  width: 100%;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--space-3);
   min-width: 0;
 }
-.processing-heading > span {
-  flex: 0 0 auto;
-  width: 30px;
-  height: 30px;
-  display: grid;
-  place-items: center;
-  border: 0;
-  border-radius: 8px;
-  background: rgba(255,255,255,.03);
-  color: var(--text-primary);
-}
-.processing-heading > div { display: grid; gap: 2px; min-width: 0; text-align: left; }
-.processing-heading strong { color: var(--text); overflow-wrap: anywhere; font-size: var(--type-heading-size); font-weight: var(--type-heading-weight); line-height: var(--type-heading-line); letter-spacing: var(--type-heading-tracking); }
-.processing-heading small { color: var(--text-primary); overflow-wrap: anywhere; }
-.processing-heading > b {
-  flex: 0 0 auto;
-  width: 34px;
-  height: 34px;
-  display: grid;
-  place-items: center;
-  border: 0;
-  border-radius: 50%;
-  color: var(--text-primary);
-  background: rgba(255,255,255,.02);
-  font-weight: var(--type-emphasis-weight);
-  font-variant-numeric: tabular-nums;
-}
+.processing-heading > div { display: grid; gap: 2px; min-width: 0; }
+.processing-heading strong { color: var(--text); overflow-wrap: anywhere; font-size: var(--processing-title-size); font-weight: var(--type-heading-weight); line-height: var(--processing-title-line); letter-spacing: var(--type-heading-tracking); }
+.processing-heading small { color: var(--text-muted); overflow-wrap: anywhere; }
+.processing-heading > b { color: var(--text); font-size: var(--processing-title-size); font-weight: var(--type-heading-weight); line-height: var(--processing-title-line); font-variant-numeric: tabular-nums; }
 
-.processing-progress-summary { display: flex; justify-content: space-between; align-items: center; gap: 8px; min-width: 0; color: var(--text-primary); font-weight: var(--type-emphasis-weight); }
-.processing-progress-bar, .download-detail-track { width: 100%; height: 6px; overflow: hidden; border: 1px solid var(--border); border-radius: 4px; background: var(--surface-4); }
+.processing-progress-bar, .download-detail-track { width: 100%; height: 4px; overflow: hidden; border-radius: 2px; background: var(--surface-4); }
 .processing-progress-bar span, .download-detail-track span { display: block; height: 100%; border-radius: inherit; background: var(--state-accent); transition: width .2s ease; }
-.processing-filmstrip {
-  width: 100%;
-  display: grid; gap: 4px;
-  padding: 0;
-}
-.filmstrip-perforations {
-  height: 8px;
-  border: 1px solid var(--border);
-  border-radius: 2px;
-  background-color: var(--canvas);
-  background-image: repeating-linear-gradient(90deg, var(--surface-4) 0 13px, transparent 13px 23px);
-}
-.processing-track {
-  position: relative;
-  display: flex; gap: 4px;
-  padding: 6px;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  background: rgba(0,0,0,.42);
-}
-.processing-track > span {
-  flex: 1;
-  height: 13px;
-  border-radius: 2px;
-  background: var(--surface-4);
-}
-.processing-track > span.active {
-  background: var(--state-accent);
-  opacity: .9;
-  animation: processing-block 2.2s ease-in-out infinite;
-  animation-delay: calc(var(--clip-index) * .15s);
-}
-.processing-track > i {
-  position: absolute;
-  top: -2px; bottom: -2px;
-  width: 1px;
-  background: var(--state-accent);
-  box-shadow: 0 0 6px var(--state-accent);
-  pointer-events: none;
-}
-@keyframes processing-block {
-  0%, 100% { opacity: .5; }
-  50% { opacity: 1; }
-}
 @keyframes processing-in {
   from { opacity: 0; }
   to { opacity: 1; }
 }
 
-/* Labelled value pairs keep labels close to their values without turning a
-   growing timestamp or transfer figure into an inline sentence. */
-.processing-meta {
+/* Label left, value right, one fact per line. Each pair stays its own
+   element, so a growing figure never runs into its label as a sentence. */
+.processing-meta,
+.download-detail-values {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
-  gap: var(--space-3) var(--space-5);
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-1) var(--space-3);
   margin: 0;
   font-variant-numeric: tabular-nums;
 }
 .processing-meta > div,
-.download-detail-values > div {
-  display: grid;
-  align-content: start;
-  gap: var(--space-1);
-  min-width: 0;
-}
-.processing-meta dt, .download-detail-values dt { color: var(--text-primary); font-weight: var(--type-emphasis-weight); }
-.processing-meta dd, .download-detail-values dd { margin: 0; min-width: 0; color: var(--text-primary); font-weight: var(--type-emphasis-weight); overflow-wrap: anywhere; }
-.download-progress-detail {
-  display: grid;
-  align-self: start;
-  gap: var(--space-3);
-  min-width: 0;
-  padding: var(--space-4);
-  border: 0;
-  border-radius: var(--radius-md);
-  background: rgba(0,0,0,.26);
-  text-align: left;
-}
+.download-detail-values > div { display: contents; }
+.processing-meta dt, .download-detail-values dt { color: var(--text-muted); white-space: nowrap; }
+.processing-meta dd, .download-detail-values dd { margin: 0; min-width: 0; color: var(--text-muted); text-align: right; overflow-wrap: anywhere; text-wrap: balance; }
+.download-progress-detail { display: grid; gap: var(--space-2); min-width: 0; margin-top: var(--space-3); }
 .download-detail-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--space-1) var(--space-3); min-width: 0; }
-.download-detail-heading strong { color: var(--text); text-transform: capitalize; overflow-wrap: anywhere; }
-.download-detail-heading b { color: var(--text-primary); font-variant-numeric: tabular-nums; }
-.download-detail-values {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-3) var(--space-4);
-  margin: 0;
-  font-variant-numeric: tabular-nums;
-}
-.download-detail-values time { overflow-wrap: anywhere; }
-.download-message { display: block; margin: 0; min-width: 0; color: var(--text-primary); overflow-wrap: anywhere; }
-.processing-help {
-  align-self: end;
-  margin: 0;
-  padding-top: var(--space-3);
-  border-top: 0;
-  max-width: 100%;
-  color: var(--text-primary);
-  overflow-wrap: anywhere;
+.download-detail-heading strong { color: var(--text); font-weight: var(--type-emphasis-weight); text-transform: capitalize; overflow-wrap: anywhere; }
+.download-detail-heading b { color: var(--text); font-weight: var(--type-emphasis-weight); font-variant-numeric: tabular-nums; }
+.download-message { display: block; margin: 0; min-width: 0; color: var(--text-muted); overflow-wrap: anywhere; }
+.processing-help { margin-bottom: 0; color: var(--text-muted); overflow-wrap: anywhere; }
+@container (max-width: 280px) {
+  .processing-state { padding: var(--space-4); }
 }
 
 /* Processing checklist: a full-width document block before the lower workspace. */
@@ -1555,12 +1465,7 @@ main { min-width: 0; }
   /* General text is taller than the 11px this panel was originally packed
      with, so the compact layout tightens its own rhythm on tokens rather
      than shrinking the type. */
-  .processing-state { gap: var(--space-2); padding: var(--space-2) var(--space-3); }
-  .processing-heading { gap: 6px; }
-  .processing-heading > span { width: 27px; height: 27px; }
-  .processing-heading > b { width: 31px; height: 31px; }
-  .processing-filmstrip { padding: 0 3px; }
-  .processing-track { padding: 5px; }
+  .processing-state { padding: var(--space-3); }
 }
 
 /* Shorts Editor */
@@ -1672,8 +1577,7 @@ main { min-width: 0; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
-  .processing-state, .processing-track > span.active, .workspace-offline::before { animation: none !important; }
-  .processing-track > span.active { opacity: 1; }
+  .processing-state, .workspace-offline::before { animation: none !important; }
   .checklist-step.status-active .checklist-icon svg, .checklist-step.status-complete.checkmark-new .checklist-icon svg { animation: none !important; }
   .checklist-step.status-active {
     border-color: var(--brand-border);
@@ -2675,7 +2579,7 @@ input[type="checkbox"]:checked::before {
 .panel-tabs button.active, .inspector-tabs button.active { background: var(--canvas); color: var(--text); }
 .library-sidebar > button.active, .folder-node > button.active, .help-nav button.active { box-shadow: none; background: var(--surface-2); }
 /* Status reads as an icon and a word. */
-.status, .origin-badge, .section-count, .saved-badge, .engine-chips :is(.ok, .warn), .processing-heading > :is(span, b) { padding-inline: 0; background: transparent; }
+.status, .origin-badge, .section-count, .saved-badge, .engine-chips :is(.ok, .warn) { padding-inline: 0; background: transparent; }
 
 /* --- Shell --------------------------------------------------------------- */
 .app-rail { background: var(--canvas); }
