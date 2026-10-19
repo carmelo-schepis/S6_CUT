@@ -44,7 +44,7 @@ test("production PWA manifest, icons, and service worker are valid", async ({ re
   expect(serviceWorkerResponse.ok()).toBeTruthy();
   expect(serviceWorkerResponse.headers()["content-type"]).toContain("javascript");
   const serviceWorkerSource = await serviceWorkerResponse.text();
-  expect(serviceWorkerSource).toContain('const CACHE = "s6-cut-shell-v11"');
+  expect(serviceWorkerSource).toContain('const CACHE = "s6-cut-shell-v13"');
   expect(serviceWorkerSource).toContain('fetch(request, { cache: "no-store" })');
   expect(serviceWorkerSource).toContain('event.data?.type === "SKIP_WAITING"');
   expect(serviceWorkerSource).toContain('request.headers.has("range")');
@@ -89,7 +89,7 @@ test("production PWA activates, works offline, and excludes API/media traffic fr
       const entries = await Promise.all(names.map(async (name) => ({ name, urls: (await (await caches.open(name)).keys()).map((request) => new URL(request.url).pathname) })));
       return entries;
     });
-    expect(initialCaches.map((cache) => cache.name)).toContain("s6-cut-shell-v11");
+    expect(initialCaches.map((cache) => cache.name)).toContain("s6-cut-shell-v13");
     expect(initialCaches.map((cache) => cache.name)).not.toContain("s6-cut-shell-v10");
     expect(initialCaches.flatMap((cache) => cache.urls)).toContain("/");
     expect(initialCaches.flatMap((cache) => cache.urls)).toContain("/startup.css");

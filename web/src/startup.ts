@@ -1,7 +1,7 @@
 /** A splash that has noticeably appeared is held at least this long, so it never flashes past. */
-export const SPLASH_MIN_VISIBLE_MS = 350;
-/** One that has barely begun to fade in (about 40% opaque) is discarded instead: load finished right at the boundary. */
-export const SPLASH_NOTICEABLE_MS = 50;
+export const SPLASH_MIN_VISIBLE_MS = 250;
+/** One that has barely begun to fade in (not yet clearly visible) is discarded instead: load finished right at the boundary. */
+export const SPLASH_NOTICEABLE_MS = 40;
 
 /**
  * How long the splash has been on screen, or null while it has not appeared yet.
@@ -65,10 +65,10 @@ export function revealApp() {
     }
     document.body.classList.add("startup-revealing");
     // A bounded fallback also releases keyboard access if animation completion stalls.
-    const timeout = window.setTimeout(finish, 350);
+    const timeout = window.setTimeout(finish, 300);
     try {
       const fade = screen.animate([{ opacity: getComputedStyle(screen).opacity }, { opacity: 0 }], {
-        duration: 220, easing: "ease-out", fill: "forwards",
+        duration: 160, easing: "ease-out", fill: "forwards",
       });
       void fade.finished.catch(() => undefined).then(() => {
         window.clearTimeout(timeout);

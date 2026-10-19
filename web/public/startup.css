@@ -5,12 +5,12 @@ body.startup-loading { overflow: hidden; }
 .startup-loading .app-wallpaper { transition: none; }
 /* A load that finishes at once goes straight to the app, which fades in. */
 .startup-quick #root { transition: opacity 160ms ease-out; }
-/* The splash is a patience screen, not a ceremony: it waits 800ms (the delay in the
-   animation below) and only then fades in, so a normal load never shows it. A normal
-   load here is about 500ms, so the delay sits clearly above it. Until then the page is
-   plain black, the same colour the splash is. startup.ts reads this delay from the
-   animation itself, so it is set in exactly one place. */
-#startup-screen { position: fixed; inset: 0; z-index: 10000; display: grid; place-items: center; overflow: hidden; isolation: isolate; background: #000; opacity: 0; animation: startup-appear 180ms ease-out 800ms both; }
+/* The splash is a patience screen, not a ceremony: it waits 300ms (the delay in the
+   animation below), so an instant load never shows it, but any wait you can notice does.
+   A normal load here is about 500ms of plain black, so a longer grace period left that gap
+   empty. Until the delay passes the page is black, the same colour the splash is.
+   startup.ts reads this delay from the animation itself, so it is set in exactly one place. */
+#startup-screen { position: fixed; inset: 0; z-index: 10000; display: grid; place-items: center; overflow: hidden; isolation: isolate; background: #000; opacity: 0; animation: startup-appear 120ms ease-out 300ms both; }
 #startup-screen::before {
   content: ""; position: absolute; inset: -8%; z-index: -1; opacity: .4;
   background: radial-gradient(ellipse at 48% 56%, rgba(0, 0, 0, .92) 0%, rgba(0, 0, 0, .6) 16%, transparent 48%),
@@ -20,6 +20,10 @@ body.startup-loading { overflow: hidden; }
     radial-gradient(ellipse at 100% 0%, #060565 0%, #000a3c 30%, transparent 65%), #000;
   animation: startup-drift 7s ease-in-out infinite alternate;
 }
+/* Real text, visually hidden: it is the status message for screen readers, and it is also enough text for
+   WebKit to count the page as having content. Without it Safari paints nothing at all, splash included,
+   until the page script has downloaded, which on a slow connection is exactly when the splash is needed. */
+.startup-note { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: normal; font: 12px/1.4 system-ui, sans-serif; color: #f4f0ed; }
 .startup-brand { display: grid; justify-items: center; gap: 24px; }
 .startup-logo { display: block; width: clamp(160px, 15vw, 210px); height: auto; }
 .startup-wordmark {
@@ -37,7 +41,7 @@ body.startup-loading { overflow: hidden; }
 }
 @media (prefers-reduced-motion: reduce) {
   /* No fade, but the same grace period: it still appears only when loading is slow. */
-  #startup-screen { animation: startup-appear 1ms linear 800ms both; }
+  #startup-screen { animation: startup-appear 1ms linear 300ms both; }
   #startup-screen::before { animation: none; }
   .startup-quick #root { transition: none; }
 }
