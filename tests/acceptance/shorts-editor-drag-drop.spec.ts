@@ -68,7 +68,7 @@ test.describe("Shorts Editor drag-and-drop source loading", () => {
     await expect(page.getByLabel("Video trim end seconds")).toHaveValue("4");
     await expect(page.getByRole("region", { name: "Media settings" }).getByLabel("Aspect ratio")).toHaveValue("9:16");
     await expect(page.locator(".shorts-video-frame video")).toHaveAttribute("src", /asset-short-a\/preview/);
-    await expect(page.locator(".shorts-inline-status")).toHaveText("Loaded Copper sunrise from Library.");
+    await expect(page.locator(".shorts-inline-status").filter({ hasText: "Loaded Copper sunrise from Library." })).toHaveText("Loaded Copper sunrise from Library.");
     await expect(page.locator(".clip-drag-ghost")).toHaveCount(0);
     expect(jobsCreated).toEqual([]);
     await mkdir(artifacts, { recursive: true });

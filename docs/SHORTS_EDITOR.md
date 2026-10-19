@@ -18,7 +18,10 @@ contextual properties inspector. Selecting Video or Audio on the timeline expose
 trim or audio properties; the Video and Audio tracks stay linked to the same source.
 Export mute and volume are separate from the preview-only mute control. The editor's
 volume control is bounded to 0–100% so preview and rendered loudness stay aligned.
-These local edits are only submitted when the user explicitly queues a short. Text
+Editor changes are autosaved in the current browser's IndexedDB and can be resumed
+after a reload; local files must be reselected to resume, and only their file identity
+is stored. This browser-local draft is separate from queued jobs. Changes are submitted
+to the existing queue only when the user explicitly queues a short. Text
 placement is output-relative, keyboard-adjustable, and draggable inside the frame;
 the inspector can be dismissed without changing the edit. Overlay start and positive
 duration are relative to the trimmed output and must fit within it; an invalid interval

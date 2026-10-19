@@ -7,6 +7,7 @@ import { LazyVideoThumbnail } from "./lazy-video-thumbnail";
 import { VideoSourcePicker, type VideoSourceMode } from "./video-source-picker";
 import { SubscribeAnimationControl } from "./subscribe-animation-control";
 import { ShortsEditorToolbox, type ShortsTextOverlay as TextOverlay } from "./shorts-editor-toolbox";
+import { clearShortsEditorDraft, localFileMatchesDraft, readShortsEditorDraft, writeShortsEditorDraft, type ShortsEditorDraft } from "./shorts-editor-draft";
 import { usePoll } from "../use-poll";
 
 const aspects = ["9:16", "16:9", "1:1", "4:5"] as const;
@@ -118,6 +119,15 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
   const [drawerOpen, setDrawerOpen] = useState(false);
   const singleFlight = useSingleFlight();
   const [status, setStatus] = useState("");
+  const [availableDraft, setAvailableDraft] = useState<ShortsEditorDraft | null>(null);
+  const [draftStatus, setDraftStatus] = useState("");
+  const [draftLookupComplete, setDraftLookupComplete] = useState(false);
+  const [pendingLocalDraft, setPendingLocalDraft] = useState<ShortsEditorDraft | null>(null);
+  const draftSaveVersion = useRef(0);
+  const draftRestoreRef = useRef<ShortsEditorDraft | null>(null);
+  const draftTimerRef = useRef<number | null>(null);
+  const pendingDraftWrite = useRef<ShortsEditorDraft | null>(null);
+  const queuedDraftKey = useRef<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const playRequestRef = useRef(0);
   const frameRef = useRef<HTMLDivElement>(null);
@@ -265,6 +275,11 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
 
   const loadFile = (next: File | null, pickerError?: string) => {
     if (pickerError) { setError(pickerError); return; }
+    const restoringDraft = draftRestoreRef.current;
+    if (next && restoringDraft?.source.mode === "file" && !localFileMatchesDraft(next, restoringDraft.source)) {
+      setError("This is a different file. Select the original video to resume this draft.");
+      return;
+    }
     if (next && dirty && pendingConfirmedSourceMode.current?.mode !== "file" && !window.confirm("Discard unsaved Shorts Editor changes?")) return;
     playRequestRef.current += 1;
     setError(null); setFile(next); setPreviewUrl(null); setPlaying(false); setCurrentTime(0); setSourceDuration(0); setSourceHasAudio(null);
@@ -273,6 +288,12 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
       setMode("file"); setAssetId(""); setUrl(""); setSelectedClipId(null); setStart("0"); setEnd(""); setAspect("9:16"); setSubtitles(true); setProjectName(""); setMuted(false); setVolume(1); setFilterPreset("none"); setFilterIntensity(1); setTintColor("#d58a55"); setTintOpacity(0); setSubscribeAnimation(DEFAULT_SUBSCRIBE_ANIMATION); setEditorTool("media"); setSelectedProperty("video"); setPropertiesOpen(true);
       const baseline: EditState = { start: 0, end: undefined, aspect: "9:16", subtitles: true, projectName: "", muted: false, volume: 1, filterPreset: "none", filterIntensity: 1, tintColor: "#d58a55", tintOpacity: 0, subscribeAnimation: DEFAULT_SUBSCRIBE_ANIMATION };
       setSavedBaseline(baseline); setTextOverlays([]); setOverlayBaseline("[]"); setSelectedOverlayId(null); resetHistory(); currentSnapshot.current = { edit: baseline, overlays: [] }; setPendingProposal(null);
+      if (restoringDraft) {
+        const restoredBaseline = restoringDraft.savedBaseline;
+        setSavedBaseline(restoredBaseline.edit); setOverlayBaseline(JSON.stringify(restoredBaseline.overlays)); setTextOverlays(restoringDraft.snapshot.overlays);
+        restoreSnapshot(restoringDraft.snapshot); currentSnapshot.current = restoringDraft.snapshot;
+        draftRestoreRef.current = null; setPendingLocalDraft(null); setAvailableDraft(null); setDraftStatus("Draft saved locally");
+      }
       setAssistantMessages((current) => [{ id: (current.at(-1)?.id ?? 0) + 1, role: "assistant", text: `Loaded local video ${next.name}.` }]);
       setStatus(`Loaded local video ${next.name}.`);
     }
@@ -298,7 +319,14 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
       else await createShortsSourceJob({ file: mode === "file" ? file || undefined : undefined, url: mode === "url" ? url.trim() : undefined, name: projectName.trim() || undefined, burnSubtitles: subtitles, subscribeAnimation, start: from, end: to, aspectRatio: aspect, muted, volume, filterPreset, filterIntensity, tintColor, tintOpacity, textOverlays });
       const queuedBaseline = submittedSnapshot;
       pendingConfirmedSourceMode.current = null;
+      const queuedSource = mode === "library" && assetId ? { mode: "library", assetId }
+        : mode === "url" && url.trim() ? { mode: "url", url: url.trim() }
+          : file ? { mode: "file", name: file.name, size: file.size, lastModified: file.lastModified, type: file.type } : null;
+      queuedDraftKey.current = queuedSource ? JSON.stringify({ source: queuedSource, snapshot: queuedBaseline }) : null;
       setStatus("Short queued successfully."); setSavedBaseline(queuedBaseline.edit); setOverlayBaseline(JSON.stringify(queuedBaseline.overlays)); resetHistory(true); await refresh(); onJobCreated();
+      draftSaveVersion.current += 1; pendingDraftWrite.current = null; setAvailableDraft(null); setDraftStatus("");
+      if (draftTimerRef.current !== null) window.clearTimeout(draftTimerRef.current);
+      try { await clearShortsEditorDraft(); } catch { setDraftStatus("Local draft saving is unavailable"); setError("Local draft saving is unavailable"); }
     } catch (cause) { setError(readableError(cause)); setStatus(""); } finally { setAssistantBusy(false); }
     });
   };
@@ -377,6 +405,47 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
     return () => window.removeEventListener("keydown", shortcut);
   }, []);
   const dirty = !sameEditState(editState, savedBaseline) || JSON.stringify(textOverlays) !== overlayBaseline;
+  useEffect(() => {
+    let active = true;
+    void readShortsEditorDraft().then((draft) => { if (active && draft) setAvailableDraft(draft); }).catch(() => { if (active) setDraftStatus("Local draft saving is unavailable"); }).finally(() => { if (active) setDraftLookupComplete(true); });
+    return () => { active = false; };
+  }, []);
+  const draftSource = mode === "library" && assetId ? { mode: "library" as const, assetId }
+    : mode === "url" && url.trim() ? { mode: "url" as const, url: url.trim() }
+      : mode === "file" && file ? { mode: "file" as const, name: file.name, size: file.size, lastModified: file.lastModified, type: file.type } : null;
+  const draftToSaveKey = draftSource ? JSON.stringify({
+    source: draftSource, snapshot: { edit: editState, overlays: textOverlays },
+    savedBaseline: { edit: savedBaseline, overlays: JSON.parse(overlayBaseline) as TextOverlay[] },
+  }) : "";
+  useEffect(() => {
+    if (!draftLookupComplete || !draftToSaveKey || availableDraft || pendingLocalDraft) { pendingDraftWrite.current = null; return; }
+    const data = JSON.parse(draftToSaveKey) as Pick<ShortsEditorDraft, "source" | "snapshot" | "savedBaseline">;
+    const draftToSave: ShortsEditorDraft = { ...data, version: 1, updatedAt: new Date().toISOString() };
+    if (queuedDraftKey.current === JSON.stringify({ source: draftToSave.source, snapshot: draftToSave.snapshot })) {
+      pendingDraftWrite.current = null;
+      setDraftStatus("");
+      return;
+    }
+    const version = ++draftSaveVersion.current;
+    pendingDraftWrite.current = draftToSave;
+    setDraftStatus("Saving draft locally…");
+    if (draftTimerRef.current !== null) window.clearTimeout(draftTimerRef.current);
+    draftTimerRef.current = window.setTimeout(() => {
+      const draft = pendingDraftWrite.current;
+      if (!draft) return;
+      void writeShortsEditorDraft(draft).then(() => {
+        if (version === draftSaveVersion.current) setDraftStatus("Draft saved locally");
+      }).catch(() => {
+        if (version === draftSaveVersion.current) { setDraftStatus("Local draft saving is unavailable"); setError("Local draft saving is unavailable"); }
+      });
+      draftTimerRef.current = null;
+    }, 700);
+    return () => { if (draftTimerRef.current !== null) { window.clearTimeout(draftTimerRef.current); draftTimerRef.current = null; } };
+  }, [draftLookupComplete, draftToSaveKey, availableDraft, pendingLocalDraft]);
+  useEffect(() => () => {
+    const draft = pendingDraftWrite.current;
+    if (draft) void writeShortsEditorDraft(draft).catch(() => undefined);
+  }, []);
   const updateSubscribeAnimation = (value: SubscribeAnimationConfig) => { const snapshot = { edit: { ...currentSnapshot.current.edit, subscribeAnimation: value }, overlays: currentSnapshot.current.overlays }; recordSnapshot(snapshot); setSubscribeAnimation(value); };
   const changeSourceMode = (next: VideoSourceMode) => {
     if (next === mode) return;
@@ -388,8 +457,8 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
   };
   const overlayOutputDuration = (end.trim() ? Number(end) : sourceDuration) - (Number(start) || 0);
   const invalidOverlays = textOverlays.filter((item) => !Number.isFinite(item.start) || !Number.isFinite(item.duration) || item.start < 0 || item.duration <= 0 || item.start >= overlayOutputDuration || item.start + item.duration > overlayOutputDuration);
-  const loadLibrarySource = useCallback(async (id: string, identity?: { jobId: string; clipId: string }) => {
-    if (sourceLoadingRef.current) return;
+  const loadLibrarySource = useCallback(async (id: string, identity?: { jobId: string; clipId: string }): Promise<boolean> => {
+    if (sourceLoadingRef.current) return false;
     sourceLoadingRef.current = true;
     try {
       setError(null); setSourceLoading(true);
@@ -400,16 +469,16 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
       if (!asset || !asset.mediaType.toLowerCase().startsWith("video/") || !asset.previewUrl) {
         setAssets(freshAssets.filter((item) => item.mediaType.toLowerCase().startsWith("video/")));
         setError("This video is no longer available in the Library. Your current editor source and edits are unchanged.");
-        return;
+        return false;
       }
       if (identity && (!freshJob || !freshClip || freshClip.state !== "complete" || freshClip.libraryAssetId !== asset.id || asset.origin !== "generated-clip" || asset.sourceClipId !== freshClip.id || asset.sourceJobId !== freshJob.id || asset.sourceProjectId !== freshJob.projectId)) {
         setError("This short is not currently published and available in the Library. Your current editor source and edits are unchanged.");
-        return;
+        return false;
       }
       const currentClipAlreadyLoaded = identity && selectedClipId === identity.clipId && assetId === asset.id;
       const sameLibrarySource = !identity && selectedClipId === null && mode === "library" && assetId === asset.id;
-      if (currentClipAlreadyLoaded || sameLibrarySource) return;
-      if (dirty && pendingConfirmedSourceMode.current?.mode !== "library" && !window.confirm("Discard unsaved Shorts Editor changes?")) return;
+      if (currentClipAlreadyLoaded || sameLibrarySource) return true;
+      if (dirty && pendingConfirmedSourceMode.current?.mode !== "library" && !window.confirm("Discard unsaved Shorts Editor changes?")) return false;
 
       const row = freshClip && freshJob ? { clip: freshClip, job: freshJob } : undefined;
       pendingConfirmedSourceMode.current = null;
@@ -440,9 +509,40 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
       setAssistantMessages((current) => [{ id: (current.at(-1)?.id ?? 0) + 1, role: "assistant", text: row ? `Loaded ${row.clip.title || `Clip ${row.clip.index}`} from Library. This source is the published generated video.` : `Library source changed to ${asset.title}.` }]);
       setStatus(row ? `Loaded ${row.clip.title || `Clip ${row.clip.index}`} from Library.` : `Loaded ${asset.title} from Library.`);
       closeDrawer();
-    } catch (cause) { setError(readableError(cause)); }
+      return true;
+    } catch (cause) { setError(readableError(cause)); return false; }
     finally { sourceLoadingRef.current = false; setSourceLoading(false); }
   }, [assetId, closeDrawer, dirty, jobs, mode, selectedClipId]);
+  const applyRestoredDraft = (draft: ShortsEditorDraft) => {
+    resetHistory();
+    setSavedBaseline(draft.savedBaseline.edit); setOverlayBaseline(JSON.stringify(draft.savedBaseline.overlays));
+    setTextOverlays(draft.snapshot.overlays); setSelectedOverlayId(draft.snapshot.overlays.at(-1)?.id ?? null);
+    restoreSnapshot(draft.snapshot); currentSnapshot.current = draft.snapshot;
+    setAvailableDraft(null); setPendingLocalDraft(null); draftRestoreRef.current = null;
+    setDraftStatus("Draft saved locally"); setError(null);
+  };
+  const resumeDraft = async () => {
+    const draft = availableDraft;
+    if (!draft) return;
+    if (draft.source.mode === "file") {
+      draftRestoreRef.current = draft; setPendingLocalDraft(draft); setAvailableDraft(null);
+      setMode("file"); setAssetId(""); setUrl(""); setFile(null); setPreviewUrl(null);
+      setStatus(`Reselect ${draft.source.name} to resume this draft.`);
+      return;
+    }
+    if (draft.source.mode === "url") {
+      setMode("url"); setAssetId(""); setFile(null); setUrl(draft.source.url); setPreviewUrl(null);
+      applyRestoredDraft(draft); setStatus("Draft restored. Review the YouTube source before queueing.");
+      return;
+    }
+    if (await loadLibrarySource(draft.source.assetId)) {
+      applyRestoredDraft(draft); setStatus("Draft restored from Library.");
+    }
+  };
+  const discardDraft = () => {
+    draftRestoreRef.current = null; setPendingLocalDraft(null); setAvailableDraft(null); setDraftStatus(""); setStatus("Draft discarded.");
+    void clearShortsEditorDraft().catch(() => { setDraftStatus("Local draft saving is unavailable"); setError("Local draft saving is unavailable"); });
+  };
   useEffect(() => {
     pointerFinish.current = (event) => {
       const pointer = pointerStart.current;
@@ -470,6 +570,8 @@ export function ShortsEditorView({ onJobCreated }: { onJobCreated: () => void })
   return <div className="page shorts-workspace-page">
     <form className="shorts-workspace-form" onSubmit={submit}>
     <header className="shorts-workspace-header"><div><h1>Editor</h1></div><div className="shorts-header-actions"><span className={dirty ? "edit-state dirty" : "edit-state"}>{dirty ? "Unsaved edits" : "All changes saved"}</span><Button type="button" aria-label="Undo" aria-keyshortcuts="Control+Z Meta+Z" disabled={!canUndo} onClick={undo}><RotateCcw size={14} /> Undo</Button><Button type="button" aria-label="Redo" aria-keyshortcuts="Control+Shift+Z Meta+Shift+Z Control+Y" disabled={!canRedo} onClick={redo}><RotateCw size={14} /> Redo</Button><button ref={drawerToggleRef} type="button" className="button button-secondary" aria-expanded={drawerOpen} aria-controls="shorts-clip-drawer" onClick={() => setDrawerOpen((open) => !open)}><PanelRight size={14} /> Clips &amp; assistant <span className="count-pill">{rows.length}</span></button><Button type="submit" variant="primary" disabled={assistantBusy}><Scissors size={14} /> Queue short</Button></div></header>
+    {(availableDraft || pendingLocalDraft) && <div className="shorts-inline-status" role="status"><Clock3 size={15} /><span>Draft available{pendingLocalDraft ? ` · Reselect ${pendingLocalDraft.source.mode === "file" ? pendingLocalDraft.source.name : "the original video"} to resume.` : ""}</span>{availableDraft && <Button type="button" onClick={() => void resumeDraft()}>Resume draft</Button>}<Button type="button" onClick={discardDraft}>Discard draft</Button></div>}
+    <div className="sr-only" role="status" aria-live="polite">{draftStatus}</div>
     {error && <div className="shorts-global-alert" role="alert"><X size={16} />{error}</div>}
     {/* A <main> here nested a second main landmark inside the shell's
         #main-content. This element only lays out the editor and its drawer — naming it
