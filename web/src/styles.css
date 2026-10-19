@@ -958,9 +958,19 @@ main { min-width: 0; }
 .viewer-frame:has(.processing-state) { container-type: inline-size; }
 
 /* Processing state: the stage, one progress bar and a few quiet facts,
-   centred in the frame with the reassurance line on the floor. */
+   centred in the frame with the reassurance line on the floor.
+   EXCLUDED from the two typography roles on purpose (owner request,
+   2026-10-19): the card sits inside a small output frame and reads as a
+   quiet overlay, so it carries its own smaller pair of sizes. Line boxes stay
+   whole pixels for the same subpixel reason as the global roles. */
 .processing-state {
   --state-accent: var(--theme-primary-hover);
+  --processing-title-size: 13px;
+  --processing-title-line: 18px;
+  --processing-text-size: 11px;
+  --processing-text-line: 16px;
+  font-size: var(--processing-text-size);
+  line-height: var(--processing-text-line);
   position: relative;
   inset: auto;
   display: flex;
@@ -998,9 +1008,9 @@ main { min-width: 0; }
   min-width: 0;
 }
 .processing-heading > div { display: grid; gap: 2px; min-width: 0; }
-.processing-heading strong { color: var(--text); overflow-wrap: anywhere; font-size: var(--type-heading-size); font-weight: var(--type-heading-weight); line-height: var(--type-heading-line); letter-spacing: var(--type-heading-tracking); }
+.processing-heading strong { color: var(--text); overflow-wrap: anywhere; font-size: var(--processing-title-size); font-weight: var(--type-heading-weight); line-height: var(--processing-title-line); letter-spacing: var(--type-heading-tracking); }
 .processing-heading small { color: var(--text-muted); overflow-wrap: anywhere; }
-.processing-heading > b { color: var(--text); font-size: var(--type-heading-size); font-weight: var(--type-heading-weight); line-height: var(--type-heading-line); font-variant-numeric: tabular-nums; }
+.processing-heading > b { color: var(--text); font-size: var(--processing-title-size); font-weight: var(--type-heading-weight); line-height: var(--processing-title-line); font-variant-numeric: tabular-nums; }
 
 .processing-progress-bar, .download-detail-track { width: 100%; height: 4px; overflow: hidden; border-radius: 2px; background: var(--surface-4); }
 .processing-progress-bar span, .download-detail-track span { display: block; height: 100%; border-radius: inherit; background: var(--state-accent); transition: width .2s ease; }
