@@ -84,6 +84,8 @@ test("iOS devices get Home, Library and Jobs: live progress, still previews, one
   // Home: the wallpaper, a live headline and quick links. No search field.
   await expect(page.getByRole("heading", { level: 1, name: "2 jobs running" })).toBeVisible();
   await expect(page.locator(".m-wallpaper")).toHaveCSS("opacity", "1");
+  // The wallpaper sits behind an 86% black overlay: dark enough to be atmosphere, not a bright backdrop.
+  expect(await page.locator(".m-wallpaper").evaluate((element) => getComputedStyle(element).backgroundImage)).toContain("rgba(0, 0, 0, 0.86)");
   await expect(page.getByRole("searchbox")).toHaveCount(0);
   await expect(page.getByRole("button", { name: /14 new clips/ })).toBeVisible();
   await expect(page.getByText("Studio session").first()).toBeVisible();

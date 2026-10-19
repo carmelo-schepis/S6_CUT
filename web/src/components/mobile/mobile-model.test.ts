@@ -63,6 +63,15 @@ describe("work facts", () => {
     expect(facts).toMatchObject({ title: "Studio session", stage: "Rendering clips", detail: "5 of 8", percent: 62, state: "active" });
     expect(jobSubtitle(item.kind === "job" ? item.job : (undefined as never))).toBe("A long talk about editing");
   });
+  it("drops an item count that cannot be a count of clips, such as 856 of 5", () => {
+    const [item] = workGroups(overview({ running: [runningJob({ stageLabel: "Verifying clip boundaries", currentItem: 856, totalItems: 5 })] })).running;
+    expect(workFacts(item)).toMatchObject({ stage: "Verifying clip boundaries", detail: null });
+    const [normal] = workGroups(overview({ running: [runningJob({ currentItem: 5, totalItems: 5 })] })).running;
+    expect(workFacts(normal).detail).toBe("5 of 5");
+    // …and not twice when the stage label already carries it.
+    const [labelled] = workGroups(overview({ running: [runningJob({ stageLabel: "Rendering clip 2 of 5", currentItem: 2, totalItems: 5 })] })).running;
+    expect(workFacts(labelled).detail).toBeNull();
+  });
   it("describes a download from its own title, bytes and percentage", () => {
     const [, item] = workGroups(overview({ downloads: [downloadTask(), downloadTask({ id: "x".repeat(32), percent: null, title: null, thumbnailUrl: null })] })).running;
     expect(workFacts(item)).toMatchObject({ title: "YouTube video", indeterminate: true, poster: null, detail: "1.5 MB of 4.0 MB" });
