@@ -208,6 +208,9 @@ type ClipJobInput = {
   libraryFolderId?: string;
   musicPresentation?: MusicPresentationConfig;
   musicTopText?: string;
+  musicTrackFile?: File;
+  musicTrackUrl?: string;
+  musicTrackSpeed?: number;
   hookText?: boolean;
   youtubeMetadata?: boolean;
   youtubeMetadataModelId?: string;
@@ -239,6 +242,9 @@ export async function createClipJob(input: ClipJobInput): Promise<{ project: Pro
   if (input.sourceProfile === "music") {
     form.set("music_presentation", JSON.stringify(input.musicPresentation ?? { version: 1, subtitleTheme: "clean" }));
     if (input.musicTopText !== undefined) form.set("music_top_text", input.musicTopText);
+    if (input.musicTrackFile) form.set("music_track_file", input.musicTrackFile);
+    if (input.musicTrackUrl) form.set("music_track_url", input.musicTrackUrl);
+    if (input.musicTrackSpeed !== undefined) form.set("music_track_speed", String(input.musicTrackSpeed));
   }
   const value = await request<{ project: unknown; job: unknown }>("/jobs/clip", { method: "POST", body: form });
   return { project: projectSchema.parse(value.project), job: jobSchema.parse(value.job) };

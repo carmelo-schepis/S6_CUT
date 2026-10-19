@@ -2045,6 +2045,17 @@ class JobManager:
                 previous_end = clip.end
         output_dir = self.settings.data_path / "jobs" / job.id / "clips"
         output_dir.mkdir(parents=True, exist_ok=True)
+        music_track = None
+        if profile == "music":
+            track_path = private.get("music_track_path")
+            if track_path and Path(str(track_path)).is_file():
+                music_track = Path(str(track_path))
+            elif private.get("music_track_url"):
+                music_track = _media_fn("download_youtube_audio")(
+                    str(private["music_track_url"]), self.settings.data_path / "jobs" / job.id / "source" / "background.mp3", self.settings,
+                )
+                private["music_track_path"] = str(music_track)
+                self._save(job, private)
         for position, clip in enumerate(job.clips, 1):
             if clip.state == "complete":
                 continue
@@ -2106,6 +2117,7 @@ class JobManager:
                         (private.get("music_presentation") or {}).get("subtitle_theme", "clean"),
                         clip.music_top_text, clip.music_treatment,
                     ) if profile == "music" else {}),
+                    **({"music_track": music_track, "music_track_speed": float(private.get("music_track_speed", 1.0))} if music_track else {}),
                 }
                 try:
                     render_clip(source, output, **_compatible_render_kwargs(render_clip, render_kwargs))
