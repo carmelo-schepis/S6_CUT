@@ -2958,7 +2958,7 @@ input[type="checkbox"]:checked::before {
 .ios-status-transfer { font-variant-numeric: tabular-nums; }
 .ios-status-previews { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 12px; margin-top: 16px; }
 .ios-status-previews figure { min-width: 0; margin: 0; }
-.ios-status-previews video { display: block; width: 100%; max-height: 64vh; aspect-ratio: 9 / 16; object-fit: contain; border-radius: 10px; background: #000; }
+.ios-status-previews video { display: block; width: 100%; max-height: 64vh; aspect-ratio: 9 / 16; object-fit: cover; border-radius: 10px; background: #000; }
 .ios-status-previews figcaption { margin-top: 6px; overflow-wrap: anywhere; }
 .ios-status-error { display: flex; justify-content: space-between; gap: 12px; margin-top: 20px; padding: 12px; border: 1px solid rgba(242,56,85,.45); border-radius: 10px; }
 .ios-status-error button { color: var(--text-primary); background: transparent; border: 0; text-decoration: underline; }

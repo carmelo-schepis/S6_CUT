@@ -169,6 +169,7 @@ export const clipSchema = z.object({
   folderName: z.string().nullable().optional(),
   publishedAt: z.string().nullable().optional(),
   previewUrl: z.string().nullable().optional(),
+  thumbnailUrl: z.string().nullable().optional(),
 }).superRefine((clip, context) => {
   if (clip.end <= clip.start) context.addIssue({ code: z.ZodIssueCode.custom, message: "Clip end must follow its start", path: ["end"] });
   if (Math.abs(clip.duration - (clip.end - clip.start)) > .1) context.addIssue({ code: z.ZodIssueCode.custom, message: "Clip duration must match its range", path: ["duration"] });

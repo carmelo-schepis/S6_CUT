@@ -181,6 +181,7 @@ class Clip(ApiModel):
     folder_id: str | None = None
     published_at: str | None = None
     preview_url: str | None = None
+    thumbnail_url: str | None = None
     download_url: str | None = None
     error: str | None = None
     fallback_used: bool = False

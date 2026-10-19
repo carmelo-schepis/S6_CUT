@@ -15,7 +15,7 @@ import { PwaStatus } from "./components/pwa-status";
 import { hasLiveWork, jobPollInterval, workspaceActivity } from "./project-status";
 import { onLibraryChanged } from "./library-sync";
 import { usePoll } from "./use-poll";
-import { revealWhenReady } from "./startup";
+import { revealApp, revealWhenReady } from "./startup";
 import type { Health, Job, Project, ProviderProfile } from "./types";
 
 type Page = "projects" | "library" | "workspace" | "shorts-editor" | "jobs" | "settings";
@@ -55,8 +55,9 @@ export function App() {
   const [projectsReady, setProjectsReady] = useState(false);
   const onProjectsReady = useCallback(() => setProjectsReady(true), []);
   useEffect(() => {
+    if (iosViewer) return revealApp();
     if (initialDataLoaded && projectsReady) return revealWhenReady();
-  }, [initialDataLoaded, projectsReady]);
+  }, [iosViewer, initialDataLoaded, projectsReady]);
 
   const [page, setPage] = useState<Page>("projects");
   const [projects, setProjects] = useState<Project[]>([]);

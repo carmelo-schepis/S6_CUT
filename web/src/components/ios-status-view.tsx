@@ -13,7 +13,7 @@ function StatusPreview({ clip }: { clip: Job["clips"][number] }) {
   const latestUrl = useRef(clip.previewUrl ?? undefined);
   const [src, setSrc] = useState(clip.previewUrl ?? undefined);
   useEffect(() => { latestUrl.current = clip.previewUrl ?? undefined; }, [clip.previewUrl]);
-  return <figure><video src={src} controls playsInline preload="metadata" controlsList="nodownload noplaybackrate" disablePictureInPicture aria-label={clip.title || `Preview clip ${clip.index}`} onError={() => { if (latestUrl.current && latestUrl.current !== src) setSrc(latestUrl.current); }} /><figcaption>{clip.title || `Clip ${String(clip.index).padStart(2, "0")}`}</figcaption></figure>;
+  return <figure><video src={src} poster={clip.thumbnailUrl || undefined} controls playsInline preload="none" controlsList="nodownload noplaybackrate" disablePictureInPicture aria-label={clip.title || `Preview clip ${clip.index}`} onError={() => { if (latestUrl.current && latestUrl.current !== src) setSrc(latestUrl.current); }} /><figcaption>{clip.title || `Clip ${String(clip.index).padStart(2, "0")}`}</figcaption></figure>;
 }
 
 function titleFor(job: Job, projects: Project[]) {
