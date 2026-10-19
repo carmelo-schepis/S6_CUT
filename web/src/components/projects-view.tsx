@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, Film, Plus, Sparkles, Zap } from "lucide-react";
 import { createClipJob, createFolder, listFolders, readableError } from "../api";
 import { DEFAULT_SUBSCRIBE_ANIMATION, type BatchMode, type ContentFormat, type Health, type LibraryFolder, type ProcessingMode, type Project, type ProviderProfile, type SourceProfile, type Style, type SubscribeAnimationConfig, type MusicTheme } from "../types";
@@ -12,7 +12,7 @@ const RECENT_FOLDER_KEY = "s6-cut.recent-library-folder";
 const PROVIDER_CALLOUT_DISMISSED_KEY = "s6-cut.provider-callout-dismissed";
 const MUSIC_PROFILE_NOTE = "Music / sung vocals always uses Smart transcription locally. VAD disabled; word timestamps retained. Sung words may still be missed or hallucinated, so review outputs.";
 const isYouTubeUrl = (value: string) => {
-  try { const parsed = new URL(value); return parsed.protocol === "https:" && ["youtube.com", "m.youtube.com", "youtu.be"].includes(parsed.hostname.toLowerCase().replace(/^www\./, "")); }
+  try { const parsed = new URL(value); return parsed.protocol === "https:" && ["youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"].includes(parsed.hostname.toLowerCase().replace(/^www\./, "")); }
   catch { return false; }
 };
 
@@ -54,6 +54,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
   const [musicTheme, setMusicTheme] = useState<MusicTheme>("clean");
   const [musicTopText, setMusicTopText] = useState("");
   const [musicTrackFile, setMusicTrackFile] = useState<File | null>(null);
+  const musicTrackInput = useRef<HTMLInputElement>(null);
   const [musicTrackUrl, setMusicTrackUrl] = useState("");
   const [musicTrackSpeed, setMusicTrackSpeed] = useState("1");
   const [sourceDuration, setSourceDuration] = useState<{ file: File; seconds: number } | null>(null);
@@ -324,8 +325,8 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
             <Field label="Top text"><input value={musicTopText} maxLength={100} onChange={(event) => setMusicTopText(event.target.value)} placeholder="Leave blank to omit" /></Field>
           </FieldGroup>}
           {sourceProfile === "music" && <FieldGroup title="Background song" hint="Optional · upload an MP3 or paste a public YouTube song URL. When supplied, this replaces the video's original audio in each clip.">
-            <label className="field"><span className="field-label">MP3 upload</span><input aria-label="Background song MP3" type="file" accept="audio/mpeg,.mp3" onChange={(event) => { const next = event.target.files?.[0] || null; setMusicTrackFile(next); if (next) setMusicTrackUrl(""); }} /><small>{musicTrackFile?.name || "MP3 audio only"}</small></label>
-            <Field label="YouTube song URL"><input aria-label="YouTube song URL" type="url" value={musicTrackUrl} onChange={(event) => { setMusicTrackUrl(event.target.value); if (event.target.value) setMusicTrackFile(null); }} placeholder="https://www.youtube.com/watch?v=..." /></Field>
+            <label className="field"><span className="field-label">MP3 upload</span><input ref={musicTrackInput} aria-label="Background song MP3" type="file" accept="audio/mpeg,.mp3" onChange={(event) => { const next = event.target.files?.[0] || null; setMusicTrackFile(next); if (next) setMusicTrackUrl(""); }} /><small>{musicTrackFile?.name || "MP3 audio only"}</small>{musicTrackFile && <button type="button" className="button button-quiet" onClick={() => { setMusicTrackFile(null); if (musicTrackInput.current) musicTrackInput.current.value = ""; }}>Remove song</button>}</label>
+            <Field label="YouTube song URL"><input aria-label="YouTube song URL" type="url" value={musicTrackUrl} onChange={(event) => { setMusicTrackUrl(event.target.value); if (event.target.value) { setMusicTrackFile(null); if (musicTrackInput.current) musicTrackInput.current.value = ""; } }} placeholder="https://www.youtube.com/watch?v=..." /></Field>
             <Field label="Song speed"><select aria-label="Song speed" value={musicTrackSpeed} onChange={(event) => setMusicTrackSpeed(event.target.value)}><option value="1">Standard speed</option><option value="1.25">Speed up · 1.25×</option><option value="1.5">Sped-up · 1.5×</option><option value="0.85">Slow down · 0.85×</option><option value="0.75">Slowed · 0.75×</option></select></Field>
           </FieldGroup>}
 

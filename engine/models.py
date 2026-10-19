@@ -126,6 +126,13 @@ class YouTubeMetadataUpdate(ApiModel):
         return cleaned
 
 
+class MusicTrackSnapshot(ApiModel):
+    asset_id: str | None = None
+    title: str = Field(min_length=1, max_length=200)
+    source: Literal["upload", "youtube"]
+    speed: Literal[0.75, 0.85, 1.0, 1.25, 1.5] = 1.0
+
+
 class Clip(ApiModel):
     id: str
     index: int = Field(ge=1)
@@ -161,6 +168,7 @@ class Clip(ApiModel):
     youtube_metadata_cost_usd: float | None = Field(default=None, ge=0)
     youtube_metadata_cost_kind: Literal["actual", "estimated"] | None = None
     music_treatment: Literal["color", "grayscale"] | None = None
+    music_track: "MusicTrackSnapshot | None" = None
     # DO-NOT-CHANGE: engine-set only, after the publication transaction commits —
     # the UI never displays this from optimistic state
     library_asset_id: str | None = None
@@ -250,6 +258,7 @@ class Job(ApiModel):
     successful_count: int = Field(default=0, ge=0, le=500)
     music_presentation: MusicPresentationConfig | None = None
     music_top_text: str | None = Field(default=None, max_length=100)
+    music_track: MusicTrackSnapshot | None = None
     # Snapshot of the user's caption choice; legacy payloads default safely on.
     burn_subtitles: bool = True
     embed_subtitles: bool = False
@@ -314,6 +323,7 @@ class Project(ApiModel):
     cap_explanation: str | None = Field(default=None, max_length=500)
     content_format: ContentFormat = "short"
     source_profile: Literal["speech", "music"] = "speech"
+    music_track: MusicTrackSnapshot | None = None
     latest_job_id: str | None = None
     library_folder_id: str = UNSORTED_LIBRARY_FOLDER_ID
     source_blob_id: str | None = None

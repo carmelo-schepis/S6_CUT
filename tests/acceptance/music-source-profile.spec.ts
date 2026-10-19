@@ -1,7 +1,9 @@
 import { test, expect } from "@playwright/test";
 import path from "node:path";
+import { readFileSync } from "node:fs";
 
 const now = "2026-01-01T00:00:00Z";
+const backgroundSong = readFileSync(path.resolve("tests/fixtures/background-song.mp3"));
 const folder = { id: "unsorted", name: "Unsorted", description: "", color: null, parentId: null, archived: false, system: true, createdAt: now, updatedAt: now };
 const health = { status: "ready", version: "fixture", database: true, ffmpeg: true, ffprobe: true, whisper: true, ytdlp: true, localTts: false, dataPath: "Local mounted data directory", freeBytes: 10000000, configuredWorkers: 1, activeWorkers: 0, queuedJobs: 0, fallbacks: {} };
 
@@ -41,9 +43,9 @@ test("Music / sung vocals opts into Smart and sends the durable music profile", 
   await expect(musicChoice).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByText(/always uses Smart transcription locally.*VAD disabled.*word timestamps retained/i)).toBeVisible();
   await page.getByRole("tab", { name: "YouTube" }).click();
-  await page.getByLabel("YouTube URL").fill("https://www.youtube.com/watch?v=music-fixture");
+  await page.getByLabel("YouTube URL").fill("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
   await expect(page.getByLabel("YouTube song URL")).toBeVisible();
-  await page.getByLabel("YouTube song URL").fill("https://www.youtube.com/watch?v=song-fixture");
+  await page.getByLabel("YouTube song URL").fill("https://music.youtube.com/watch?v=9bZkp7q19f0");
   await page.getByLabel("Song speed").selectOption("1.5");
   await page.getByRole("button", { name: /Create \d+ short clips?/ }).click();
 
@@ -51,9 +53,38 @@ test("Music / sung vocals opts into Smart and sends the durable music profile", 
   expect(submittedForm).toMatch(/name="source_profile"\s+music/);
   expect(submittedForm).toMatch(/name="processing_mode"\s+smart/);
   expect(submittedForm).toMatch(/name="min_duration"\s+20/);
-  expect(submittedForm).toMatch(/name="music_track_url"\s+https:\/\/www\.youtube\.com\/watch\?v=song-fixture/);
+  expect(submittedForm).toMatch(/name="music_track_url"\s+https:\/\/music\.youtube\.com\/watch\?v=9bZkp7q19f0/);
   expect(submittedForm).toMatch(/name="music_track_speed"\s+1\.5/);
   await expect(page.getByText(/smart processing/i)).toBeVisible();
+});
+
+test("switching from a picked MP3 to a song URL clears the native picker state", async ({ page }) => {
+  let submittedForm = "";
+  const project = { schemaVersion: 1, id: "switch-project", name: "Switch source", mode: "clip", style: "educational", state: "queued", sourceName: "YouTube import", sourceKind: "youtube", requestedCount: 1, contentFormat: "short", sourceProfile: "music", latestJobId: "switch-job", libraryFolderId: folder.id, createdAt: now, updatedAt: now };
+  const job = { schemaVersion: 1, id: "switch-job", projectId: project.id, mode: "clip", state: "queued", stage: "queued", stageLabel: "Queued on this machine", progress: 0, currentItem: 0, totalItems: 0, style: "educational", processingMode: "smart", contentFormat: "short", sourceProfile: "music", warnings: [], clips: [], beats: [], steps: [], createdAt: now, updatedAt: now };
+  await page.route("**/api/v1/health", (route) => route.fulfill({ json: health }));
+  await page.route("**/api/v1/profiles", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/library/folders", (route) => route.fulfill({ json: [folder] }));
+  await page.route("**/api/v1/library/assets**", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/projects", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/jobs", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/jobs/clip", async (route) => { submittedForm = route.request().postData() || ""; await route.fulfill({ status: 202, json: { project, job } }); });
+  await page.route("**/api/v1/jobs/switch-job/events", (route) => route.fulfill({ status: 200, contentType: "text/event-stream", body: ": keep-alive\n\n" }));
+  await page.route("**/api/v1/jobs/switch-job", (route) => route.fulfill({ json: job }));
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.getByRole("button", { name: "Music / sung vocals" }).click();
+  await page.getByRole("tab", { name: "YouTube" }).click();
+  await page.getByLabel("YouTube URL").fill("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+  const picker = page.getByLabel("Background song MP3");
+  await picker.setInputFiles({ name: "backing.mp3", mimeType: "audio/mpeg", buffer: backgroundSong });
+  await expect.poll(() => picker.evaluate((element) => (element as HTMLInputElement).files?.length)).toBe(1);
+  await page.getByLabel("YouTube song URL").fill("https://music.youtube.com/watch?v=9bZkp7q19f0");
+  await expect.poll(() => picker.evaluate((element) => (element as HTMLInputElement).files?.length)).toBe(0);
+  await page.getByLabel("YouTube song URL").fill("");
+  await page.getByRole("button", { name: /Create \d+ short clips?/ }).click();
+  await expect(page.getByRole("heading", { name: "Switch source" })).toBeVisible();
+  expect(submittedForm).not.toContain('name="music_track_file"');
+  expect(submittedForm).not.toContain('name="music_track_url"');
 });
 
 test("Music mode uploads an MP3 background song with the selected slow speed", async ({ page }) => {
@@ -85,8 +116,12 @@ test("Music mode uploads an MP3 background song with the selected slow speed", a
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await page.getByRole("button", { name: "Music / sung vocals" }).click();
   await page.getByRole("tab", { name: "YouTube" }).click();
-  await page.getByLabel("YouTube URL").fill("https://www.youtube.com/watch?v=music-fixture");
-  await page.getByLabel("Background song MP3").setInputFiles({ name: "backing-track.mp3", mimeType: "audio/mpeg", buffer: Buffer.from("mp3-fixture") });
+  await page.getByLabel("YouTube URL").fill("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+  await page.getByLabel("Background song MP3").setInputFiles({ name: "backing-track.mp3", mimeType: "audio/mpeg", buffer: backgroundSong });
+  const songPicker = page.getByLabel("Background song MP3");
+  await page.getByRole("button", { name: "Remove song" }).click();
+  await expect.poll(() => songPicker.evaluate((element) => (element as HTMLInputElement).files?.length)).toBe(0);
+  await songPicker.setInputFiles({ name: "backing-track.mp3", mimeType: "audio/mpeg", buffer: backgroundSong });
   await page.getByLabel("Song speed").selectOption("0.75");
   await page.getByRole("button", { name: /Create \d+ short clips?/ }).click();
 
@@ -121,12 +156,12 @@ test("completed music jobs meet the requested minimum and expose timed caption a
   const completedProject = {
     schemaVersion: 1, id: "music-complete-project", name: "Completed music fixture", mode: "clip", style: "educational", state: "complete",
     sourceName: "music-fixture.mp4", sourceKind: "upload", requestedCount: 2, contentFormat: "short", sourceProfile: "music",
-    latestJobId: "music-complete-job", libraryFolderId: folder.id, createdAt: now, updatedAt: now,
+    latestJobId: "music-complete-job", libraryFolderId: folder.id, musicTrack: { assetId: "song-asset", title: "Verified backing track", source: "upload", speed: 0.85 }, createdAt: now, updatedAt: now,
   };
   const completedJob = {
     schemaVersion: 1, id: "music-complete-job", projectId: completedProject.id, libraryFolderId: folder.id, mode: "clip", state: "complete", stage: "complete",
     stageLabel: "2 music cuts ready", progress: 100, currentItem: 2, totalItems: 2, style: "educational", processingMode: "smart", contentFormat: "short", sourceProfile: "music",
-    burnSubtitles: true, embedSubtitles: false, warnings: [], error: null,
+    burnSubtitles: true, embedSubtitles: false, musicTrack: completedProject.musicTrack, warnings: [], error: null,
     clips: [
       {
         id: "music-clip-1", index: 1, state: "complete", start: 0, end: 20, duration: 20, openingLine: "Sing it back", score: null, selected: true,
@@ -182,7 +217,8 @@ test("completed music jobs meet the requested minimum and expose timed caption a
   await page.locator('.job-card[data-job-id="music-complete-job"]')
     .getByRole("button", { name: "Open", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Completed music fixture" })).toBeVisible();
-  await expect(page.locator(".workspace-secondary-meta")).toContainText(/Music \/ sung vocals/);
+  await expect(page.getByText("Song: Verified backing track · 0.85× speed")).toBeVisible();
+  await expect(page.locator(".workspace-secondary-meta").first()).toContainText(/Music \/ sung vocals/);
   await expect(page.locator(".clip-tile.complete")).toHaveCount(completedProject.requestedCount);
 
   // The workspace does not render cue rows or sidecar labels. Assert the

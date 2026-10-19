@@ -325,14 +325,14 @@ def _assign_music_treatments(job: Job, private: dict[str, Any], save) -> None:
 
 
 def can_retry_import(job: Job, private: dict[str, Any]) -> bool:
-    """Whether this job's source import can actually be re-run.
+    """Whether this job's source or selected song import can be re-run.
 
     The Workspace offers Retry import from this answer rather than inferring it
     from the project's source kind. The two could disagree — a project marked
     youtube whose job holds no url — and the customer then got a 409 from the
     one control the failure screen offered them.
     """
-    return job.mode == "clip" and bool(private.get("url")) and job.state in {"failed", "stalled", "cancelled_kept"}
+    return job.mode == "clip" and bool(private.get("url") or (job.source_profile == "music" and private.get("music_track_url"))) and job.state in {"failed", "stalled", "cancelled_kept"}
 
 
 def _youtube_creator_name(value: object) -> str | None:
@@ -826,6 +826,7 @@ class JobManager:
         steps = [
             ProcessingStep(id="source", label="Source received"),
             ProcessingStep(id="probe", label="Video validated"),
+            *([ProcessingStep(id="music_track", label="Background song prepared")] if music else []),
             ProcessingStep(id="audio", label="Audio prepared"),
             ProcessingStep(id="transcribe", label="Music words timed" if music else "Speech transcribed"),
             provider_step,
@@ -1253,13 +1254,76 @@ class JobManager:
             resumable=True,
         )
         job.download_progress = progress
+        music_download = bool(update.get("music_track"))
         if phase == "stalled":
-            job.state, job.stage, job.stage_label = "stalled", "source", "YouTube download stalled"
+            job.state, job.stage, job.stage_label = "stalled", "music_track" if music_download else "source", "Background song download stalled" if music_download else "YouTube download stalled"
         elif phase not in {"complete", "failed"}:
-            job.state, job.stage, job.stage_label = "active", "source", "Downloading YouTube source"
+            job.state, job.stage, job.stage_label = "active", "music_track" if music_download else "source", "Downloading background song" if music_download else "Downloading YouTube source"
             if percent is not None:
-                job.progress = min(15, 5 + percent * 0.1)
+                job.progress = min(20 if music_download else 15, 5 + percent * (0.15 if music_download else 0.1))
         self._save(job, private)
+
+    def _music_track_source(self, job: Job, private: dict[str, Any]) -> Path | None:
+        """Resolve the selected immutable soundtrack, downloading/registering it once."""
+        if not private.get("music_track_path") and not private.get("music_track_asset_id") and not private.get("music_track_url"):
+            return None
+        path_value = private.get("music_track_path")
+        track = Path(str(path_value)) if path_value else None
+        if track is None or not track.is_file():
+            asset_id = private.get("music_track_asset_id")
+            if asset_id:
+                asset = self.db.get_asset(str(asset_id))
+                relative = self.db.blob_relative_path(asset.blob_id) if asset else None
+                if relative:
+                    try:
+                        track = confined(self.settings.data_path, *relative.split("/"))
+                    except ValueError:
+                        track = None
+            if track is None or not track.is_file():
+                if not private.get("music_track_url"):
+                    raise MediaError("The selected background song is missing from its saved Media Library asset; it was not replaced with source audio")
+        if track is None or not track.is_file():
+            if not any(step.id == "music_track" for step in job.steps):
+                from .models import ProcessingStep
+                position = next((index + 1 for index, step in enumerate(job.steps) if step.id == "probe"), len(job.steps))
+                job.steps.insert(position, ProcessingStep(id="music_track", label="Background song prepared"))
+                self._save(job, private)
+            job.download_progress = None
+            self.start_step(job, "music_track", detail="Downloading and validating the selected YouTube song", label="Preparing background song", progress=7, private=private)
+            target = self.settings.data_path / "jobs" / job.id / "source" / "background.mp3"
+            def progress(update: dict[str, Any]) -> None:
+                self._download_progress(job, private, {**update, "music_track": True})
+            track = _media_fn("download_youtube_audio")(
+                str(private["music_track_url"]), target, self.settings,
+                progress_callback=progress, cancellation_callback=lambda: not self._cooperate(job),
+                max_seconds=self.settings.max_source_seconds,
+            )
+            metadata = _media_fn("probe_audio")(track, self.settings)
+            digest = sha256_file(track)
+            title_fn = getattr(media_module, "downloaded_audio_title", None)
+            track_title = title_fn(track) if callable(title_fn) else None
+            asset = self.rules.register_file(
+                track, title=track_title or "YouTube soundtrack", media_type="audio/mpeg", origin="manual-import",
+                folder_id=job.library_folder_id, content_hash=digest, filename="background.mp3",
+                metadata={"duration": metadata["duration"]},
+            )
+            private.update({"music_track_path": str(track), "music_track_hash": digest, "music_track_asset_id": asset.id,
+                            "music_track_title": asset.title, "music_track_source": "youtube"})
+            from .models import MusicTrackSnapshot
+            job.music_track = MusicTrackSnapshot(asset_id=asset.id, title=asset.title, source="youtube", speed=float(private.get("music_track_speed", 1.0)))
+            project = self.db.get_project(job.project_id)
+            if project:
+                project.music_track = job.music_track
+                self.db.save_project(project)
+            self.complete_step(job, "music_track", detail="YouTube song downloaded, decoded, and saved to the Media Library", private=private)
+        assert track is not None
+        expected_hash = private.get("music_track_hash")
+        if expected_hash and sha256_file(track) != expected_hash:
+            raise MediaError("The selected background song failed its saved content-hash check")
+        metadata = _media_fn("probe_audio")(track, self.settings)
+        if float(metadata["duration"]) > self.settings.max_source_seconds:
+            raise MediaError(f"Background song exceeds the {self.settings.max_source_seconds}-second duration limit")
+        return track
 
     def _source(self, job: Job, private: dict[str, Any]) -> Path:
         if not private.get("source_kind"):
@@ -1386,6 +1450,7 @@ class JobManager:
             return
         source = self._source(job, private)
         metadata = probe(source, self.settings)
+        music_track = self._music_track_source(job, private) if job.source_profile == "music" else None
         output_dir = self.settings.data_path / "jobs" / job.id / "clips"
         output = output_dir / f"{clip.index:02d}-caption-r{revision}.mp4"
         words = [{"text": cue["text"], "start": cue["start"], "end": cue["end"]} for cue in cues]
@@ -1411,6 +1476,7 @@ class JobManager:
                 **_format_render_kwargs(render, job_content_format(job, private)),
                 **_creator_render_kwargs(render, youtube_creator_credit(job, private)),
                 **_presentation_render_kwargs(render, private), **music_kwargs,
+                **({"music_track": music_track, "music_track_speed": float(private.get("music_track_speed", 1.0))} if music_track else {}),
             }
             render(source, output, **_compatible_render_kwargs(render, rerender_kwargs))
             # publish_clip_output reuses the stable asset identity in its transaction.
@@ -1906,18 +1972,29 @@ class JobManager:
         for warning in _source_quality_warnings(metadata):
             if warning not in job.warnings:
                 job.warnings.append(warning)
-        if not metadata["audio"]:
+        profile = job.source_profile
+        music_track = self._music_track_source(job, private) if profile == "music" else None
+        if not metadata["audio"] and music_track is None:
             requirement = "readable sung vocals" if job.source_profile == "music" else "speech"
             raise MediaError(f"This video has no readable audio track. Automatic clips require {requirement}; retain it as a source for manual editing.")
         source_duration = float(metadata["duration"])
-        target = self._resolve_batch_target(job, private, source_duration)
-        if job.source_profile == "music":
-            feasible_count = math.floor((source_duration + 1e-9) / float(private["min_duration"]))
+        transcript_source = source
+        transcript_duration = float(metadata["duration"])
+        if music_track is not None:
+            speed = float(private.get("music_track_speed", 1.0))
+            transcript_source = _media_fn("prepare_music_track")(
+                music_track, self.settings.data_path / "jobs" / job.id / "transcription" / f"music-{speed:.2f}.mp3", speed, self.settings,
+            )
+            transcript_duration = float(_media_fn("probe_audio")(transcript_source, self.settings)["duration"])
+        planning_duration = min(source_duration, transcript_duration) if profile == "music" else source_duration
+        target = self._resolve_batch_target(job, private, planning_duration)
+        if profile == "music":
+            feasible_count = math.floor((planning_duration + 1e-9) / float(private["min_duration"]))
             if feasible_count < int(private["count"]):
-                raise MediaError(f"Cannot create {private['count']} non-overlapping music clips of at least {float(private['min_duration']):g}s from a {source_duration:.1f}s source; at most {feasible_count} can fit without padding or duplication.")
-        source_hash = str(private.get("source_hash") or sha256_file(source))
-        private["source_hash"] = source_hash
-        profile = job.source_profile
+                raise MediaError(f"Cannot create {private['count']} non-overlapping music clips of at least {float(private['min_duration']):g}s from the {planning_duration:.1f}s available music timeline; at most {feasible_count} can fit without padding or duplication.")
+        source_hash = sha256_file(transcript_source) if music_track is not None else str(private.get("source_hash") or sha256_file(source))
+        if music_track is None:
+            private["source_hash"] = source_hash
         language = private.get("transcription_language")
         beam = self.settings.music_whisper_beam_size if profile == "music" else self.settings.whisper_beam_size
         cache_key = transcription_cache_key(
@@ -1946,17 +2023,23 @@ class JobManager:
             else:
                 self.start_step(job, "audio", detail="Extracting 16 kHz mono audio", label="Preparing audio for transcription", progress=12, private=private)
                 audio = media_module.extract_audio_16k(
-                    source, self.settings,
+                    transcript_source, self.settings,
                     output=self.settings.data_path / "jobs" / job.id / "transcription" / "audio-16k.wav",
                 )
                 self.complete_step(job, "audio", detail="16 kHz mono audio prepared", private=private)
-                transcript = self._transcribe_with_stages(job, audio, float(metadata["duration"]), private)
+                transcript = self._transcribe_with_stages(job, audio, transcript_duration, private)
                 self.db.cache_put(cache_key, now_iso(), transcript)
             private["transcript"] = transcript
             private["transcript_cache_key"] = cache_key
             self._save(job, private)
             self.complete_step(job, "transcribe", detail=self._transcript_detail(transcript, source_duration=source_duration, music=profile == "music"), private=private)
         words = transcript["words"]
+        if profile == "music":
+            words = [
+                {**word, "end": min(float(word["end"]), planning_duration)}
+                for word in words
+                if float(word.get("start", 0)) < planning_duration and float(word.get("end", 0)) > 0
+            ]
         if not job.clips:
             if not self._cooperate(job):
                 self._save(job)
@@ -2005,6 +2088,7 @@ class JobManager:
             for index, candidate in enumerate(candidates, 1):
                 clip = clip_from_candidate(candidate, index)
                 clip.id = str(uuid.uuid4())
+                clip.music_track = job.music_track if profile == "music" else None
                 excerpt = " ".join(str(word["text"]) for word in candidate.words)
                 visual = self.rules.resolve(excerpt)
                 clip.visual_label = visual.label
@@ -2045,17 +2129,7 @@ class JobManager:
                 previous_end = clip.end
         output_dir = self.settings.data_path / "jobs" / job.id / "clips"
         output_dir.mkdir(parents=True, exist_ok=True)
-        music_track = None
-        if profile == "music":
-            track_path = private.get("music_track_path")
-            if track_path and Path(str(track_path)).is_file():
-                music_track = Path(str(track_path))
-            elif private.get("music_track_url"):
-                music_track = _media_fn("download_youtube_audio")(
-                    str(private["music_track_url"]), self.settings.data_path / "jobs" / job.id / "source" / "background.mp3", self.settings,
-                )
-                private["music_track_path"] = str(music_track)
-                self._save(job, private)
+        music_track = self._music_track_source(job, private) if profile == "music" else None
         for position, clip in enumerate(job.clips, 1):
             if clip.state == "complete":
                 continue
@@ -2518,12 +2592,17 @@ class JobManager:
             if not can_retry_import(job, private):
                 raise MediaError("This project has no YouTube import to retry")
             private["retry_import"] = True
-            job.state, job.stage, job.stage_label, job.error = "queued", "source", "Retrying YouTube import", None
+            retry_source = bool(private.get("url"))
+            retry_stage = "source" if retry_source else "music_track"
+            retry_label = "Retrying YouTube import" if retry_source else "Retrying background song download"
+            job.state, job.stage, job.stage_label, job.error = "queued", retry_stage, retry_label, None
             if job.download_progress:
                 job.download_progress = job.download_progress.model_copy(update={"phase": "retrying", "message": "Retry queued; retained partial will be resumed"})
             for step in job.steps:
-                if step.id == "source":
+                if step.id == "source" and private.get("url"):
                     step.status, step.started_at, step.completed_at, step.detail = "pending", None, None, "Retrying YouTube import"
+                elif step.id == "music_track" and private.get("music_track_url"):
+                    step.status, step.started_at, step.completed_at, step.detail = "pending", None, None, "Retrying background song download"
                 elif step.status in {"active", "failed"}:
                     step.status, step.started_at, step.completed_at, step.detail = "pending", None, None, "Waiting for source retry"
             # Persist the requeue before exposing the id to a worker. Otherwise a
@@ -2682,6 +2761,7 @@ class JobManager:
                 "library_asset_id": clip.library_asset_id,
                 "blob_id": clip.blob_id,
                 "provenance": [record.model_dump(mode="json") for record in clip.provenance],
+                "music_track": clip.music_track.model_dump(mode="json") if clip.music_track else None,
             })
             if clip.creator_credit or clip.provenance:
                 credits.append({
@@ -2705,6 +2785,7 @@ class JobManager:
                 "source_kind": project.source_kind if project else None,
                 "source_name": project.source_name if project else None,
                 "source_creator": project.source_creator if project else None,
+                "music_track": project.music_track.model_dump(mode="json") if project and project.music_track else None,
             },
             "job": {
                 "id": job.id,
@@ -2712,9 +2793,12 @@ class JobManager:
                 "content_format": job.content_format,
                 "created_at": job.created_at,
                 "updated_at": job.updated_at,
+                "music_track": job.music_track.model_dump(mode="json") if job.music_track else None,
             },
             "outputs": manifest_outputs,
         }
+        if job.music_track:
+            credits.append({"music_track": job.music_track.model_dump(mode="json"), "licence": "User supplied soundtrack"})
         with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True) as archive:
             for output_record, (_, source) in zip(manifest_outputs, export_sources, strict=True):
                 archive.write(source, f"{title}/{output_record['filename']}")
