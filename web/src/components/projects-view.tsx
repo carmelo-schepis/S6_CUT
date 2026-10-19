@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, Film, Plus, Sparkles, Zap } from "lucide-react";
 import { createClipJob, createFolder, listFolders, readableError } from "../api";
 import { DEFAULT_SUBSCRIBE_ANIMATION, type BatchMode, type ContentFormat, type Health, type LibraryFolder, type ProcessingMode, type Project, type ProviderProfile, type SourceProfile, type Style, type SubscribeAnimationConfig, type MusicTheme } from "../types";
@@ -11,6 +11,10 @@ import { RecentClips } from "./recent-clips";
 const RECENT_FOLDER_KEY = "s6-cut.recent-library-folder";
 const PROVIDER_CALLOUT_DISMISSED_KEY = "s6-cut.provider-callout-dismissed";
 const MUSIC_PROFILE_NOTE = "Music / sung vocals always uses Smart transcription locally. VAD disabled; word timestamps retained. Sung words may still be missed or hallucinated, so review outputs.";
+const isYouTubeUrl = (value: string) => {
+  try { const parsed = new URL(value); return parsed.protocol === "https:" && ["youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"].includes(parsed.hostname.toLowerCase().replace(/^www\./, "")); }
+  catch { return false; }
+};
 
 const styles: { id: Style; label: string; note: string }[] = [
   { id: "funny", label: "Funny", note: "Punchlines & reactions" },
@@ -49,6 +53,10 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
   const [sourceProfile, setSourceProfile] = useState<SourceProfile>("speech");
   const [musicTheme, setMusicTheme] = useState<MusicTheme>("clean");
   const [musicTopText, setMusicTopText] = useState("");
+  const [musicTrackFile, setMusicTrackFile] = useState<File | null>(null);
+  const musicTrackInput = useRef<HTMLInputElement>(null);
+  const [musicTrackUrl, setMusicTrackUrl] = useState("");
+  const [musicTrackSpeed, setMusicTrackSpeed] = useState("1");
   const [sourceDuration, setSourceDuration] = useState<{ file: File; seconds: number } | null>(null);
   const [burnSubtitles, setBurnSubtitles] = useState(true);
   const [hookTextChoice, setHookTextChoice] = useState(false);
@@ -135,6 +143,8 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
       if (!Number.isFinite(maxDuration) || maxDuration <= minDuration) return setError("Maximum seconds must be greater than minimum seconds.");
       if (contentFormat === "short" && maxDuration > 180) return setError("Short-form clips can be at most 180 seconds.");
       if (sourceProfile === "music" && musicTopText.length > 100) return setError("Top text must be 100 characters or fewer.");
+      if (sourceProfile === "music" && musicTrackFile && musicTrackUrl.trim()) return setError("Choose an MP3 upload or a YouTube song link, not both.");
+      if (sourceProfile === "music" && musicTrackUrl.trim() && !isYouTubeUrl(musicTrackUrl.trim())) return setError("Only public HTTPS YouTube URLs are supported for the background song.");
       if (musicConfigurationMessage) return setError(musicConfigurationMessage);
       if (musicFeasibilityMessage) return setError(musicFeasibilityMessage);
     setSubmitting(true);
@@ -152,6 +162,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
           ...(metadataDisabledReason === null ? { youtubeMetadata: youtubeMetadataActive } : {}),
           subscribeAnimation, libraryFolderId: libraryFolderId || undefined,
           ...(sourceProfile === "music" ? { musicPresentation: { version: 1 as const, subtitleTheme: musicTheme }, musicTopText } : {}),
+          ...(sourceProfile === "music" ? { musicTrackFile: musicTrackFile || undefined, musicTrackUrl: musicTrackUrl.trim() || undefined, musicTrackSpeed: Number(musicTrackSpeed) } : {}),
         });
       if (libraryFolderId) localStorage.setItem(RECENT_FOLDER_KEY, libraryFolderId);
       onCreated(result.project);
@@ -312,6 +323,11 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
 
           {sourceProfile === "music" && <FieldGroup title="Top text" hint="Optional · displayed separately in the upper black area. Up to 100 characters.">
             <Field label="Top text"><input value={musicTopText} maxLength={100} onChange={(event) => setMusicTopText(event.target.value)} placeholder="Leave blank to omit" /></Field>
+          </FieldGroup>}
+          {sourceProfile === "music" && <FieldGroup title="Background song" hint="Optional · upload an MP3 or paste a public YouTube song URL. When supplied, this replaces the video's original audio in each clip.">
+            <label className="field"><span className="field-label">MP3 upload</span><input ref={musicTrackInput} aria-label="Background song MP3" type="file" accept="audio/mpeg,.mp3" onChange={(event) => { const next = event.target.files?.[0] || null; setMusicTrackFile(next); if (next) setMusicTrackUrl(""); }} /><small>{musicTrackFile?.name || "MP3 audio only"}</small>{musicTrackFile && <button type="button" className="button button-quiet" onClick={() => { setMusicTrackFile(null); if (musicTrackInput.current) musicTrackInput.current.value = ""; }}>Remove song</button>}</label>
+            <Field label="YouTube song URL"><input aria-label="YouTube song URL" type="url" value={musicTrackUrl} onChange={(event) => { setMusicTrackUrl(event.target.value); if (event.target.value) { setMusicTrackFile(null); if (musicTrackInput.current) musicTrackInput.current.value = ""; } }} placeholder="https://www.youtube.com/watch?v=..." /></Field>
+            <Field label="Song speed"><select aria-label="Song speed" value={musicTrackSpeed} onChange={(event) => setMusicTrackSpeed(event.target.value)}><option value="1">Standard speed</option><option value="1.25">Speed up · 1.25×</option><option value="1.5">Sped-up · 1.5×</option><option value="0.85">Slow down · 0.85×</option><option value="0.75">Slowed · 0.75×</option></select></Field>
           </FieldGroup>}
 
           <SubscribeAnimationControl value={subscribeAnimation} onChange={setSubscribeAnimation} longForm={contentFormat === "long"} />

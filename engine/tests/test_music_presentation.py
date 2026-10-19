@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+import shutil
+import subprocess
 
 import pytest
 from fastapi.testclient import TestClient
@@ -76,6 +78,53 @@ def test_music_upload_api_preserves_100_char_title_and_rejects_101(monkeypatch) 
 
     rejected = client.post("/api/v1/jobs/clip", data={**fields, "music_top_text": exact + "x"}, files={"file": ("song.mp4", b"fixture", "video/mp4")})
     assert rejected.status_code == 422
+
+
+def test_real_mp3_upload_is_persisted_as_a_music_asset_after_video_validation(monkeypatch, tmp_path: Path) -> None:
+    from engine import app as app_module
+    from engine.config import Settings
+
+    runtime = Settings.from_env()
+    if not shutil.which(runtime.ffmpeg):
+        pytest.skip("real MP3 API fixture requires FFmpeg")
+    mp3 = tmp_path / "song.mp3"
+    subprocess.run([runtime.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=523:duration=2", "-codec:a", "libmp3lame", "-q:a", "4", str(mp3)], check=True, capture_output=True)
+    monkeypatch.setattr(app_module, "validate_video_upload", lambda *args, **kwargs: {"duration": 40.0, "width": 640, "height": 360, "audio": False})
+    monkeypatch.setattr(app_module.profiles, "smart_available", lambda: False)
+    monkeypatch.setattr(app_module.manager.queue, "full", lambda: False)
+    async def enqueue(_: str) -> None:
+        return None
+    monkeypatch.setattr(app_module.manager, "enqueue", enqueue)
+    folder = app_module.db.list_folders()[0]
+    fields = {"source_profile": "music", "processing_mode": "smart", "count": "1", "min_duration": "8", "max_duration": "20", "library_folder_id": folder.id}
+    accepted = client.post("/api/v1/jobs/clip", data=fields, files={"file": ("silent.mp4", b"fixture", "video/mp4"), "music_track_file": ("song.mp3", mp3.read_bytes(), "audio/mpeg")})
+    assert accepted.status_code == 202, accepted.text
+    assert accepted.json()["project"]["musicTrack"]["title"] == "song"
+    assert accepted.json()["job"]["musicTrack"]["source"] == "upload"
+    asset_id = accepted.json()["job"]["musicTrack"]["assetId"]
+    asset = app_module.db.get_asset(asset_id)
+    assert asset is not None and asset.media_type == "audio/mpeg" and asset.content_hash
+    private = app_module.db.get_job_private(accepted.json()["job"]["id"])
+    assert private["music_track_hash"] == asset.content_hash
+
+
+def test_rejected_video_does_not_stage_the_uploaded_song(monkeypatch, tmp_path: Path) -> None:
+    from engine import app as app_module
+    from engine.media import MediaError
+    from engine.config import Settings
+
+    runtime = Settings.from_env()
+    if not shutil.which(runtime.ffmpeg):
+        pytest.skip("real MP3 API fixture requires FFmpeg")
+    mp3 = tmp_path / "song.mp3"
+    subprocess.run([runtime.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=1", "-codec:a", "libmp3lame", "-q:a", "4", str(mp3)], check=True, capture_output=True)
+    monkeypatch.setattr(app_module, "validate_video_upload", lambda *args, **kwargs: (_ for _ in ()).throw(MediaError("invalid video")))
+    before = set((app_module.settings.data_path / "jobs").glob("*/source/background.mp3"))
+    folder = app_module.db.list_folders()[0]
+    fields = {"source_profile": "music", "processing_mode": "smart", "count": "1", "min_duration": "8", "max_duration": "20", "library_folder_id": folder.id}
+    rejected = client.post("/api/v1/jobs/clip", data=fields, files={"file": ("bad.mp4", b"invalid", "video/mp4"), "music_track_file": ("song.mp3", mp3.read_bytes(), "audio/mpeg")})
+    assert rejected.status_code == 422
+    assert set((app_module.settings.data_path / "jobs").glob("*/source/background.mp3")) == before
 
 
 def test_music_renderer_contract_and_ass_boundaries(tmp_path: Path) -> None:
@@ -415,6 +464,7 @@ def test_caption_rerender_preserves_music_presentation_and_clip_treatment(tmp_pa
     manager = object.__new__(JobManager)
     manager.settings = SimpleNamespace(data_path=tmp_path)
     manager._source = lambda *_args: tmp_path / "source.mp4"
+    manager._music_track_source = lambda *_args: tmp_path / "saved-song.mp3"
     manager._save = lambda *_args: None
     manager._publish_output = lambda job, clip, *_args: (job, clip, None)
     clip = Clip(
@@ -431,6 +481,7 @@ def test_caption_rerender_preserves_music_presentation_and_clip_treatment(tmp_pa
         "aspect_ratio": "9:16",
         "music_presentation": {"version": 1, "subtitle_theme": "warm"},
         "music_top_text": "Exact title",
+        "music_track_speed": 1.25,
         "music_treatments": {clip.id: "grayscale"},
         "caption_rerender": request,
         "caption_overrides": {clip.id: {"revision": 1, "cues": [{"id": "edited-word", "start": 0.5, "end": 0.9, "text": "edited"}]}},
@@ -441,6 +492,8 @@ def test_caption_rerender_preserves_music_presentation_and_clip_treatment(tmp_pa
     assert rendered["music_theme"] == "warm"
     assert rendered["music_top_text"] == "Exact title"
     assert rendered["music_treatment"] == "grayscale"
+    assert rendered["music_track"] == tmp_path / "saved-song.mp3"
+    assert rendered["music_track_speed"] == 1.25
     assert rendered["words"] == [{"text": "edited", "start": 50.5, "end": 50.9}]
     assert clip.caption_cues[0].text == "edited"
     assert "caption_rerender" not in private

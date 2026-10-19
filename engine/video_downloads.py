@@ -235,6 +235,10 @@ class VideoDownloadManager:
         with self.lock:
             return self.tasks.get(task_id)
 
+    def list(self):
+        with self.lock:
+            return sorted(self.tasks.values(), key=lambda task: (task.created_at, task.id), reverse=True)
+
     async def create(self, raw_url: str):
         url = await asyncio.to_thread(validate_youtube_url, raw_url)
         with self.lock:
