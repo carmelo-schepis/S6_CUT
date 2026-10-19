@@ -215,6 +215,49 @@ test.describe("AI hook text acceptance", () => {
     expect(submittedBodies[0]).not.toContain("manual_hook_text");
   });
 
+  test("Music Top text is rendered and the clip plays in the browser", async ({ page }, testInfo) => {
+    test.skip(process.env.S6_RUN_MUSIC_TOP_TEXT_RENDER !== "1", "set S6_RUN_MUSIC_TOP_TEXT_RENDER=1 for the isolated Music render check");
+    test.skip(testInfo.project.name !== "Desktop Chromium", "the local Music render check runs only on Desktop Chromium");
+    test.setTimeout(20 * 60_000);
+    await openCreation(page);
+    await page.getByRole("button", { name: "Music / sung vocals" }).click();
+    await page.getByRole("button", { name: /Advanced controls/i }).click();
+    await page.getByLabel("Minimum seconds").fill("8");
+    await page.getByLabel("Maximum seconds").fill("10");
+    await chooseSpeechSource(page);
+    const count = page.locator(".count-control strong");
+    while (Number(await count.textContent()) > 1) await page.getByRole("button", { name: "Fewer clips" }).click();
+    const text = "Sung words lead to this moment";
+    await page.getByRole("checkbox", { name: "Hook text" }).check();
+    await page.getByRole("textbox", { name: "Top text" }).fill(text);
+    const createdResponse = page.waitForResponse((response) => response.url().includes("/api/v1/jobs/clip") && response.status() === 202);
+    await page.getByRole("button", { name: /^Create 1 short clip$/ }).click();
+    const created = await (await createdResponse).json();
+    await expect(page.getByRole("heading", { name: created.project.name })).toBeVisible({ timeout: 60_000 });
+    await waitForReady(page, 1);
+    const response = await page.request.get(new URL(`/api/v1/jobs/${encodeURIComponent(created.job.id)}`, page.url()).toString());
+    expect(response.ok()).toBeTruthy();
+    const job = await response.json();
+    expect(job.musicTopText).toBe(text);
+    expect(job.clips[0].musicTopText).toBe(text);
+    const firstTile = page.locator(".clip-tile.complete").first();
+    await firstTile.getByRole("button", { name: "Preview", exact: true }).click();
+    const player = page.locator(".viewer-frame video").first();
+    await expect(player).toBeVisible();
+    const playback = await player.evaluate(async (video: HTMLVideoElement) => {
+      video.muted = true;
+      await video.play();
+      const before = video.currentTime;
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      return { advanced: video.currentTime > before, readyState: video.readyState, width: video.videoWidth, height: video.videoHeight };
+    });
+    expect(playback.advanced).toBe(true);
+    expect(playback.readyState).toBeGreaterThanOrEqual(2);
+    expect(playback.width).toBeGreaterThan(0);
+    expect(playback.height).toBeGreaterThan(0);
+    await page.screenshot({ path: path.join(artifacts, "music-top-text-render.png"), fullPage: false });
+  });
+
   test("shows eligibility reasons without enabling unsupported configurations", async ({ page }) => {
     await mockConnectedProvider(page);
     await openCreation(page);
