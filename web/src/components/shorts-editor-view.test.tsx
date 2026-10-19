@@ -17,7 +17,7 @@ function trimField(name: "Start seconds" | "End seconds") {
 
 describe("ShortsEditorView", () => {
   beforeEach(() => { vi.clearAllMocks(); vi.mocked(listAssets).mockImplementation(async () => [asset]); vi.mocked(listJobs).mockResolvedValue([]); vi.mocked(createShortsJob).mockResolvedValue({ project: {} as never, job: {} as never }); vi.mocked(createShortsSourceJob).mockResolvedValue({ project: {} as never, job: {} as never }); });
-  afterEach(() => vi.useRealTimers());
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
   it("explains the accepted source, editing controls, and queued output", async () => {
     render(<ShortsEditorView onJobCreated={vi.fn()} />);
     expect(screen.getByRole("heading", { level: 1, name: "Editor" })).toBeInTheDocument();
@@ -316,6 +316,18 @@ describe("ShortsEditorView", () => {
     expect(screen.getByRole("button", { name: "Undo" })).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "Undo" }));
     expect(screen.getByRole("button", { name: "Text overlay: Your text" })).toHaveStyle({ left: "50%", top: "50%" });
+  });
+
+  it("adds text overlays when randomUUID is unavailable on an insecure origin", async () => {
+    vi.stubGlobal("crypto", { randomUUID: undefined });
+    vi.mocked(listAssets).mockResolvedValue([{ ...asset, previewUrl: "/preview.mp4" }]);
+    render(<ShortsEditorView onJobCreated={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("tab", { name: /Library/ }));
+    fireEvent.change(await screen.findByLabelText("Library video"), { target: { value: asset.id } });
+    await screen.findByRole("heading", { level: 2, name: asset.title });
+    fireEvent.click(screen.getByRole("tab", { name: "Text" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add text overlay" }));
+    expect(screen.getByRole("button", { name: "Text overlay: Your text" })).toBeInTheDocument();
   });
 
   it("enables undo for a meaningful focused edit and clears redo without splitting the group", async () => {

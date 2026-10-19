@@ -2,6 +2,7 @@ import { Film, Maximize2, Pause, Play, RotateCcw, SlidersHorizontal, Type, Volum
 import { formatDuration } from "./common";
 
 export type ShortsTextOverlay = { id: string; text: string; color: string; size: number; x: number; y: number; start: number; duration: number };
+const createOverlayId = () => globalThis.crypto?.randomUUID?.() ?? `overlay-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 type Tool = "media" | "filters" | "text";
 type PropertyTarget = "video" | "audio" | null;
 type Props = {
@@ -61,7 +62,7 @@ export function ShortsEditorToolbox(props: Props) {
   };
   const addText = () => {
     const duration = Math.max(0.1, Math.min(3, props.outputDuration || 3));
-    const overlay = { id: crypto.randomUUID(), text: "Your text", color: "#ffffff", size: 48, x: 0.5, y: 0.5, start: 0, duration };
+    const overlay = { id: createOverlayId(), text: "Your text", color: "#ffffff", size: 48, x: 0.5, y: 0.5, start: 0, duration };
     props.changeOverlays((items) => [...items, overlay]);
     props.setSelectedOverlayId(overlay.id);
     props.setSelectedProperty(null);
