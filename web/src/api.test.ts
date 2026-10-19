@@ -48,6 +48,7 @@ describe("engine API boundary", () => {
     vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
       const body = init?.body as FormData;
       expect(body.get("processing_mode")).toBe("fast");
+      expect(body.get("execution_policy")).toBe("engine_only");
       expect(body.get("source_profile")).toBe("speech");
       expect(body.get("batch_mode")).toBe("high_volume");
       expect(body.get("style")).toBe("serious");
@@ -67,7 +68,7 @@ describe("engine API boundary", () => {
     }));
     const result = await createClipJob({
       style: "serious", count: 3, minDuration: 20, maxDuration: 60, aspectRatio: "9:16",
-      batchMode: "high_volume", processingMode: "fast", libraryFolderId: "business-1",
+      batchMode: "high_volume", processingMode: "fast", executionPolicy: "engine_only", libraryFolderId: "business-1",
     });
     expect(result.project.id).toBe("p");
     expect(result.job.processingMode).toBe("smart"); // legacy backend omission defaults to Smart

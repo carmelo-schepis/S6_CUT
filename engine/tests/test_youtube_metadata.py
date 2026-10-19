@@ -321,3 +321,32 @@ def test_metadata_generation_uses_small_output_budget_and_caps_paid_calls(monkey
         assert len(calls) == 1
     finally:
         app_module.db.delete_project(job.project_id)
+
+
+@pytest.mark.parametrize("copy", ["public", "private"])
+def test_engine_only_workspace_metadata_action_never_calls_provider(monkeypatch, copy):
+    job = _completed_job()
+    private = {}
+    if copy == "public":
+        job.execution_policy = "engine_only"
+    else:
+        private["execution_policy"] = "engine_only"
+    _persist_job(job, private)
+    calls = []
+    async def forbidden(*args, **kwargs):
+        calls.append("provider")
+        raise AssertionError("Local job must never call OpenRouter")
+    monkeypatch.setattr(app_module.profiles, "openrouter_json", forbidden)
+    monkeypatch.setattr(app_module.profiles, "openrouter_models", forbidden)
+    try:
+        path = f"/api/v1/jobs/{job.id}/clips/{job.clips[0].id}/youtube-metadata"
+        response = client.post(path, json={"regenerate": True})
+        assert response.status_code == 200, response.text
+        assert calls == []
+        saved = app_module.db.get_job(job.id).clips[0]
+        assert saved.title == "Deterministic fallback title"
+        assert saved.youtube_description == "A grounded transcript excerpt."
+        assert saved.youtube_metadata_status == "fallback"
+        assert app_module.db.get_asset(saved.library_asset_id).description == saved.youtube_description
+    finally:
+        app_module.db.delete_project(job.project_id)

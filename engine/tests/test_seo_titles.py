@@ -479,7 +479,7 @@ def test_workspace_save_with_a_stale_seeded_title_keeps_the_library_title():
         app_module.db.delete_project(project.id)
 
 
-def test_default_on_seo_toggle_never_blocks_an_auto_job_that_resolved_to_fast(monkeypatch):
+def test_default_on_seo_toggle_uses_local_smart_without_provider(monkeypatch):
     monkeypatch.setattr(app_module.manager.queue, "full", lambda: False)
 
     async def enqueue(job_id: str) -> None:
@@ -490,7 +490,7 @@ def test_default_on_seo_toggle_never_blocks_an_auto_job_that_resolved_to_fast(mo
     created = client.post("/api/v1/jobs/clip", data={"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "processing_mode": "auto", "youtube_metadata": "true"})
     assert created.status_code == 202, created.text
     try:
-        assert created.json()["job"]["processingMode"] == "fast"
-        assert created.json()["job"]["youtubeMetadataEnabled"] is False
+        assert created.json()["job"]["processingMode"] == "smart"
+        assert created.json()["job"]["youtubeMetadataEnabled"] is True
     finally:
         app_module.db.delete_project(created.json()["project"]["id"])

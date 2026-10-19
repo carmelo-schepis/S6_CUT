@@ -71,7 +71,7 @@ def test_hook_ass_style_wrap_layer_and_end_time(tmp_path):
     assert "Anton" not in ass
 
 
-def test_hook_provider_timeout_is_warning_only_and_rendering_can_continue(monkeypatch, tmp_path):
+def test_hook_provider_timeout_uses_local_transcript_and_rendering_can_continue(monkeypatch, tmp_path):
     from dataclasses import replace
     from engine.app import settings as app_settings
     from engine.config import Settings
@@ -103,9 +103,10 @@ def test_hook_provider_timeout_is_warning_only_and_rendering_can_continue(monkey
     monkeypatch.setattr(profiles, "openrouter_json", fail_generation)
     manager._generate_hook_text(job, private, [{"text": "The transcript remains available", "start": 1, "end": 2}])
 
-    assert job.clips[0].hook_text is None
-    assert private["hook_text"]["status"] == "failed"
-    assert next(step for step in job.steps if step.id == "hook_text").status == "failed"
+    assert job.clips[0].hook_text == "The transcript remains available"
+    assert private["hook_text"]["status"] == "complete"
+    assert private["hook_text"]["local_fallback_count"] == 1
+    assert next(step for step in job.steps if step.id == "hook_text").status == "complete"
     assert any("AI hook text unavailable" in warning for warning in job.warnings)
     assert "render" in {step.id for step in job.steps}, "the normal render stage remains queued after hook failure"
     assert not any("offline or timed out" in warning and "API key" in warning for warning in job.warnings)
