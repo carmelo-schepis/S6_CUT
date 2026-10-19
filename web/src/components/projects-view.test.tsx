@@ -262,16 +262,48 @@ describe("Projects create flow", () => {
     ["Fast", "Fast mode does not support AI hook text."],
     ["Long form", "Long form does not support AI hook text."],
     ["High-volume", "High-volume batches do not support AI hook text."],
-    ["Music", "Music mode does not support AI hook text; Music keeps its manual Top text."],
   ])("explains why hook text is unavailable for %s", (reason, message) => {
     render(<ProjectsView health={health} hasSelectedProvider={reason !== "No provider"} onCreated={vi.fn()} />);
     if (reason === "Fast") fireEvent.click(screen.getByRole("button", { name: "Fast" }));
     if (reason === "Long form") fireEvent.click(screen.getByRole("button", { name: /Long form/ }));
     if (reason === "High-volume") fireEvent.click(screen.getByRole("button", { name: /High-volume/ }));
-    if (reason === "Music") fireEvent.click(screen.getByRole("button", { name: "Music / sung vocals" }));
     const checkbox = screen.getByRole("checkbox", { name: /Hook text/i });
     expect(checkbox).toBeDisabled();
     expect(checkbox.parentElement).toHaveTextContent(message);
+  });
+
+  it("opens Music Top text from Hook text and submits it only when enabled", async () => {
+    mockCreateClipJob.mockResolvedValue({ project: { ...project, sourceProfile: "music" }, job: { ...undefinedJob, sourceProfile: "music" } });
+    render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Music / sung vocals" }));
+    const hookText = screen.getByRole("checkbox", { name: /Hook text/i });
+    expect(hookText).toBeEnabled();
+    expect(hookText).not.toBeChecked();
+    expect(screen.queryByRole("textbox", { name: "Top text" })).not.toBeInTheDocument();
+    fireEvent.click(hookText);
+    const topText = screen.getByRole("textbox", { name: "Top text" });
+    expect(topText).toHaveAttribute("maxLength", "100");
+    fireEvent.change(topText, { target: { value: "Sung vocals make the story" } });
+    fireEvent.click(screen.getByRole("tab", { name: "YouTube" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "YouTube URL" }), { target: { value: "https://www.youtube.com/watch?v=fixture" } });
+    fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
+    await waitFor(() => expect(mockCreateClipJob).toHaveBeenCalledWith(expect.objectContaining({ sourceProfile: "music", musicTopText: "Sung vocals make the story" })));
+    expect(mockCreateClipJob.mock.calls[0][0]).not.toHaveProperty("hookText");
+    expect(mockCreateClipJob.mock.calls[0][0]).not.toHaveProperty("manualHookText");
+  });
+
+  it("omits a Music Top text draft while Hook text is unchecked", async () => {
+    mockCreateClipJob.mockResolvedValue({ project: { ...project, sourceProfile: "music" }, job: { ...undefinedJob, sourceProfile: "music" } });
+    render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Music / sung vocals" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Hook text/i }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Top text" }), { target: { value: "Draft should not be sent" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: /Hook text/i }));
+    fireEvent.click(screen.getByRole("tab", { name: "YouTube" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "YouTube URL" }), { target: { value: "https://www.youtube.com/watch?v=fixture" } });
+    fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
+    await waitFor(() => expect(mockCreateClipJob).toHaveBeenCalled());
+    expect(mockCreateClipJob.mock.calls[0][0]).toHaveProperty("musicTopText", "");
   });
 
   it("defaults to Auto mode with local transcription available without a provider", () => {

@@ -140,7 +140,8 @@ test("real authorized sung-vocal Music presentation: all themes, render, playbac
     const desktopDimensions = await page.evaluate(() => ({ width: document.documentElement.scrollWidth, viewport: window.innerWidth }));
     expect(desktopDimensions.width, "Music controls fit the desktop viewport").toBeLessThanOrEqual(desktopDimensions.viewport);
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.getByRole("textbox", { name: /top text/i }).fill(`Authorized vocals — ${theme}`);
+    await page.getByRole("checkbox", { name: "Hook text" }).check();
+    await page.getByRole("textbox", { name: "Top text" }).fill(`Authorized vocals — ${theme}`);
     const count = page.locator(".count-control strong");
     await expect(count).toHaveText("5");
     while (await count.textContent() !== "2") await page.getByRole("button", { name: "Fewer clips" }).click();

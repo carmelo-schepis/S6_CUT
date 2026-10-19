@@ -61,6 +61,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
   const [sourceDuration, setSourceDuration] = useState<{ file: File; seconds: number } | null>(null);
   const [burnSubtitles, setBurnSubtitles] = useState(true);
   const [hookTextChoice, setHookTextChoice] = useState(false);
+  const [musicHookTextChoice, setMusicHookTextChoice] = useState(false);
   const [manualHookText, setManualHookText] = useState("");
   // null until the customer touches the toggle; until then it follows the
   // profile's "Auto-write SEO titles" default as eligibility changes.
@@ -159,12 +160,12 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
           contentFormat, batchMode, executionPolicy,
           processingMode: sourceProfile === "music" ? "smart" : processingMode,
           sourceProfile, burnSubtitles: fastMode ? false : burnSubtitles,
-          ...(hookTextEnabled ? { hookText: true } : {}),
-          ...(hookTextEnabled && manualHookText.trim() ? { manualHookText: manualHookText.trim() } : {}),
+          ...(sourceProfile === "speech" && speechHookTextEnabled ? { hookText: true } : {}),
+          ...(sourceProfile === "speech" && speechHookTextEnabled && manualHookText.trim() ? { manualHookText: manualHookText.trim() } : {}),
           // Eligible: always send the explicit choice so an untick is respected.
           ...(metadataDisabledReason === null ? { youtubeMetadata: youtubeMetadataActive } : {}),
           subscribeAnimation, libraryFolderId: libraryFolderId || undefined,
-          ...(sourceProfile === "music" ? { musicPresentation: { version: 1 as const, subtitleTheme: musicTheme }, musicTopText } : {}),
+          ...(sourceProfile === "music" ? { musicPresentation: { version: 1 as const, subtitleTheme: musicTheme }, musicTopText: musicHookTextEnabled ? musicTopText : "" } : {}),
           ...(sourceProfile === "music" ? { musicTrackFile: musicTrackFile || undefined, musicTrackUrl: musicTrackUrl.trim() || undefined, musicTrackSpeed: Number(musicTrackSpeed) } : {}),
         });
       if (libraryFolderId) localStorage.setItem(RECENT_FOLDER_KEY, libraryFolderId);
@@ -181,18 +182,23 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
   // claim was wrong for the whole of it whenever a provider was in fact set up.
   const fastMode = sourceProfile === "speech" && processingMode === "fast";
   const knownSourceDuration = sourceType === "file" && sourceDuration?.file === file ? sourceDuration.seconds : null;
-  const hookTextDisabledReason = sourceProfile === "music" ? "Music mode does not support AI hook text; Music keeps its manual Top text."
-    : processingMode === "fast" ? "Fast mode does not support AI hook text."
+  const speechHookTextDisabledReason = processingMode === "fast" ? "Fast mode does not support AI hook text."
       : contentFormat === "long" ? "Long form does not support AI hook text."
         : batchMode === "high_volume" ? "High-volume batches do not support AI hook text."
           : null;
-  const hookTextEligible = hookTextDisabledReason === null;
-  const [previousHookTextEligibility, setPreviousHookTextEligibility] = useState(hookTextEligible);
-  if (previousHookTextEligibility !== hookTextEligible) {
-    setPreviousHookTextEligibility(hookTextEligible);
-    if (!hookTextEligible) setHookTextChoice(false);
+  const musicHookTextDisabledReason = contentFormat !== "short" ? "Music Top text is available for Short form only." : null;
+  const speechHookTextEligible = sourceProfile === "speech" && speechHookTextDisabledReason === null;
+  const musicHookTextEligible = sourceProfile === "music" && musicHookTextDisabledReason === null;
+  const hookTextDisabledReason = sourceProfile === "music" ? musicHookTextDisabledReason : speechHookTextDisabledReason;
+  const hookTextEligible = sourceProfile === "music" ? musicHookTextEligible : speechHookTextEligible;
+  const [previousSpeechHookTextEligibility, setPreviousSpeechHookTextEligibility] = useState(speechHookTextEligible);
+  if (previousSpeechHookTextEligibility !== speechHookTextEligible) {
+    setPreviousSpeechHookTextEligibility(speechHookTextEligible);
+    if (!speechHookTextEligible) setHookTextChoice(false);
   }
-  const hookTextEnabled = hookTextEligible && hookTextChoice;
+  const speechHookTextEnabled = speechHookTextEligible && hookTextChoice;
+  const musicHookTextEnabled = musicHookTextEligible && musicHookTextChoice;
+  const hookTextEnabled = sourceProfile === "music" ? musicHookTextEnabled : speechHookTextEnabled;
   const metadataDisabledReason = contentFormat !== "short" ? "Available for Short form only."
       : sourceProfile === "speech" && processingMode === "fast" ? "Fast mode does not support metadata generation. Choose Auto or Smart."
         : null;
@@ -327,9 +333,6 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
             <div className="folder-picker"><Field label="Business folder"><select aria-label="Business folder" value={libraryFolderId} onChange={(event) => setLibraryFolderId(event.target.value)}>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></Field><Button variant="ghost" onClick={addFolder}><Plus size={13} /> New folder</Button></div>
           </FieldGroup>
 
-          {sourceProfile === "music" && <FieldGroup title="Top text" hint="Optional · displayed separately in the upper black area. Up to 100 characters.">
-            <Field label="Top text"><input value={musicTopText} maxLength={100} onChange={(event) => setMusicTopText(event.target.value)} placeholder="Leave blank to omit" /></Field>
-          </FieldGroup>}
           {sourceProfile === "music" && <FieldGroup title="Background song" hint="Optional · upload an MP3 or paste a public YouTube song URL. When supplied, this replaces the video's original audio in each clip.">
             <label className="field"><span className="field-label">MP3 upload</span><input ref={musicTrackInput} aria-label="Background song MP3" type="file" accept="audio/mpeg,.mp3" onChange={(event) => { const next = event.target.files?.[0] || null; setMusicTrackFile(next); if (next) setMusicTrackUrl(""); }} /><small>{musicTrackFile?.name || "MP3 audio only"}</small>{musicTrackFile && <button type="button" className="button button-quiet" onClick={() => { setMusicTrackFile(null); if (musicTrackInput.current) musicTrackInput.current.value = ""; }}>Remove song</button>}</label>
             <Field label="YouTube song URL"><input aria-label="YouTube song URL" type="url" value={musicTrackUrl} onChange={(event) => { setMusicTrackUrl(event.target.value); if (event.target.value) { setMusicTrackFile(null); if (musicTrackInput.current) musicTrackInput.current.value = ""; } }} placeholder="https://www.youtube.com/watch?v=..." /></Field>
@@ -339,8 +342,9 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
           <SubscribeAnimationControl value={subscribeAnimation} onChange={setSubscribeAnimation} longForm={contentFormat === "long"} />
 
           {sourceProfile === "speech" && <label className="subtitle-toggle"><input type="checkbox" checked={fastMode ? false : burnSubtitles} disabled={fastMode} onChange={(event) => setBurnSubtitles(event.target.checked)} /> <span><strong>Burn in subtitles</strong><small>{fastMode ? "Fast mode skips transcription and captions. Choose Auto or Smart to enable them." : "Uses local word timing. Fast mode skips captions."}</small></span></label>}
-          <label className="subtitle-toggle"><input type="checkbox" aria-label="Hook text" checked={hookTextEnabled} disabled={!hookTextEligible} onChange={(event) => setHookTextChoice(event.target.checked)} /> <span><strong>Hook text</strong><small>{hookTextDisabledReason ?? "Off by default. Tick to enter your own hook or leave blank to generate one from the transcript."}</small></span></label>
-          {hookTextEnabled && <Field label="Hook text to display" hint="Up to 150 characters. Your text will be shown on each clip."><textarea aria-label="Hook text to display" rows={2} maxLength={150} value={manualHookText} onChange={(event) => setManualHookText(event.target.value)} placeholder="Leave blank to generate a hook from the transcript" /></Field>}
+          <label className="subtitle-toggle"><input type="checkbox" aria-label="Hook text" checked={hookTextEnabled} disabled={!hookTextEligible} onChange={(event) => sourceProfile === "music" ? setMusicHookTextChoice(event.target.checked) : setHookTextChoice(event.target.checked)} /> <span><strong>Hook text</strong><small>{hookTextDisabledReason ?? (sourceProfile === "music" ? "Off by default. Tick to enter optional text shown in the upper black area of each clip (up to 100 characters)." : "Off by default. Tick to enter your own hook or leave blank to generate one from the transcript.")}</small></span></label>
+          {musicHookTextEnabled && <Field label="Top text" hint="Optional · displayed in the upper black area. Up to 100 characters."><input aria-label="Top text" value={musicTopText} maxLength={100} onChange={(event) => setMusicTopText(event.target.value)} placeholder="Leave blank to omit" /></Field>}
+          {speechHookTextEnabled && <Field label="Hook text to display" hint="Up to 150 characters. Your text will be shown on each clip."><textarea aria-label="Hook text to display" rows={2} maxLength={150} value={manualHookText} onChange={(event) => setManualHookText(event.target.value)} placeholder="Leave blank to generate a hook from the transcript" /></Field>}
           <label className="subtitle-toggle"><input type="checkbox" aria-label="Write SEO titles with AI (YouTube metadata)" data-testid="youtube-metadata-toggle" checked={youtubeMetadataActive} disabled={metadataDisabledReason !== null} onChange={(event) => setYoutubeMetadataChoice(event.target.checked)} /> <span><strong>Generate YouTube metadata</strong><small>{metadataDisabledReason ?? (processingMode === "fast" ? "Fast mode has no transcript. Choose Auto or Smart." : executionPolicy === "engine_only" ? "Uses transcript-based local descriptions and deterministic titles." : `${youtubeMetadataDefault ? "On by default (Settings › Auto-write SEO titles)" : "Off by default"}. Uses ${selectedProfile?.youtubeMetadataModelId || "the configured Settings model"} when available, with local fallback. Editable and separate from burned-in text.`)}</small></span></label>
 
           <button className="advanced-toggle" onClick={() => setAdvanced(!advanced)} aria-expanded={advanced}>Advanced controls <span aria-hidden="true">{advanced ? "−" : "+"}</span></button>

@@ -191,6 +191,30 @@ test.describe("AI hook text acceptance", () => {
     expect(submittedBodies[1]).toContain(`name="manual_hook_text"\r\n\r\n${customText}`);
   });
 
+  test("Music Hook text opens Top text and submits it through the Music field", async ({ page }) => {
+    await mockConnectedProvider(page);
+    const submittedBodies: string[] = [];
+    await page.route("**/api/v1/jobs/clip", async (route) => {
+      submittedBodies.push(route.request().postData() || "");
+      await route.fulfill({ status: 400, json: { detail: "Acceptance payload capture" } });
+    });
+    await openCreation(page);
+    await page.getByRole("button", { name: "Music / sung vocals" }).click();
+    await chooseSpeechSource(page, "youtube");
+    const hook = page.getByRole("checkbox", { name: "Hook text" });
+    await expect(hook).toBeEnabled();
+    await expect(hook).not.toBeChecked();
+    await expect(page.getByRole("textbox", { name: "Top text" })).toHaveCount(0);
+    await hook.check();
+    const text = "Lyrics lead into the chorus";
+    await page.getByRole("textbox", { name: "Top text" }).fill(text);
+    await page.getByRole("button", { name: /Create \d+ short clips?/ }).click();
+    await expect.poll(() => submittedBodies.length).toBe(1);
+    expect(submittedBodies[0]).toContain(`name="music_top_text"\r\n\r\n${text}`);
+    expect(submittedBodies[0]).not.toMatch(/name="hook_text"\s+true/i);
+    expect(submittedBodies[0]).not.toContain("manual_hook_text");
+  });
+
   test("shows eligibility reasons without enabling unsupported configurations", async ({ page }) => {
     await mockConnectedProvider(page);
     await openCreation(page);
@@ -222,9 +246,11 @@ test.describe("AI hook text acceptance", () => {
 
     await page.getByRole("button", { name: "Standard · up to 30" }).click();
     await page.getByRole("button", { name: "Music / sung vocals" }).click();
-    await expect(hook).toBeDisabled();
+    await expect(hook).toBeEnabled();
     await expect(hook).not.toBeChecked();
-    await expect(page.getByText("Music mode does not support AI hook text; Music keeps its manual Top text.", { exact: true })).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "Top text" })).toHaveCount(0);
+    await hook.check();
+    await expect(page.getByRole("textbox", { name: "Top text" })).toBeVisible();
   });
 
   test("an unticked Smart job creates no hook step or hook output", async ({ page }, testInfo) => {

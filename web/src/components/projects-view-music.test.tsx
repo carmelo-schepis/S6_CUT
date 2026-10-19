@@ -54,6 +54,8 @@ describe("Music presentation creation controls", () => {
     expect(themeGroup.getAllByRole("button").filter((button) => button.getAttribute("aria-pressed") === "true")).toHaveLength(1);
     const topText = `  ${"L".repeat(96)}  `;
     expect(topText).toHaveLength(100);
+    expect(screen.queryByRole("textbox", { name: "Top text" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Hook text" }));
     const title = screen.getByRole("textbox", { name: "Top text" });
     expect(title).toHaveAttribute("maxLength", "100");
     fireEvent.change(title, { target: { value: topText } });
@@ -86,6 +88,7 @@ describe("Music presentation creation controls", () => {
     expect(vi.mocked(createClipJob).mock.calls[0][0]).not.toHaveProperty("musicTopText");
 
     fireEvent.click(mode("Music"));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Hook text" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Top text" }), { target: { value: "Do not leak" } });
     fireEvent.click(mode("Music"));
     chooseFile();
