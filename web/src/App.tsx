@@ -258,7 +258,6 @@ export function App() {
     </aside>
 
     <div className="app-main">
-      <div className="app-wallpaper" aria-hidden="true" />
       <header className="topbar">
         <div className="topbar-context">
           <span className="mobile-brand"><img src="/app-icon.png" alt="" /> <span><span className="brand-accent">S6</span>_cut</span></span>
