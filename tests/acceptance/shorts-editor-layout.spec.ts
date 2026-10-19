@@ -1,4 +1,6 @@
 import { expect, test } from "@playwright/test";
+
+test.use({ serviceWorkers: "block" });
 import fs from "node:fs/promises";
 import path from "node:path";
 

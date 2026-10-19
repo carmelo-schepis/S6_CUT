@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+test.use({ serviceWorkers: "block" });
+
 async function openShortsEditor(page) {
   await page.route("**/api/v1/library/assets", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/jobs", (route) => route.fulfill({ json: [] }));

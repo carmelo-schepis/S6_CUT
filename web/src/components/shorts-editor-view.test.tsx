@@ -17,7 +17,7 @@ function trimField(name: "Start seconds" | "End seconds") {
 
 describe("ShortsEditorView", () => {
   beforeEach(() => { vi.clearAllMocks(); vi.mocked(listAssets).mockImplementation(async () => [asset]); vi.mocked(listJobs).mockResolvedValue([]); vi.mocked(createShortsJob).mockResolvedValue({ project: {} as never, job: {} as never }); vi.mocked(createShortsSourceJob).mockResolvedValue({ project: {} as never, job: {} as never }); });
-  afterEach(() => vi.useRealTimers());
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
   it("explains the accepted source, editing controls, and queued output", async () => {
     render(<ShortsEditorView onJobCreated={vi.fn()} />);
     expect(screen.getByRole("heading", { level: 1, name: "Editor" })).toBeInTheDocument();
@@ -265,5 +265,314 @@ describe("ShortsEditorView", () => {
     fireEvent.change(trimField("Start seconds"), { target: { value: "0" } });
     fireEvent.click(screen.getByRole("button", { name: "Queue short" }));
     await waitFor(() => expect(createShortsSourceJob).toHaveBeenCalledWith(expect.objectContaining({ url: "https://www.youtube.com/watch?v=test", end: undefined })));
+  });
+
+  it("undoes and redoes complete edits, leaves no-op changes alone, and supports shortcuts", async () => {
+    vi.mocked(listAssets).mockResolvedValue([{ ...asset, previewUrl: "/preview.mp4" }]);
+    render(<ShortsEditorView onJobCreated={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("tab", { name: /Library/ }));
+    fireEvent.change(await screen.findByLabelText("Library video"), { target: { value: asset.id } });
+    await screen.findByRole("heading", { level: 2, name: asset.title });
+    const aspect = await screen.findByLabelText("Aspect ratio");
+    fireEvent.change(aspect, { target: { value: "1:1" } });
+    expect(aspect).toHaveValue("1:1");
+    expect(screen.getByRole("button", { name: "Undo" })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(aspect).toHaveValue("9:16");
+    expect(screen.getByRole("button", { name: "Redo" })).toBeEnabled();
+    fireEvent.change(aspect, { target: { value: "9:16" } }); // no-op keeps redo available
+    expect(screen.getByRole("button", { name: "Redo" })).toBeEnabled();
+    fireEvent.change(aspect, { target: { value: "16:9" } });
+    expect(screen.getByRole("button", { name: "Redo" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+
+    fireEvent.keyDown(document.body, { key: "z", ctrlKey: true, shiftKey: true });
+    expect(aspect).toHaveValue("16:9");
+    fireEvent.keyDown(document.body, { key: "y", ctrlKey: true });
+    expect(aspect).toHaveValue("16:9");
+    const name = screen.getByLabelText("Project name");
+    name.focus();
+    fireEvent.keyDown(name, { key: "z", ctrlKey: true });
+    expect(aspect).toHaveValue("16:9"); // native text editing keeps the shortcut
+  });
+
+  it("commits a canceled text drag as one grouped undo action", async () => {
+    vi.mocked(listAssets).mockResolvedValue([{ ...asset, previewUrl: "/preview.mp4" }]);
+    render(<ShortsEditorView onJobCreated={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("tab", { name: /Library/ }));
+    fireEvent.change(await screen.findByLabelText("Library video"), { target: { value: asset.id } });
+    await screen.findByRole("heading", { level: 2, name: asset.title });
+    fireEvent.click(screen.getByRole("tab", { name: "Text" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add text overlay" }));
+    const overlay = screen.getByRole("button", { name: "Text overlay: Your text" });
+    const frame = document.querySelector(".shorts-video-frame")!;
+    vi.spyOn(frame, "getBoundingClientRect").mockReturnValue({ x: 100, y: 100, left: 100, top: 100, right: 500, bottom: 500, width: 400, height: 400, toJSON: () => ({}) });
+    vi.spyOn(overlay, "getBoundingClientRect").mockReturnValue({ x: 200, y: 200, left: 200, top: 200, right: 300, bottom: 240, width: 100, height: 40, toJSON: () => ({}) });
+    fireEvent.pointerDown(overlay, { pointerId: 11, button: 0, clientX: 250, clientY: 220 });
+    fireEvent.pointerMove(window, { pointerId: 11, clientX: 380, clientY: 350 });
+    fireEvent.pointerCancel(window, { pointerId: 11 });
+    expect(overlay).toHaveStyle({ left: "70%", top: "62.5%" });
+    expect(screen.getByRole("button", { name: "Undo" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(screen.getByRole("button", { name: "Text overlay: Your text" })).toHaveStyle({ left: "50%", top: "50%" });
+  });
+
+  it("adds text overlays when randomUUID is unavailable on an insecure origin", async () => {
+    vi.stubGlobal("crypto", { randomUUID: undefined });
+    vi.mocked(listAssets).mockResolvedValue([{ ...asset, previewUrl: "/preview.mp4" }]);
+    render(<ShortsEditorView onJobCreated={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("tab", { name: /Library/ }));
+    fireEvent.change(await screen.findByLabelText("Library video"), { target: { value: asset.id } });
+    await screen.findByRole("heading", { level: 2, name: asset.title });
+    fireEvent.click(screen.getByRole("tab", { name: "Text" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add text overlay" }));
+    expect(screen.getByRole("button", { name: "Text overlay: Your text" })).toBeInTheDocument();
+  });
+
+  it("enables undo for a meaningful focused edit and clears redo without splitting the group", async () => {
+    vi.mocked(listAssets).mockResolvedValue([{ ...asset, previewUrl: "/preview.mp4" }]);
+    render(<ShortsEditorView onJobCreated={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("tab", { name: /Library/ }));
+    fireEvent.change(await screen.findByLabelText("Library video"), { target: { value: asset.id } });
+    await screen.findByRole("heading", { level: 2, name: asset.title });
+    const aspect = screen.getByLabelText("Aspect ratio");
+    const trimStart = screen.getByLabelText("Video trim start seconds");
+    fireEvent.change(aspect, { target: { value: "1:1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(screen.getByRole("button", { name: "Redo" })).toBeEnabled();
+
+    fireEvent.focus(trimStart);
+    fireEvent.change(trimStart, { target: { value: "0" } });
+    expect(screen.getByRole("button", { name: "Undo" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Redo" })).toBeEnabled();
+    fireEvent.change(trimStart, { target: { value: "1" } });
+    expect(screen.getByRole("button", { name: "Undo" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Redo" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(trimStart).toHaveValue(0);
+    expect(screen.getByRole("button", { name: "Redo" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Redo" }));
+    expect(trimStart).toHaveValue(1);
+  });
+
+  it("keeps redo when a grouped edit returns to its starting snapshot", async () => {
+    vi.mocked(listAssets).mockResolvedValue([{ ...asset, previewUrl: "/preview.mp4" }]);
+    render(<ShortsEditorView onJobCreated={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("tab", { name: /Library/ }));
+    fireEvent.change(await screen.findByLabelText("Library video"), { target: { value: asset.id } });
+    await screen.findByRole("heading", { level: 2, name: asset.title });
+    const aspect = screen.getByLabelText("Aspect ratio");
+    fireEvent.change(aspect, { target: { value: "1:1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+
+    const projectName = screen.getByLabelText("Project name");
+    fireEvent.focus(projectName);
+    fireEvent.change(projectName, { target: { value: "temporary" } });
+    fireEvent.change(projectName, { target: { value: "" } });
+    expect(screen.getByRole("button", { name: "Undo" })).toBeDisabled();
+    fireEvent.blur(projectName);
+    expect(screen.getByRole("button", { name: "Redo" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Redo" }));
+    expect(aspect).toHaveValue("1:1");
+  });
+
+  it("groups tint colour changes made during one picker session", async () => {
+    vi.mocked(listAssets).mockResolvedValue([{ ...asset, previewUrl: "/preview.mp4" }]);
+    render(<ShortsEditorView onJobCreated={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("tab", { name: /Library/ }));
+    fireEvent.change(await screen.findByLabelText("Library video"), { target: { value: asset.id } });
+    await screen.findByRole("heading", { level: 2, name: asset.title });
+    fireEvent.click(screen.getByRole("tab", { name: "Filters" }));
+    fireEvent.change(screen.getByLabelText("Filter preset"), { target: { value: "tint" } });
+    const tint = screen.getByLabelText("Tint color");
+    fireEvent.focus(tint);
+    fireEvent.change(tint, { target: { value: "#123456" } });
+    fireEvent.change(tint, { target: { value: "#654321" } });
+    fireEvent.blur(tint);
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(tint).toHaveValue("#d58a55");
+    expect(screen.getByLabelText("Filter preset")).toHaveValue("tint");
+  });
+
+  it("groups tint colour changes on the empty editor screen", async () => {
+    render(<ShortsEditorView onJobCreated={vi.fn()} />);
+    fireEvent.change(await screen.findByLabelText("Filter preset"), { target: { value: "tint" } });
+    const tint = screen.getByLabelText("Tint color");
+    fireEvent.focus(tint);
+    fireEvent.change(tint, { target: { value: "#123456" } });
+    fireEvent.change(tint, { target: { value: "#654321" } });
+    fireEvent.blur(tint);
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(tint).toHaveValue("#d58a55");
+    expect(screen.getByLabelText("Filter preset")).toHaveValue("tint");
+  });
+
+  it("restores project name, trims, tint settings, and subscribe animation snapshots", async () => {
+    vi.mocked(listAssets).mockResolvedValue([{ ...asset, previewUrl: "/preview.mp4" }]);
+    render(<ShortsEditorView onJobCreated={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("tab", { name: /Library/ }));
+    fireEvent.change(await screen.findByLabelText("Library video"), { target: { value: asset.id } });
+    await screen.findByRole("heading", { level: 2, name: asset.title });
+
+    const projectName = screen.getByLabelText("Project name");
+    fireEvent.focus(projectName);
+    fireEvent.change(projectName, { target: { value: "Project Aurora" } });
+    fireEvent.blur(projectName);
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(projectName).toHaveValue("");
+    fireEvent.click(screen.getByRole("button", { name: "Redo" }));
+    expect(projectName).toHaveValue("Project Aurora");
+
+    const trimStart = screen.getByLabelText("Video trim start seconds");
+    fireEvent.focus(trimStart);
+    fireEvent.change(trimStart, { target: { value: "0.5" } });
+    fireEvent.blur(trimStart);
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(trimStart).toHaveValue(0);
+    fireEvent.click(screen.getByRole("button", { name: "Redo" }));
+    expect(trimStart).toHaveValue(0.5);
+
+    fireEvent.click(screen.getByRole("tab", { name: "Filters" }));
+    fireEvent.change(screen.getByLabelText("Filter preset"), { target: { value: "tint" } });
+    const tint = screen.getByLabelText("Tint color");
+    fireEvent.focus(tint);
+    fireEvent.change(tint, { target: { value: "#123456" } });
+    fireEvent.blur(tint);
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(tint).toHaveValue("#d58a55");
+    fireEvent.click(screen.getByRole("button", { name: "Redo" }));
+    expect(tint).toHaveValue("#123456");
+
+    fireEvent.click(screen.getByText("Subscribe animation settings", { selector: "summary" }));
+    const enabled = screen.getByLabelText("Enable Subscribe animation");
+    const timing = screen.getByLabelText("Subscribe animation timing");
+    fireEvent.change(timing, { target: { value: "10" } });
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(timing).toHaveValue("5");
+    fireEvent.click(screen.getByRole("button", { name: "Redo" }));
+    expect(timing).toHaveValue("10");
+    fireEvent.click(enabled);
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(enabled).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Redo" }));
+    expect(enabled).not.toBeChecked();
+  });
+
+  it("caps meaningful undo history at 100 entries", async () => {
+    vi.mocked(listAssets).mockResolvedValue([{ ...asset, previewUrl: "/preview.mp4" }]);
+    render(<ShortsEditorView onJobCreated={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("tab", { name: /Library/ }));
+    fireEvent.change(await screen.findByLabelText("Library video"), { target: { value: asset.id } });
+    await screen.findByRole("heading", { level: 2, name: asset.title });
+    const aspect = screen.getByLabelText("Aspect ratio");
+    const values = ["16:9", "1:1", "4:5", "9:16"];
+    for (let index = 0; index < 101; index += 1) fireEvent.change(aspect, { target: { value: values[index % values.length] } });
+    const undo = screen.getByRole("button", { name: "Undo" });
+    for (let index = 0; index < 100; index += 1) fireEvent.click(undo);
+    expect(aspect).toHaveValue("16:9");
+    expect(undo).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Redo" })).toBeEnabled();
+  });
+
+  it("saves the queued baseline and clears undo and redo after success", async () => {
+    vi.mocked(listAssets).mockResolvedValue([{ ...asset, previewUrl: "/preview.mp4" }]);
+    render(<ShortsEditorView onJobCreated={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("tab", { name: /Library/ }));
+    fireEvent.change(await screen.findByLabelText("Library video"), { target: { value: asset.id } });
+    await screen.findByRole("heading", { level: 2, name: asset.title });
+    const aspect = screen.getByLabelText("Aspect ratio");
+    fireEvent.change(aspect, { target: { value: "1:1" } });
+    expect(screen.getByText("Unsaved edits")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Queue short" }));
+    await waitFor(() => expect(createShortsJob).toHaveBeenCalled());
+    expect(await screen.findByText("All changes saved")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Undo" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Redo" })).toBeDisabled();
+
+    fireEvent.change(aspect, { target: { value: "16:9" } });
+    expect(screen.getByText("Unsaved edits")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(aspect).toHaveValue("1:1");
+  });
+
+  it("preserves both history stacks when queueing fails", async () => {
+    vi.mocked(listAssets).mockResolvedValue([{ ...asset, previewUrl: "/preview.mp4" }]);
+    vi.mocked(createShortsJob).mockRejectedValueOnce(new Error("Queue unavailable"));
+    render(<ShortsEditorView onJobCreated={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("tab", { name: /Library/ }));
+    fireEvent.change(await screen.findByLabelText("Library video"), { target: { value: asset.id } });
+    await screen.findByRole("heading", { level: 2, name: asset.title });
+    const aspect = screen.getByLabelText("Aspect ratio");
+    fireEvent.change(aspect, { target: { value: "1:1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(aspect).toHaveValue("9:16");
+    expect(screen.getByRole("button", { name: "Redo" })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Queue short" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Queue unavailable");
+    expect(screen.getByRole("button", { name: "Undo" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Redo" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Redo" }));
+    expect(aspect).toHaveValue("1:1");
+  });
+
+  it("clears undo and redo after a successful source replacement", async () => {
+    const second = { ...asset, id: "asset-2", title: "Second clip", filename: "second.mp4", blobId: "blob-2", previewUrl: "/second.mp4" };
+    vi.mocked(listAssets).mockResolvedValue([{ ...asset, previewUrl: "/preview.mp4" }, second]);
+    render(<ShortsEditorView onJobCreated={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("tab", { name: /Library/ }));
+    fireEvent.change(await screen.findByLabelText("Library video"), { target: { value: asset.id } });
+    await screen.findByRole("heading", { level: 2, name: asset.title });
+    fireEvent.change(screen.getByLabelText("Aspect ratio"), { target: { value: "1:1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(screen.getByRole("button", { name: "Redo" })).toBeEnabled();
+
+    fireEvent.click(screen.getByText("Choose another source"));
+    fireEvent.change(await screen.findByLabelText("Library video"), { target: { value: second.id } });
+    await screen.findByRole("heading", { level: 2, name: second.title });
+    expect(screen.getByRole("button", { name: "Undo" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Redo" })).toBeDisabled();
+    expect(screen.getByText("All changes saved")).toBeInTheDocument();
+  });
+
+  it("preserves edits and undo history when a Library source load fails", async () => {
+    const second = { ...asset, id: "asset-2", title: "Second clip", filename: "second.mp4", blobId: "blob-2", previewUrl: "/second.mp4" };
+    vi.mocked(listAssets).mockResolvedValue([{ ...asset, previewUrl: "/preview.mp4" }, second]);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<ShortsEditorView onJobCreated={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("tab", { name: /Library/ }));
+    fireEvent.change(await screen.findByLabelText("Library video"), { target: { value: asset.id } });
+    await screen.findByRole("heading", { level: 2, name: asset.title });
+    fireEvent.change(trimField("Start seconds"), { target: { value: "1" } });
+    expect(screen.getByRole("button", { name: "Undo" })).toBeEnabled();
+
+    vi.mocked(listAssets).mockRejectedValueOnce(new Error("Library unavailable"));
+    fireEvent.click(screen.getByText("Choose another source"));
+    fireEvent.change(await screen.findByLabelText("Library video"), { target: { value: second.id } });
+    expect(await screen.findByRole("alert")).toHaveTextContent("Library unavailable");
+    expect(trimField("Start seconds")).toHaveValue(1);
+    expect(screen.getByRole("button", { name: "Undo" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(trimField("Start seconds")).toHaveValue(0);
+  });
+
+  it("reconfirms a source switch if the document changes after mode confirmation", async () => {
+    vi.mocked(listAssets).mockResolvedValue([{ ...asset, previewUrl: "/preview.mp4" }]);
+    const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(true).mockReturnValueOnce(false);
+    render(<ShortsEditorView onJobCreated={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("tab", { name: /Library/ }));
+    fireEvent.change(await screen.findByLabelText("Library video"), { target: { value: asset.id } });
+    await screen.findByRole("heading", { level: 2, name: asset.title });
+    fireEvent.change(trimField("Start seconds"), { target: { value: "1" } });
+    fireEvent.click(screen.getByText("Choose another source"));
+    fireEvent.click(screen.getByRole("tab", { name: /Local file/ }));
+    fireEvent.change(screen.getByLabelText("Aspect ratio"), { target: { value: "1:1" } });
+    fireEvent.change(screen.getByLabelText("Choose video file"), { target: { files: [new File(["video"], "replacement.mp4", { type: "video/mp4" })] } });
+
+    expect(confirm).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("heading", { level: 2, name: asset.title })).toBeInTheDocument();
+    expect(screen.getByLabelText("Aspect ratio")).toHaveValue("1:1");
+    expect(screen.getByRole("button", { name: "Undo" })).toBeEnabled();
   });
 });
