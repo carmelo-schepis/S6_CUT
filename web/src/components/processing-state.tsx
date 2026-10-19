@@ -70,10 +70,10 @@ export function ProcessingState({ job, waitingForEngine = false }: { job: Job; w
       <div className="download-detail-heading"><strong>{download.phase}</strong>{download.percent != null && <b>{Math.round(download.percent)}%</b>}</div>
       {download.percent != null && <div className="download-detail-track" aria-hidden="true"><span style={{ width: `${download.percent}%` }} /></div>}
       <dl className="download-detail-values">
-        <div><dt>Transferred</dt><dd>{download.transferred}</dd></div>
+        <div><dt>Received</dt><dd>{download.transferred}</dd></div>
         {download.speed && <div><dt>Speed</dt><dd>{download.speed}</dd></div>}
         {download.eta && <div><dt>Remaining</dt><dd>{download.eta}</dd></div>}
-        <div><dt>Last progress</dt><dd><time dateTime={download.lastProgressAt}>{new Date(download.lastProgressAt).toLocaleTimeString()}</time></dd></div>
+        <div><dt>Updated</dt><dd><time dateTime={download.lastProgressAt}>{new Date(download.lastProgressAt).toLocaleTimeString()}</time></dd></div>
       </dl>
       {download.message && <small className="download-message">{download.message}</small>}
     </section>}
