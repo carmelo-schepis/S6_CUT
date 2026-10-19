@@ -2,11 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SPLASH_MIN_VISIBLE_MS, SPLASH_NOTICEABLE_MS, revealApp, revealWhenReady, splashVisibleFor } from "./startup";
 
 // The splash enters after a grace period, so whether it is "visible" is read from its own animation.
-function fakeAnimation(elapsed: number, delay = 800) {
+function fakeAnimation(elapsed: number, delay = 300) {
   return { animationName: "startup-appear", effect: { getComputedTiming: () => ({ delay }) }, timeline: { currentTime: elapsed }, startTime: 0, currentTime: elapsed };
 }
 
-function mount(visibleForMs: number | null, delay = 800) {
+function mount(visibleForMs: number | null, delay = 300) {
   document.body.className = "startup-loading";
   document.body.innerHTML = '<div id="startup-screen"></div><div id="root" inert></div>';
   const screen = document.getElementById("startup-screen")!;
@@ -53,7 +53,7 @@ describe("startup splash", () => {
   it("holds a splash that has only just appeared, then fades it out", async () => {
     const screen = mount(100);
     revealApp();
-    // Still covering the app: it has been visible for 100ms of the 350ms minimum.
+    // Still covering the app: it has been visible for 100ms of the 250ms minimum.
     expect(screen.isConnected).toBe(true);
     expect(document.getElementById("root")).toHaveAttribute("inert");
     expect(screen.animate).not.toHaveBeenCalled();

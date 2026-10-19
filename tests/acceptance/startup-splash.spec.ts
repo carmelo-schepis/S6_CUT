@@ -33,14 +33,14 @@ async function hold(page: Page, pattern: string | RegExp) {
   return { release, requested: () => requested };
 }
 
-// The splash waits 800ms before it appears, so a normal load never shows it. These tests choose the
+// The splash waits 300ms before it appears, so an instant load never shows it. These tests choose the
 // delay they need by rewriting the stylesheet response, which keeps them independent of how fast the
 // machine happens to load the page.
 async function withSplashDelay(page: Page, delay: string) {
   await page.route("**/startup.css*", async (route) => {
     const response = await route.fetch();
     const original = await response.text();
-    const css = original.replace(/(startup-appear\s+(?:180ms\s+ease-out|1ms\s+linear))\s+800ms/g, `$1 ${delay}`);
+    const css = original.replace(/(startup-appear\s+(?:120ms\s+ease-out|1ms\s+linear))\s+300ms/g, `$1 ${delay}`);
     expect(css).not.toBe(original);
     await route.fulfill({ response, body: css });
   });
@@ -129,7 +129,7 @@ test("once the splash has appeared it stays long enough to read, never a flash",
   await expectRevealed(page);
   await expect.poll(async () => (await read()).removed).not.toBeNull();
   const { firstVisible, removed } = await read();
-  expect(removed! - firstVisible!).toBeGreaterThanOrEqual(330);
+  expect(removed! - firstVisible!).toBeGreaterThanOrEqual(230);
 });
 
 test("static black logo screen paints before application JavaScript arrives", async ({ page }) => {
@@ -140,8 +140,9 @@ test("static black logo screen paints before application JavaScript arrives", as
     await page.goto("/", { waitUntil: "commit" });
     await expect.poll(gate.requested).toBe(true);
     await expectCovered(page);
-    // The grace period needs no JavaScript: the logo appears on its own if loading is slow.
-    await expect(page.locator("#startup-screen")).toHaveCSS("opacity", "1", { timeout: 10_000 });
+    // The grace period needs no JavaScript: the logo appears on its own if loading is slow. (WebKit does not
+    // tick animations while the page script is still pending, so it may stop part-way through the fade.)
+    await expect.poll(() => page.locator("#startup-screen").evaluate((screen) => Number.parseFloat(getComputedStyle(screen).opacity)), { timeout: 10_000 }).toBeGreaterThan(0.25);
     const logo = page.getByRole("img", { name: "S6 Cut", exact: true });
     await expect(logo).toBeVisible();
     await expect(page.locator(".startup-wordmark")).toHaveText("s6_cut");
@@ -298,7 +299,7 @@ test("entry and exit fade smoothly on load and reload without early interaction"
 test("reduced motion skips both fades but keeps the grace period", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await mockEngine(page);
-  await withSplashDelay(page, "300ms");
+  await withSplashDelay(page, "320ms");
   const gate = await hold(page, "**/api/v1/library/recent-clips**");
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await expectCovered(page);
