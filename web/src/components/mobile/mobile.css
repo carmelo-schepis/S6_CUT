@@ -137,9 +137,8 @@
 .m-run > strong { flex: 1 1 auto; min-width: 0; }
 .m-age { flex: none; white-space: nowrap; }
 
-.m-shelf { display: flex; gap: var(--space-3); margin: 0 calc(-1 * var(--page-inset)); padding: 0 var(--page-inset); list-style: none; overflow-x: auto; scroll-snap-type: x proximity; scroll-padding-inline: var(--page-inset); scrollbar-width: none; -webkit-overflow-scrolling: touch; }
-.m-shelf::-webkit-scrollbar { display: none; }
-.m-shelf > li { flex: 0 0 min(60vw, 220px); scroll-snap-align: start; }
+/* Recent clips close the page, so they take the whole width as a grid instead of a sideways shelf. */
+.m-shelf { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--gap-group) var(--space-3); margin: 0; padding: 0; list-style: none; }
 .m-shelf-item { display: grid; align-content: start; gap: var(--space-1); width: 100%; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; }
 .m-shelf-item .m-poster { margin-bottom: var(--space-1); }
 
@@ -221,17 +220,12 @@
   .m-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--gap-group) var(--space-4); }
   .m-toolbar { grid-template-columns: minmax(220px, 1fr) auto; align-items: center; }
   .m-filters { grid-template-columns: repeat(3, 140px); }
-  .m-shelf { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); margin: 0; padding: 0; overflow: visible; }
+  .m-shelf { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: var(--gap-group) var(--space-4); }
   .m-work-head { grid-template-columns: 160px minmax(0, 1fr); }
   .m-clip-strip > li { flex-basis: 120px; }
 }
 @media (min-width: 1024px) {
   .m-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  /* Home splits into work on the left and clips on the right. */
-  .m-home { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); column-gap: var(--gap-pane); align-items: start; }
-  .m-home > .m-hero, .m-home > .m-empty { grid-column: 1 / -1; }
-  .m-home > .m-clips { grid-column: 2; grid-row: 2 / span 3; margin-top: var(--gap-section); }
-  .m-home > .m-running, .m-home > .m-runs { grid-column: 1; }
   .m-work { grid-template-columns: minmax(0, 640px) minmax(240px, 380px); column-gap: var(--gap-pane); align-items: start; }
   .m-work > :not(.m-work-clips) { grid-column: 1; }
   .m-work > .m-work-clips { grid-column: 2; grid-row: 1 / span 5; }

@@ -1,31 +1,92 @@
-/** Reveal even when startup fails, so the existing error and Retry stay usable. */
+/** A splash that has noticeably appeared is held at least this long, so it never flashes past. */
+export const SPLASH_MIN_VISIBLE_MS = 350;
+/** One that has barely begun to fade in (about 40% opaque) is discarded instead: load finished right at the boundary. */
+export const SPLASH_NOTICEABLE_MS = 50;
+
+/**
+ * How long the splash has been on screen, or null while it has not appeared yet.
+ * The splash enters after a grace period (the delay on its own CSS animation), so
+ * null is how a quick load, which never needed it, is told apart from a slow one.
+ * The delay is read from the animation rather than repeated here.
+ */
+export function splashVisibleFor(screen: HTMLElement): number | null {
+  const animation = typeof screen.getAnimations === "function"
+    ? screen.getAnimations().find((item) => (item as CSSAnimation).animationName === "startup-appear")
+    : undefined;
+  if (animation) {
+    const delay = Number(animation.effect?.getComputedTiming().delay ?? 0);
+    const now = animation.timeline?.currentTime;
+    const elapsed = animation.startTime != null && now != null ? Number(now) - Number(animation.startTime) : Number(animation.currentTime ?? 0);
+    return elapsed > delay ? elapsed - delay : null;
+  }
+  // No Web Animations: judge by what is painted.
+  return Number.parseFloat(getComputedStyle(screen).opacity) > 0.02 ? SPLASH_MIN_VISIBLE_MS : null;
+}
+
+/** Consecutive frames with no new visible media before the page is considered settled enough to reveal. */
+const QUIET_FRAMES_BEFORE_REVEAL = 3;
+
+let revealScheduled = false;
+
+/**
+ * Reveal even when startup fails, so the existing error and Retry stay usable.
+ *
+ * A normal load never showed the splash (it appears only after a grace period), so
+ * the app is released at once and fades in. A slow load fades the splash out,
+ * after it has been on screen long enough to read.
+ */
 export function revealApp() {
   const screen = document.getElementById("startup-screen");
-  if (document.body.classList.contains("startup-revealing")) return;
+  if (document.body.classList.contains("startup-revealing") || revealScheduled) return;
+  const root = document.getElementById("root");
+  const reducedMotion = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const finish = () => {
     screen?.remove();
-    document.getElementById("root")?.removeAttribute("inert");
-    document.body.classList.remove("startup-loading", "startup-revealing");
+    root?.removeAttribute("inert");
+    document.body.classList.remove("startup-loading", "startup-revealing", "startup-quick");
   };
-  if (!screen || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-    finish();
+
+  const visibleFor = screen ? splashVisibleFor(screen) : null;
+  if (!screen || visibleFor === null || visibleFor < SPLASH_NOTICEABLE_MS) {
+    // Leave the loading state at once (it also holds the wallpaper's transition off); the app
+    // fades in under .startup-quick, and that class is dropped once the fade is done.
+    root?.removeAttribute("inert");
+    screen?.remove();
+    document.body.classList.add("startup-revealing", "startup-quick");
+    document.body.classList.remove("startup-loading");
+    window.setTimeout(finish, reducedMotion ? 0 : 200);
     return;
   }
-  document.body.classList.add("startup-revealing");
-  // A bounded fallback also releases keyboard access if animation completion stalls.
-  const timeout = window.setTimeout(finish, 350);
-  try {
-    const fade = screen.animate([{ opacity: getComputedStyle(screen).opacity }, { opacity: 0 }], {
-      duration: 220, easing: "ease-out", fill: "forwards",
-    });
-    void fade.finished.catch(() => undefined).then(() => {
+
+  const leave = () => {
+    if (reducedMotion) {
+      finish();
+      return;
+    }
+    document.body.classList.add("startup-revealing");
+    // A bounded fallback also releases keyboard access if animation completion stalls.
+    const timeout = window.setTimeout(finish, 350);
+    try {
+      const fade = screen.animate([{ opacity: getComputedStyle(screen).opacity }, { opacity: 0 }], {
+        duration: 220, easing: "ease-out", fill: "forwards",
+      });
+      void fade.finished.catch(() => undefined).then(() => {
+        window.clearTimeout(timeout);
+        finish();
+      });
+    } catch {
       window.clearTimeout(timeout);
       finish();
-    });
-  } catch {
-    window.clearTimeout(timeout);
-    finish();
+    }
+  };
+
+  const hold = SPLASH_MIN_VISIBLE_MS - visibleFor;
+  if (hold > 0) {
+    revealScheduled = true;
+    window.setTimeout(() => { revealScheduled = false; leave(); }, hold);
+    return;
   }
+  leave();
 }
 
 /** Called after initial data settles; retain layout while first-frame media loads. */
@@ -89,20 +150,32 @@ export function revealWhenReady(): () => void {
     document.fonts?.ready,
   ]);
 
-  // IntersectionObserver assigns lazy thumbnail sources after the first layout.
-  frame = window.requestAnimationFrame(() => {
-    frame = window.requestAnimationFrame(() => {
-      if (cancelled) return;
-      const media = Array.from(document.querySelectorAll<HTMLImageElement | HTMLVideoElement>("#root img, #root video"))
-        .filter((element) => {
-          const bounds = element.getBoundingClientRect();
-          return bounds.width > 0 && bounds.height > 0 && bounds.bottom > 0 && bounds.right > 0 && bounds.top < window.innerHeight && bounds.left < window.innerWidth;
-        });
-      void Promise.allSettled([
-        assets,
-        ...media.map((element) => element instanceof HTMLImageElement ? decoded(element) : loaded(element)),
-      ]).then(finish);
+  // Lazy thumbnails get their media only after an IntersectionObserver callback, which can land a few
+  // frames after the page first renders. A single scan can therefore run before the media it should wait
+  // for exists, and reveal the page ahead of its first frames. Keep scanning until a few consecutive frames
+  // bring nothing new, then wait for everything seen.
+  const visibleMedia = () => Array.from(document.querySelectorAll<HTMLImageElement | HTMLVideoElement>("#root img, #root video"))
+    .filter((element) => {
+      const bounds = element.getBoundingClientRect();
+      return bounds.width > 0 && bounds.height > 0 && bounds.bottom > 0 && bounds.right > 0 && bounds.top < window.innerHeight && bounds.left < window.innerWidth;
     });
-  });
+  const seen = new Set<Element>();
+  const waiting: Promise<unknown>[] = [assets];
+  let quietFrames = 0;
+  const scan = () => {
+    if (cancelled) return;
+    const fresh = visibleMedia().filter((element) => !seen.has(element));
+    for (const element of fresh) {
+      seen.add(element);
+      waiting.push(element instanceof HTMLImageElement ? decoded(element) : loaded(element));
+    }
+    quietFrames = fresh.length ? 0 : quietFrames + 1;
+    if (quietFrames >= QUIET_FRAMES_BEFORE_REVEAL) {
+      void Promise.allSettled(waiting).then(finish);
+      return;
+    }
+    frame = window.requestAnimationFrame(scan);
+  };
+  frame = window.requestAnimationFrame(() => { frame = window.requestAnimationFrame(scan); });
   return () => { cancelled = true; cleanup(); };
 }

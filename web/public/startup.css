@@ -3,7 +3,14 @@ body.startup-loading { overflow: hidden; }
 .startup-loading #root { opacity: 0; }
 .startup-loading.startup-revealing #root { opacity: 1; }
 .startup-loading .app-wallpaper { transition: none; }
-#startup-screen { position: fixed; inset: 0; z-index: 10000; display: grid; place-items: center; overflow: hidden; isolation: isolate; background: #000; animation: startup-appear 180ms ease-out both; }
+/* A load that finishes at once goes straight to the app, which fades in. */
+.startup-quick #root { transition: opacity 160ms ease-out; }
+/* The splash is a patience screen, not a ceremony: it waits 800ms (the delay in the
+   animation below) and only then fades in, so a normal load never shows it. A normal
+   load here is about 500ms, so the delay sits clearly above it. Until then the page is
+   plain black, the same colour the splash is. startup.ts reads this delay from the
+   animation itself, so it is set in exactly one place. */
+#startup-screen { position: fixed; inset: 0; z-index: 10000; display: grid; place-items: center; overflow: hidden; isolation: isolate; background: #000; opacity: 0; animation: startup-appear 180ms ease-out 800ms both; }
 #startup-screen::before {
   content: ""; position: absolute; inset: -8%; z-index: -1; opacity: .4;
   background: radial-gradient(ellipse at 48% 56%, rgba(0, 0, 0, .92) 0%, rgba(0, 0, 0, .6) 16%, transparent 48%),
@@ -29,5 +36,8 @@ body.startup-loading { overflow: hidden; }
   to { transform: translate(1.5%, 1%) scale(1.04); }
 }
 @media (prefers-reduced-motion: reduce) {
-  #startup-screen, #startup-screen::before { animation: none; }
+  /* No fade, but the same grace period: it still appears only when loading is slow. */
+  #startup-screen { animation: startup-appear 1ms linear 800ms both; }
+  #startup-screen::before { animation: none; }
+  .startup-quick #root { transition: none; }
 }
