@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BriefcaseBusiness, House, Library, LoaderCircle } from "lucide-react";
 import { getMobileOverview, readableError } from "../../api";
-import { revealWhenReady } from "../../startup";
+import { revealApp, revealWhenReady } from "../../startup";
 import type { MobileOverview } from "../../types";
 import { usePoll } from "../../use-poll";
 import { Button, StatusBadge } from "../common";
@@ -79,8 +79,11 @@ export function MobileApp() {
   // the mobile chunk and decoding its wallpaper cannot consume the exit fade.
   const startupReady = overview !== null || error !== null;
   useEffect(() => {
+    // Only the initial Home visit gets the startup fade. Direct links and
+    // subsequent tab navigation use the shell's existing loading indicators.
+    if (tab !== "home") { revealApp(false); return; }
     if (startupReady) return revealWhenReady("/mobile-wallpaper.jpg");
-  }, [startupReady]);
+  }, [startupReady, tab]);
 
   const refresh = useCallback(async () => {
     try {

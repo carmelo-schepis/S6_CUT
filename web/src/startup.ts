@@ -35,9 +35,12 @@ let revealScheduled = false;
  * the app is released at once and fades in. A slow load fades the splash out,
  * after it has been on screen long enough to read.
  */
-export function revealApp() {
+export function revealApp(animate = true) {
   const screen = document.getElementById("startup-screen");
-  if (document.body.classList.contains("startup-revealing") || revealScheduled) return;
+  // The document's initial loading state is the only invitation to reveal.
+  // In particular, the 30-second fallback must never replay a finished startup.
+  if (!document.body.classList.contains("startup-loading") ||
+      document.body.classList.contains("startup-revealing") || revealScheduled) return;
   const root = document.getElementById("root");
   const reducedMotion = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const finish = () => {
@@ -45,6 +48,11 @@ export function revealApp() {
     root?.removeAttribute("inert");
     document.body.classList.remove("startup-loading", "startup-revealing", "startup-quick");
   };
+
+  if (!animate) {
+    finish();
+    return;
+  }
 
   const visibleFor = screen ? splashVisibleFor(screen) : null;
   if (!screen || visibleFor === null || visibleFor < SPLASH_NOTICEABLE_MS) {

@@ -42,6 +42,37 @@ describe("startup splash", () => {
     expect(document.body.className).toBe("");
   });
 
+  it("cannot replay a quick reveal after startup finishes, including the late fallback", () => {
+    mount(null);
+    revealApp();
+    vi.advanceTimersByTime(300);
+    window.setTimeout(revealApp, 30_000);
+    vi.advanceTimersByTime(30_000);
+    expect(document.body.className).toBe("");
+    expect(document.getElementById("root")).not.toHaveAttribute("inert");
+    expect(document.getElementById("startup-screen")).toBeNull();
+  });
+
+  it("cannot replay after a visible splash has finished fading", async () => {
+    const screen = mount(2_000);
+    revealApp();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(screen.isConnected).toBe(false);
+    revealApp();
+    expect(document.body.className).toBe("");
+    expect(screen.animate).toHaveBeenCalledOnce();
+  });
+
+  it("releases a non-Home entry immediately without either fade", () => {
+    const screen = mount(2_000);
+    revealApp(false);
+    expect(screen.isConnected).toBe(false);
+    expect(screen.animate).not.toHaveBeenCalled();
+    expect(document.body.className).toBe("");
+    expect(document.getElementById("root")).not.toHaveAttribute("inert");
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("discards a splash that has barely begun to appear, as if the load had been quick", () => {
     const screen = mount(SPLASH_NOTICEABLE_MS - 10);
     revealApp();

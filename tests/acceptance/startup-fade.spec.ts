@@ -193,3 +193,71 @@ test("normal playback changes opacity progressively without seeking the animatio
   expect(intermediate.at(-1)!.time - intermediate[0].time).toBeGreaterThan(80);
   expect(intermediate[0].opacity).toBeGreaterThan(intermediate.at(-1)!.opacity);
 });
+
+async function watchStartupReplays(page: Page) {
+  await page.addInitScript(() => {
+    const report = { finished: false, replayed: false, exitAnimations: 0, quickFade: false };
+    (window as unknown as { __startupOnce: typeof report }).__startupOnce = report;
+    const animate = Element.prototype.animate;
+    Element.prototype.animate = function (...args) {
+      if (this.id === "startup-screen") report.exitAnimations++;
+      return animate.apply(this, args);
+    };
+    new MutationObserver(() => {
+      if (!document.body) return;
+      const active = /startup-(?:loading|revealing|quick)/.test(document.body.className);
+      if (document.body.classList.contains("startup-quick")) report.quickFade = true;
+      if (report.finished && active) report.replayed = true;
+      if (!active && !document.getElementById("startup-screen")) report.finished = true;
+    }).observe(document, { attributes: true, childList: true, subtree: true });
+  });
+}
+
+test("initial Home fade never replays on other tabs, returning Home, or the startup fallback", async ({ page }) => {
+  await page.clock.install();
+  await mockEngine(page);
+  await watchStartupReplays(page);
+  const data = await hold(page, /\/api\/v1\/(?:mobile\/overview|library\/recent-clips)(?:\?.*)?$/);
+  try {
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await expect.poll(data.requested).toBe(true);
+    await expect(page.locator("#startup-screen")).toHaveCSS("opacity", "1");
+    await page.waitForTimeout(500);
+  } finally { data.release(); }
+  await expectRevealed(page);
+  await expect(page.locator("body")).not.toHaveClass(/startup-/);
+  const mobile = await page.locator(".m-app").count() > 0;
+  for (const tab of ["Library", "Jobs", mobile ? "Home" : "Projects", "Library"]) {
+    await page.getByRole("navigation").getByRole("button", { name: tab, exact: true }).click();
+    await expect(page.locator("body")).not.toHaveClass(/startup-/);
+    await expect(page.locator("#startup-screen")).toHaveCount(0);
+    await expect(page.locator("#root")).toHaveCSS("opacity", "1");
+    await page.waitForTimeout(150);
+  }
+  // The fallback is registered in main.tsx at document startup. It must be a
+  // no-op once the initial screen has finished, even while another tab is open.
+  await page.clock.fastForward(31_000);
+  const report = await page.evaluate(() =>
+    (window as unknown as { __startupOnce: { finished: boolean; replayed: boolean; exitAnimations: number } }).__startupOnce);
+  expect(report.finished).toBe(true);
+  expect(report.exitAnimations).toBe(1);
+  expect(report.replayed).toBe(false);
+  await expect(page.locator("body")).not.toHaveClass(/startup-/);
+  await expect(page.locator("#root")).toHaveCSS("opacity", "1");
+});
+
+for (const tab of ["library", "jobs"]) {
+  test(`direct ${tab} entry skips the startup fade`, async ({ page, browserName }) => {
+    test.skip(browserName !== "webkit", "Hash tabs belong to the iOS status view.");
+    await mockEngine(page);
+    await watchStartupReplays(page);
+    await page.goto(`/#/${tab}`, { waitUntil: "domcontentloaded" });
+    await expectRevealed(page);
+    await expect(page.locator(".m-app")).toHaveAttribute("data-tab", tab);
+    await expect(page.locator("body")).not.toHaveClass(/startup-/);
+    const report = await page.evaluate(() =>
+      (window as unknown as { __startupOnce: { quickFade: boolean; exitAnimations: number } }).__startupOnce);
+    expect(report.exitAnimations).toBe(0);
+    expect(report.quickFade).toBe(false);
+  });
+}
