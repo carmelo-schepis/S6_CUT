@@ -114,8 +114,10 @@ test("iOS devices get Home, Library and Jobs: live progress, still previews, one
   await expect(page.getByRole("heading", { level: 1, name: "Jobs" })).toBeVisible();
   await expect(page.locator(".m-wallpaper")).toHaveCSS("opacity", "0", { timeout: 5_000 });
   await expect(page.getByText("Render clips", { exact: true })).toBeVisible();
-  await expect(page.getByText(/1\.5 MB of 4\.0 MB/)).toBeVisible();
-  await expect(page.getByLabel("Rendering clips: 74%")).toBeVisible({ timeout: 20_000 });
+  // Home stays mounted behind Jobs and shows the same download, so read these off the Jobs page itself.
+  const jobsPage = page.locator(".m-jobs");
+  await expect(jobsPage.getByText(/1\.5 MB of 4\.0 MB/)).toBeVisible();
+  await expect(jobsPage.getByLabel("Rendering clips: 74%")).toBeVisible({ timeout: 20_000 });
   expect(overviewReads()).toBeGreaterThanOrEqual(2);
   await expect(page.locator("video")).toHaveCount(0);
   await page.getByRole("button", { name: "Preview Cold open" }).click();
