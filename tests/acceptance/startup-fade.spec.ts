@@ -168,6 +168,9 @@ test("normal playback paints intermediate fade frames without seeking the animat
     await page.goto("/", { waitUntil: "domcontentloaded" });
     await expect.poll(data.requested).toBe(true);
     await expect(page.locator("#startup-screen")).toHaveCSS("opacity", "1");
+    // Keep entrance/script startup separate from exit playback, as in the
+    // normal-load video review; headless WebKit can coalesce their first paints.
+    await page.waitForTimeout(500);
     await page.evaluate(() => {
       const samples: { time: number; opacity: number }[] = [];
       (window as unknown as { __normalFade: typeof samples }).__normalFade = samples;
