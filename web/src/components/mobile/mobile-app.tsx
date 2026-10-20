@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BriefcaseBusiness, House, Library, LoaderCircle } from "lucide-react";
 import { getMobileOverview, readableError } from "../../api";
-import { revealApp } from "../../startup";
+import { revealWhenReady } from "../../startup";
 import type { MobileOverview } from "../../types";
 import { usePoll } from "../../use-poll";
 import { Button, StatusBadge } from "../common";
@@ -75,8 +75,12 @@ export function MobileApp() {
   const historyRef = useRef(HISTORY_STEP);
 
   useNoFocusZoom();
-  // The shell mounts only after its chunk has loaded, so this is the first moment there is something to show.
-  useEffect(() => { revealApp(); }, []);
+  // Reveal the populated first screen after its images have settled, so mounting
+  // the mobile chunk and decoding its wallpaper cannot consume the exit fade.
+  const startupReady = overview !== null || error !== null;
+  useEffect(() => {
+    if (startupReady) return revealWhenReady("/mobile-wallpaper.jpg");
+  }, [startupReady]);
 
   const refresh = useCallback(async () => {
     try {

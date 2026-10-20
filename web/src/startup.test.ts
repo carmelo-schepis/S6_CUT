@@ -38,7 +38,7 @@ describe("startup splash", () => {
     // The loading state ends at once: it is what holds the wallpaper's transition off.
     expect(document.body.classList.contains("startup-loading")).toBe(false);
     expect(screen.animate).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(250);
+    vi.advanceTimersByTime(300);
     expect(document.body.className).toBe("");
   });
 

@@ -3,8 +3,12 @@ body.startup-loading { overflow: hidden; }
 .startup-loading #root { opacity: 0; }
 .startup-loading.startup-revealing #root { opacity: 1; }
 .startup-loading .app-wallpaper { transition: none; }
-/* A load that finishes at once goes straight to the app, which fades in. */
-.startup-quick #root { transition: opacity 160ms ease-out; }
+/* Explicit keyframes also run when ready and loading styles change in one frame. */
+.startup-quick #root { animation: startup-app-appear 240ms ease-out both; }
+@keyframes startup-app-appear {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
 /* The splash is a patience screen, not a ceremony: it waits 300ms (the delay in the
    animation below), so an instant load never shows it, but any wait you can notice does.
    A normal load here is about 500ms of plain black, so a longer grace period left that gap
@@ -43,5 +47,5 @@ body.startup-loading { overflow: hidden; }
   /* No fade, but the same grace period: it still appears only when loading is slow. */
   #startup-screen { animation: startup-appear 1ms linear 300ms both; }
   #startup-screen::before { animation: none; }
-  .startup-quick #root { transition: none; }
+  .startup-quick #root { animation: none; }
 }
