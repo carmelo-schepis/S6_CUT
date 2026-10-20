@@ -11,7 +11,7 @@ const HOME_RUNS_LIMIT = 4;
 
 type Chip = { key: string; tab: MobileTab; icon: typeof Film; text: string; hint?: string; spin?: boolean };
 
-export function MobileHome({ overview, groups, onOpenTab, onPreview }: { overview: MobileOverview; groups: WorkGroups; onOpenTab: (tab: MobileTab) => void; onPreview: OpenPreview }) {
+export function MobileHome({ overview, groups, onOpenTab, onPreview, onReady }: { overview: MobileOverview; groups: WorkGroups; onOpenTab: (tab: MobileTab) => void; onPreview: OpenPreview; onReady?: () => void }) {
   const [clips, setClips] = useState<{ items: LibraryAsset[]; total: number } | null>(null);
   const lastFinished = overview.recent[0];
   // The strip is refetched when a run finishes or a clip is published, not on every poll.
@@ -20,9 +20,10 @@ export function MobileHome({ overview, groups, onOpenTab, onPreview }: { overvie
     let cancelled = false;
     void listRecentClips({ pageSize: 12 })
       .then((page) => { if (!cancelled) setClips({ items: page.items, total: page.total }); })
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => { if (!cancelled) onReady?.(); });
     return () => { cancelled = true; };
-  }, [refreshKey]);
+  }, [refreshKey, onReady]);
 
   const { title, detail } = headline(groups);
   const chips: Chip[] = [];
