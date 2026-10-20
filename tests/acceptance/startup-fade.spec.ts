@@ -159,3 +159,37 @@ test("mobile startup errors reveal usable retry controls", async ({ page, browse
   await expect(page.getByRole("alert")).toContainText("Engine unavailable");
   await expect(page.getByRole("button", { name: "Retry", exact: true })).toBeEnabled();
 });
+
+test("normal playback changes opacity progressively without seeking the animation", async ({ page }) => {
+  await mockEngine(page);
+  await withSplashDelay(page, "50ms");
+  const data = await hold(page, /\/api\/v1\/(?:mobile\/overview|library\/recent-clips)(?:\?.*)?$/);
+  try {
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await expect.poll(data.requested).toBe(true);
+    await expect(page.locator("#startup-screen")).toHaveCSS("opacity", "1");
+    // Keep entrance/script startup separate from exit playback, as in the
+    // normal-load video review; headless WebKit can coalesce their first paints.
+    await page.waitForTimeout(500);
+    await page.evaluate(() => {
+      const samples: { time: number; opacity: number }[] = [];
+      (window as unknown as { __normalFade: typeof samples }).__normalFade = samples;
+      // WebKit's compositor can paint while JavaScript animation-frame callbacks
+      // are throttled. Sample the running animation without seeking or pausing it.
+      const timer = window.setInterval(() => {
+        const screen = document.getElementById("startup-screen");
+        if (!screen) { window.clearInterval(timer); return; }
+        if (document.body.classList.contains("startup-revealing")) {
+          samples.push({ time: performance.now(), opacity: Number(getComputedStyle(screen).opacity) });
+        }
+      }, 20);
+    });
+  } finally { data.release(); }
+  await expectRevealed(page);
+  const samples = await page.evaluate(() =>
+    (window as unknown as { __normalFade: { time: number; opacity: number }[] }).__normalFade);
+  const intermediate = samples.filter(({ opacity }) => opacity > 0.02 && opacity < 0.98);
+  expect(intermediate.length).toBeGreaterThanOrEqual(2);
+  expect(intermediate.at(-1)!.time - intermediate[0].time).toBeGreaterThan(80);
+  expect(intermediate[0].opacity).toBeGreaterThan(intermediate.at(-1)!.opacity);
+});

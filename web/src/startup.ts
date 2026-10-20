@@ -65,11 +65,26 @@ export function revealApp() {
     }
     document.body.classList.add("startup-revealing");
     // A bounded fallback also releases keyboard access if animation completion stalls.
-    const timeout = window.setTimeout(finish, 600);
+    let timeout = window.setTimeout(finish, 1_500);
     try {
       const fade = screen.animate([{ opacity: getComputedStyle(screen).opacity }, { opacity: 0 }], {
         duration: 360, easing: "ease-in-out", fill: "forwards",
       });
+      // WebKit can keep a new animation pending until its next paint, then
+      // backdate its start to this frame and skip most or all of the fade.
+      // Hold frame zero until it is ready, then start a full visible duration.
+      fade.pause();
+      fade.currentTime = 0;
+      void fade.ready.then(() => {
+        if (!screen.isConnected) return;
+        fade.play();
+        return fade.ready.then(() => {
+          if (!screen.isConnected) return;
+          fade.currentTime = 0;
+          window.clearTimeout(timeout);
+          timeout = window.setTimeout(finish, 600);
+        });
+      }).catch(finish);
       void fade.finished.catch(() => undefined).then(() => {
         window.clearTimeout(timeout);
         finish();

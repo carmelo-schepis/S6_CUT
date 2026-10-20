@@ -12,7 +12,7 @@ function mount(visibleForMs: number | null, delay = 300) {
   const screen = document.getElementById("startup-screen")!;
   const animations = visibleForMs === null ? [fakeAnimation(delay - 100, delay)] : [fakeAnimation(delay + visibleForMs, delay)];
   screen.getAnimations = (() => animations) as unknown as typeof screen.getAnimations;
-  const fade = { finished: Promise.resolve() };
+  const fade = { ready: Promise.resolve(), finished: Promise.resolve(), pause: vi.fn(), play: vi.fn(), currentTime: 0 };
   screen.animate = vi.fn(() => fade) as unknown as typeof screen.animate;
   return screen;
 }
@@ -70,6 +70,44 @@ describe("startup splash", () => {
     expect(screen.animate).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(0);
     expect(screen.isConnected).toBe(false);
+  });
+
+  it("holds frame zero until the browser is ready, then allows the full exit", async () => {
+    const screen = mount(2_000);
+    let ready!: () => void;
+    const fade = {
+      ready: new Promise<void>((resolve) => { ready = resolve; }),
+      finished: new Promise<void>(() => undefined),
+      pause: vi.fn(), play: vi.fn(), currentTime: 90,
+    };
+    screen.animate = vi.fn(() => fade) as unknown as typeof screen.animate;
+    revealApp();
+    expect(fade.pause).toHaveBeenCalledOnce();
+    expect(fade.currentTime).toBe(0);
+    await vi.advanceTimersByTimeAsync(700);
+    expect(screen.isConnected).toBe(true);
+    expect(fade.play).not.toHaveBeenCalled();
+    ready();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fade.play).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(599);
+    expect(screen.isConnected).toBe(true);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(screen.isConnected).toBe(false);
+    expect(document.getElementById("root")).not.toHaveAttribute("inert");
+  });
+
+  it("releases keyboard access even if the browser never readies the animation", async () => {
+    const screen = mount(2_000);
+    const fade = {
+      ready: new Promise<void>(() => undefined), finished: new Promise<void>(() => undefined),
+      pause: vi.fn(), play: vi.fn(), currentTime: 0,
+    };
+    screen.animate = vi.fn(() => fade) as unknown as typeof screen.animate;
+    revealApp();
+    await vi.advanceTimersByTimeAsync(1_500);
+    expect(screen.isConnected).toBe(false);
+    expect(document.getElementById("root")).not.toHaveAttribute("inert");
   });
 
   it("ignores a second reveal while one is pending or running", () => {
