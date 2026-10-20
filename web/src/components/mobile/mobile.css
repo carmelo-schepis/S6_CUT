@@ -137,7 +137,8 @@
 .m-row .progress-wrap, .m-work .progress-wrap { min-width: 0; }
 .m-run { display: flex; align-items: center; gap: var(--space-3); width: 100%; min-height: 44px; padding: var(--space-2) 0; border: 0; background: transparent; color: inherit; text-align: left; }
 .m-run > strong { flex: 1 1 auto; min-width: 0; }
-.m-age { flex: none; white-space: nowrap; }
+/* A fixed width for "8m ago" and "13h ago" alike, so the status words above it line up down the list. */
+.m-age { flex: none; min-width: 8ch; white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; }
 
 /* Recent clips close the page, so they take the whole width as a grid instead of a sideways shelf. */
 .m-shelf { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--gap-group) var(--space-3); margin: 0; padding: 0; list-style: none; }
@@ -157,26 +158,41 @@
 
 /* --- Jobs ------------------------------------------------------------------- */
 .m-work-list { display: grid; gap: var(--gap-group); }
-.m-work { display: grid; gap: var(--space-3); min-width: 0; }
+/* A running entry is up to three groups: what it is and how far along, the live
+   steps, and the clips finished so far. Lines inside a group sit 12px apart and
+   the groups 24px apart, so the entry reads as three blocks, not one long stack. */
+.m-work { display: grid; gap: var(--space-6); min-width: 0; }
+.m-work-summary, .m-work-steps, .m-work-clips { display: grid; align-content: start; gap: var(--space-3); min-width: 0; }
 .m-work-head { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: var(--space-3); align-items: start; }
 .m-work-title { display: grid; gap: var(--space-1); justify-items: start; min-width: 0; }
 .m-work-detail { margin: 0; }
-.m-work-clips { display: grid; gap: var(--space-2); }
 .m-toggle { display: flex; align-items: center; gap: var(--space-2); min-height: 44px; margin-block: calc(-1 * var(--space-2)); padding: 0; border: 0; background: transparent; color: var(--text-muted); text-align: left; }
 .m-toggle > span { margin-left: auto; }
 /* The desktop step checklist, restyled as plain rows: the heading and the panel chrome belong to the Workspace page. */
-.m-app .checklist-panel { margin: 0; border-radius: 0; background: transparent; }
+.m-app .checklist-panel { margin: 0; border-radius: 0; background: transparent; overflow: visible; }
 .m-app .checklist-heading { display: none; }
-.m-app .process-checklist { padding: 0; }
-.m-app .process-checklist::before { left: 8px; }
-.m-app .checklist-step { padding-inline: 0; }
+/* The icons share the entry's left edge, under the toggle's chevron. Each row's
+   8px of padding hangs out into the gutter, which gives the live row's tint room
+   around its text, and the rail runs through the icon centres. (The selectors
+   name .compact to outrank the desktop's own compact padding.) */
+.m-work-steps .checklist-panel.compact .process-checklist { gap: 0; margin: 0 calc(-1 * var(--space-2)); padding: 0; }
+.m-work-steps .process-checklist::before { top: 14px; bottom: 14px; left: calc(var(--space-2) + 7.5px); }
+.m-work-steps .checklist-panel.compact .checklist-step { align-items: start; gap: var(--space-3); padding: var(--space-1) var(--space-2); line-height: var(--type-text-line); }
+.m-work-steps .checklist-icon { margin-top: 2px; }
+/* The label and its status word share a line, and every status word ends on the
+   same right edge down the list. The detail is a quieter line beneath, and any
+   count sits under the status word. */
+.m-work-steps .checklist-step-body { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 var(--space-4); align-items: baseline; }
+.m-work-steps .checklist-step-meta { display: contents; }
+.m-work-steps .checklist-label { grid-column: 1; grid-row: 1; }
+.m-work-steps .checklist-status-text { order: 0; grid-column: 2; grid-row: 1; justify-self: end; text-align: right; white-space: nowrap; }
+/* Elapsed time and detail run on as one sentence ("Elapsed 1:53 · Transcribing music"), wrapping between words. */
+.m-work-steps .checklist-detail { order: 0; grid-column: 1; grid-row: 2; display: block; max-width: none; overflow: visible; color: var(--text-muted); text-align: left; }
+.m-work-steps .checklist-detail-text { max-width: none; overflow: visible; text-overflow: clip; white-space: normal; }
+.m-work-steps .checklist-elapsed + .checklist-detail-text::before { content: " · "; content: " · " / ""; }
+.m-work-steps .checklist-progress { order: 0; grid-column: 2; justify-self: end; color: var(--text-muted); }
 /* Done and waiting steps are their own message (a tick, an empty ring); only the live step needs words. */
-.m-app .checklist-step:is(.status-complete, .status-pending) .checklist-status-text { display: none; }
-/* Always the stacked arrangement the desktop uses on phones: label above its status line, nothing clipped. */
-.m-app .checklist-step-body { display: grid; gap: 0; }
-.m-app .checklist-step-meta { width: 100%; flex-basis: auto; justify-content: flex-start; text-align: left; }
-.m-app .checklist-detail { flex-wrap: wrap; overflow: visible; max-width: none; }
-.m-app .checklist-detail-text { overflow: visible; text-overflow: clip; white-space: normal; max-width: none; }
+.m-work-steps .checklist-step:is(.status-complete, .status-pending) .checklist-status-text { display: none; }
 
 .m-clip-strip { display: flex; gap: var(--space-2); margin: 0; padding: 0; list-style: none; overflow-x: auto; scrollbar-width: none; }
 .m-clip-strip::-webkit-scrollbar { display: none; }
@@ -228,11 +244,12 @@
 }
 @media (min-width: 1024px) {
   .m-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .m-work { grid-template-columns: minmax(0, 640px) minmax(240px, 380px); column-gap: var(--gap-pane); align-items: start; }
-  .m-work > :not(.m-work-clips) { grid-column: 1; }
-  .m-work > .m-work-clips { grid-column: 2; grid-row: 1 / span 5; }
-  .m-work-clips .m-clip-strip { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); overflow: visible; }
-  .m-work-clips .m-clip-strip > li { flex: none; }
+  /* The summary and the steps side by side in two even columns, so the entry
+     spans the page like the lists below it, with no column left waiting for
+     clips. The still grows to fill its column; finished clips run across the foot. */
+  .m-work-split { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: var(--gap-pane); align-items: start; }
+  .m-work-split .m-work-head { grid-template-columns: minmax(0, 1fr); }
+  .m-work-split .m-work-clips { grid-column: 1 / -1; }
 }
 @media (min-width: 1181px) {
   .m-app { --m-rail: 224px; }

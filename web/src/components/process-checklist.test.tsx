@@ -172,6 +172,18 @@ describe("ProcessChecklist – compact mode", () => {
     expect(container.querySelector(".checklist-panel")).toHaveClass("compact");
     expect(screen.getByTestId("progress-step-list")).toHaveAttribute("aria-label", "Short creation progress");
   });
+
+  it("leaves out an item count the step's detail already states, and still announces it", () => {
+    const transcribing: ProcessingStep = { id: "transcribe", label: "Music words timed", status: "active", startedAt: "2026-08-13T00:00:00Z", currentItem: 575, totalItems: 1162, detail: "Transcribing music — 575s of 1161s" };
+    const { rerender } = render(<ProcessChecklist steps={[transcribing]} compact />);
+    expect(screen.getByText("Transcribing music — 575s of 1161s")).toBeInTheDocument();
+    expect(screen.queryByText("575 of 1162")).toBeNull();
+    // A count the detail does not state stays, and the desktop keeps every count.
+    rerender(<ProcessChecklist steps={[active]} compact />);
+    expect(screen.getByText("3 of 5")).toBeInTheDocument();
+    rerender(<ProcessChecklist steps={[transcribing]} />);
+    expect(screen.getByText("575 of 1162")).toBeInTheDocument();
+  });
 });
 
 // ---------------------------------------------------------------

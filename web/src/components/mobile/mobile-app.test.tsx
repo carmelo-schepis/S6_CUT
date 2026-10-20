@@ -150,7 +150,8 @@ describe("iPhone/iPad status view", () => {
 
   it("groups finished work by day, expands a run into its clips, and can load older jobs", async () => {
     window.location.hash = "#/jobs";
-    api.getMobileOverview.mockResolvedValue(overview({ recent: [finishedJob()], recentTotal: 45 }));
+    // Finished a moment ago, so it is "Today" at any hour (an hour ago is yesterday just after midnight).
+    api.getMobileOverview.mockResolvedValue(overview({ recent: [finishedJob({ updatedAt: new Date().toISOString() })], recentTotal: 45 }));
     render(<MobileApp />);
     expect(await screen.findByRole("heading", { level: 2, name: "Today" })).toBeInTheDocument();
     const run = within(document.querySelector<HTMLElement>(".m-jobs")!).getByText("Podcast ep 12").closest("article")!;
