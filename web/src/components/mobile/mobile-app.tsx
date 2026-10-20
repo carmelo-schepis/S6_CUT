@@ -29,12 +29,18 @@ function useTab(): [MobileTab, (tab: MobileTab) => void] {
   useEffect(() => {
     const sync = () => setTab(tabFromHash(window.location.hash));
     window.addEventListener("hashchange", sync);
-    return () => window.removeEventListener("hashchange", sync);
+    window.addEventListener("popstate", sync);
+    return () => {
+      window.removeEventListener("hashchange", sync);
+      window.removeEventListener("popstate", sync);
+    };
   }, []);
   // The address carries the tab, so Back and a refresh keep the customer where they were.
   const open = useCallback((next: MobileTab) => {
-    if (tabFromHash(window.location.hash) !== next) window.location.hash = hashForTab(next);
-    else setTab(next);
+    // Update React and the address together, without native fragment navigation
+    // repainting Safari's old page snapshot between already prepared tabs.
+    if (tabFromHash(window.location.hash) !== next) window.history.pushState(window.history.state, "", hashForTab(next));
+    setTab(next);
   }, []);
   return [tab, open];
 }
@@ -74,16 +80,39 @@ export function MobileApp() {
   const [preview, setPreview] = useState<{ asset: PreviewTarget; opener: HTMLButtonElement | null } | null>(null);
   const historyRef = useRef(HISTORY_STEP);
 
+  const [initialTab] = useState(tab);
+  const [homeReady, setHomeReady] = useState(false);
+  const [libraryReady, setLibraryReady] = useState(false);
+  const onHomeReady = useCallback(() => setHomeReady(true), []);
+  const onLibraryReady = useCallback(() => setLibraryReady(true), []);
+
   useNoFocusZoom();
   // Reveal the populated first screen after its images have settled, so mounting
   // the mobile chunk and decoding its wallpaper cannot consume the exit fade.
-  const startupReady = overview !== null || error !== null;
+  const overviewReady = overview !== null || error !== null;
+  const startupReady = overviewReady && (homeReady || error !== null) && libraryReady;
   useEffect(() => {
-    // Only the initial Home visit gets the startup fade. Direct links and
-    // subsequent tab navigation use the shell's existing loading indicators.
-    if (tab !== "home") { revealApp(false); return; }
-    if (startupReady) return revealWhenReady("/mobile-wallpaper.jpg");
-  }, [startupReady, tab]);
+    if (!startupReady || !document.getElementById("startup-screen")) return;
+    let cancelled = false;
+    let scheduled = false;
+    let dispose: (() => void) | undefined;
+    const reveal = () => {
+      if (cancelled || scheduled) return;
+      scheduled = true;
+      window.clearTimeout(timeout);
+      if (initialTab !== "home") revealApp(false);
+      else dispose = revealWhenReady("/mobile-wallpaper.jpg");
+    };
+    // Prepare the first batch in every tab once, including currently hidden
+    // thumbnails. Later tab changes retain these decoded image elements.
+    const timeout = window.setTimeout(reveal, 5_000);
+    const images = Array.from(document.querySelectorAll<HTMLImageElement>(".m-app img"));
+    for (const image of images) image.loading = "eager";
+    void Promise.allSettled(images.map((image) =>
+      typeof image.decode === "function" ? image.decode() : Promise.resolve(),
+    )).then(reveal);
+    return () => { cancelled = true; window.clearTimeout(timeout); dispose?.(); };
+  }, [startupReady, initialTab]);
 
   const refresh = useCallback(async () => {
     try {
@@ -97,6 +126,7 @@ export function MobileApp() {
     }
   }, []);
   const groups = useMemo(() => overview ? workGroups(overview) : null, [overview]);
+  const libraryRefreshKey = overview ? `${overview.clipsLastDay}:${overview.recent[0]?.id ?? ""}:${overview.recent[0]?.updatedAt ?? ""}` : "";
   const runRefresh = usePoll(refresh, hasWorkInFlight(overview) ? BUSY_POLL_MS : IDLE_POLL_MS, visible, true);
 
   const showOlder = useCallback(() => {
@@ -144,9 +174,15 @@ export function MobileApp() {
       {error && <div className="m-banner m-banner-error" role="alert"><span><strong>Engine unavailable.</strong> {error}</span> <Button onClick={() => void runRefresh()}>Retry</Button></div>}
 
       <main id="m-content" className="m-content" tabIndex={-1}>
-        {overview && groups && tab === "home" && <MobileHome overview={overview} groups={groups} onOpenTab={openTab} onPreview={openPreview} />}
-        {tab === "library" && <MobileLibrary onPreview={openPreview} />}
-        {overview && groups && tab === "jobs" && <MobileJobs overview={overview} groups={groups} onPreview={openPreview} onShowOlder={showOlder} loadingOlder={loadingOlder} />}
+        <div className="m-tab-panel" hidden={tab !== "home"}>
+          {overview && groups && <MobileHome overview={overview} groups={groups} onOpenTab={openTab} onPreview={openPreview} onReady={onHomeReady} />}
+        </div>
+        <div className="m-tab-panel" hidden={tab !== "library"}>
+          {overviewReady && <MobileLibrary onPreview={openPreview} onReady={onLibraryReady} refreshKey={libraryRefreshKey} />}
+        </div>
+        <div className="m-tab-panel" hidden={tab !== "jobs"}>
+          {overview && groups && <MobileJobs overview={overview} groups={groups} onPreview={openPreview} onShowOlder={showOlder} loadingOlder={loadingOlder} />}
+        </div>
       </main>
     </div>
 

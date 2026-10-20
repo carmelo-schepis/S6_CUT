@@ -26,7 +26,7 @@
   color: var(--text);
 }
 
-/* --- Wallpaper: Home only, faded to black on every other tab -------------
+/* --- Wallpaper: Home only, switched without a navigation fade ------------
    Held dark (86% black) so the artwork reads as atmosphere behind the text,
    not as a bright backdrop; the desktop Projects wallpaper keeps its own 62%. */
 .m-wallpaper {
@@ -35,7 +35,8 @@
   z-index: -1;
   pointer-events: none;
   opacity: 0;
-  transition: opacity 1s ease-in-out;
+  transition: none;
+  will-change: opacity;
   background: linear-gradient(rgba(0, 0, 0, .86), rgba(0, 0, 0, .86)), url("/mobile-wallpaper.jpg") center / cover no-repeat;
 }
 .m-app[data-tab="home"] .m-wallpaper { opacity: 1; }
@@ -90,6 +91,7 @@
 @media (max-width: 420px) { .m-engine .status > span { display: none; } }
 
 .m-main { min-width: 0; }
+.m-tab-panel[hidden] { display: none; }
 .m-content { max-width: var(--page-measure); margin: 0 auto; padding: 0 var(--page-inset) calc(var(--gap-group) + env(safe-area-inset-bottom)); outline: none; }
 .m-banner { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--page-inset); background: var(--surface-2); color: var(--text-primary); }
 .m-banner-error { justify-content: space-between; background: rgba(242, 56, 85, .16); }

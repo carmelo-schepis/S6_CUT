@@ -35,7 +35,7 @@ describe("iPhone/iPad status view", () => {
   it("opens on Home with the wallpaper, a live headline and quick links, and has no search field", async () => {
     const { container } = render(<MobileApp />);
     expect(await screen.findByRole("heading", { level: 1, name: "2 jobs running" })).toBeInTheDocument();
-    expect(container.querySelector(".m-app")).toHaveAttribute("data-tab", "home");
+    expect(container.querySelector<HTMLElement>(".m-app")).toHaveAttribute("data-tab", "home");
     expect(screen.getByRole("button", { name: /2 running/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /14 new clips/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /1 failed/ })).toBeInTheDocument();
@@ -44,10 +44,10 @@ describe("iPhone/iPad status view", () => {
     expect(screen.queryByRole("textbox")).toBeNull();
     // Running work with its progress, then recent clips, then recent runs.
     expect(screen.getByRole("heading", { name: "Running now" })).toBeInTheDocument();
-    expect(screen.getByText("Studio session")).toBeInTheDocument();
-    expect(screen.getByText("How I edit Shorts")).toBeInTheDocument();
+    expect(within(container.querySelector<HTMLElement>(".m-home")!).getByText("Studio session")).toBeInTheDocument();
+    expect(within(container.querySelector<HTMLElement>(".m-home")!).getByText("How I edit Shorts")).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "Preview Scene 12 – Hal Jordan" })).toBeInTheDocument();
-    expect(screen.getByText("Podcast ep 12")).toBeInTheDocument();
+    expect(within(container.querySelector<HTMLElement>(".m-home")!).getByText("Podcast ep 12")).toBeInTheDocument();
     // Recent clips close the page, under Recent runs, so they get the remaining space.
     const order = ["Running now", "Recent runs", "Recent clips"].map((name) => screen.getByRole("heading", { level: 2, name }));
     expect(order[0].compareDocumentPosition(order[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -61,15 +61,53 @@ describe("iPhone/iPad status view", () => {
     fireEvent.click(within(nav).getByRole("button", { name: /Library/ }));
     expect(await screen.findByRole("heading", { level: 1, name: "Library" })).toBeInTheDocument();
     expect(window.location.hash).toBe("#/library");
-    expect(container.querySelector(".m-app")).toHaveAttribute("data-tab", "library");
+    expect(container.querySelector<HTMLElement>(".m-app")).toHaveAttribute("data-tab", "library");
     expect(within(nav).getByRole("button", { name: /Library/ })).toHaveAttribute("aria-current", "page");
     fireEvent.click(within(nav).getByRole("button", { name: /Jobs/ }));
     expect(await screen.findByRole("heading", { level: 1, name: "Jobs" })).toBeInTheDocument();
-    expect(container.querySelector(".m-app")).toHaveAttribute("data-tab", "jobs");
+    expect(container.querySelector<HTMLElement>(".m-app")).toHaveAttribute("data-tab", "jobs");
     // The badge counts work in progress (two running, none queued).
     expect(within(nav).getByRole("button", { name: "Jobs, 2 in progress" })).toBeInTheDocument();
     fireEvent.click(within(nav).getByRole("button", { name: /Home/ }));
     expect(await screen.findByRole("heading", { level: 1, name: "2 jobs running" })).toBeInTheDocument();
+  });
+
+  it("prepares all tabs once and retains their images, filters and data on revisit", async () => {
+    const { container } = render(<MobileApp />);
+    await screen.findByRole("heading", { name: "2 jobs running" });
+    await waitFor(() => expect(api.listAssetsPage).toHaveBeenCalled());
+    const home = container.querySelector<HTMLElement>(".m-home");
+    const logo = container.querySelector<HTMLElement>(".m-hero-mark");
+    const library = container.querySelector<HTMLElement>(".m-library");
+    const jobs = container.querySelector<HTMLElement>(".m-jobs");
+    const nav = screen.getByRole("navigation");
+    fireEvent.click(within(nav).getByRole("button", { name: "Library" }));
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "hal" } });
+    await waitFor(() => expect(api.listAssetsPage).toHaveBeenLastCalledWith(expect.objectContaining({ search: "hal" })));
+    const calls = api.listAssetsPage.mock.calls.length;
+    fireEvent.click(within(nav).getByRole("button", { name: /Jobs/ }));
+    expect(await screen.findByRole("heading", { name: "Jobs" })).toBeVisible();
+    fireEvent.click(within(nav).getByRole("button", { name: "Home" }));
+    expect(container.querySelector<HTMLElement>(".m-home")).toBe(home);
+    expect(container.querySelector<HTMLElement>(".m-hero-mark")).toBe(logo);
+    fireEvent.click(within(nav).getByRole("button", { name: "Library" }));
+    expect(container.querySelector<HTMLElement>(".m-library")).toBe(library);
+    expect(container.querySelector<HTMLElement>(".m-jobs")).toBe(jobs);
+    expect(screen.getByRole("searchbox")).toHaveValue("hal");
+    expect(api.listAssetsPage).toHaveBeenCalledTimes(calls);
+    expect(api.listRecentClips).toHaveBeenCalledTimes(1);
+  });
+
+  it("updates tabs immediately through history state and follows Back/Forward events", async () => {
+    render(<MobileApp />);
+    await screen.findByRole("heading", { name: "2 jobs running" });
+    fireEvent.click(within(screen.getByRole("navigation")).getByRole("button", { name: "Library" }));
+    expect(screen.getByRole("heading", { name: "Library" })).toBeVisible();
+    act(() => {
+      window.history.replaceState(null, "", "#/jobs");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    expect(screen.getByRole("heading", { name: "Jobs" })).toBeVisible();
   });
 
   it("follows the address on Back and on first load", async () => {
@@ -77,7 +115,7 @@ describe("iPhone/iPad status view", () => {
     const { container } = render(<MobileApp />);
     expect(await screen.findByRole("heading", { level: 1, name: "Jobs" })).toBeInTheDocument();
     act(() => { window.location.hash = "#/library"; });
-    await waitFor(() => expect(container.querySelector(".m-app")).toHaveAttribute("data-tab", "library"));
+    await waitFor(() => expect(container.querySelector<HTMLElement>(".m-app")).toHaveAttribute("data-tab", "library"));
   });
 
   it("quick links jump to the tab that explains them", async () => {
@@ -115,7 +153,7 @@ describe("iPhone/iPad status view", () => {
     api.getMobileOverview.mockResolvedValue(overview({ recent: [finishedJob()], recentTotal: 45 }));
     render(<MobileApp />);
     expect(await screen.findByRole("heading", { level: 2, name: "Today" })).toBeInTheDocument();
-    const run = screen.getByText("Podcast ep 12").closest("article")!;
+    const run = within(document.querySelector<HTMLElement>(".m-jobs")!).getByText("Podcast ep 12").closest("article")!;
     expect(within(run).getByText(/Serious · .* · 8 outputs ready/)).toBeInTheDocument();
     fireEvent.click(within(run).getByRole("button", { expanded: false }));
     expect(within(run).getByRole("button", { name: "Preview Best moment" })).toBeInTheDocument();
@@ -147,7 +185,7 @@ describe("iPhone/iPad status view", () => {
     render(<MobileApp />);
     expect(await screen.findByText("Older clip")).toBeInTheDocument();
     expect(api.listAssetsPage).toHaveBeenCalledWith(expect.objectContaining({ page: 2 }));
-    expect(screen.getByText("Scene 12 – Hal Jordan")).toBeInTheDocument();
+    expect(within(document.querySelector<HTMLElement>(".m-library")!).getByText("Scene 12 – Hal Jordan")).toBeInTheDocument();
   });
 
   it("says so plainly when the engine cannot be reached, and retries on request", async () => {

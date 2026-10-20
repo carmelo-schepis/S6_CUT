@@ -15,7 +15,7 @@ function secondaryLine(asset: LibraryAsset): string {
   return [originLabels[asset.origin], duration].filter(Boolean).join(" · ");
 }
 
-export function MobileLibrary({ onPreview }: { onPreview: OpenPreview }) {
+export function MobileLibrary({ onPreview, onReady, refreshKey = "" }: { onPreview: OpenPreview; onReady?: () => void; refreshKey?: string }) {
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState("");
   const [mediaType, setMediaType] = useState("all");
@@ -42,11 +42,11 @@ export function MobileLibrary({ onPreview }: { onPreview: OpenPreview }) {
   }, []);
 
   // A newer request (filters changed, or the next page) always wins over a slower older one.
-  const fetchPage = useCallback(async (next: number) => {
+  const fetchPage = useCallback(async (next: number, keepItems = false) => {
     const id = ++request.current;
     setLoading(true);
     setError(null);
-    if (next === 1) setItems([]);
+    if (next === 1 && !keepItems) setItems([]);
     try {
       const result = await listAssetsPage({
         search: search || undefined,
@@ -71,6 +71,17 @@ export function MobileLibrary({ onPreview }: { onPreview: OpenPreview }) {
     page.current = 0;
     void Promise.resolve().then(() => fetchPage(1));
   }, [fetchPage]);
+
+  useEffect(() => { if (!loading) onReady?.(); }, [loading, onReady]);
+
+  // Keep the prepared tab fresh when the overview reports a new publication,
+  // without discarding visible items just because a background refresh starts.
+  const previousRefreshKey = useRef(refreshKey);
+  useEffect(() => {
+    if (previousRefreshKey.current === refreshKey) return;
+    previousRefreshKey.current = refreshKey;
+    void fetchPage(1, true);
+  }, [refreshKey, fetchPage]);
 
   const canObserve = typeof window !== "undefined" && "IntersectionObserver" in window;
   useEffect(() => {
