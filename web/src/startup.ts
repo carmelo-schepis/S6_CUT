@@ -54,7 +54,7 @@ export function revealApp() {
     screen?.remove();
     document.body.classList.add("startup-revealing", "startup-quick");
     document.body.classList.remove("startup-loading");
-    window.setTimeout(finish, reducedMotion ? 0 : 200);
+    window.setTimeout(finish, reducedMotion ? 0 : 300);
     return;
   }
 
@@ -65,10 +65,10 @@ export function revealApp() {
     }
     document.body.classList.add("startup-revealing");
     // A bounded fallback also releases keyboard access if animation completion stalls.
-    const timeout = window.setTimeout(finish, 300);
+    const timeout = window.setTimeout(finish, 600);
     try {
       const fade = screen.animate([{ opacity: getComputedStyle(screen).opacity }, { opacity: 0 }], {
-        duration: 160, easing: "ease-out", fill: "forwards",
+        duration: 360, easing: "ease-in-out", fill: "forwards",
       });
       void fade.finished.catch(() => undefined).then(() => {
         window.clearTimeout(timeout);
@@ -90,7 +90,7 @@ export function revealApp() {
 }
 
 /** Called after initial data settles; retain layout while first-frame media loads. */
-export function revealWhenReady(): () => void {
+export function revealWhenReady(wallpaperSrc = "/projects-wallpaper.jpg"): () => void {
   if (!document.getElementById("startup-screen")) return () => undefined;
   let cancelled = false;
   let finished = false;
@@ -142,7 +142,7 @@ export function revealWhenReady(): () => void {
     if (!cancelled && !finished && typeof image.decode === "function") await image.decode().catch(() => undefined);
   };
   const wallpaper = new Image();
-  wallpaper.src = "/projects-wallpaper.jpg";
+  wallpaper.src = wallpaperSrc;
   const logo = document.querySelector<HTMLImageElement>("#startup-screen img");
   const assets = Promise.allSettled([
     decoded(wallpaper),
