@@ -403,6 +403,7 @@ async def create_clip_job(
     music_track_url: Annotated[str | None, Form()] = None,
     music_track_speed: Annotated[float, Form()] = 1.0,
     music_audio_mode: Annotated[Literal["song_only", "mix_original"], Form()] = "song_only",
+    music_song_gain: Annotated[float | None, Form(ge=0, le=1)] = None,
     name: Annotated[str | None, Form()] = None,
     style: Annotated[Literal["funny", "serious", "educational", "hype"], Form()] = "educational",
     processing_mode: Annotated[Literal["fast", "smart", "auto"], Form()] = "auto",
@@ -452,7 +453,7 @@ async def create_clip_job(
         raise HTTPException(422, "Background songs are only available in Music mode")
     if music_track_file and music_track_url and music_track_url.strip():
         raise HTTPException(422, "Choose an MP3 upload or a YouTube song link, not both")
-    if source_profile != "music" and music_audio_mode != "song_only":
+    if source_profile != "music" and (music_audio_mode != "song_only" or music_song_gain is not None):
         raise HTTPException(422, "Background song audio options are only available in Music mode")
     if music_track_speed not in {0.75, 0.85, 1.0, 1.25, 1.5}:
         raise HTTPException(422, "Song speed must be one of the available speed options")
@@ -520,7 +521,7 @@ async def create_clip_job(
         private["music_top_text"] = music_top_text if music_top_text.strip() else None
         private["music_track_speed"] = music_track_speed
         private["music_audio_mode"] = music_audio_mode
-        private["music_song_gain"] = 0.25 if music_audio_mode == "mix_original" else 1.0
+        private["music_song_gain"] = (music_song_gain if music_song_gain is not None else 0.25) if music_audio_mode == "mix_original" else 1.0
         private["music_original_audio_gain"] = 1.0
         if music_track_url and music_track_url.strip():
             try:

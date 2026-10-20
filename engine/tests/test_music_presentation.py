@@ -532,8 +532,11 @@ def test_music_audio_mode_defaults_and_validates_on_legacy_models() -> None:
         })
 
 
-def test_music_mix_audio_mode_is_persisted_and_rejected_for_speech(monkeypatch) -> None:
+@pytest.mark.parametrize("gain", [None, 0, 0.1, 1])
+def test_music_mix_audio_mode_is_persisted_and_rejected_for_speech(monkeypatch, gain) -> None:
     from engine import app as app_module
+
+    monkeypatch.setattr(app_module, "_rate_limit", lambda _: None)
 
     monkeypatch.setattr(app_module, "validate_video_upload", lambda *args, **kwargs: {"duration": 40.0, "width": 640, "height": 360, "audio": True})
     monkeypatch.setattr(app_module.profiles, "smart_available", lambda: False)
@@ -548,20 +551,30 @@ def test_music_mix_audio_mode_is_persisted_and_rejected_for_speech(monkeypatch) 
         "source_profile": "music", "processing_mode": "smart", "count": "1", "min_duration": "8",
         "max_duration": "20", "library_folder_id": folder.id, "music_audio_mode": "mix_original",
     }
+    if gain is not None:
+        fields["music_song_gain"] = str(gain)
+    expected_gain = 0.25 if gain is None else gain
     accepted = client.post("/api/v1/jobs/clip", data=fields, files={"file": ("song.mp4", b"fixture", "video/mp4")})
     assert accepted.status_code == 202, accepted.text
     payload = accepted.json()
     assert payload["project"]["musicAudioMode"] == "mix_original"
-    assert payload["project"]["musicSongGain"] == pytest.approx(0.25)
+    assert payload["project"]["musicSongGain"] == pytest.approx(expected_gain)
     assert payload["project"]["musicOriginalAudioGain"] == pytest.approx(1)
     assert payload["job"]["musicAudioMode"] == "mix_original"
+    assert payload["job"]["musicSongGain"] == pytest.approx(expected_gain)
     private = app_module.db.get_job_private(payload["job"]["id"])
     assert private["music_audio_mode"] == "mix_original"
-    assert private["music_song_gain"] == pytest.approx(0.25)
+    assert private["music_song_gain"] == pytest.approx(expected_gain)
 
     rejected = client.post(
         "/api/v1/jobs/clip",
-        data={**fields, "source_profile": "speech"},
+        data={**fields, "source_profile": "speech", **({"music_audio_mode": "song_only"} if gain is not None else {})},
         files={"file": ("speech.mp4", b"fixture", "video/mp4")},
     )
     assert rejected.status_code == 422
+
+
+@pytest.mark.parametrize("gain", ["-0.1", "1.01", "nan", "inf"])
+def test_music_song_gain_rejects_invalid_levels(gain):
+    response = client.post("/api/v1/jobs/clip", data={"source_profile": "music", "music_song_gain": gain})
+    assert response.status_code == 422

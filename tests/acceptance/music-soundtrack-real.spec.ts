@@ -47,9 +47,9 @@ function verifyMix(filename: string) {
   const raw = execFileSync('docker', ['exec', container!, 'ffmpeg', '-v', 'error', '-i', `/qa/${filename}`, '-vn', '-ac', '1', '-ar', '16000', '-f', 'f32le', '-']);
   const original = toneAmplitude(raw, 220), song = toneAmplitude(raw, 660);
   expect(original).toBeGreaterThan(.05);
-  expect(song).toBeGreaterThan(.01);
-  expect(song / original).toBeGreaterThan(.15);
-  expect(song / original).toBeLessThan(.36);
+  expect(song).toBeGreaterThan(.004);
+  expect(song / original).toBeGreaterThan(.07);
+  expect(song / original).toBeLessThan(.13);
 }
 
 function verifyAudio(filename: string, frequency: number) {
@@ -92,6 +92,7 @@ for (const item of cases) {
     await page.getByLabel('Minimum seconds').fill('8');
     await page.getByLabel('Maximum seconds').fill('10');
     await page.getByLabel('Project name').fill(name);
+    if (item.audioMode === 'mix_original' && item.source !== 'none' && !item.silentVideo) await page.getByRole('slider', { name: 'Background song volume' }).fill('10');
     const creation = page.waitForResponse(response => response.url().endsWith('/api/v1/jobs/clip') && response.request().method() === 'POST');
     await page.getByRole('button', { name: 'Create 1 short clip', exact: true }).click();
     const created = await creation;
@@ -111,6 +112,7 @@ for (const item of cases) {
     let finished = await readJob();
     expect(finished.clips).toHaveLength(1);
     if (item.audioMode) expect(finished.musicAudioMode).toBe(item.audioMode);
+    if (item.audioMode === 'mix_original' && item.source !== 'none' && !item.silentVideo) expect(finished.musicSongGain).toBe(.1);
     expect(finished.steps.every((step: { status: string }) => ['complete', 'skipped'].includes(step.status))).toBe(true);
     if (item.source === 'none') expect(finished.musicTrack).toBeNull();
     else expect(finished.musicTrack).toMatchObject({ source: item.source === 'upload' ? 'upload' : 'youtube', speed: item.speed });
@@ -169,12 +171,12 @@ for (const item of cases) {
     const credits = JSON.parse(zipEntry(archive, `${name}/credits.json`));
     if (item.audioMode) {
       expect(manifest.outputs[0].music_audio.mode).toBe(item.audioMode);
-      expect(manifest.outputs[0].music_audio.song_gain).toBe(.25);
+      expect(manifest.outputs[0].music_audio.song_gain).toBe(item.source !== 'none' && !item.silentVideo ? .1 : .25);
     }
     if (item.source !== 'none') {
       expect(manifest.outputs[0].music_track.speed).toBe(item.speed);
       expect(manifest.outputs[0].music_audio.mode).toBe(item.audioMode || 'song_only');
-      expect(manifest.outputs[0].music_audio.song_gain).toBe(item.audioMode === 'mix_original' ? .25 : 1);
+      expect(manifest.outputs[0].music_audio.song_gain).toBe(item.audioMode === 'mix_original' ? (item.silentVideo ? .25 : .1) : 1);
       expect(credits.credits.some((credit: { music_track?: { speed: number } }) => credit.music_track?.speed === item.speed)).toBe(true);
     }
     await testInfo.attach('persisted-job', { body: JSON.stringify(finished, null, 2), contentType: 'application/json' });

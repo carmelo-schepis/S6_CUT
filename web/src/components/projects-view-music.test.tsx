@@ -82,10 +82,18 @@ describe("Music presentation creation controls", () => {
     expect(only).toHaveAttribute("aria-pressed", "true");
     fireEvent.click(mix);
     expect(mix).toHaveAttribute("aria-pressed", "true");
+    const volume = screen.getByRole("slider", { name: "Background song volume" });
+    expect(volume).toHaveValue("25");
+    fireEvent.change(volume, { target: { value: "10" } });
+    expect(screen.getByText("Original audio at full volume · song at 10% volume")).toBeVisible();
+    fireEvent.click(only);
+    expect(screen.queryByRole("slider", { name: "Background song volume" })).not.toBeInTheDocument();
+    fireEvent.click(mix);
+    expect(screen.getByRole("slider", { name: "Background song volume" })).toHaveValue("10");
     chooseFile();
     fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
     await waitFor(() => expect(createClipJob).toHaveBeenCalledTimes(1));
-    expect(vi.mocked(createClipJob).mock.calls[0][0]).toMatchObject({ sourceProfile: "music", musicAudioMode: "mix_original" });
+    expect(vi.mocked(createClipJob).mock.calls[0][0]).toMatchObject({ sourceProfile: "music", musicAudioMode: "mix_original", musicSongGain: 0.1 });
   });
 
   it("forces short vertical music output and resets captions when switching from long-form Clip mode", () => {

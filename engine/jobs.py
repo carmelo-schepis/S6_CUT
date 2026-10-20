@@ -2067,7 +2067,7 @@ class JobManager:
             requirement = "readable sung vocals" if job.source_profile == "music" else "speech"
             raise MediaError(f"This video has no readable audio track. Automatic clips require {requirement}; retain it as a source for manual editing.")
         if job.source_profile == "music" and job.music_audio_mode.value == "mix_original" and music_track is not None and not metadata["audio"]:
-            warning = "Original audio was unavailable; the background song was rendered at 25% volume."
+            warning = f"Original audio was unavailable; the background song was rendered at {job.music_song_gain * 100:g}% volume."
             if warning not in job.warnings:
                 job.warnings.append(warning)
         source_duration = float(metadata["duration"])

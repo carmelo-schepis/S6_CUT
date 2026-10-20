@@ -131,7 +131,8 @@ def _tone_amplitude(path: Path, frequency: float, settings: Settings) -> float:
 
 
 @pytest.mark.parametrize("renderer", ["complex", "fast"])
-def test_real_mix_keeps_original_and_quieter_song(tmp_path: Path, settings: Settings, renderer: str) -> None:
+@pytest.mark.parametrize("gain", [0, 0.1, 0.25])
+def test_real_mix_keeps_original_and_quieter_song(tmp_path: Path, settings: Settings, renderer: str, gain: float) -> None:
     silent, song = _fixtures(tmp_path, settings)
     source = _with_original_tone(silent, tmp_path / "with-original.mp4", settings)
     output = tmp_path / f"mix-{renderer}.mp4"
@@ -139,19 +140,20 @@ def test_real_mix_keeps_original_and_quieter_song(tmp_path: Path, settings: Sett
         render_clip(
             source, output, start=.2, end=1.4, aspect="16:9", words=[], visuals=[], overlays=[],
             settings=settings, has_audio=True, subtitles_enabled=False, music_track=song,
-            music_audio_mode="mix_original", music_song_gain=.25, music_original_audio_gain=1,
+            music_audio_mode="mix_original", music_song_gain=gain, music_original_audio_gain=1,
         )
     else:
         render_fast_clip(
             source, output, start=.2, end=1.4, aspect="16:9", settings=settings,
             has_audio=True, subtitles_enabled=False, music_track=song, music_audio_mode="mix_original",
-            music_song_gain=.25, music_original_audio_gain=1,
+            music_song_gain=gain, music_original_audio_gain=1,
         )
     original = _tone_amplitude(output, 440, settings)
     background = _tone_amplitude(output, 660, settings)
     assert original > .05
-    assert background > .01
-    assert background / original == pytest.approx(.25, abs=.08)
+    if gain:
+        assert background > .004
+    assert background / original == pytest.approx(gain, abs=.025)
     assert float(_probe_audio(output, settings)["format"]["duration"]) == pytest.approx(1.2, abs=.15)
 
 

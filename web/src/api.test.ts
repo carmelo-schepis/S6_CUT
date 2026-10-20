@@ -83,8 +83,9 @@ describe("engine API boundary", () => {
         job: { schemaVersion: 1, id: "j", projectId: "p", mode: "clip", state: "queued", stage: "q", stageLabel: "Q", progress: 0, style: "serious", warnings: [], clips: [], beats: [], createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" },
       }), { status: 202, headers: { "Content-Type": "application/json" } });
     }));
-    await createClipJob({ style: "serious", count: 1, minDuration: 8, maxDuration: 20, aspectRatio: "9:16", sourceProfile: "music", musicAudioMode: "mix_original" });
+    await createClipJob({ style: "serious", count: 1, minDuration: 8, maxDuration: 20, aspectRatio: "9:16", sourceProfile: "music", musicAudioMode: "mix_original", musicSongGain: 0 });
     expect(body?.get("music_audio_mode")).toBe("mix_original");
+    expect(body?.get("music_song_gain")).toBe("0");
   });
 
   it("sends hook_text only for an explicit opt-in", async () => {

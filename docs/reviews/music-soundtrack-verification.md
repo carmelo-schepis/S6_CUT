@@ -2,7 +2,20 @@
 
 Music mode lets the optional song replace the video's audio or play underneath
 it. Song-only is the default; mixed mode keeps the original audio at normal
-level and plays the song at 25% linear gain. Leaving the song blank keeps the
+level and starts the song at 25% linear gain. A Background song volume slider
+lets new jobs use 0–100% gain in mixed mode; 0% mutes only the song. Start at
+10–15% for speech and lower further for quiet voices or loud songs. These are
+fixed linear gains, not perceived-loudness percentages: 25% is about −12 dB
+and 10% is −20 dB relative to the song input. There is no automatic ducking or
+speech detection; quiet source recordings may still need a lower song level.
+The mix limiter catches combined peaks without normalizing away the chosen
+balance. Original source audio may itself contain music or noise; this control
+only lowers the added song.
+
+The chosen gain is saved on the project, job and clips, shown in the workspace,
+used by caption rerenders and included in ZIP metadata. Existing jobs retain
+their saved levels; changing this creation control requires a new job/render.
+Song-only keeps full song level. Leaving the song blank keeps the
 video's original audio. Lyrics use the song's adjusted timeline. Short songs
 loop across the footage, and each clip uses its position on that timeline.
 Speed changes pitch and tempo together.
@@ -102,3 +115,28 @@ read-only status view and is covered by the separate iOS status acceptance test.
   silent footage, Engine only and a matching `song.mp3` title at 1.5×. All 12
   steps completed, nine caption cues were saved, and decoded audio measured
   989 Hz against the expected 990 Hz. Its database was isolated under `/tmp`.
+
+## Adjustable background level verification (2026-10-20)
+
+The original mix was already wired through both render paths, but creation
+hard-coded 25% and the workspace and silent-source warning also hard-coded
+that label. Creation now accepts a bounded optional `music_song_gain` (0–1);
+omitting it preserves the existing 25% mixed default. Song-only ignores the
+mixed level and Speech submissions reject the Music-only option.
+
+Regression coverage includes API persistence at 0%, 10%, 100% and the legacy
+default, invalid/nonfinite levels, frontend serialization of zero and slider
+mode switching, real decoded 440/660 Hz tone ratios at 0%, 10% and 25% in both
+renderers. The browser recovery/export case selects 10% through the slider
+and checks the resulting audio before and after a caption edit and restart.
+
+Validation: 55 focused engine tests passed in an isolated production-image
+container with real FFmpeg. Lint, TypeScript, provider checks and production
+build passed. The full frontend run passed 414/415; the mobile finished-work
+date grouping test also fails on unchanged main just after UTC midnight because
+its one-hour-old fixture is yesterday. All 11 mobile tests pass with
+`TZ=Australia/Sydney`; no unrelated mobile code was changed.
+
+All 9 real browser/API/worker/FFmpeg soundtrack cases passed, including the
+10% mix and its restart/caption rerender/export checks. Evidence:
+`.qa/s6-music-check-1792455895921-1057342/playwright`.
