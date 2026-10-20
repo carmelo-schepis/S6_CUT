@@ -104,9 +104,21 @@ test("a slow load shows the splash only after the grace period, and removes it w
   try {
     await page.goto("/", { waitUntil: "domcontentloaded" });
     await expect.poll(gate.requested).toBe(true);
+    // Measure the CSS grace period independently of script download/compilation:
+    // on a busy machine it may already have elapsed before the API request starts.
+    await page.locator("#startup-screen").evaluate((screen) => {
+      const entry = screen.getAnimations().find((item) =>
+        item instanceof CSSAnimation && item.animationName === "startup-appear")!;
+      entry.pause();
+      entry.currentTime = 0;
+    });
     // Grace period: plain black, the app hidden and inert, but no splash yet.
     await expectCovered(page);
     await expect(page.locator("#startup-screen")).toHaveCSS("opacity", "0");
+    await page.locator("#startup-screen").evaluate((screen) => {
+      screen.getAnimations().find((item) =>
+        item instanceof CSSAnimation && item.animationName === "startup-appear")!.play();
+    });
     // Still loading after it: now the splash appears.
     await expect(page.locator("#startup-screen")).toHaveCSS("opacity", "1", { timeout: 10_000 });
     await expectCovered(page);
