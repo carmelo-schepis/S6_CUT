@@ -1,5 +1,7 @@
 # Video overlay diagnosis and planned solution map
 
+Follow-up: [independent reverification and updated solution map](video-refraction-solution-map.md), including Shorts Editor exposure, fresh decoded frames, and the observed deployment compatibility blocker.
+
 Inspected on linuxpc, 2026-10-20. Baseline: `eeb1669` (`origin/main`). Investigation branch: `diagnose/video-frame-overlay-20261020`, worktree `/home/linuxpc/git_branches/S6_CUT-video-frame-overlay`.
 
 ## Diagnosis: completed outputs feed back into automatic overlays
