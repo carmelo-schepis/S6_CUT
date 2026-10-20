@@ -160,7 +160,7 @@ test("mobile startup errors reveal usable retry controls", async ({ page, browse
   await expect(page.getByRole("button", { name: "Retry", exact: true })).toBeEnabled();
 });
 
-test("normal playback paints intermediate fade frames without seeking the animation", async ({ page }) => {
+test("normal playback changes opacity progressively without seeking the animation", async ({ page }) => {
   await mockEngine(page);
   await withSplashDelay(page, "50ms");
   const data = await hold(page, /\/api\/v1\/(?:mobile\/overview|library\/recent-clips)(?:\?.*)?$/);
@@ -174,15 +174,15 @@ test("normal playback paints intermediate fade frames without seeking the animat
     await page.evaluate(() => {
       const samples: { time: number; opacity: number }[] = [];
       (window as unknown as { __normalFade: typeof samples }).__normalFade = samples;
-      const tick = () => {
+      // WebKit's compositor can paint while JavaScript animation-frame callbacks
+      // are throttled. Sample the running animation without seeking or pausing it.
+      const timer = window.setInterval(() => {
         const screen = document.getElementById("startup-screen");
-        if (!screen) return;
+        if (!screen) { window.clearInterval(timer); return; }
         if (document.body.classList.contains("startup-revealing")) {
           samples.push({ time: performance.now(), opacity: Number(getComputedStyle(screen).opacity) });
         }
-        requestAnimationFrame(tick);
-      };
-      requestAnimationFrame(tick);
+      }, 20);
     });
   } finally { data.release(); }
   await expectRevealed(page);
