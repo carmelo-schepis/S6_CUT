@@ -4,7 +4,7 @@
  * Home, Jobs and tab-badge counts can never disagree with each other.
  */
 import { dayLabel } from "../jobs-view";
-import { downloadFacts, formatBytes, jobFacts, sentenceCase } from "../../status-format";
+import { downloadFacts, formatBytes, jobFacts, sentenceCase, statesCount } from "../../status-format";
 import type { JobState, MobileDownload, MobileJob, MobileOverview } from "../../types";
 
 export type MobileTab = "home" | "library" | "jobs";
@@ -96,8 +96,9 @@ export function workFacts(item: WorkItem): WorkFacts {
   const live = job.downloadProgress && job.downloadProgress.phase !== "complete" ? downloadFacts(job.downloadProgress) : null;
   // Some stages count something other than clips (words checked, for instance), which reads as "856 of 5".
   // Item counts are shown only when they make sense; a live download's transfer line always does.
-  // The stage label often says it already ("Rendering clip 2 of 5"); repeating it would read "… · 2 of 5".
-  const counted = job.currentItem <= job.totalItems && !facts.stage.includes(`${job.currentItem} of ${job.totalItems}`);
+  // The stage label often says it already ("Rendering clip 2 of 5", "Transcribing music — 575s of 1161s");
+  // repeating it would read "… · 2 of 5".
+  const counted = job.currentItem <= job.totalItems && !statesCount(facts.stage, job.currentItem);
   const items = live || counted ? facts.detail : null;
   const detail = [items, live?.speed, live?.eta].filter(Boolean).join(" · ");
   return {

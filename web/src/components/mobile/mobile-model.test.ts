@@ -71,6 +71,9 @@ describe("work facts", () => {
     // …and not twice when the stage label already carries it.
     const [labelled] = workGroups(overview({ running: [runningJob({ stageLabel: "Rendering clip 2 of 5", currentItem: 2, totalItems: 5 })] })).running;
     expect(workFacts(labelled).detail).toBeNull();
+    // A label that counts in its own unit says it too: not "… 575s of 1161s · 575 of 1162".
+    const [seconds] = workGroups(overview({ running: [runningJob({ stageLabel: "Transcribing music — 575s of 1161s", currentItem: 575, totalItems: 1162 })] })).running;
+    expect(workFacts(seconds)).toMatchObject({ stage: "Transcribing music — 575s of 1161s", detail: null });
   });
   it("describes a download from its own title, bytes and percentage", () => {
     const [, item] = workGroups(overview({ downloads: [downloadTask(), downloadTask({ id: "x".repeat(32), percent: null, title: null, thumbnailUrl: null })] })).running;

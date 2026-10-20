@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DownloadProgress, Job } from "./types";
-import { downloadFacts, downloadPhaseLabel, formatEta, formatSeconds, groupWarnings, jobFacts } from "./status-format";
+import { downloadFacts, downloadPhaseLabel, formatEta, formatSeconds, groupWarnings, jobFacts, statesCount } from "./status-format";
 
 const download: DownloadProgress = {
   downloadedBytes: 148_100_000,
@@ -108,6 +108,23 @@ describe("jobFacts", () => {
 
   it("marks a download with no percentage as indeterminate", () => {
     expect(jobFacts({ ...job, downloadProgress: { ...download, percent: null } }).indeterminate).toBe(true);
+  });
+});
+
+describe("statesCount", () => {
+  it("finds a count the text already states, with or without a unit", () => {
+    expect(statesCount("Rendering clip 2 of 5", 2)).toBe(true);
+    expect(statesCount("Transcribing music — 575s of 1161s", 575)).toBe(true);
+    expect(statesCount("575 of 1162", 575)).toBe(true);
+  });
+
+  it("ignores other numbers and text without a count", () => {
+    expect(statesCount("Rendering clip 12 of 15", 2)).toBe(false);
+    expect(statesCount("Rendering output 3", 3)).toBe(false);
+    expect(statesCount("Checked 856 words", 856)).toBe(false);
+    expect(statesCount("Downloaded 1.575 of 4 GB", 575)).toBe(false);
+    expect(statesCount(null, 5)).toBe(false);
+    expect(statesCount("Rendering clip 2 of 5", null)).toBe(false);
   });
 });
 

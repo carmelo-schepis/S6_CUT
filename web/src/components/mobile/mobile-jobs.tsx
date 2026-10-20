@@ -7,30 +7,37 @@ import { ProcessChecklist } from "../process-checklist";
 import { groupFinishedByDay, outputsReady, workFacts, type WorkGroups, type WorkItem } from "./mobile-model";
 import { ClipStrip, Poster, type OpenPreview } from "./mobile-parts";
 
-/** Work in flight: a large still, a progress bar with its numbers, the live steps and the clips finished so far. */
+/**
+ * Work in flight, in up to three groups: what it is and how far along, the live
+ * steps, and the clips finished so far. A wide screen sets the first two side
+ * by side, so an entry with steps always fills the page width.
+ */
 function RunningEntry({ item, onPreview }: { item: WorkItem; onPreview: OpenPreview }) {
   const facts = workFacts(item);
   const [stepsOpen, setStepsOpen] = useState(true);
   const job = item.kind === "job" ? item.job : null;
-  const done = job ? job.steps.filter((step) => step.status === "complete" || step.status === "skipped").length : 0;
-  return <article className="m-work" data-work-key={item.key}>
-    <div className="m-work-head">
-      <Poster src={facts.poster} className="m-work-poster" />
-      <div className="m-work-title">
-        <strong className="m-clamp">{facts.title}</strong>
-        {facts.subtitle && <span className="m-muted m-clamp-1">{facts.subtitle}</span>}
-        <StatusBadge state={facts.state} />
+  const steps = job && job.steps.length > 0 ? job.steps : null;
+  const done = steps ? steps.filter((step) => step.status === "complete" || step.status === "skipped").length : 0;
+  return <article className={steps ? "m-work m-work-split" : "m-work"} data-work-key={item.key}>
+    <div className="m-work-summary">
+      <div className="m-work-head">
+        <Poster src={facts.poster} className="m-work-poster" />
+        <div className="m-work-title">
+          <strong className="m-clamp">{facts.title}</strong>
+          {facts.subtitle && <span className="m-muted m-clamp-1">{facts.subtitle}</span>}
+          <StatusBadge state={facts.state} />
+        </div>
       </div>
+      <Progress value={facts.percent} indeterminate={facts.indeterminate} label={facts.stage} />
+      <p className="m-muted m-work-detail">{[facts.stage, facts.detail].filter(Boolean).join(" · ")}</p>
     </div>
-    <Progress value={facts.percent} indeterminate={facts.indeterminate} label={facts.stage} />
-    <p className="m-muted m-work-detail">{[facts.stage, facts.detail].filter(Boolean).join(" · ")}</p>
-    {job && job.steps.length > 0 && <>
+    {job && steps && <div className="m-work-steps">
       <button type="button" className="m-toggle" aria-expanded={stepsOpen} onClick={() => setStepsOpen((open) => !open)}>
         {stepsOpen ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}
-        {stepsOpen ? "Hide steps" : "Show steps"}<span className="m-muted">{done} of {job.steps.length} done</span>
+        {stepsOpen ? "Hide steps" : "Show steps"}<span className="m-muted">{done} of {steps.length} done</span>
       </button>
-      {stepsOpen && <ProcessChecklist steps={job.steps} jobState={job.state} compact label={`Steps for ${facts.title} (job ${job.id.slice(0, 8)})`} />}
-    </>}
+      {stepsOpen && <ProcessChecklist steps={steps} jobState={job.state} compact label={`Steps for ${facts.title} (job ${job.id.slice(0, 8)})`} />}
+    </div>}
     {job && job.clips.length > 0 && <div className="m-work-clips"><p className="m-muted m-work-detail">{job.clipsReady} clip{job.clipsReady === 1 ? "" : "s"} ready so far</p><ClipStrip clips={job.clips} onPreview={onPreview} label={`Finished clips for ${facts.title}`} /></div>}
   </article>;
 }

@@ -38,7 +38,19 @@ const health = {
   dataPath: "/app/data", freeBytes: 1, configuredWorkers: 1, activeWorkers: 1, queuedJobs: 0, fallbacks: { media: "text card" },
 };
 
-async function stubApi(page: Page) {
+// The job from the customer's iPad report: a Music run 25% in, transcribing, no clips yet, twelve steps.
+const musicJob = () => ({
+  ...runningJob(25), id: "job-music", projectName: "Hal Jordan Scenepack | Lanterns Season 1 Clips For Edits", sourceTitle: "Hal Jordan Scenepack | Lanterns Season 1 Clips For Edits",
+  stage: "transcribe", stageLabel: "Transcribing music — 575s of 1161s", currentItem: 575, totalItems: 1162, clipsReady: 0, clips: [],
+  steps: [
+    ...["Source received", "Video validated", "Background song prepared", "Audio prepared"].map((label, index) => ({ id: `done-${index}`, label, status: "complete", completedAt: ago(90_000) })),
+    { id: "transcribe", label: "Music words timed", status: "active", startedAt: ago(79_000), currentItem: 575, totalItems: 1162, detail: "Transcribing music — 575s of 1161s" },
+    { id: "provider", label: "Provider bypassed for music profile", status: "skipped", completedAt: ago(80_000), detail: "Music profile stays local; provider planning skipped" },
+    ...["Lyric windows planned", "Lyric windows selected", "Clip boundaries verified", "Clips rendered and saved", "Outputs verified", "Project ready"].map((label, index) => ({ id: `next-${index}`, label, status: "pending" })),
+  ],
+});
+
+async function stubApi(page: Page, work: { running?: unknown[]; downloads?: unknown[] } = {}) {
   const mutations: string[] = [];
   const requests: string[] = [];
   let overviewReads = 0;
@@ -57,7 +69,7 @@ async function stubApi(page: Page) {
     if (url.pathname.endsWith("/mobile/overview")) {
       overviewReads += 1;
       return route.fulfill({ json: {
-        generatedAt: now(), running: [runningJob(overviewReads > 1 ? 74 : 62)], recent: [finishedJob], recentTotal: 1, downloads: [download], clipsLastDay: 14, failedLastDay: 1,
+        generatedAt: now(), running: work.running ?? [runningJob(overviewReads > 1 ? 74 : 62)], recent: [finishedJob], recentTotal: 1, downloads: work.downloads ?? [download], clipsLastDay: 14, failedLastDay: 1,
       } });
     }
     if (url.pathname.endsWith("/library/recent-clips")) return route.fulfill({ json: { items: [asset("a1", "Scene 12 – Hal Jordan"), asset("a2", "Scene 11 – Hal Jordan")], page: 1, pageSize: 12, hasMore: false, total: 103 } });
@@ -102,8 +114,10 @@ test("iOS devices get Home, Library and Jobs: live progress, still previews, one
   await expect(page.getByRole("heading", { level: 1, name: "Jobs" })).toBeVisible();
   await expect(page.locator(".m-wallpaper")).toHaveCSS("opacity", "0", { timeout: 5_000 });
   await expect(page.getByText("Render clips", { exact: true })).toBeVisible();
-  await expect(page.getByText(/1\.5 MB of 4\.0 MB/)).toBeVisible();
-  await expect(page.getByLabel("Rendering clips: 74%")).toBeVisible({ timeout: 20_000 });
+  // Home stays mounted behind Jobs and shows the same download, so read these off the Jobs page itself.
+  const jobsPage = page.locator(".m-jobs");
+  await expect(jobsPage.getByText(/1\.5 MB of 4\.0 MB/)).toBeVisible();
+  await expect(jobsPage.getByLabel("Rendering clips: 74%")).toBeVisible({ timeout: 20_000 });
   expect(overviewReads()).toBeGreaterThanOrEqual(2);
   await expect(page.locator("video")).toHaveCount(0);
   await page.getByRole("button", { name: "Preview Cold open" }).click();
@@ -160,6 +174,57 @@ test("navigation follows the desktop's breakpoints: top bar on phones, the sideb
       expect(tab!.height).toBeGreaterThanOrEqual(44);
     }
   }
+});
+
+test("a running job spans the page evenly: no empty column, one edge for every status, the rail through the icons", async ({ page }, testInfo) => {
+  test.skip(!isStatusViewProject(testInfo.project.name), "iOS only");
+  await stubApi(page, { running: [musicJob()], downloads: [] });
+  await page.goto("/#/jobs", { waitUntil: "domcontentloaded" });
+  await expect(page.getByText("Music words timed", { exact: true })).toBeVisible();
+  // The stage label already counts ("575s of 1161s"), so no second "575 of 1162" beside it or in the step.
+  await expect(page.getByText(/575 of 1162/)).toHaveCount(0);
+  const layout = await page.evaluate(() => {
+    const rect = (element: Element | null) => element!.getBoundingClientRect();
+    const content = document.querySelector(".m-content")!;
+    const style = getComputedStyle(content);
+    const left = rect(content).left + parseFloat(style.paddingLeft);
+    const right = rect(content).right - parseFloat(style.paddingRight);
+    const textLeft = (element: Element) => { const range = document.createRange(); range.selectNodeContents(element); return range.getBoundingClientRect().left; };
+    const list = document.querySelector(".m-work .process-checklist")!;
+    const rail = rect(list).left + parseFloat(getComputedStyle(list, "::before").left) + 0.5;
+    const steps = [...document.querySelectorAll(".m-work .checklist-step")];
+    const skipped = steps.find((step) => step.classList.contains("status-skipped"))!;
+    const visible = (element: Element | null) => Boolean(element) && getComputedStyle(element!).display !== "none";
+    return {
+      left, right,
+      summary: rect(document.querySelector(".m-work-summary")).toJSON() as DOMRect,
+      steps: rect(document.querySelector(".m-work-steps")).toJSON() as DOMRect,
+      statusRights: steps.map((step) => step.querySelector(".checklist-status-text")).filter(visible).map((status) => rect(status).right),
+      countRight: rect(document.querySelector(".m-work .m-toggle > span")).right,
+      finishedRight: rect(document.querySelector(".m-done-main")).right,
+      railOffsets: steps.map((step) => { const icon = rect(step.querySelector(".checklist-icon")); return Math.abs(icon.left + icon.width / 2 - rail); }),
+      detailIndent: textLeft(skipped.querySelector(".checklist-detail-text")!) - textLeft(skipped.querySelector(".checklist-label")!),
+      overflow: document.documentElement.scrollWidth - window.innerWidth,
+    };
+  });
+  // "In progress" and "Skipped" end on the content's right edge, with the step count and the finished jobs below.
+  expect(layout.statusRights).toHaveLength(2);
+  for (const edge of [...layout.statusRights, layout.countRight, layout.finishedRight]) expect(Math.abs(edge - layout.right)).toBeLessThanOrEqual(1);
+  // The rail runs through every step icon, and a step's detail starts under its label.
+  for (const offset of layout.railOffsets) expect(offset).toBeLessThanOrEqual(1);
+  expect(Math.abs(layout.detailIndent)).toBeLessThanOrEqual(1);
+  if (page.viewportSize()!.width >= 1024) {
+    // Wide: the summary and the steps side by side in two equal columns that fill the page.
+    expect(Math.abs(layout.summary.left - layout.left)).toBeLessThanOrEqual(1);
+    expect(Math.abs(layout.steps.right - layout.right)).toBeLessThanOrEqual(1);
+    expect(Math.abs(layout.summary.width - layout.steps.width)).toBeLessThanOrEqual(1);
+    expect(Math.abs(layout.summary.top - layout.steps.top)).toBeLessThanOrEqual(1);
+  } else {
+    // Narrow: stacked, each the full width.
+    for (const box of [layout.summary, layout.steps]) expect(Math.abs(box.width - (layout.right - layout.left))).toBeLessThanOrEqual(1);
+    expect(layout.steps.top).toBeGreaterThan(layout.summary.bottom);
+  }
+  expect(layout.overflow).toBeLessThanOrEqual(0);
 });
 
 test("the status view is built from the desktop's tokens, not its own", async ({ page }, testInfo) => {

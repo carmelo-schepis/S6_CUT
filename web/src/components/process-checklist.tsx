@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, Check, Circle, LoaderCircle, Minus } from "lucide-react";
-import { formatSeconds } from "../status-format";
+import { formatSeconds, statesCount } from "../status-format";
 import type { JobState, ProcessingStep } from "../types";
 
 function formatElapsed(startedAt: string, now: number) {
@@ -45,6 +45,9 @@ function statusLabel(status: ProcessingStep["status"], paused: boolean) {
  * engine reported as `complete`, and elapsed time is derived only from the
  * active step's real `startedAt`. It never infers completion from item
  * counts, progress values, or elapsed time.
+ *
+ * `compact` is the iPhone/iPad status view's plain-row version; it also leaves
+ * out an item count the step's own detail already states ("575s of 1161s").
  */
 export function ProcessChecklist({ steps, jobState, compact = false, label = "Short creation progress" }: { steps: ProcessingStep[]; jobState?: JobState; compact?: boolean; label?: string }) {
   const [now, setNow] = useState(() => Date.now());
@@ -137,6 +140,7 @@ export function ProcessChecklist({ steps, jobState, compact = false, label = "Sh
         {steps.map((step) => {
           const active = step.status === "active";
           const progress = itemProgress(step);
+          const shownProgress = compact && statesCount(step.detail, step.currentItem) ? null : progress;
           return (
             <li key={step.id} className={`checklist-step status-${step.status}${active ? " active-row" : ""}${step.status === "complete" && freshlyCompleted.has(step.id) ? " checkmark-new" : ""}`} aria-current={active ? "step" : undefined} data-step-id={step.id} data-testid={`progress-step-${step.id}`}>
               <span className="checklist-icon" aria-hidden="true">{stepIcon(step.status)}</span>
@@ -153,7 +157,7 @@ export function ProcessChecklist({ steps, jobState, compact = false, label = "Sh
                   {(step.status === "skipped" || step.status === "failed") && step.detail && (
                     <span className="checklist-detail" title={step.detail}><span className="checklist-detail-text" title={step.detail}>{step.detail}</span></span>
                   )}
-                  {progress && <span className="checklist-progress">{progress}</span>}
+                  {shownProgress && <span className="checklist-progress">{shownProgress}</span>}
                 </span>
               </div>
             </li>

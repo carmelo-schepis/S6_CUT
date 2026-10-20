@@ -100,6 +100,15 @@ export type JobFacts = {
   indeterminate: boolean;
 };
 
+/**
+ * True when `text` already states a count for `current`, as "Rendering clip 2 of 5"
+ * or "Transcribing music — 575s of 1161s" do, so a separate "575 of 1162" would
+ * only repeat it. A different number ("12 of 15" for 2) does not count.
+ */
+export function statesCount(text: string | null | undefined, current: number | null | undefined): boolean {
+  return Boolean(text) && current != null && new RegExp(`(^|[^\\d.])${current}\\s*[a-z]*\\s+of\\s+\\d`, "i").test(text!);
+}
+
 export function jobFacts(job: Pick<Job, "downloadProgress" | "stageLabel" | "currentItem" | "totalItems" | "progress">): JobFacts {
   const download = activeDownload(job);
   const facts = download ? downloadFacts(download) : null;
