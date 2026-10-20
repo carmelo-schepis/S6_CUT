@@ -85,6 +85,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
   }, [foldersLoaded, recentClipsLoaded, onReady]);
   const [folders, setFolders] = useState<LibraryFolder[]>([]);
   const [libraryFolderId, setLibraryFolderId] = useState("");
+  const [libraryOverlaysEnabled, setLibraryOverlaysEnabled] = useState(false);
   const singleFlight = useSingleFlight();
 
   useEffect(() => {
@@ -166,7 +167,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
           ...(sourceProfile === "speech" && speechHookTextEnabled && manualHookText.trim() ? { manualHookText: manualHookText.trim() } : {}),
           // Eligible: always send the explicit choice so an untick is respected.
           ...(metadataDisabledReason === null ? { youtubeMetadata: youtubeMetadataActive } : {}),
-          subscribeAnimation, libraryFolderId: libraryFolderId || undefined,
+          subscribeAnimation, libraryFolderId: libraryFolderId || undefined, libraryOverlaysEnabled: libraryOverlaysEnabled && libraryOverlaysSupported,
           ...(sourceProfile === "music" ? { musicPresentation: { version: 1 as const, subtitleTheme: musicTheme }, musicTopText: musicHookTextEnabled ? musicTopText : "" } : {}),
           ...(sourceProfile === "music" ? { musicTrackFile: musicTrackFile || undefined, musicTrackUrl: musicTrackUrl.trim() || undefined, musicTrackSpeed: Number(musicTrackSpeed), musicAudioMode, ...(musicAudioMode === "mix_original" ? { musicSongGain: musicSongVolume / 100 } : {}) } : {}),
         });
@@ -183,6 +184,9 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
   // must not assert that none is: that read can take several seconds, and the
   // claim was wrong for the whole of it whenever a provider was in fact set up.
   const fastMode = sourceProfile === "speech" && processingMode === "fast";
+  const libraryOverlaysSupported = sourceProfile === "music"
+      || (contentFormat === "short" && !fastMode)
+      || (contentFormat === "long" && batchMode === "high_volume" && processingMode === "smart");
   const knownSourceDuration = sourceType === "file" && sourceDuration?.file === file ? sourceDuration.seconds : null;
   const speechHookTextDisabledReason = processingMode === "fast" ? "Fast mode does not support AI hook text."
       : contentFormat === "long" ? "Long form does not support AI hook text."
@@ -333,6 +337,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
           <FieldGroup title="Destination">
             <Field label="Project name" hint="Optional. Leave blank for a generated name."><input id="project-name" aria-label="Project name" value={projectName} maxLength={160} onChange={(event) => setProjectName(event.target.value)} placeholder="e.g. Launch highlights" /></Field>
             <div className="folder-picker"><Field label="Business folder"><select aria-label="Business folder" value={libraryFolderId} onChange={(event) => setLibraryFolderId(event.target.value)}>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></Field><Button variant="ghost" onClick={addFolder}><Plus size={13} /> New folder</Button></div>
+            {libraryOverlaysSupported && <label className="subtitle-toggle"><input type="checkbox" aria-label="Use eligible Library B-roll" checked={libraryOverlaysEnabled} onChange={(event) => setLibraryOverlaysEnabled(event.target.checked)} /><span><strong>Use eligible Library B-roll</strong><small>Off by default. Only manually imported images or videos explicitly marked eligible are considered. A job keeps the same choices through retries.</small></span></label>}
           </FieldGroup>
 
           {sourceProfile === "music" && <FieldGroup title="Background song" hint="Optional · upload an MP3 or paste a public YouTube song URL. Choose whether the song replaces or accompanies the video audio.">

@@ -20,7 +20,7 @@ from typing import Any
 from . import media as media_module
 from .config import Settings
 from .database import Database
-from .library import LibraryRules, ResolvedVisual
+from .library import LibraryRules, ResolvedVisual, visual_concept
 from .media import (
     DownloadStalled, MediaError, available, download_youtube, probe, render_clip,
     _metadata_text, sha256_file, transcribe, transcription_cache_key, youtube_import_metadata, youtube_import_title,
@@ -1496,7 +1496,10 @@ class JobManager:
                 )
             if job.steps:
                 self.start_step(job, "render", detail=f"Rendering caption revision {revision}", progress=40, private=private)
-            render = _media_fn("render_fast_clip")
+            overlays, provenance = self._video_overlay_for_clip(job, clip, private)
+            render = _media_fn("render_clip" if overlays else "render_fast_clip")
+            if overlays:
+                clip.provenance = [record for record in clip.provenance if record.provider != "personal-library"] + provenance
             music_presentation = private.get("music_presentation")
             music_treatments = private.get("music_treatments")
             music_kwargs = _music_render_kwargs(
@@ -1509,6 +1512,7 @@ class JobManager:
                 "start": clip.start, "end": clip.end, "aspect": private["aspect_ratio"], "settings": self.settings,
                 "has_audio": bool(metadata["audio"]), "words": words, "style": job.style,
                 "hook_text": clip.hook_text,
+                **({"visuals": [], "overlays": overlays} if overlays else {}),
                 **_centered_partial_fill_kwargs(render, centered_partial_fill_eligible(job, private, metadata)),
                 "subtitles_enabled": bool(private.get("burn_subtitles", job.burn_subtitles)),
                 **_reaction_policy_render_kwargs(render, private, job.source_profile, bool(private.get("burn_subtitles", job.burn_subtitles))),
@@ -2047,6 +2051,131 @@ class JobManager:
             job.warnings.append(warning)
         self._save(job, private)
 
+    def _snapshot_video_overlays(self, job: Job, private: dict[str, Any], words: list[dict[str, Any]]) -> dict[str, Any]:
+        """Freeze each selected asset before the first render can publish a clip."""
+        saved = private.get("library_overlay_snapshot")
+        if isinstance(saved, dict) and isinstance(saved.get("clips"), dict):
+            return saved["clips"]
+        snapshot: dict[str, Any] = {}
+        enabled = bool(job.library_overlays_enabled and private.get("library_overlays_enabled", False))
+        if enabled:
+            source_blob_id = job.source_blob_id or str(private.get("source_hash") or "")
+            for clip in job.clips:
+                excerpt = " ".join(
+                    str(word.get("text", "")) for word in words
+                    if float(word.get("end", 0)) > clip.start and float(word.get("start", 0)) < clip.end
+                )
+                visual = self.rules.resolve_video_overlay(
+                    excerpt, exclude_project_id=job.project_id, exclude_job_id=job.id,
+                    exclude_blob_id=source_blob_id,
+                )
+                asset = visual.asset
+                if asset and visual.asset_path and visual.asset_path.is_file():
+                    snapshot[clip.id] = {
+                        "asset_id": asset.id, "blob_id": asset.blob_id,
+                        "content_hash": asset.content_hash, "title": asset.title,
+                        "licence": asset.licence, "attribution": asset.attribution or asset.title,
+                        "query": excerpt, "match_reason": visual.match_reason,
+                    }
+                else:
+                    snapshot[clip.id] = None
+        private["library_overlay_snapshot"] = {"version": 1, "clips": snapshot}
+        self._save(job, private)
+        return snapshot
+
+    def _video_overlay_for_clip(self, job: Job, clip: Clip, private: dict[str, Any]) -> tuple[list[tuple[Path, float, float]], list[ProvenanceRecord]]:
+        """Load only the asset identity chosen in the persisted job snapshot."""
+        entry = (private.get("library_overlay_snapshot") or {}).get("clips", {}).get(clip.id)
+        if not isinstance(entry, dict) or not job.library_overlays_enabled:
+            return [], []
+        relative = self.db.blob_relative_path(str(entry.get("blob_id") or ""))
+        if not relative:
+            return [], []
+        try:
+            path = confined(self.settings.data_path, *relative.split("/"))
+        except ValueError:
+            return [], []
+        if not path.is_file():
+            return [], []
+        duration = float(clip.duration)
+        if duration <= 1:
+            return [], []
+        provenance = ProvenanceRecord(
+            id=str(uuid.uuid4()), provider="personal-library", licence=str(entry.get("licence") or "User supplied"),
+            attribution=str(entry.get("attribution") or entry.get("title") or "Library asset"),
+            query=str(entry.get("query") or ""), match_reason=str(entry.get("match_reason") or "Explicitly eligible Library asset"),
+            content_hash=entry.get("content_hash"),
+        )
+        return [(path, .65, min(3.4, duration - .2))], [provenance]
+
+    def create_source_only_rerender(self, job: Job, clip_ids: list[str]) -> Job:
+        """Queue an immutable new job using the saved source and selected clip ranges."""
+        if job.mode != "clip":
+            raise ValueError("Source-only regeneration is available for Clip jobs")
+        if job.state not in {"complete", "partial", "failed", "cancelled_kept"}:
+            raise ValueError("Wait for the current job to finish before regenerating outputs")
+        private = self.db.get_job_private(job.id)
+        if private.get("caption_rerender"):
+            raise ValueError("Wait for caption editing to finish before regenerating outputs")
+        source_value = private.get("source_path")
+        source = Path(str(source_value)) if source_value else None
+        if source is None or not source.is_file():
+            project = self.db.get_project(job.project_id)
+            source_blob_id = job.source_blob_id or (project.source_blob_id if project else None)
+            relative = self.db.blob_relative_path(source_blob_id) if source_blob_id else None
+            if relative:
+                source = confined(self.settings.data_path, *relative.split("/"))
+        if source is None or not source.is_file() or source.is_symlink():
+            raise ValueError("The original source is no longer available for regeneration")
+        requested = list(dict.fromkeys(clip_ids))
+        if not requested:
+            raise ValueError("Select at least one completed clip")
+        by_id = {clip.id: clip for clip in job.clips}
+        if any(clip_id not in by_id for clip_id in requested):
+            raise KeyError(next(clip_id for clip_id in requested if clip_id not in by_id))
+        originals = [by_id[clip_id] for clip_id in requested]
+        if any(clip.state != "complete" for clip in originals):
+            raise ValueError("Only completed clips can be regenerated")
+        new_id = str(uuid.uuid4())
+        clips = [clip.model_copy(deep=True, update={
+            "id": str(uuid.uuid4()), "state": "queued", "selected": True, "error": None,
+            "output_name": None, "blob_id": None, "library_asset_id": None,
+            "width": None, "height": None, "folder_id": None, "published_at": None,
+            "preview_url": None, "thumbnail_url": None, "download_url": None,
+            "provenance": [], "fallback_used": False,
+        }) for clip in originals]
+        new_private = dict(private)
+        new_private["source_path"] = str(source)
+        new_private["library_overlays_enabled"] = False
+        new_private["processing_mode"] = job.processing_mode
+        new_private["execution_policy"] = "engine_only"
+        new_private["use_openrouter"] = False
+        new_private["youtube_metadata"] = {"enabled": False, "status": "disabled"}
+        new_private["hook_text"] = {"enabled": False, "status": "disabled"}
+        new_private.pop("library_overlay_snapshot", None)
+        new_private.pop("caption_rerender", None)
+        new_private.pop("caption_rerender_error", None)
+        fast = job_uses_fast_pipeline(job, new_private)
+        steps = self._fast_steps() if fast else self._smart_steps(False, job.source_profile, include_hook_text=False)
+        new_job = job.model_copy(deep=True, update={
+            "id": new_id, "source_blob_id": job.source_blob_id or (self.db.get_project(job.project_id).source_blob_id if self.db.get_project(job.project_id) else None), "state": "queued",
+            "stage": "queued", "stage_label": "Source-only regeneration queued", "progress": 0,
+            "current_item": 0, "total_items": len(clips), "planned_count": len(clips),
+            "successful_count": 0, "execution_policy": "engine_only", "library_overlays_enabled": False,
+            "hook_text_enabled": False, "youtube_metadata_enabled": False,
+            "clips": clips, "steps": steps, "error": None, "warnings": [
+                "New source-only versions are rendering from the saved original source. Previous outputs are preserved."
+            ],
+        })
+        self.db.save_job(new_job, new_private)
+        project = self.db.get_project(job.project_id)
+        if project:
+            project.latest_job_id = new_id
+            project.state = "queued"
+            project.updated_at = now_iso()
+            self.db.save_project(project)
+        return new_job
+
     def _process_clip_smart(self, job: Job, private: dict[str, Any]) -> None:
         source = self._source(job, private)
         if not self._cooperate(job):
@@ -2190,8 +2319,7 @@ class JobManager:
                     clip.music_song_gain = job.music_song_gain
                     clip.music_original_audio_gain = job.music_original_audio_gain
                 excerpt = " ".join(str(word["text"]) for word in candidate.words)
-                visual = self.rules.resolve(excerpt)
-                clip.visual_label = visual.label
+                clip.visual_label = visual_concept(excerpt)
                 # The source renderer uses source footage plus real library
                 # media only; it never burns the planner's text-card fallback.
                 clip.fallback_used = False
@@ -2227,6 +2355,7 @@ class JobManager:
                         f"Music clip {clip.index} does not meet the requested {minimum:g}–{maximum:g}s non-overlapping bounds; no invalid output was published."
                     )
                 previous_end = clip.end
+        self._snapshot_video_overlays(job, private, words)
         output_dir = self.settings.data_path / "jobs" / job.id / "clips"
         output_dir.mkdir(parents=True, exist_ok=True)
         for position, clip in enumerate(job.clips, 1):
@@ -2257,8 +2386,7 @@ class JobManager:
             ]
             if profile == "music":
                 clip.caption_cues = [CaptionCue.model_validate(cue) for cue in media_module.music_caption_cues(clip_words, clip.start, clip.end)]
-            visual = self.rules.resolve(" ".join(str(word["text"]) for word in clip_words))
-            overlays, provenance = _source_clip_visual_metadata(visual, clip.duration)
+            overlays, provenance = self._video_overlay_for_clip(job, clip, private)
             # Provenance describes media actually composited into this source
             # clip. Remove legacy/generated-card records and replace any prior
             # library match when a retry resolves the clip again.

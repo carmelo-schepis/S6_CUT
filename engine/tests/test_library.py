@@ -138,3 +138,41 @@ def test_temporary_or_missing_media_cannot_be_registered(tmp_path) -> None:
 def test_visual_concept_skips_pronoun_contractions_for_named_entities() -> None:
     assert visual_concept("It's the natural progression, you know, GW, CIA.") == "CIA"
     assert visual_concept("The Beatles changed popular music.") == "The Beatles"
+
+
+def test_video_overlay_resolution_requires_manual_asset_opt_in_and_excludes_project_media(tmp_path) -> None:
+    db = Database(tmp_path / "db.sqlite3")
+    rules = LibraryRules(db, tmp_path / "library")
+    manual_path = tmp_path / "eligible.png"
+    manual_path.write_bytes(b"approved still")
+    eligible = rules.register_file(
+        manual_path, title="Campaign graphic", media_type="image/png", origin="manual-import",
+        folder_id="00000000-0000-0000-0000-000000000001", triggers=["campaign"], policy="prefer",
+    ).model_copy(update={"video_overlay_eligible": True})
+    db.save_asset(eligible)
+    generated = asset("generated", "Campaign generated output", "required", ["campaign"])
+    generated.origin = "generated-clip"
+    generated.video_overlay_eligible = True
+    db.save_asset(generated)
+    same_project = asset("project", "Campaign source", "required", ["campaign"])
+    same_project.source_project_id = "project-1"
+    same_project.video_overlay_eligible = True
+    db.save_asset(same_project)
+
+    selected = rules.resolve_video_overlay("campaign", exclude_project_id="project-1")
+
+    assert selected.asset and selected.asset.id == eligible.id
+    assert selected.asset_path and selected.asset_path.is_file()
+    assert {item["assetId"] for item in rules.explain("campaign", video_overlay=True).rejected} >= {generated.id}
+    excluded = rules.resolve_video_overlay("campaign", exclude_project_id="project-1", exclude_blob_id=eligible.blob_id)
+    assert excluded.asset is None
+
+
+def test_legacy_asset_and_job_overlay_policy_defaults_off() -> None:
+    old_asset = asset("legacy", "Old clip", "required", ["music"])
+    assert old_asset.video_overlay_eligible is False
+    old_job = Job(
+        id="old-job", project_id="old-project", mode="clip", state="complete", stage="complete",
+        stage_label="Ready", progress=100, style="serious",
+    )
+    assert old_job.library_overlays_enabled is False

@@ -111,12 +111,28 @@ class LibraryRules:
 
     # DO-NOT-CHANGE: deterministic scoring — exact×45, tags×12, title+20, policy
     # required+35/prefer+18; never/negative/date reject first; tie-break (-score, id)
-    def explain(self, text: str, *, on_date: date | None = None) -> MatchExplanation:
+    def explain(
+        self, text: str, *, on_date: date | None = None, video_overlay: bool = False,
+        exclude_project_id: str | None = None, exclude_job_id: str | None = None,
+        exclude_blob_id: str | None = None,
+    ) -> MatchExplanation:
         on_date = on_date or date.today()
         query = normalize(text)
         ranked: list[tuple[float, Asset, list[str], str]] = []
         rejected: list[dict[str, str]] = []
         for asset in self.db.list_assets():
+            if video_overlay and (asset.origin != "manual-import" or not asset.video_overlay_eligible):
+                rejected.append({"assetId": asset.id, "title": asset.title, "reason": "Automatic video overlays require explicit eligibility on a manually imported asset"})
+                continue
+            if video_overlay and exclude_project_id and asset.source_project_id == exclude_project_id:
+                rejected.append({"assetId": asset.id, "title": asset.title, "reason": "Current project assets cannot be used as its own overlay"})
+                continue
+            if video_overlay and exclude_job_id and asset.source_job_id == exclude_job_id:
+                rejected.append({"assetId": asset.id, "title": asset.title, "reason": "Current job assets cannot be used as its own overlay"})
+                continue
+            if video_overlay and exclude_blob_id and asset.blob_id == exclude_blob_id:
+                rejected.append({"assetId": asset.id, "title": asset.title, "reason": "The source video cannot be reused as its own overlay"})
+                continue
             if not asset.media_type.casefold().startswith(("image/", "video/")):
                 rejected.append({"assetId": asset.id, "title": asset.title, "reason": "This asset has no visual media for an overlay"})
                 continue
@@ -157,6 +173,30 @@ class LibraryRules:
         return MatchExplanation(query=text, selected=asset, matched_triggers=hits, score=score, reason=reason, rejected=rejected)
 
     def resolve(self, text: str) -> ResolvedVisual:
+        explanation = self.explain(text)
+        if explanation.selected:
+            asset = explanation.selected
+            relative = self.db.blob_relative_path(asset.blob_id)
+            path = self.data_root / relative if relative else self.library_root / asset.id / asset.filename
+            return ResolvedVisual(asset.title, "library", explanation.score / 100, explanation.reason, asset, path if path.exists() else None)
+        concept = visual_concept(text)
+        return ResolvedVisual(concept, "text-card", 0.55, "No eligible personal asset matched. Continue to enabled licensed sources, then a relevant text card.", rejected=[]) if False else ResolvedVisual(concept, "text-card", 0.55, "No eligible personal asset matched; used a relevant text description")
+
+    def resolve_video_overlay(
+        self, text: str, *, exclude_project_id: str | None = None,
+        exclude_job_id: str | None = None, exclude_blob_id: str | None = None,
+    ) -> ResolvedVisual:
+        """Resolve only explicitly opted-in manual assets for video composition."""
+        explanation = self.explain(
+            text, video_overlay=True, exclude_project_id=exclude_project_id,
+            exclude_job_id=exclude_job_id, exclude_blob_id=exclude_blob_id,
+        )
+        if not explanation.selected:
+            return ResolvedVisual(visual_concept(text), "text-card", 0.0, explanation.reason)
+        asset = explanation.selected
+        relative = self.db.blob_relative_path(asset.blob_id)
+        path = self.data_root / relative if relative else self.library_root / asset.id / asset.filename
+        return ResolvedVisual(asset.title, "library", explanation.score / 100, explanation.reason, asset, path if path.is_file() else None)
         explanation = self.explain(text)
         if explanation.selected:
             asset = explanation.selected

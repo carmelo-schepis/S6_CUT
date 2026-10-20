@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { AlertTriangle, Captions, Check, Clock, Copy, Download, Eye, FileText, Film, Pause, Play, RefreshCw, RotateCcw, RotateCw, SlidersHorizontal, Sparkles, Square, Volume2, Zap } from "lucide-react";
-import { changeProjectFolder, controlJob, createZip, generateYoutubeMetadata, getJob, jobEventsUrl, listAssets, listFolders, readableError, retryClip, setClipSelection, updateYoutubeMetadata } from "../api";
+import { changeProjectFolder, controlJob, createZip, generateYoutubeMetadata, getJob, jobEventsUrl, listAssets, listFolders, readableError, regenerateSourceOnly, retryClip, setClipSelection, updateYoutubeMetadata } from "../api";
 import { emitLibraryChanged } from "../library-sync";
 import { jobSchema, type Clip, type Job, type LibraryAsset, type LibraryFolder, type Project } from "../types";
 import { Button, EmptyState, Field, IconButton, Progress, Skeleton, StatusBadge, WarningList, formatBytes, formatDimensions, formatDuration, resolveOutputAspectRatio, useSingleFlight } from "./common";
@@ -91,6 +91,7 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
   useEffect(() => { selectedClipIdRef.current = selectedClipId; }, [selectedClipId]);
   const [metadataBusy, setMetadataBusy] = useState(false);
   const [metadataStatus, setMetadataStatus] = useState<string | null>(null);
+  const [regeneratingSourceOnly, setRegeneratingSourceOnly] = useState(false);
   const [boardFilter, setBoardFilter] = useState<"all" | "selected" | "failed">("all");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -462,6 +463,17 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
     try { setJob(await setClipSelection(job.id, next)); } catch (cause) { setError(readableError(cause)); }
   };
 
+  const createSourceOnlyVersion = async () => {
+    if (!job || !selectedClip || selectedClip.state !== "complete" || regeneratingSourceOnly) return;
+    setRegeneratingSourceOnly(true);
+    setError(null);
+    try {
+      await regenerateSourceOnly(job.id, [selectedClip.id]);
+      await onProjectUpdated();
+    } catch (cause) { setError(readableError(cause)); }
+    finally { setRegeneratingSourceOnly(false); }
+  };
+
   const runMetadata = async (regenerate: boolean) => {
     if (!job || !selectedClip || selectedClip.state !== "complete" || metadataBusy) return;
     const requestedClipId = selectedClip.id;
@@ -618,7 +630,7 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
       </aside>
 
       <section className="viewer-panel panel" aria-label="Output viewer">
-        <div className="viewer-toolbar"><span>Output · {outputAspectRatio}</span>{creatorCredit && <span className="viewer-credit" role="note">{creatorCredit}</span>}<div><IconButton label="Toggle safe areas" aria-pressed={safeAreasVisible} onClick={() => setSafeAreasVisible((value) => !value)}><Eye size={15} /></IconButton><IconButton label={previewMuted ? "Unmute preview" : "Mute preview"} aria-pressed={previewMuted} onClick={() => { const player = playerRef.current; if (player) player.muted = !player.muted; setPreviewMuted((value) => !value); }}><Volume2 size={15} /></IconButton></div></div>
+        <div className="viewer-toolbar"><span>Output · {outputAspectRatio}</span>{creatorCredit && <span className="viewer-credit" role="note">{creatorCredit}</span>}{selectedClip?.state === "complete" && job && <Button disabled={regeneratingSourceOnly || !["complete", "partial", "failed", "cancelled_kept"].includes(job.state)} onClick={() => void createSourceOnlyVersion()}>{regeneratingSourceOnly ? "Creating…" : "Create source-only version"}</Button>}<div><IconButton label="Toggle safe areas" aria-pressed={safeAreasVisible} onClick={() => setSafeAreasVisible((value) => !value)}><Eye size={15} /></IconButton><IconButton label={previewMuted ? "Unmute preview" : "Mute preview"} aria-pressed={previewMuted} onClick={() => { const player = playerRef.current; if (player) player.muted = !player.muted; setPreviewMuted((value) => !value); }}><Volume2 size={15} /></IconButton></div></div>
         <div className="viewer-stage">
           <div className={`viewer-frame ${project.mode} ${safeAreasVisible ? "show-safe-areas" : ""}`} style={viewerFrameStyle} data-output-aspect-ratio={outputAspectRatio}>
             {previewSource ? <><video

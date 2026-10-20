@@ -67,6 +67,22 @@ describe("Projects create flow", () => {
     expect(screen.queryByRole("button", { name: /Delete project Interview/ })).not.toBeInTheDocument();
   });
 
+  it("offers Library B-roll only on render routes that honor the explicit choice", () => {
+    render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    expect(screen.getByRole("checkbox", { name: "Use eligible Library B-roll" })).not.toBeChecked();
+
+    fireEvent.click(screen.getByRole("button", { name: /Fast/ }));
+    expect(screen.queryByRole("checkbox", { name: "Use eligible Library B-roll" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Long form · 16:9/ }));
+    expect(screen.queryByRole("checkbox", { name: "Use eligible Library B-roll" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Smart/ }));
+    expect(screen.queryByRole("checkbox", { name: "Use eligible Library B-roll" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /High-volume/ }));
+    expect(screen.getByRole("checkbox", { name: "Use eligible Library B-roll" })).not.toBeChecked();
+  });
+
   it("selects Long form by keyboard-friendly control and sends landscape format", async () => {
     mockCreateClipJob.mockResolvedValue({ project: { ...project, contentFormat: "long" }, job: undefinedJob });
     render(<ProjectsView health={health} onCreated={vi.fn()} />);

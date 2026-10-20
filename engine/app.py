@@ -32,7 +32,7 @@ from .jobs import JobManager, ProjectDeletingError, QueueFullError, RetiredScrip
 from .library import LibraryRules
 from .media import _SUBTITLE_PRESETS, MediaError, available, caption_font_mismatches, probe, probe_audio, validate_audio_track, validate_video_upload
 from .models import (
-    Asset, AssetDelete, AssetDeleteResult, AssetMove, AssetOrigin, AssetUpdate, AssetPage, CaptionCue, CaptionDownload, CaptionReviewInput, Clip, FolderCreate, FolderMove, FolderUpdate, Health, Job, LibraryPurgeInput, LibraryPurgeResult,
+    Asset, AssetDelete, AssetDeleteResult, AssetMove, AssetOrigin, AssetUpdate, AssetPage, CaptionCue, CaptionDownload, CaptionReviewInput, Clip, FolderCreate, FolderMove, FolderUpdate, Health, Job, LibraryPurgeInput, LibraryPurgeResult, SourceOnlyRegenerationRequest,
     LibraryFolder, MatchExplanation, MobileClip, MobileDownload, MobileJob, MobileOverview, RecentClipsPage, ContentFormat, ProcessingMode, ProfileInput, Project, ProjectFolderUpdate,
     OpenRouterModel, ProviderProfile, SelectionInput, ShortsJobInput, SubscribeAnimationConfig, MusicPresentationConfig, YouTubeMetadataUpdate, now_iso,
 )
@@ -425,6 +425,7 @@ async def create_clip_job(
     manual_hook_text: Annotated[str, Form(max_length=150)] = "",
     youtube_metadata: Annotated[bool | None, Form()] = None,
     youtube_metadata_model_id: Annotated[str | None, Form(max_length=200)] = None,
+    library_overlays_enabled: Annotated[bool, Form()] = False,
 ) -> dict[str, object]:
     _rate_limit(request)
     selected_folder = db.get_folder(library_folder_id)
@@ -513,7 +514,7 @@ async def create_clip_job(
         "hook_text": {"enabled": hook_text, "status": "pending" if hook_text else "disabled", **({"manual_text": manual_hook_text} if manual_hook_text else {})},
         "youtube_metadata": {"enabled": youtube_metadata, "model_id": youtube_metadata_model_id, "status": "pending" if youtube_metadata else "disabled"},
         "use_openrouter": execution_policy == "auto" and mode == "smart" and smart_available and source_profile == "speech" and batch_mode == "standard",
-        "library_folder_id": library_folder_id,
+        "library_folder_id": library_folder_id, "library_overlays_enabled": library_overlays_enabled,
         "subscribe_animation": _subscribe_animation_request(subscribe_animation).model_dump(),
     }
     if source_profile == "music":
@@ -618,7 +619,7 @@ async def create_clip_job(
             steps[1].status = "complete"
             steps[1].detail = f"Source validated - {float(source_metadata['duration']):.1f}s"
             steps[1].started_at = steps[1].completed_at = checkpoint_time
-    job = Job(id=job_id, project_id=project_id, library_folder_id=library_folder_id, mode="clip", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style=style, processing_mode=mode, execution_policy=execution_policy, content_format=content_format, source_profile=source_profile, music_presentation=music_config if source_profile == "music" else None, music_top_text=(music_top_text if music_top_text.strip() else None) if source_profile == "music" else None, music_track=music_track_snapshot, music_audio_mode=music_audio_mode if source_profile == "music" else "song_only", music_song_gain=float(private.get("music_song_gain", 1.0)), music_original_audio_gain=float(private.get("music_original_audio_gain", 1.0)), requested_count=count, batch_mode=batch_mode, effective_target=effective_target, cap_explanation=cap_explanation, burn_subtitles=True if source_profile == "music" else burn_subtitles, embed_subtitles=embed_subtitles, hook_text_enabled=hook_text, youtube_metadata_enabled=youtube_metadata, youtube_metadata_model_id=youtube_metadata_model_id, steps=steps)
+    job = Job(id=job_id, project_id=project_id, library_folder_id=library_folder_id, mode="clip", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style=style, processing_mode=mode, execution_policy=execution_policy, content_format=content_format, source_profile=source_profile, music_presentation=music_config if source_profile == "music" else None, music_top_text=(music_top_text if music_top_text.strip() else None) if source_profile == "music" else None, music_track=music_track_snapshot, music_audio_mode=music_audio_mode if source_profile == "music" else "song_only", music_song_gain=float(private.get("music_song_gain", 1.0)), music_original_audio_gain=float(private.get("music_original_audio_gain", 1.0)), requested_count=count, batch_mode=batch_mode, effective_target=effective_target, cap_explanation=cap_explanation, burn_subtitles=True if source_profile == "music" else burn_subtitles, embed_subtitles=embed_subtitles, hook_text_enabled=hook_text, youtube_metadata_enabled=youtube_metadata, youtube_metadata_model_id=youtube_metadata_model_id, library_overlays_enabled=library_overlays_enabled, steps=steps)
     db.save_project(project)
     db.save_job(job, private)
     try:
@@ -1210,6 +1211,26 @@ async def generate_youtube_metadata(job_id: str, clip_id: str, regenerate: bool 
         reason = "Provider returned invalid metadata; transcript-based description is shown."
         _record_youtube_metadata_failure(job_id, clip_id, snapshot_revision, reason, excerpt)
         raise HTTPException(502, "OpenRouter returned invalid YouTube metadata; the playable clip was preserved") from exc
+
+
+@app.post("/api/v1/jobs/{job_id}/source-only-rerender", response_model=Job, status_code=status.HTTP_202_ACCEPTED)
+async def source_only_rerender(job_id: str, value: SourceOnlyRegenerationRequest) -> Job:
+    job = db.get_job(job_id)
+    if not job:
+        raise _not_found("Job")
+    reject_retired_script(job)
+    if manager.queue.full():
+        raise HTTPException(429, "The local render queue is full")
+    try:
+        regenerated = manager.create_source_only_rerender(job, value.clip_ids)
+        await manager.enqueue(regenerated.id)
+        return public_job(regenerated)
+    except KeyError as exc:
+        raise _not_found("Clip") from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except QueueFullError as exc:
+        raise HTTPException(429, str(exc)) from exc
 
 
 @app.post("/api/v1/jobs/{job_id}/clips/{clip_id}/captions/rerender", response_model=Job)
@@ -1839,6 +1860,8 @@ async def update_asset(asset_id: str, value: AssetUpdate) -> Asset:
     if not asset:
         raise _not_found("Asset")
     update = value.model_dump(exclude_unset=True)
+    if update.get("video_overlay_eligible") and (asset.origin != "manual-import" or not asset.media_type.casefold().startswith(("image/", "video/"))):
+        raise HTTPException(422, "Only manually imported image or video assets can be eligible for automatic B-roll")
     if update.get("folder_id"):
         destination = db.get_folder(update["folder_id"])
         if not destination:

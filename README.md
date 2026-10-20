@@ -160,8 +160,10 @@ Whisper job stages report real, incrementally observed progress: each fraction i
 | Fast clip cutting | Deterministic FFprobe windows and FFmpeg crop | No transcription, captions, model download, or API required |
 | Smart transcription/timing | Local Faster-Whisper | Local Whisper supplies timing; an LLM never performs transcription |
 | Smart clip selection | Optional OpenRouter ordering over validated local candidates | Deterministic local candidate planning |
-| Visuals | Clip projects cut the imported source; a valid personal Library asset may be composited as an overlay | Clip mode never substitutes a text card for source footage |
+| Visuals | Clip projects use the imported source. Optional B-roll is off by default and requires both a job opt-in and an eligible manually imported asset | Generated clips and project sources are never selected as automatic overlays |
 | YouTube | Constrained local yt-dlp | Local upload remains available and the URL failure is scoped |
+
+Automatic Library B-roll is off for new jobs. To use it, enable **Use eligible Library B-roll** when creating a project and mark individual manually imported image/video assets **Eligible for automatic B-roll** in the Library. Generated clips, project sources, and the current source are never candidates. Each job snapshots its choices before rendering so later clips and retries cannot select newly published outputs. Completed historical videos remain unchanged; use **Create source-only version** on a clip to render a new version from its saved original source while preserving the old output.
 
 The application remains operational when OpenRouter is the only configured API. Clip mode also works with no API key. Script mode and AI Video have been retired; existing project records and completed outputs remain available for reading, download, export, and deletion. Optional provider failure becomes a visible warning and local fallback, not a corrupt project.
 

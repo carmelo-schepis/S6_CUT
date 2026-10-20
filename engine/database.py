@@ -334,6 +334,19 @@ class Database:
                         profile.pop(field, None)
                     db.execute("UPDATE profiles SET payload=? WHERE id=?", (json.dumps(profile, separators=(",", ":")), row["id"]))
             db.execute("INSERT OR IGNORE INTO schema_migrations VALUES(11,?)", (stamp,))
+        if version < 12 or 12 not in applied_versions:
+            stamp = now_iso()
+            # Existing Library assets are not eligible for automatic B-roll by
+            # default. Explicit opt-in is stored in the canonical model payload.
+            for row in db.execute("SELECT id,payload FROM assets").fetchall():
+                try:
+                    asset = json.loads(row["payload"])
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    continue
+                if isinstance(asset, dict) and "videoOverlayEligible" not in asset:
+                    asset["videoOverlayEligible"] = False
+                    db.execute("UPDATE assets SET payload=? WHERE id=?", (json.dumps(asset, separators=(",", ":")), row["id"]))
+            db.execute("INSERT OR IGNORE INTO schema_migrations VALUES(12,?)", (stamp,))
 
     @staticmethod
     def _json(model: BaseModel) -> str:

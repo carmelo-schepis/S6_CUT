@@ -278,6 +278,7 @@ export function LibraryView({ selectedAssetId }: { selectedAssetId?: string | nu
         <FieldGroup title="Rights" headingLevel={2}>
           <Field label="Licence"><input value={selected.licence} onChange={(event) => setSelected({ ...selected, licence: event.target.value })} onBlur={() => saveSelected({ licence: selected.licence })} /></Field>
           <label className="check-row"><input type="checkbox" checked={selected.protected} onChange={(event) => saveSelected({ protected: event.target.checked })} /><span><strong>Protected / pinned</strong><small>Prevents accidental removal and marks campaign media.</small></span></label>
+          {selected.origin === "manual-import" && /^(image|video)\//i.test(selected.mediaType) && <label className="check-row"><input type="checkbox" aria-label="Eligible for automatic B-roll" checked={Boolean(selected.videoOverlayEligible)} onChange={(event) => saveSelected({ videoOverlayEligible: event.target.checked })} /><span><strong>Eligible for automatic B-roll</strong><small>Required in addition to enabling Library B-roll in a new job.</small></span></label>}
         </FieldGroup>
         <Button variant="ghost" className="asset-remove" disabled={selected.protected} onClick={() => void removeSelectedAsset()}>Remove Library record</Button>
       </div> : <p className="muted inspector-empty">Select an asset to edit its deterministic matching rules.</p>}</aside>

@@ -229,6 +229,7 @@ type ClipJobInput = {
   manualHookText?: string;
   youtubeMetadata?: boolean;
   youtubeMetadataModelId?: string;
+  libraryOverlaysEnabled?: boolean;
 };
 
 export async function createClipJob(input: ClipJobInput): Promise<{ project: Project; job: Job }> {
@@ -248,6 +249,7 @@ export async function createClipJob(input: ClipJobInput): Promise<{ project: Pro
   form.set("source_profile", input.sourceProfile ?? "speech");
   form.set("burn_subtitles", String(input.burnSubtitles ?? true));
   form.set("embed_subtitles", String(input.embedSubtitles ?? false));
+  form.set("library_overlays_enabled", String(input.libraryOverlaysEnabled ?? false));
   if (input.hookText === true) form.set("hook_text", "true");
   if (input.manualHookText?.trim()) form.set("manual_hook_text", input.manualHookText.trim());
   // Omitted lets the engine follow the profile's auto-SEO-titles default; an
@@ -327,6 +329,12 @@ export async function updateYoutubeMetadata(jobId: string, clipId: string, title
 
 export async function saveCaptionCues(jobId: string, clipId: string, revision: number, cues: Array<{ id: string; start: number; end: number; text: string; confidence?: number | null }>): Promise<Job> {
   return jobSchema.parse(await request(`/jobs/${encodeURIComponent(jobId)}/clips/${encodeURIComponent(clipId)}/captions`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ revision, cues }) }));
+}
+
+export async function regenerateSourceOnly(jobId: string, clipIds: string[]): Promise<Job> {
+  return jobSchema.parse(await request(`/jobs/${encodeURIComponent(jobId)}/source-only-rerender`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clipIds }),
+  }));
 }
 
 export async function rerenderCaptions(jobId: string, clipId: string, revision: number): Promise<Job> {

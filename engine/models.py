@@ -261,6 +261,8 @@ class Job(ApiModel):
     execution_policy: Literal["auto", "engine_only"] = "auto"
     content_format: ContentFormat = "short"
     source_profile: Literal["speech", "music"] = "speech"
+    # Automatic personal-library video composition is deliberately opt-in.
+    library_overlays_enabled: bool = False
     requested_count: int = Field(default=1, ge=1, le=500)
     batch_mode: BatchMode = "standard"
     effective_target: int | None = Field(default=None, ge=0, le=500)
@@ -631,6 +633,8 @@ class Asset(ApiModel):
     content_hash: str
     folder_id: str = UNSORTED_LIBRARY_FOLDER_ID
     origin: AssetOrigin = "manual-import"
+    # Only explicitly approved manual assets may be used as automatic B-roll.
+    video_overlay_eligible: bool = False
     blob_id: str = ""
     source_project_id: str | None = None
     source_job_id: str | None = None
@@ -661,6 +665,7 @@ class AssetUpdate(ApiModel):
     aliases: list[str] | None = None
     negative_triggers: list[str] | None = None
     policy: Literal["required", "prefer", "neutral", "never"] | None = None
+    video_overlay_eligible: bool | None = None
     protected: bool | None = None
     min_spacing_seconds: float | None = Field(default=None, ge=0, le=3600)
     max_uses_per_project: int | None = Field(default=None, ge=1, le=100)
@@ -669,6 +674,10 @@ class AssetUpdate(ApiModel):
     licence: str | None = Field(default=None, max_length=500)
     attribution: str | None = Field(default=None, max_length=1000)
     folder_id: str | None = None
+
+
+class SourceOnlyRegenerationRequest(ApiModel):
+    clip_ids: list[str] = Field(min_length=1, max_length=500)
 
 
 class AssetPage(ApiModel):
