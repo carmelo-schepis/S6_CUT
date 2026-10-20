@@ -1,0 +1,895 @@
+{
+  "baseline_files": {
+    "jobs.py": "5504d27a1f779f8bf58250c3026c8f7223ef630b4af759823599c86387a4b4dc",
+    "library.py": "94892b1a8000dae5c2450b6a98cd7c12ccc556b630663f38e8a891e50ccfa9e7",
+    "media.py": "43da0f600fd987fd6a1f040eb04540a2437b1953d02211f0cef74f003f5ac0a2"
+  },
+  "source": {
+    "url": "https://www.youtube.com/watch?v=LwG6aia2vn0",
+    "title": "The Wolf of Wall Street (2013): TOP 3 BEST SCENES",
+    "channel": "Binge Society",
+    "metadata": {
+      "duration": 1087.661,
+      "width": 1920,
+      "height": 1080,
+      "video_codec": "av1",
+      "video_bitrate": 574047,
+      "pixel_format": "yuv420p",
+      "color_space": "bt709",
+      "color_transfer": "bt709",
+      "color_primaries": "bt709",
+      "audio": true,
+      "audio_codec": "opus",
+      "audio_bitrate": 109251,
+      "audio_sample_rate": 48000,
+      "audio_channels": 2,
+      "frame_rate": 23.976,
+      "rotation": 0,
+      "sample_aspect_ratio": 1.0
+    }
+  },
+  "affected_job": "4934a355-4c91-41e0-9ed5-845ad29aeed6",
+  "affected_clip_count": 12,
+  "matched_asset": {
+    "id": "26c71438-082f-4b23-ae99-466fc770f42f",
+    "origin": "generated-clip",
+    "source_job_id": "4934a355-4c91-41e0-9ed5-845ad29aeed6",
+    "title": "I fall into. I was lost within the darkness",
+    "score": 0.2,
+    "reason": "Neutral policy; reserved eligible placement"
+  },
+  "query": "Once again you fell, I caught ya I'll never lie you go again Like I did all you used to say I would never fall in love again Until I found her I said I would never fall unless it's you I fall into I was lost within the darkness But then I found her I found you",
+  "overlay_interval": [
+    0.65,
+    3.4
+  ],
+  "route_matrix": [
+    {
+      "profile": "speech",
+      "mode": "fast",
+      "format": "short",
+      "batch": "standard",
+      "style": "funny",
+      "execution": "auto",
+      "pipeline": "fast",
+      "implicit_library_lookup": false
+    },
+    {
+      "profile": "speech",
+      "mode": "fast",
+      "format": "short",
+      "batch": "standard",
+      "style": "funny",
+      "execution": "engine_only",
+      "pipeline": "fast",
+      "implicit_library_lookup": false
+    },
+    {
+      "profile": "speech",
+      "mode": "fast",
+      "format": "short",
+      "batch": "standard",
+      "style": "serious",
+      "execution": "auto",
+      "pipeline": "fast",
+      "implicit_library_lookup": false
+    },
+    {
+      "profile": "speech",
+      "mode": "fast",
+      "format": "short",
+      "batch": "standard",
+      "style": "serious",
+      "execution": "engine_only",
+      "pipeline": "fast",
+      "implicit_library_lookup": false
+    },
+    {
+      "profile": "speech",
+      "mode": "fast",
+      "format": "short",
+      "batch": "standard",
+      "style": "educational",
+      "execution": "auto",
+      "pipeline": "fast",
+      "implicit_library_lookup": false
+    },
+    {
+      "profile": "speech",
+      "mode": "fast",
+      "format": "short",
+      "batch": "standard",
+      "style": "educational",
+      "execution": "engine_only",
+      "pipeline": "fast",
+      "implicit_library_lookup": false
+    },
+    {
+      "profile": "speech",
+      "mode": "fast",
+      "format": "short",
+      "batch": "standard",
+      "style": "hype",
+      "execution": "auto",
+      "pipeline": "fast",
+      "implicit_library_lookup": false
+    },
+    {
+      "profile": "speech",
+      "mode": "fast",
+      "format": "short",
+      "batch": "standard",
+      "style": "hype",
+      "execution": "engine_only",
+      "pipeline": "fast",
+      "implicit_library_lookup": false
+    },
+    {
+      "profile": "speech",
+      "mode": "fast",
+      "format": "short",
+      "batch": "high_volume",
+      "style": "funny",
+      "execution": "auto",
+      "pipeline": "fast",
+      "implicit_library_lookup": false
+    },
+    {
+      "profile": "speech",
+      "mode": "fast",
+      "format": "short",
+      "batch": "high_volume",
+      "style": "funny",
+      "execution": "engine_only",
+      "pipeline": "fast",
+      "implicit_library_lookup": false
+    },
+    {
+      "profile": "speech",
+      "mode": "fast",
+      "format": "short",
+      "batch": "high_volume",
+      "style": "serious",
+      "execution": "auto",
+      "pipeline": "fast",
+      "implicit_library_lookup": false
+    },
+    {
+      "profile": "speech",
+      "mode": "fast",
+      "format": "short",
+      "batch": "high_volume",
+      "style": "serious",
+      "execution": "engine_only",
+      "pipeline": "fast",
+      "implicit_library_lookup": false
+    },
+    {
+      "profile": "speech",
+      "mode": "fast",
+      "format": "short",
+      "batch": "high_volume",
+      "style": "educational",
+      "execution": "auto",
+      "pipeline": "fast",
+      "implicit_library_lookup": false
+    },
+    {
+      "profile": "speech",
+      "mode": "fast",
+      "format": "short",
+      "batch": "high_volume",
+      "style": "educational",
+      "execution": "engine_only",
+      "pipeline": "fast",
+      "implicit_library_lookup": false
+    },
+    {
+      "profile": "speech",
+      "mode": "fast",
+      "format": "short",
+      "batch": "high_volume",
+      "style": "hype",
+      "execution": "auto",
+      "pipeline": "fast",
+      "implicit_library_lookup": false
+    },
+    {
+      "profile": "speech",
+      "mode": "fast",
+      "format": "short",
+      "batch": "high_volume",
+      "style": "hype",
+      "execution": "engine_only",
+      "pipeline": "fast",
+      "implicit_library_lookup": false
+    },
+    {
+      "profile": "speech",
+      "mode": "fast",
+      "format": "long",
+      "batch": "standard",
+      "style": "funny",
+      "execution": "auto",
+      "pipeline": "fast",
+      "implicit_library_lookup": false
+    },
+    {
+      "profile": "speech",
+      "mode": "fast",
+      "format": "long",
+      "batch": "standard",
+      "style": "funny",
+      "execution": "engine_only",
+      "pipeline": "fast",
+      "implicit_library_lookup": false
+    },
+    {
+      "profile": "speech",
+      "mode": "fast",
+      "format": "long",
+      "batch": "standard",
+      "style": "serious",
+      "execution": "auto",
+      "pipeline": "fast",
+      "implicit_library_lookup": false
+    },
+    {
+      "profile": "speech",
+      "mode": "fast",
+      "format": "long",
+      "batch": "standard",
+      "style": "serious",
+      "execution": "engine_only",
+      "pipeline": "fast",
+      "implicit_library_lookup": false
+    },
+    {
+      "profile": "speech",
+      "mode": "fast",
+      "format": "long",
+      "batch": "standard",
+      "style": "educational",
+      "execution": "auto",
+      "pipeline": "fast",
+      "implicit_library_lookup": false
+    },
+    {
+      "profile": "speech",
+      "mode": "fast",
+      "format": "long",
+      "batch": "standard",
+      "style": "educational",
+      "execution": "engine_only",
+      "pipeline": "fast",
+      "implicit_library_lookup": false
+    },
+    {
+      "profile": "speech",
+      "mode": "fast",
+      "format": "long",
+      "batch": "standard",
+      "style": "hype",
+      "execution": "auto",
+      "pipeline": "fast",
+      "implicit_library_lookup": false
+    },
+    {
+      "profile": "speech",
+      "mode": "fast",
+      "format": "long",
+      "batch": "standard",
+      "style": "hype",
+      "execution": "engine_only",
+      "pipeline": "fast",
+      "implicit_library_lookup": false
+    },
+    {
+      "profile": "speech",
+      "mode": "fast",
+      "format": "long",
+      "batch": "high_volume",
+      "style": "funny",
+      "execution": "auto",
+      "pipeline": "fast",
+      "implicit_library_lookup": false
+    },
+    {
+      "profile": "speech",
+      "mode": "fast",
+      "format": "long",
+      "batch": "high_volume",
+      "style": "funny",
+      "execution": "engine_only",
+      "pipeline": "fast",
+      "implicit_library_lookup": false
+    },
+    {
+      "profile": "speech",
+      "mode": "fast",
+      "format": "long",
+      "batch": "high_volume",
+      "style": "serious",
+      "execution": "auto",
+      "pipeline": "fast",
+      "implicit_library_lookup": false
+    },
+    {
+      "profile": "speech",
+      "mode": "fast",
+      "format": "long",
+      "batch": "high_volume",
+      "style": "serious",
+      "execution": "engine_only",
+      "pipeline": "fast",
+      "implicit_library_lookup": false
+    },
+    {
+      "profile": "speech",
+      "mode": "fast",
+      "format": "long",
+      "batch": "high_volume",
+      "style": "educational",
+      "execution": "auto",
+      "pipeline": "fast",
+      "implicit_library_lookup": false
+    },
+    {
+      "profile": "speech",
+      "mode": "fast",
+      "format": "long",
+      "batch": "high_volume",
+      "style": "educational",
+      "execution": "engine_only",
+      "pipeline": "fast",
+      "implicit_library_lookup": false
+    },
+    {
+      "profile": "speech",
+      "mode": "fast",
+      "format": "long",
+      "batch": "high_volume",
+      "style": "hype",
+      "execution": "auto",
+      "pipeline": "fast",
+      "implicit_library_lookup": false
+    },
+    {
+      "profile": "speech",
+      "mode": "fast",
+      "format": "long",
+      "batch": "high_volume",
+      "style": "hype",
+      "execution": "engine_only",
+      "pipeline": "fast",
+      "implicit_library_lookup": false
+    },
+    {
+      "profile": "speech",
+      "mode": "smart",
+      "format": "short",
+      "batch": "standard",
+      "style": "funny",
+      "execution": "auto",
+      "pipeline": "smart",
+      "implicit_library_lookup": true
+    },
+    {
+      "profile": "speech",
+      "mode": "smart",
+      "format": "short",
+      "batch": "standard",
+      "style": "funny",
+      "execution": "engine_only",
+      "pipeline": "smart",
+      "implicit_library_lookup": true
+    },
+    {
+      "profile": "speech",
+      "mode": "smart",
+      "format": "short",
+      "batch": "standard",
+      "style": "serious",
+      "execution": "auto",
+      "pipeline": "smart",
+      "implicit_library_lookup": true
+    },
+    {
+      "profile": "speech",
+      "mode": "smart",
+      "format": "short",
+      "batch": "standard",
+      "style": "serious",
+      "execution": "engine_only",
+      "pipeline": "smart",
+      "implicit_library_lookup": true
+    },
+    {
+      "profile": "speech",
+      "mode": "smart",
+      "format": "short",
+      "batch": "standard",
+      "style": "educational",
+      "execution": "auto",
+      "pipeline": "smart",
+      "implicit_library_lookup": true
+    },
+    {
+      "profile": "speech",
+      "mode": "smart",
+      "format": "short",
+      "batch": "standard",
+      "style": "educational",
+      "execution": "engine_only",
+      "pipeline": "smart",
+      "implicit_library_lookup": true
+    },
+    {
+      "profile": "speech",
+      "mode": "smart",
+      "format": "short",
+      "batch": "standard",
+      "style": "hype",
+      "execution": "auto",
+      "pipeline": "smart",
+      "implicit_library_lookup": true
+    },
+    {
+      "profile": "speech",
+      "mode": "smart",
+      "format": "short",
+      "batch": "standard",
+      "style": "hype",
+      "execution": "engine_only",
+      "pipeline": "smart",
+      "implicit_library_lookup": true
+    },
+    {
+      "profile": "speech",
+      "mode": "smart",
+      "format": "short",
+      "batch": "high_volume",
+      "style": "funny",
+      "execution": "auto",
+      "pipeline": "smart",
+      "implicit_library_lookup": true
+    },
+    {
+      "profile": "speech",
+      "mode": "smart",
+      "format": "short",
+      "batch": "high_volume",
+      "style": "funny",
+      "execution": "engine_only",
+      "pipeline": "smart",
+      "implicit_library_lookup": true
+    },
+    {
+      "profile": "speech",
+      "mode": "smart",
+      "format": "short",
+      "batch": "high_volume",
+      "style": "serious",
+      "execution": "auto",
+      "pipeline": "smart",
+      "implicit_library_lookup": true
+    },
+    {
+      "profile": "speech",
+      "mode": "smart",
+      "format": "short",
+      "batch": "high_volume",
+      "style": "serious",
+      "execution": "engine_only",
+      "pipeline": "smart",
+      "implicit_library_lookup": true
+    },
+    {
+      "profile": "speech",
+      "mode": "smart",
+      "format": "short",
+      "batch": "high_volume",
+      "style": "educational",
+      "execution": "auto",
+      "pipeline": "smart",
+      "implicit_library_lookup": true
+    },
+    {
+      "profile": "speech",
+      "mode": "smart",
+      "format": "short",
+      "batch": "high_volume",
+      "style": "educational",
+      "execution": "engine_only",
+      "pipeline": "smart",
+      "implicit_library_lookup": true
+    },
+    {
+      "profile": "speech",
+      "mode": "smart",
+      "format": "short",
+      "batch": "high_volume",
+      "style": "hype",
+      "execution": "auto",
+      "pipeline": "smart",
+      "implicit_library_lookup": true
+    },
+    {
+      "profile": "speech",
+      "mode": "smart",
+      "format": "short",
+      "batch": "high_volume",
+      "style": "hype",
+      "execution": "engine_only",
+      "pipeline": "smart",
+      "implicit_library_lookup": true
+    },
+    {
+      "profile": "speech",
+      "mode": "smart",
+      "format": "long",
+      "batch": "standard",
+      "style": "funny",
+      "execution": "auto",
+      "pipeline": "fast",
+      "implicit_library_lookup": false
+    },
+    {
+      "profile": "speech",
+      "mode": "smart",
+      "format": "long",
+      "batch": "standard",
+      "style": "funny",
+      "execution": "engine_only",
+      "pipeline": "fast",
+      "implicit_library_lookup": false
+    },
+    {
+      "profile": "speech",
+      "mode": "smart",
+      "format": "long",
+      "batch": "standard",
+      "style": "serious",
+      "execution": "auto",
+      "pipeline": "fast",
+      "implicit_library_lookup": false
+    },
+    {
+      "profile": "speech",
+      "mode": "smart",
+      "format": "long",
+      "batch": "standard",
+      "style": "serious",
+      "execution": "engine_only",
+      "pipeline": "fast",
+      "implicit_library_lookup": false
+    },
+    {
+      "profile": "speech",
+      "mode": "smart",
+      "format": "long",
+      "batch": "standard",
+      "style": "educational",
+      "execution": "auto",
+      "pipeline": "fast",
+      "implicit_library_lookup": false
+    },
+    {
+      "profile": "speech",
+      "mode": "smart",
+      "format": "long",
+      "batch": "standard",
+      "style": "educational",
+      "execution": "engine_only",
+      "pipeline": "fast",
+      "implicit_library_lookup": false
+    },
+    {
+      "profile": "speech",
+      "mode": "smart",
+      "format": "long",
+      "batch": "standard",
+      "style": "hype",
+      "execution": "auto",
+      "pipeline": "fast",
+      "implicit_library_lookup": false
+    },
+    {
+      "profile": "speech",
+      "mode": "smart",
+      "format": "long",
+      "batch": "standard",
+      "style": "hype",
+      "execution": "engine_only",
+      "pipeline": "fast",
+      "implicit_library_lookup": false
+    },
+    {
+      "profile": "speech",
+      "mode": "smart",
+      "format": "long",
+      "batch": "high_volume",
+      "style": "funny",
+      "execution": "auto",
+      "pipeline": "smart",
+      "implicit_library_lookup": true
+    },
+    {
+      "profile": "speech",
+      "mode": "smart",
+      "format": "long",
+      "batch": "high_volume",
+      "style": "funny",
+      "execution": "engine_only",
+      "pipeline": "smart",
+      "implicit_library_lookup": true
+    },
+    {
+      "profile": "speech",
+      "mode": "smart",
+      "format": "long",
+      "batch": "high_volume",
+      "style": "serious",
+      "execution": "auto",
+      "pipeline": "smart",
+      "implicit_library_lookup": true
+    },
+    {
+      "profile": "speech",
+      "mode": "smart",
+      "format": "long",
+      "batch": "high_volume",
+      "style": "serious",
+      "execution": "engine_only",
+      "pipeline": "smart",
+      "implicit_library_lookup": true
+    },
+    {
+      "profile": "speech",
+      "mode": "smart",
+      "format": "long",
+      "batch": "high_volume",
+      "style": "educational",
+      "execution": "auto",
+      "pipeline": "smart",
+      "implicit_library_lookup": true
+    },
+    {
+      "profile": "speech",
+      "mode": "smart",
+      "format": "long",
+      "batch": "high_volume",
+      "style": "educational",
+      "execution": "engine_only",
+      "pipeline": "smart",
+      "implicit_library_lookup": true
+    },
+    {
+      "profile": "speech",
+      "mode": "smart",
+      "format": "long",
+      "batch": "high_volume",
+      "style": "hype",
+      "execution": "auto",
+      "pipeline": "smart",
+      "implicit_library_lookup": true
+    },
+    {
+      "profile": "speech",
+      "mode": "smart",
+      "format": "long",
+      "batch": "high_volume",
+      "style": "hype",
+      "execution": "engine_only",
+      "pipeline": "smart",
+      "implicit_library_lookup": true
+    },
+    {
+      "profile": "music",
+      "mode": "smart",
+      "format": "short",
+      "batch": "standard",
+      "style": "funny",
+      "execution": "auto",
+      "pipeline": "smart",
+      "implicit_library_lookup": true
+    },
+    {
+      "profile": "music",
+      "mode": "smart",
+      "format": "short",
+      "batch": "standard",
+      "style": "funny",
+      "execution": "engine_only",
+      "pipeline": "smart",
+      "implicit_library_lookup": true
+    },
+    {
+      "profile": "music",
+      "mode": "smart",
+      "format": "short",
+      "batch": "standard",
+      "style": "serious",
+      "execution": "auto",
+      "pipeline": "smart",
+      "implicit_library_lookup": true
+    },
+    {
+      "profile": "music",
+      "mode": "smart",
+      "format": "short",
+      "batch": "standard",
+      "style": "serious",
+      "execution": "engine_only",
+      "pipeline": "smart",
+      "implicit_library_lookup": true
+    },
+    {
+      "profile": "music",
+      "mode": "smart",
+      "format": "short",
+      "batch": "standard",
+      "style": "educational",
+      "execution": "auto",
+      "pipeline": "smart",
+      "implicit_library_lookup": true
+    },
+    {
+      "profile": "music",
+      "mode": "smart",
+      "format": "short",
+      "batch": "standard",
+      "style": "educational",
+      "execution": "engine_only",
+      "pipeline": "smart",
+      "implicit_library_lookup": true
+    },
+    {
+      "profile": "music",
+      "mode": "smart",
+      "format": "short",
+      "batch": "standard",
+      "style": "hype",
+      "execution": "auto",
+      "pipeline": "smart",
+      "implicit_library_lookup": true
+    },
+    {
+      "profile": "music",
+      "mode": "smart",
+      "format": "short",
+      "batch": "standard",
+      "style": "hype",
+      "execution": "engine_only",
+      "pipeline": "smart",
+      "implicit_library_lookup": true
+    }
+  ],
+  "renders": [
+    {
+      "name": "speech-fast",
+      "metadata": {
+        "duration": 4.004,
+        "width": 1080,
+        "height": 1920,
+        "video_codec": "h264",
+        "video_bitrate": 1818753,
+        "pixel_format": "yuv420p",
+        "color_space": "bt709",
+        "color_transfer": "bt709",
+        "color_primaries": "bt709",
+        "audio": true,
+        "audio_codec": "aac",
+        "audio_bitrate": 192686,
+        "audio_sample_rate": 48000,
+        "audio_channels": 2,
+        "frame_rate": 23.976,
+        "rotation": 0,
+        "sample_aspect_ratio": 1.0
+      },
+      "elapsed_seconds": 6.84,
+      "sha256": "cbf54f87528bd3758fc0c6b07f84ad9c292b4386ce1a763bb2daa3baa3b10c6d"
+    },
+    {
+      "name": "speech-smart-current",
+      "metadata": {
+        "duration": 4.004,
+        "width": 1080,
+        "height": 1920,
+        "video_codec": "h264",
+        "video_bitrate": 1410531,
+        "pixel_format": "yuv420p",
+        "color_space": "bt709",
+        "color_transfer": "bt709",
+        "color_primaries": "bt709",
+        "audio": true,
+        "audio_codec": "aac",
+        "audio_bitrate": 192686,
+        "audio_sample_rate": 48000,
+        "audio_channels": 2,
+        "frame_rate": 23.976,
+        "rotation": 0,
+        "sample_aspect_ratio": 1.0
+      },
+      "elapsed_seconds": 8.16,
+      "sha256": "878d1867cbb859bafa60f49f70c42bfbe177732038a0309e5c3c3b56ae113ea0"
+    },
+    {
+      "name": "music-current",
+      "metadata": {
+        "duration": 4.004,
+        "width": 1080,
+        "height": 1920,
+        "video_codec": "h264",
+        "video_bitrate": 642215,
+        "pixel_format": "yuv420p",
+        "color_space": "bt709",
+        "color_transfer": "bt709",
+        "color_primaries": "bt709",
+        "audio": true,
+        "audio_codec": "aac",
+        "audio_bitrate": 192686,
+        "audio_sample_rate": 48000,
+        "audio_channels": 2,
+        "frame_rate": 23.976,
+        "rotation": 0,
+        "sample_aspect_ratio": 1.0
+      },
+      "elapsed_seconds": 3.7,
+      "sha256": "876a042c0666d4716eb4dff227c52d5eea1d7d5be689042937cbd302692e21d7"
+    },
+    {
+      "name": "music-source-only-control",
+      "metadata": {
+        "duration": 4.004,
+        "width": 1080,
+        "height": 1920,
+        "video_codec": "h264",
+        "video_bitrate": 875660,
+        "pixel_format": "yuv420p",
+        "color_space": "bt709",
+        "color_transfer": "bt709",
+        "color_primaries": "bt709",
+        "audio": true,
+        "audio_codec": "aac",
+        "audio_bitrate": 192686,
+        "audio_sample_rate": 48000,
+        "audio_channels": 2,
+        "frame_rate": 23.976,
+        "rotation": 0,
+        "sample_aspect_ratio": 1.0
+      },
+      "elapsed_seconds": 3.43,
+      "sha256": "66353e4bde7931ef24f56c2aae2be8d282bd27b44a50c2556b1a5244e9a25a10"
+    },
+    {
+      "name": "landscape-fast",
+      "metadata": {
+        "duration": 4.004,
+        "width": 1920,
+        "height": 1080,
+        "video_codec": "h264",
+        "video_bitrate": 2089772,
+        "pixel_format": "yuv420p",
+        "color_space": "bt709",
+        "color_transfer": "bt709",
+        "color_primaries": "bt709",
+        "audio": true,
+        "audio_codec": "aac",
+        "audio_bitrate": 192686,
+        "audio_sample_rate": 48000,
+        "audio_channels": 2,
+        "frame_rate": 23.976,
+        "rotation": 0,
+        "sample_aspect_ratio": 1.0
+      },
+      "elapsed_seconds": 3.26,
+      "sha256": "2c64b8d282cbd70eb3af386263854b33c1ad019928d7b19f9cfe6c1599d2ca56"
+    }
+  ],
+  "limitations": [
+    "Renders call real FFmpeg renderers directly, not full API-created jobs.",
+    "Overlay-enabled reproduction uses the saved Music lyric query and existing Library inventory with the supplied YouTube footage. It does not assert that speech from the new video naturally selects this asset.",
+    "No new Whisper/provider calls or browser playback tests were performed."
+  ]
+}
