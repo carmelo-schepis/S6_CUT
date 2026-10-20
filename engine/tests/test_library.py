@@ -176,3 +176,31 @@ def test_legacy_asset_and_job_overlay_policy_defaults_off() -> None:
         stage_label="Ready", progress=100, style="serious",
     )
     assert old_job.library_overlays_enabled is False
+
+
+def test_title_match_explanation_names_title_and_keeps_deterministic_score(tmp_path) -> None:
+    db = Database(tmp_path / "db.sqlite3")
+    candidate = asset("title", "Campaign Graphic", "neutral", [])
+    db.save_asset(candidate)
+
+    result = LibraryRules(db, tmp_path / "library").explain("campaign graphic")
+
+    assert result.selected and result.selected.id == candidate.id
+    assert result.score == 20
+    assert result.matched_triggers == []
+    assert "matched title" in result.reason
+    assert "reserved placement" not in result.reason
+
+
+def test_title_match_explanation_names_title_and_keeps_deterministic_score(tmp_path) -> None:
+    db = Database(tmp_path / "db.sqlite3")
+    candidate = asset("title", "Campaign Graphic", "neutral", [])
+    db.save_asset(candidate)
+
+    result = LibraryRules(db, tmp_path / "library").explain("campaign graphic")
+
+    assert result.selected and result.selected.id == candidate.id
+    assert result.score == 20
+    assert result.matched_triggers == []
+    assert "matched title" in result.reason
+    assert "reserved placement" not in result.reason

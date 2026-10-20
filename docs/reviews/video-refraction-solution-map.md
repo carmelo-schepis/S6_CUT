@@ -75,7 +75,32 @@ This is a **persisted-data/deployed-code compatibility mismatch**, distinct from
 
 For the fresh baseline experiment only, the driver removed this one unknown field from an **in-memory copy** of read-only asset payloads so the original deployed matching behavior could be evaluated. It did not write to SQLite or repair the live endpoint. This projection is recorded in the evidence.
 
-## Planned implementation, in order
+## Implementation status and remaining deployment work
+
+The fix is implemented on the integration branch and ready to merge:
+
+- New Clip jobs default to no automatic Library video. Smart job creation persists the explicit choice in both public Job state and the private checkpoint. The UI exposes it only on routes that honor it.
+- Automatic B-roll requires an explicit manual-asset eligibility flag. Generated clips and project sources remain in the Library but are ineligible. The Library policy score remains unchanged; matching explanations now call title matches by name instead of saying they were reserved.
+- Eligible choices are resolved and persisted for every clip before output publication starts, with the asset/blob identity, query, attribution, and reason. Rendering and caption revisions load only that snapshot, so retries, process recovery, and later Library additions cannot silently change composition.
+- The new source-only version action creates a new job from the original source and saved clip ranges, keeps previous output references intact, and carries user-reviewed caption cues to the new clip IDs. Captions, Music treatment/audio, hook/top text, creator credit, and other saved render options remain on the new job.
+- The additive database migration defaults old assets to ineligible and preserves any already stored opt-in. Read-only validation against the current database parsed 186 assets and 115 jobs with the new models. A database copy upgraded through migration 12 kept all 186 assets ineligible by default; the live database was not modified.
+
+| Phase | Status | Remaining gate |
+| --- | --- | --- |
+| 0. Coordinate deployment | **Pending deployment** | Rebuild/restart the local service with this code; verify health, Library reads, and job reads. Current running baseline returns health 200 and Library 500 because its strict model rejects `videoOverlayEligible`. |
+| 1. Stop implicit overlays | **Implemented** | After deployment, verify every default-off entry point, including Music, High-volume landscape, Shorts Editor, and retries. |
+| 2. Make optional B-roll explicit and stable | **Implemented** | Acceptance-check explicitly eligible manual still/video assets and exclusions with a contaminated Library. |
+| 3. Repair old outputs safely | **Implemented** | Exercise the queued new-version flow through a real render and publication, including edited caption cues and Music settings. Existing exports remain unchanged until the user creates versions. |
+| 4. Verify and integrate | **In progress** | Complete contaminated-Library media acceptance after deployment, run the full repository gate, and verify preview, MP4, and ZIP outputs. |
+
+### Verification so far
+
+- Frontend: **426 passed** across 33 test files; lint, provider check, and typecheck passed. Production build passed.
+- Targeted engine checks after the latest caption preservation change: **62 passed** across API, Library rules, eligibility migration, snapshot replay, and source-only version behavior. A further Fast-render check confirmed the clean branch remains green after the caption replay path was added.
+- Full engine suite: **759 passed, 114 skipped**. The host's default fontconfig did not see the repository's vendored Montserrat face, so the suite was rerun with a temporary fontconfig file that points at the existing `engine/fonts` files. No font or application test was changed. Skips are existing media/tool gates.
+- Fresh render comparisons using the requested YouTube source are recorded above. Current deployment compatibility was also verified using read-only copies and the new models; no production jobs or assets were altered.
+
+## Planned deployment, acceptance, and integration
 
 | Phase | Work | Completion gate |
 | --- | --- | --- |
@@ -85,16 +110,14 @@ For the fresh baseline experiment only, the driver removed this one unknown fiel
 | 3. Repair old outputs safely | Add an explicit source-only new-job/version action using original source, exact saved trim, edited captions/timing, treatment, text, audio settings, and lineage. Preserve old outputs. Publish new validated files through existing transactional clip/asset APIs. Recompute actual-layer provenance. | Original bytes and old references remain intact. New outputs contain the authorized composition and remain downloadable/exportable. |
 | 4. Verify and integrate | Exercise every exposed route against a contaminated isolated Library, plus deliberate manual B-roll opt-in. Test inter-clip publication, cross-job recursion, legacy/retry/restart, unavailable blobs, caption revisions, and regeneration failure/retry. Decode frames before/during/after the interval; check A/V sync, text/effects, dimensions, MP4, preview, and ZIP. Run repository gates, integrate latest main, then deploy compatible services. | Real decoded pixels contain no unrequested old content; actual Library/job endpoints and playback work after deploy. Existing bad outputs are only claimed repaired after regeneration. |
 
-### Handoff to GPT Luna
+### Remaining GPT Luna acceptance tasks
 
-An implementation already exists on **`fix/explicit-library-video-overlays-20261020`**, observed at `e765444`, in `/home/linuxpc/git_branches/S6_CUT-explicit-library-video-overlays`. It adds default-off job policy, explicit manual-asset eligibility, choice snapshots, and a source-only regeneration path. **It was not merged or deployed as part of this diagnosis, and this inspection is not an acceptance certification.** Continue that work rather than implementing a competing copy. Its worktree had an untracked `node_modules` entry; leave other agents' files alone.
+The implementation was based on the isolated branch **`fix/explicit-library-video-overlays-20261020`** and integrated in a clean worktree. Its original worktree was left untouched. Use the [original handoff](video-overlay-diagnosis.md#four-bounded-prompts-for-gpt-luna) for the detailed acceptance matrix, with these remaining tasks:
 
-Use one bounded prompt per phase from the [original handoff](video-overlay-diagnosis.md#four-bounded-prompts-for-gpt-luna), with these additions:
-
-1. Include both Shorts Editor endpoints and the embedded-captions-only case in default-off route tests. Verify legacy recovered/retry behavior explicitly.
-2. Certify actual persisted choice replay, ineligible asset exclusion, and truthful title-match explanations; inspect missing-blob behavior and snapshot identity retention.
-3. Verify repair preserves edited caption cues/timing, per-clip Music treatments/gains, top/hook text, source trim, and requested effects through the **executed** render/publication, not only copying a queued Job object.
-4. Resolve the live strict-model field mismatch with coordinated deployment; verify health **and** Library/job reads. Do not use production storage for implementation tests. Complete contaminated-Library API/media acceptance before merging the implementation.
+1. Verify default-off behavior on both Shorts Editor endpoints and the embedded-captions-only case, then exercise Smart retries and recovery.
+2. Acceptance-check persisted choice replay, ineligible asset exclusion, truthful title-match explanations, and missing-blob behavior.
+3. Run a real source-only render with edited caption cues, per-clip Music treatment/gains, top/hook text, source trim, and requested effects; verify atomic publication while old outputs remain accessible.
+4. Deploy the merged code, verify health and Library/job reads, then complete contaminated-Library API/media acceptance and preview/MP4/ZIP playback checks. Do not use production storage for test jobs.
 
 ## Verification and retained artifacts
 

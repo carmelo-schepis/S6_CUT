@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import json
+import json
 from pathlib import Path
 
 from engine.config import Settings
 from engine.database import Database
 from engine.jobs import JobManager
 from engine.library import LibraryRules
-from engine.models import Clip, Job, Project
+from engine.models import CaptionCue, Clip, Job, Project
 
 
 def test_overlay_choices_are_snapshotted_before_render_and_survive_inventory_changes(tmp_path: Path) -> None:
@@ -62,7 +64,8 @@ def test_source_only_regeneration_keeps_old_output_and_copies_saved_range(tmp_pa
     clip = Clip(
         id="clip-old", index=1, state="complete", start=12, end=18, duration=6,
         opening_line="A saved phrase", output_name="01-cut.mp4", blob_id="old-output",
-        hook_text="Keep this approved text", provenance=[],
+        hook_text="Keep this approved text", provenance=[], caption_revision=2,
+        caption_cues=[CaptionCue(id="cue-reviewed", start=0.2, end=1.4, text="Reviewed wording")],
     )
     old_job = Job(
         id="old-job", project_id=project.id, mode="clip", state="complete", stage="complete",
@@ -70,7 +73,9 @@ def test_source_only_regeneration_keeps_old_output_and_copies_saved_range(tmp_pa
         library_overlays_enabled=True, clips=[clip],
     )
     db.save_project(project)
-    db.save_job(old_job, {"source_path": str(source), "processing_mode": "fast", "library_overlays_enabled": True})
+    reviewed_cues = [{"start": 0.2, "end": 1.4, "text": "Reviewed wording"}]
+    db.save_job(old_job, {"source_path": str(source), "processing_mode": "fast", "library_overlays_enabled": True,
+                          "caption_overrides": {clip.id: {"revision": 2, "cues": reviewed_cues}}})
 
     regenerated = manager.create_source_only_rerender(old_job, [clip.id])
     saved = db.get_job(regenerated.id)
@@ -82,8 +87,92 @@ def test_source_only_regeneration_keeps_old_output_and_copies_saved_range(tmp_pa
     assert saved.execution_policy == "engine_only"
     assert len(saved.clips) == 1 and saved.clips[0].id != clip.id
     assert (saved.clips[0].start, saved.clips[0].end, saved.clips[0].hook_text) == (12, 18, "Keep this approved text")
+    assert saved.clips[0].caption_revision == 2
+    assert [cue.text for cue in saved.clips[0].caption_cues] == ["Reviewed wording"]
+    saved_private = db.get_job_private(regenerated.id)
+    assert saved_private["caption_overrides"] == {saved.clips[0].id: {"revision": 2, "cues": reviewed_cues}}
+    assert saved_private["source_only_regeneration"] is True
     assert saved.clips[0].output_name is None and not saved.clips[0].provenance
     assert db.get_job(old_job.id).clips[0].output_name == "01-cut.mp4"
     assert old_output.read_bytes() == b"old contaminated output"
     assert (tmp_path / "jobs" / saved.id / "source" / "source.mp4").exists() is False
     assert db.get_job_private(saved.id)["source_path"] == str(source)
+
+
+def test_asset_eligibility_migration_defaults_old_assets_off_and_preserves_opt_ins(tmp_path: Path) -> None:
+    path = tmp_path / "db.sqlite3"
+    db = Database(path)
+    old = rules_asset("old")
+    opted_in = rules_asset("eligible", eligible=True)
+    db.save_asset(old)
+    db.save_asset(opted_in)
+    with db._connect() as connection:
+        for row in connection.execute("SELECT id,payload FROM assets").fetchall():
+            payload = json.loads(row["payload"])
+            if row["id"] == old.id:
+                payload.pop("videoOverlayEligible", None)
+            connection.execute("UPDATE assets SET payload=? WHERE id=?", (json.dumps(payload), row["id"]))
+        connection.execute("DELETE FROM schema_migrations WHERE version=12")
+
+    upgraded = Database(path)
+
+    assert {asset.id: asset.video_overlay_eligible for asset in upgraded.list_assets()} == {old.id: False, opted_in.id: True}
+    with upgraded._connect() as connection:
+        assert connection.execute("SELECT 1 FROM schema_migrations WHERE version=12").fetchone()
+
+
+def rules_asset(asset_id: str, *, eligible: bool = False):
+    from engine.models import Asset
+
+    return Asset(
+        id=asset_id, title=asset_id, filename=f"{asset_id}.png", media_type="image/png",
+        content_hash=asset_id * 16, video_overlay_eligible=eligible,
+    )
+
+
+def test_asset_eligibility_migration_defaults_old_assets_off_and_preserves_opt_ins(tmp_path: Path) -> None:
+    path = tmp_path / "db.sqlite3"
+    db = Database(path)
+    old = rules_asset("old")
+    opted_in = rules_asset("eligible", eligible=True)
+    db.save_asset(old)
+    db.save_asset(opted_in)
+    with db._connect() as connection:
+        for row in connection.execute("SELECT id,payload FROM assets").fetchall():
+            payload = json.loads(row["payload"])
+            if row["id"] == old.id:
+                payload.pop("videoOverlayEligible", None)
+            connection.execute("UPDATE assets SET payload=? WHERE id=?", (json.dumps(payload), row["id"]))
+        connection.execute("DELETE FROM schema_migrations WHERE version=12")
+
+    upgraded = Database(path)
+
+    assert {asset.id: asset.video_overlay_eligible for asset in upgraded.list_assets()} == {old.id: False, opted_in.id: True}
+    with upgraded._connect() as connection:
+        assert connection.execute("SELECT 1 FROM schema_migrations WHERE version=12").fetchone()
+
+
+def rules_asset(asset_id: str, *, eligible: bool = False):
+    from engine.models import Asset
+
+    return Asset(
+        id=asset_id, title=asset_id, filename=f"{asset_id}.png", media_type="image/png",
+        content_hash=asset_id * 16, video_overlay_eligible=eligible,
+    )
+
+
+def test_source_only_render_prefers_saved_reviewed_caption_words(tmp_path: Path) -> None:
+    from engine.jobs import _render_words_for_clip, _reviewed_caption_words_for_clip
+
+    clip = Clip(
+        id="new-clip", index=1, state="queued", start=12, end=18, duration=6,
+        opening_line="A saved phrase", caption_revision=3,
+    )
+    private = {"caption_overrides": {clip.id: {"revision": 3, "cues": [
+        {"start": 0.5, "end": 1.25, "text": "Edited caption"},
+    ]}}}
+
+    words = _render_words_for_clip(private, clip, [{"text": "transcript", "start": 12.0, "end": 13.0}])
+
+    assert words == [{"text": "Edited caption", "start": 12.5, "end": 13.25}]
+    assert _reviewed_caption_words_for_clip(private, clip) == [{"text": "Edited caption", "start": 0.5, "end": 1.25}]

@@ -162,7 +162,13 @@ class LibraryRules:
                 rejected.append({"assetId": asset.id, "title": asset.title, "reason": "No trigger, tag, alias, or title matched"})
                 continue
             hits = [*exact, *tag_hits]
-            reason = f"{asset.policy.title()} policy; " + (f"matched {', '.join(hits)}" if hits else "reserved eligible placement")
+            if hits:
+                match = f"matched {', '.join(hits)}"
+            elif title_hit:
+                match = f"matched title {asset.title!r}"
+            else:
+                match = "reserved placement under required policy"
+            reason = f"{asset.policy.title()} policy; {match}"
             ranked.append((min(score, 100), asset, hits, reason))
         ranked.sort(key=lambda item: (-item[0], item[1].id))
         if not ranked:
@@ -180,7 +186,7 @@ class LibraryRules:
             path = self.data_root / relative if relative else self.library_root / asset.id / asset.filename
             return ResolvedVisual(asset.title, "library", explanation.score / 100, explanation.reason, asset, path if path.exists() else None)
         concept = visual_concept(text)
-        return ResolvedVisual(concept, "text-card", 0.55, "No eligible personal asset matched. Continue to enabled licensed sources, then a relevant text card.", rejected=[]) if False else ResolvedVisual(concept, "text-card", 0.55, "No eligible personal asset matched; used a relevant text description")
+        return ResolvedVisual(concept, "text-card", 0.55, "No eligible personal asset matched; used a relevant text description")
 
     def resolve_video_overlay(
         self, text: str, *, exclude_project_id: str | None = None,
@@ -197,14 +203,6 @@ class LibraryRules:
         relative = self.db.blob_relative_path(asset.blob_id)
         path = self.data_root / relative if relative else self.library_root / asset.id / asset.filename
         return ResolvedVisual(asset.title, "library", explanation.score / 100, explanation.reason, asset, path if path.is_file() else None)
-        explanation = self.explain(text)
-        if explanation.selected:
-            asset = explanation.selected
-            relative = self.db.blob_relative_path(asset.blob_id)
-            path = self.data_root / relative if relative else self.library_root / asset.id / asset.filename
-            return ResolvedVisual(asset.title, "library", explanation.score / 100, explanation.reason, asset, path if path.exists() else None)
-        concept = visual_concept(text)
-        return ResolvedVisual(concept, "text-card", 0.55, "No eligible local or enabled licensed result; used a relevant text card")
 
 
 def visual_concept(text: str) -> str:

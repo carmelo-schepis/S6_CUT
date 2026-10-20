@@ -31,6 +31,58 @@ def test_clip_api_rejects_count_outside_opted_in_integer_limits(batch_mode, coun
     assert response.status_code == 422
 
 
+def test_library_video_overlays_default_off_and_persist_explicit_job_opt_in(monkeypatch) -> None:
+    from engine import app as app_module
+
+    saved: dict[str, object] = {}
+    monkeypatch.setattr(app_module, "validate_youtube_url", lambda value: value)
+    monkeypatch.setattr(app_module.profiles, "smart_available", lambda: True)
+    monkeypatch.setattr(app_module.db, "save_project", lambda project: saved.update(project=project))
+    monkeypatch.setattr(app_module.db, "save_job", lambda job, private=None: saved.update(job=job, private=private))
+
+    async def enqueue(_: str) -> None:
+        return None
+
+    monkeypatch.setattr(app_module.manager, "enqueue", enqueue)
+    base = {"url": "https://www.youtube.com/watch?v=fixture", "processing_mode": "smart", "count": "2"}
+
+    response = client.post("/api/v1/jobs/clip", data=base)
+    assert response.status_code == 202, response.text
+    assert response.json()["job"]["libraryOverlaysEnabled"] is False
+    assert saved["private"]["library_overlays_enabled"] is False
+
+    response = client.post("/api/v1/jobs/clip", data={**base, "library_overlays_enabled": "true"})
+    assert response.status_code == 202, response.text
+    assert response.json()["job"]["libraryOverlaysEnabled"] is True
+    assert saved["private"]["library_overlays_enabled"] is True
+
+
+def test_library_video_overlays_default_off_and_persist_explicit_job_opt_in(monkeypatch) -> None:
+    from engine import app as app_module
+
+    saved: dict[str, object] = {}
+    monkeypatch.setattr(app_module, "validate_youtube_url", lambda value: value)
+    monkeypatch.setattr(app_module.profiles, "smart_available", lambda: True)
+    monkeypatch.setattr(app_module.db, "save_project", lambda project: saved.update(project=project))
+    monkeypatch.setattr(app_module.db, "save_job", lambda job, private=None: saved.update(job=job, private=private))
+
+    async def enqueue(_: str) -> None:
+        return None
+
+    monkeypatch.setattr(app_module.manager, "enqueue", enqueue)
+    base = {"url": "https://www.youtube.com/watch?v=fixture", "processing_mode": "smart", "count": "2"}
+
+    response = client.post("/api/v1/jobs/clip", data=base)
+    assert response.status_code == 202, response.text
+    assert response.json()["job"]["libraryOverlaysEnabled"] is False
+    assert saved["private"]["library_overlays_enabled"] is False
+
+    response = client.post("/api/v1/jobs/clip", data={**base, "library_overlays_enabled": "true"})
+    assert response.status_code == 202, response.text
+    assert response.json()["job"]["libraryOverlaysEnabled"] is True
+    assert saved["private"]["library_overlays_enabled"] is True
+
+
 def test_hook_text_is_opt_in_and_adds_only_an_enabled_job_step(monkeypatch) -> None:
     from engine import app as app_module
 
@@ -341,6 +393,7 @@ def test_shorts_editor_caption_request_uses_smart_pipeline(monkeypatch) -> None:
     assert response.status_code == 202
     body = response.json()
     assert body["job"]["processingMode"] == "smart"
+    assert body["job"]["libraryOverlaysEnabled"] is False
     assert [step["id"] for step in body["job"]["steps"]][:4] == ["source", "probe", "audio", "transcribe"]
     assert saved["private"]["processing_mode"] == "smart"
     assert saved["private"]["subscribe_animation"] == {"version": 1, "enabled": True, "short_form_lead_seconds": 10}

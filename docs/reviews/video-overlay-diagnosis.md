@@ -125,4 +125,4 @@ Fetch latest main, reconcile concurrent work, rerun affected checks, and merge t
 
 ## Delivery scope
 
-This change delivers diagnosis, evidence, and the implementation plan only. Playback/rendering behavior is unchanged. The source-only sample demonstrates a proposed composition, not an implemented application fix.
+This document preserves the original baseline diagnosis and renderer evidence. The implementation status, updated mode map, deployment compatibility finding, and remaining acceptance gates are maintained in [video-refraction-solution-map.md](video-refraction-solution-map.md).

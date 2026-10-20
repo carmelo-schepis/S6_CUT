@@ -395,6 +395,41 @@ def _source_clip_visual_metadata(visual: ResolvedVisual, duration: float) -> tup
     return [overlay], [provenance]
 
 
+def _reviewed_caption_words_for_clip(private: dict[str, Any], clip: Clip) -> list[dict[str, Any]] | None:
+    """Return the validated, clip-relative cues for the saved review revision."""
+    overrides = private.get("caption_overrides")
+    override = overrides.get(clip.id) if isinstance(overrides, dict) else None
+    if not isinstance(override, dict) or override.get("revision") != clip.caption_revision:
+        return None
+    from .captions import normalize_and_validate
+
+    snapshot = private.get("presentation")
+    presentation = snapshot.get("caption") if isinstance(snapshot, dict) and snapshot.get("version") in {1, 2} else None
+    cues, findings = normalize_and_validate(
+        list(override.get("cues") or []), clip.duration,
+        aspect=str(private.get("aspect_ratio") or "9:16"),
+        presentation=presentation if presentation in {"smart_speech_v1", "smart_speech_v2"} else None,
+    )
+    if any(item["severity"] == "error" for item in findings):
+        return None
+    return [{"text": cue["text"], "start": float(cue["start"]), "end": float(cue["end"])} for cue in cues]
+
+
+def _render_words_for_clip(private: dict[str, Any], clip: Clip, transcript_words: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Prefer the current reviewed caption revision over generated transcript cues."""
+    reviewed = _reviewed_caption_words_for_clip(private, clip)
+    if reviewed is not None:
+        return [
+            {**word, "start": word["start"] + clip.start, "end": word["end"] + clip.start}
+            for word in reviewed
+        ]
+    local_words = media_module.caption_words_for_clip(transcript_words, clip.start, clip.end)
+    return [
+        {**word, "start": float(word["start"]) + clip.start, "end": float(word["end"]) + clip.start}
+        for word in local_words
+    ]
+
+
 def _creator_render_kwargs(render, credit: str | None) -> dict[str, str]:
     if not credit:
         return {}
@@ -2144,7 +2179,16 @@ class JobManager:
             "preview_url": None, "thumbnail_url": None, "download_url": None,
             "provenance": [], "fallback_used": False,
         }) for clip in originals]
+        old_caption_overrides = private.get("caption_overrides")
+        regenerated_caption_overrides: dict[str, Any] = {}
+        if isinstance(old_caption_overrides, dict):
+            for original, regenerated_clip in zip(originals, clips):
+                override = old_caption_overrides.get(original.id)
+                if isinstance(override, dict) and override.get("revision") == original.caption_revision:
+                    regenerated_caption_overrides[regenerated_clip.id] = dict(override)
         new_private = dict(private)
+        new_private["caption_overrides"] = regenerated_caption_overrides
+        new_private["source_only_regeneration"] = True
         new_private["source_path"] = str(source)
         new_private["library_overlays_enabled"] = False
         new_private["processing_mode"] = job.processing_mode
@@ -2377,13 +2421,9 @@ class JobManager:
             job.total_items = len(job.clips)
             output = output_dir / f"{position:02d}-{safe_filename(clip.opening_line[:36], 'short')}.mp4"
             subtitles_enabled = bool(private.get("burn_subtitles", private.get("subtitles_enabled", job.burn_subtitles)))
-            clip_words = media_module.caption_words_for_clip(words, clip.start, clip.end)
-            # render_clip receives source-time words; write_ass performs the
-            # same bounded local conversion for every Clip output.
-            clip_words = [
-                {**word, "start": float(word["start"]) + clip.start, "end": float(word["end"]) + clip.start}
-                for word in clip_words
-            ]
+            # Reviewed cue edits take precedence over the generated transcript
+            # when this job is a source-only regeneration or a retry.
+            clip_words = _render_words_for_clip(private, clip, words)
             if profile == "music":
                 clip.caption_cues = [CaptionCue.model_validate(cue) for cue in media_module.music_caption_cues(clip_words, clip.start, clip.end)]
             overlays, provenance = self._video_overlay_for_clip(job, clip, private)
@@ -2607,16 +2647,19 @@ class JobManager:
             embed_subtitles_requested = bool(private.get("embed_subtitles", job.embed_subtitles))
             caption_options_requested = subtitles_requested or embed_subtitles_requested or bool(private.get("caption_downloads_enabled", False)) or bool(private.get("caption_review_enabled", False))
             captions_enabled = job_processing_mode(job, private) != "fast"
+            reviewed_words = _reviewed_caption_words_for_clip(private, clip) if private.get("source_only_regeneration") else None
+            if reviewed_words is not None and (subtitles_requested or embed_subtitles_requested):
+                captions_enabled = True
             subtitles_enabled = subtitles_requested and captions_enabled
             embed_subtitles = embed_subtitles_requested and captions_enabled
-            words: list[dict[str, Any]] = []
+            words: list[dict[str, Any]] = reviewed_words or []
             try:
                 captions_required = captions_enabled and caption_options_requested
                 if caption_options_requested and not captions_enabled and has_audio:
                     warning = "Fast mode skips caption transcription and rendering; choose Smart mode for captions."
                     if warning not in job.warnings:
                         job.warnings.append(warning)
-                if captions_required and has_audio:
+                if reviewed_words is None and captions_required and has_audio:
                     try:
                         words = self._transcribe_fast_window(job, private, source, clip, output_dir)
                     except media_module.TranscriptionCancelled:
