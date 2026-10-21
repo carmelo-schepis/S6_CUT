@@ -297,6 +297,35 @@ describe("LibraryView", () => {
     expect(mockDeleteAssets).not.toHaveBeenCalled();
   });
 
+  it("keeps preview Star focusable while saving and ignores duplicate activations", async () => {
+    let finishSave!: (asset: LibraryAsset) => void;
+    mockUpdateAsset.mockImplementationOnce(() => new Promise((resolve) => { finishSave = resolve; }));
+    render(<LibraryView />);
+    await screen.findByText("Acme launch");
+    fireEvent.click(screen.getByRole("button", { name: "Preview Acme launch" }));
+    const star = screen.getByRole("button", { name: "Star" });
+    star.focus();
+    fireEvent.click(star);
+    expect(star).toHaveAttribute("aria-disabled", "true");
+    expect(star).not.toBeDisabled();
+    expect(star).toHaveFocus();
+    fireEvent.click(star);
+    expect(mockUpdateAsset).toHaveBeenCalledTimes(1);
+    finishSave({ ...assets[0], starred: true });
+    await waitFor(() => expect(star).toHaveAccessibleName("Undo star"));
+    expect(star).not.toHaveAttribute("aria-disabled");
+    expect(star).toHaveFocus();
+  });
+
+  it("keeps Star out of image details", async () => {
+    render(<LibraryView />);
+    await screen.findByText("Other logo");
+    fireEvent.click(screen.getByRole("button", { name: "Select Other logo for Rule Inspector" }));
+    const dialog = screen.getByRole("dialog", { name: "Other logo details" });
+    expect(within(dialog).queryByRole("button", { name: /^(Star|Undo star)$/ })).not.toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Remove Library record" })).toBeInTheDocument();
+  });
+
   it("keeps bulk selection separate and opens the same view from card details", async () => {
     render(<LibraryView />);
     await screen.findByText("Acme launch");

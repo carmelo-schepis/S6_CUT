@@ -58,6 +58,29 @@ test("Library video actions persist stars and preview video", async ({ page, req
     await expect.poll(() => video.evaluate((element: HTMLVideoElement) => element.readyState)).toBeGreaterThan(0);
     await page.getByRole("button", { name: "Play video", exact: true }).click();
     await expect.poll(() => video.evaluate((element: HTMLVideoElement) => element.currentTime)).toBeGreaterThan(0);
+
+    const inspectorTitle = dialog.getByLabel("Title", { exact: true });
+    await inspectorTitle.fill("Unsaved preview draft");
+    const revalidation = page.waitForResponse((response) => response.request().method() === "GET" && new URL(response.url()).pathname === "/api/v1/library/assets");
+    await dialog.getByRole("button", { name: "Star", exact: true }).click();
+    await revalidation;
+    await expect(page.locator(".loading-note")).not.toContainText("Refreshing");
+    await expect(inspectorTitle).toHaveValue("Unsaved preview draft");
+    await expect(dialog.getByRole("button", { name: "Undo star", exact: true })).toBeFocused();
+    await expect.poll(() => starUpdates).toEqual([{ starred: true }, { starred: false }, { starred: true }]);
+
+    const remove = dialog.getByRole("button", { name: "Remove Library record", exact: true });
+    await remove.click();
+    const confirmation = page.getByRole("dialog", { name: `Delete “${title}”?`, exact: true });
+    await expect(confirmation).toBeVisible();
+    expect(await confirmation.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      return element.contains(document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2));
+    })).toBe(true);
+    await page.keyboard.press("Escape");
+    await expect(confirmation).toHaveCount(0);
+    await expect(remove).toBeFocused();
+    await expect(inspectorTitle).toHaveValue("Unsaved preview draft");
     await page.screenshot({ path: test.info().outputPath("library-video-preview.png"), fullPage: true });
     await page.getByRole("button", { name: "Close video preview", exact: true }).click();
   } finally {
