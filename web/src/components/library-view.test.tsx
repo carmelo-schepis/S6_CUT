@@ -14,8 +14,7 @@ vi.mock("../api", () => ({
   listAssets: vi.fn(async () => assets), listFolders: vi.fn(async () => folders), getHealth: vi.fn().mockRejectedValue(new Error("offline")), updateAsset: vi.fn(), deleteAsset: vi.fn(), deleteAssets: vi.fn(), uploadAsset: vi.fn(), createFolder: vi.fn(), updateFolder: vi.fn(), archiveFolder: vi.fn(), removeFolder: vi.fn(), moveFolder: vi.fn(), moveAssets: vi.fn(), renewAssetThumbnail: vi.fn(), suggestLibraryTitles: vi.fn(), applyLibraryTitles: vi.fn(), readableError: (cause: unknown) => cause instanceof Error ? cause.message : "Error",
 }));
 
-import { applyLibraryTitles, deleteAsset, deleteAssets, listAssets, listFolders, renewAssetThumbnail, suggestLibraryTitles, updateAsset } from "../api";
-const mockDeleteAsset = vi.mocked(deleteAsset);
+import { applyLibraryTitles, deleteAssets, listAssets, listFolders, renewAssetThumbnail, suggestLibraryTitles, updateAsset } from "../api";
 const mockDeleteAssets = vi.mocked(deleteAssets);
 const mockListAssets = vi.mocked(listAssets);
 const mockListFolders = vi.mocked(listFolders);
@@ -276,6 +275,26 @@ describe("LibraryView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close video preview" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.queryByRole("complementary", { name: "Rule Inspector" })).not.toBeInTheDocument();
+  });
+
+  it("puts Star and Remove in the preview inspector and keeps delete confirmation above the preview", async () => {
+    mockUpdateAsset.mockResolvedValueOnce({ ...assets[0], starred: true });
+    render(<LibraryView />);
+    await screen.findByText("Acme launch");
+    fireEvent.click(screen.getByRole("button", { name: "Preview Acme launch" }));
+    const preview = screen.getByRole("dialog", { name: "Acme launch video preview" });
+    expect(within(preview).getByRole("button", { name: "Star" })).toBeInTheDocument();
+    expect(within(preview).getByRole("button", { name: "Remove Library record" })).toBeInTheDocument();
+    fireEvent.click(within(preview).getByRole("button", { name: "Star" }));
+    await waitFor(() => expect(within(preview).getByRole("button", { name: "Undo star" })).toBeInTheDocument());
+    expect(mockUpdateAsset).toHaveBeenCalledWith("a1", { starred: true });
+    fireEvent.click(within(preview).getByRole("button", { name: "Remove Library record" }));
+    const confirmation = screen.getByRole("dialog", { name: "Delete “Acme launch”?" });
+    expect(confirmation.parentElement).toHaveClass("library-delete-backdrop");
+    expect(confirmation).toHaveTextContent("Referenced project media and history are retained where applicable.");
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(within(preview).getByRole("button", { name: "Remove Library record" })).toHaveFocus());
+    expect(mockDeleteAssets).not.toHaveBeenCalled();
   });
 
   it("keeps bulk selection separate and opens the same view from card details", async () => {

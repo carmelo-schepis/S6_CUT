@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
 import { Archive, FileImage, Folder, FolderPlus, ImagePlus, Library, MoreHorizontal, RefreshCw, Search, ShieldCheck, Sparkles, Star, Trash2, Upload } from "lucide-react";
-import { applyLibraryTitles, archiveFolder, createFolder, deleteAsset, deleteAssets, getHealth, listAssets, listFolders, moveAssets, moveFolder, readableError, removeFolder, renewAssetThumbnail, suggestLibraryTitles, updateAsset, updateFolder, uploadAsset } from "../api";
+import { applyLibraryTitles, archiveFolder, createFolder, deleteAssets, getHealth, listAssets, listFolders, moveAssets, moveFolder, readableError, removeFolder, renewAssetThumbnail, suggestLibraryTitles, updateAsset, updateFolder, uploadAsset } from "../api";
 import { bindRevalidationOnFocus, createBoundedRevalidation, emitLibraryChanged, onLibraryChanged } from "../library-sync";
 import type { AssetOrigin, Health, LibraryAsset, LibraryFolder, TitleApplyItem, TitleSuggestionResponse } from "../types";
 import { Button, EmptyState, Field, FieldGroup, PageHeader, StatusBadge, formatAge } from "./common";
@@ -11,7 +11,7 @@ import { VideoPreviewDialog } from "./video-preview-dialog";
 
 const originLabels = { "manual-import": "Manual", "project-source": "Source", "generated-clip": "Generated clip", "script-output": "Legacy output" } as const;
 const sleep = (milliseconds: number) => new Promise((resolve) => window.setTimeout(resolve, milliseconds));
-const focusIsInAssetMenu = (target: EventTarget | null) => target instanceof Element && !!target.closest(".asset-actions, .library-asset-menu");
+const focusIsInAssetMenu = (target: EventTarget | null) => target instanceof Element && !!target.closest(".asset-actions, .library-asset-menu, .library-preview-actions");
 
 // A full library mounted every card at once — 329 assets meant 332 concurrent
 // <video> elements and a ~15,000px page. Render a page at a time instead.
@@ -36,6 +36,7 @@ export function LibraryView({ selectedAssetId }: { selectedAssetId?: string | nu
   // otherwise the first paint claims an empty Library before anything is read.
   const [loading, setLoading] = useState(true);
   const [previewAsset, setPreviewAsset] = useState<LibraryAsset | null>(null);
+  const [previewActionError, setPreviewActionError] = useState<string | null>(null);
   const [previewOpener, setPreviewOpener] = useState<HTMLButtonElement | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteTargetIds, setDeleteTargetIds] = useState<string[]>([]);
@@ -161,6 +162,8 @@ export function LibraryView({ selectedAssetId }: { selectedAssetId?: string | nu
 
   const selected = assets.find((asset) => asset.id === inspectedAssetId) || null;
   const inspector = selected ? { ...selected, ...(drafts[selected.id] || {}) } as LibraryAsset : null;
+  const previewCurrent = previewAsset ? assets.find((asset) => asset.id === previewAsset.id) || previewAsset : null;
+  const previewActionPending = previewCurrent ? pendingStars.includes(previewCurrent.id) : false;
   const updateDraft = (field: string, value: unknown) => {
     if (!inspectedAssetId) return;
     setDrafts((current) => ({ ...current, [inspectedAssetId]: { ...current[inspectedAssetId], [field]: value } }));
@@ -184,9 +187,9 @@ export function LibraryView({ selectedAssetId }: { selectedAssetId?: string | nu
       emitLibraryChanged();
     } catch (cause) { setError(readableError(cause)); }
   };
-  const removeSelectedAsset = () => {
-    if (!selected || selected.protected) return;
-    setDeleteTargetIds([selected.id]); setDeleteOpener(document.activeElement as HTMLElement); setDeleteDialogOpen(true);
+  const removeSelectedAsset = (asset: LibraryAsset, opener: HTMLElement) => {
+    if (asset.protected) return;
+    setDeleteTargetIds([asset.id]); setDeleteOpener(opener); setDeleteFeedback(null); setDeleteDialogOpen(true);
   };
   const openAssetMenu = (asset: LibraryAsset, x: number, y: number, opener: HTMLElement) => {
     if (!asset.mediaType.startsWith("video/")) return;
@@ -204,6 +207,7 @@ export function LibraryView({ selectedAssetId }: { selectedAssetId?: string | nu
     const opener = assetMenu?.opener;
     const card = opener?.closest<HTMLElement>(".asset-card");
     pendingStarFocus.current = opener && card ? { opener, cardIndex: [...document.querySelectorAll(".asset-card")].indexOf(card), activeAtStart: document.activeElement } : null;
+    setPreviewActionError(null);
     setPendingStars((current) => [...current, asset.id]); closeAssetMenu(false);
     try {
       const next = await updateAsset(asset.id, { starred: !asset.starred });
@@ -211,7 +215,11 @@ export function LibraryView({ selectedAssetId }: { selectedAssetId?: string | nu
       setAssets((current) => current.map((item) => item.id === next.id ? { ...item, ...next, previewUrl: item.blobId === next.blobId ? item.previewUrl || next.previewUrl : next.previewUrl } : item));
       setAnnouncement(next.starred ? `${next.title} starred` : `${next.title} unstarred`);
       emitLibraryChanged();
-    } catch (cause) { pendingStarFocus.current = null; setError(`Could not update star. ${readableError(cause)}`); }
+    } catch (cause) {
+      pendingStarFocus.current = null;
+      const message = `Could not update star. ${readableError(cause)}`;
+      if (previewAsset?.id === asset.id) setPreviewActionError(message); else setError(message);
+    }
     finally { setPendingStars((current) => current.filter((id) => id !== asset.id)); }
   };
   useEffect(() => {
@@ -265,6 +273,7 @@ export function LibraryView({ selectedAssetId }: { selectedAssetId?: string | nu
   };
   const openPreview = (asset: LibraryAsset, opener: HTMLButtonElement) => {
     setInspectedAssetId(asset.id);
+    setPreviewActionError(null);
     setPreviewOpener(opener);
     setPreviewAsset(asset);
   };
@@ -306,6 +315,7 @@ export function LibraryView({ selectedAssetId }: { selectedAssetId?: string | nu
       if (deletedCount) emitLibraryChanged();
       setSelectedIds((current) => current.filter((id) => !result.deleted.includes(id)));
       setInspectedAssetId((current) => current && result.deleted.includes(current) ? null : current);
+      if (previewAsset && result.deleted.includes(previewAsset.id)) setPreviewAsset(null);
       if (result.failed && Object.keys(result.failed).length) {
         setDeleteFeedback(`${deletedCount} item${deletedCount === 1 ? "" : "s"} deleted. ${Object.keys(result.failed).length} could not be deleted. ${Object.values(result.failed)[0]}`);
       } else {
@@ -353,13 +363,16 @@ export function LibraryView({ selectedAssetId }: { selectedAssetId?: string | nu
     </div>
 
     {titleSuggestions && <SeoTitleReviewDialog result={titleSuggestions} applying={applyingTitles} error={titleApplyError} onCancel={closeTitleReview} onApply={(items) => void applyTitles(items)} />}
-    {previewAsset && <VideoPreviewDialog asset={previewAsset} opener={previewOpener} onClose={closePreview}>
-      <aside className="asset-inspector panel" aria-label="Rule Inspector"><div className="panel-title"><strong>Rule Inspector</strong>{inspector && <span>{formatAge(inspector.createdAt)}</span>}</div>{inspector ? <div className="asset-fields">
+    {previewAsset && previewCurrent && <VideoPreviewDialog asset={previewCurrent} opener={previewOpener} onClose={closePreview}>
+      <aside className="asset-inspector panel" aria-label="Rule Inspector"><div className="library-inspector-header"><div className="panel-title"><strong>Rule Inspector</strong>{inspector && <span>{formatAge(inspector.createdAt)}</span>}</div><div className="library-preview-actions" aria-label="Video actions">
+        <Button variant="ghost" disabled={previewActionPending} aria-label={previewCurrent.starred ? "Undo star" : "Star"} onClick={() => void starAsset(previewCurrent)}><Star size={15} aria-hidden="true" fill={previewCurrent.starred ? "currentColor" : "none"} />{previewActionPending ? "Saving…" : previewCurrent.starred ? "Undo star" : "Star"}</Button>
+        <Button variant="danger" disabled={previewCurrent.protected} aria-label={previewCurrent.protected ? "Remove Library record (protected media cannot be removed)" : "Remove Library record"} title={previewCurrent.protected ? "Protected media cannot be removed" : undefined} onClick={(event) => removeSelectedAsset(previewCurrent, event.currentTarget)}><Trash2 size={15} aria-hidden="true" />Remove</Button>
+      </div></div>{previewActionError && <p className="library-preview-action-error" role="alert">{previewActionError}</p>}{inspector ? <div className="asset-fields">
         <FieldGroup title="Identity" headingLevel={2}>
           <Field label="Title"><input value={inspector.title} onChange={(event) => updateDraft("title", event.target.value)} onBlur={(event) => { if (!assetMenuOpen.current && !focusIsInAssetMenu(event.relatedTarget)) void saveSelectedField("title"); }} /></Field>
           <Field label="Filename"><input readOnly value={inspector.filename} /></Field>
           <Field label="Description"><textarea value={inspector.description} onChange={(event) => updateDraft("description", event.target.value)} onBlur={(event) => { if (!assetMenuOpen.current && !focusIsInAssetMenu(event.relatedTarget)) void saveSelectedField("description"); }} rows={4} aria-label="Full description" /></Field>
-          <Field label="Policy" hint="Controls whether this asset may be chosen automatically."><select value={inspector.policy} onChange={(event) => updateDraft("policy", event.target.value)} onBlur={() => void saveSelectedField("policy")}><option value="required">Required</option><option value="prefer">Prefer</option><option value="neutral">Neutral</option><option value="never">Never</option></select></Field>
+          <Field label="Policy" hint="Controls whether this asset may be chosen automatically."><select value={inspector.policy} onChange={(event) => updateDraft("policy", event.target.value)} onBlur={(event) => { if (!focusIsInAssetMenu(event.relatedTarget)) void saveSelectedField("policy"); }}><option value="required">Required</option><option value="prefer">Prefer</option><option value="neutral">Neutral</option><option value="never">Never</option></select></Field>
         </FieldGroup>
         <FieldGroup title="Matching" headingLevel={2}>
           <Field label="Trigger phrases"><input value={inspector.triggers.join(", ")} onChange={(event) => updateDraft("triggers", event.target.value.split(",").map((item) => item.trim()).filter(Boolean))} onBlur={(event) => { if (!assetMenuOpen.current && !focusIsInAssetMenu(event.relatedTarget)) void saveSelectedField("triggers"); }} /></Field>
@@ -368,24 +381,24 @@ export function LibraryView({ selectedAssetId }: { selectedAssetId?: string | nu
           <Field label="People"><input value={inspector.people.join(", ")} onChange={(event) => updateDraft("people", event.target.value.split(",").map((item) => item.trim()).filter(Boolean))} onBlur={(event) => { if (!assetMenuOpen.current && !focusIsInAssetMenu(event.relatedTarget)) void saveSelectedField("people"); }} /></Field>
         </FieldGroup>
         <FieldGroup title="Usage limits" columns={2} headingLevel={2}>
-          <Field label="Min spacing (s)"><input type="number" min={0} value={inspector.minSpacingSeconds} onChange={(event) => updateDraft("minSpacingSeconds", Number(event.target.value))} onBlur={() => void saveSelectedField("minSpacingSeconds")} /></Field>
-          <Field label="Max uses"><input type="number" min={1} value={inspector.maxUsesPerProject} onChange={(event) => updateDraft("maxUsesPerProject", Number(event.target.value))} onBlur={() => void saveSelectedField("maxUsesPerProject")} /></Field>
+          <Field label="Min spacing (s)"><input type="number" min={0} value={inspector.minSpacingSeconds} onChange={(event) => updateDraft("minSpacingSeconds", Number(event.target.value))} onBlur={(event) => { if (!focusIsInAssetMenu(event.relatedTarget)) void saveSelectedField("minSpacingSeconds"); }} /></Field>
+          <Field label="Max uses"><input type="number" min={1} value={inspector.maxUsesPerProject} onChange={(event) => updateDraft("maxUsesPerProject", Number(event.target.value))} onBlur={(event) => { if (!focusIsInAssetMenu(event.relatedTarget)) void saveSelectedField("maxUsesPerProject"); }} /></Field>
         </FieldGroup>
         <FieldGroup title="Rights" headingLevel={2}>
           <Field label="Licence"><input value={inspector.licence} onChange={(event) => updateDraft("licence", event.target.value)} onBlur={(event) => { if (!assetMenuOpen.current && !focusIsInAssetMenu(event.relatedTarget)) void saveSelectedField("licence"); }} /></Field>
-          <label className="check-row"><input type="checkbox" checked={inspector.protected} onChange={(event) => updateDraft("protected", event.target.checked)} onBlur={() => void saveSelectedField("protected")} /><span><strong>Protected / pinned</strong><small>Prevents accidental removal and marks campaign media.</small></span></label>
-          {inspector.origin === "manual-import" && /^(image|video)\//i.test(inspector.mediaType) && <label className="check-row"><input type="checkbox" aria-label="Eligible for automatic B-roll" checked={Boolean(inspector.videoOverlayEligible)} onChange={(event) => updateDraft("videoOverlayEligible", event.target.checked)} onBlur={() => void saveSelectedField("videoOverlayEligible")} /><span><strong>Eligible for automatic B-roll</strong><small>Required in addition to enabling Library B-roll in a new job.</small></span></label>}
+          <label className="check-row"><input type="checkbox" checked={inspector.protected} onChange={(event) => updateDraft("protected", event.target.checked)} onBlur={(event) => { if (!focusIsInAssetMenu(event.relatedTarget)) void saveSelectedField("protected"); }} /><span><strong>Protected / pinned</strong><small>Prevents accidental removal and marks campaign media.</small></span></label>
+          {inspector.origin === "manual-import" && /^(image|video)\//i.test(inspector.mediaType) && <label className="check-row"><input type="checkbox" aria-label="Eligible for automatic B-roll" checked={Boolean(inspector.videoOverlayEligible)} onChange={(event) => updateDraft("videoOverlayEligible", event.target.checked)} onBlur={(event) => { if (!focusIsInAssetMenu(event.relatedTarget)) void saveSelectedField("videoOverlayEligible"); }} /><span><strong>Eligible for automatic B-roll</strong><small>Required in addition to enabling Library B-roll in a new job.</small></span></label>}
         </FieldGroup>
-        <Button variant="ghost" className="asset-remove" disabled={inspector.protected} onClick={removeSelectedAsset}>Remove Library record</Button>
+        {!previewAsset && <Button variant="ghost" className="asset-remove" disabled={inspector.protected} onClick={(event) => removeSelectedAsset(inspector, event.currentTarget)}>Remove Library record</Button>}
       </div> : <p className="muted inspector-empty">Select an asset to edit its deterministic matching rules.</p>}</aside>
     </VideoPreviewDialog>}
     {assetMenu && menuAsset && createPortal(<AssetContextMenu asset={menuAsset} x={assetMenu.x} y={assetMenu.y} pending={pendingStars.includes(menuAsset.id)} onStar={() => void starAsset(menuAsset)} onDelete={() => beginContextDelete(menuAsset)} onClose={(restore) => closeAssetMenu(restore)} />, document.body)}
-    {deleteDialogOpen && deleteTargetIds.length > 0 && <DeleteConfirmationDialog count={deleteTargetIds.length} title={deleteTargetIds.length === 1 ? assets.find((asset) => asset.id === deleteTargetIds[0])?.title : undefined} projectSource={deleteTargetIds.some((id) => assets.find((asset) => asset.id === id)?.origin === "project-source" && assets.find((asset) => asset.id === id)?.sourceProjectId)} deleting={deleting} feedback={deleteFeedback} onCancel={() => { setDeleteDialogOpen(false); setDeleteTargetIds([]); queueMicrotask(() => deleteOpener?.focus()); }} onConfirm={() => void confirmDelete()} />}
+    {deleteDialogOpen && deleteTargetIds.length > 0 && <DeleteConfirmationDialog layered={Boolean(previewAsset)} count={deleteTargetIds.length} title={deleteTargetIds.length === 1 ? assets.find((asset) => asset.id === deleteTargetIds[0])?.title : undefined} projectSource={deleteTargetIds.some((id) => assets.find((asset) => asset.id === id)?.origin === "project-source" && assets.find((asset) => asset.id === id)?.sourceProjectId)} deleting={deleting} feedback={deleteFeedback} onCancel={() => { setDeleteDialogOpen(false); setDeleteTargetIds([]); requestAnimationFrame(() => deleteOpener?.focus()); }} onConfirm={() => void confirmDelete()} />}
 
   </div>;
 }
 
-function DeleteConfirmationDialog({ count, title, projectSource, deleting, feedback, onCancel, onConfirm }: { count: number; title?: string; projectSource: boolean; deleting: boolean; feedback: string | null; onCancel: () => void; onConfirm: () => void }) {
+function DeleteConfirmationDialog({ count, title, projectSource, deleting, feedback, layered, onCancel, onConfirm }: { count: number; title?: string; projectSource: boolean; deleting: boolean; feedback: string | null; layered?: boolean; onCancel: () => void; onConfirm: () => void }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     dialogRef.current?.querySelector<HTMLButtonElement>("button:not([disabled])")?.focus();
@@ -405,7 +418,7 @@ function DeleteConfirmationDialog({ count, title, projectSource, deleting, feedb
   const message = projectSource
     ? "This project source video is required by its project. Deleting it also deletes the project, its job history, and generated media. This action cannot be undone."
     : count === 1 ? "This removes the Library item. Referenced project media and history are retained where applicable." : `This removes these ${count} Library items. Referenced project media and history are retained where applicable.`;
-  return <div className="dialog-backdrop"><div ref={dialogRef} className="confirmation-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-dialog-title" aria-describedby="delete-dialog-message">
+  return <div className={`dialog-backdrop${layered ? " library-delete-backdrop" : ""}`}><div ref={dialogRef} className="confirmation-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-dialog-title" aria-describedby="delete-dialog-message">
     <h2 id="delete-dialog-title">{dialogTitle}</h2><p id="delete-dialog-message">{message}</p>{feedback && <p className="form-error" role="alert">{feedback}</p>}
     <div className="dialog-actions"><Button disabled={deleting} onClick={onCancel}>Cancel</Button><Button variant="danger" disabled={deleting} onClick={onConfirm}><Trash2 size={15} aria-hidden="true" />{deleting ? "Deleting…" : count === 1 ? "Delete media" : `Delete ${count} items`}</Button></div>
   </div></div>;
