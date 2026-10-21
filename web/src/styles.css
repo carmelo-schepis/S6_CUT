@@ -476,6 +476,16 @@ select { line-height: var(--type-text-line); }
 @media (prefers-reduced-motion: reduce) {
   .nav-item .nav-work-progress.is-processing .nav-work-progress-ring { animation: none; }
 }
+
+/* Desktop Library video actions and saved star marker. */
+.library-page .asset-card > .asset-actions { position: absolute; z-index: 4; top: 6px; right: 6px; width: 32px; height: 32px; display: grid; place-items: center; padding: 0; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-primary); opacity: .82; }
+.library-page .asset-card > .asset-actions:hover, .library-page .asset-card > .asset-actions:focus-visible { opacity: 1; background: var(--surface-2); }
+.library-star-badge { position: absolute; z-index: 3; top: 12px; right: 46px; display: grid; place-items: center; width: 25px; height: 25px; border: 1px solid var(--border-strong); border-radius: 50%; background: var(--surface-1); color: var(--copper-light); pointer-events: none; }
+.library-asset-menu { position: fixed; z-index: 80; min-width: 170px; display: grid; gap: 2px; padding: 5px; border: 1px solid var(--border-strong); border-radius: var(--radius-md); background: var(--surface-1); box-shadow: 0 12px 34px rgba(0,0,0,.45); }
+.library-asset-menu button { width: 100%; padding: 8px 10px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-primary); text-align: left; }
+.library-asset-menu button:hover, .library-asset-menu button:focus-visible { background: var(--surface-2); outline-color: var(--selector-highlight-hover); }
+.library-asset-menu button.destructive { color: var(--error); }
+.library-asset-menu button[aria-disabled="true"] { opacity: .55; }
 .nav-item::before { content: ""; position: absolute; left: -8px; top: 12px; bottom: 12px; width: 2px; background: transparent; }
 .nav-item:hover { color: var(--text); background: var(--surface-2); }
 .nav-item.active { color: var(--text); background: var(--surface-3); font-weight: var(--type-emphasis-weight); }

@@ -624,6 +624,7 @@ class Asset(ApiModel):
     negative_triggers: list[str] = Field(default_factory=list)
     policy: Literal["required", "prefer", "neutral", "never"] = "neutral"
     protected: bool = False
+    starred: bool = False
     min_spacing_seconds: float = Field(default=8, ge=0, le=3600)
     max_uses_per_project: int = Field(default=3, ge=1, le=100)
     active_from: str | None = None
@@ -667,6 +668,7 @@ class AssetUpdate(ApiModel):
     policy: Literal["required", "prefer", "neutral", "never"] | None = None
     video_overlay_eligible: bool | None = None
     protected: bool | None = None
+    starred: bool = False
     min_spacing_seconds: float | None = Field(default=None, ge=0, le=3600)
     max_uses_per_project: int | None = Field(default=None, ge=1, le=100)
     active_from: str | None = None

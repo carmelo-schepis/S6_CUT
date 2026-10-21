@@ -11,11 +11,12 @@ const assets: LibraryAsset[] = [
 ];
 
 vi.mock("../api", () => ({
-  listAssets: vi.fn(async () => assets), listFolders: vi.fn(async () => folders), getHealth: vi.fn().mockRejectedValue(new Error("offline")), updateAsset: vi.fn(), deleteAsset: vi.fn(), uploadAsset: vi.fn(), createFolder: vi.fn(), updateFolder: vi.fn(), archiveFolder: vi.fn(), removeFolder: vi.fn(), moveFolder: vi.fn(), moveAssets: vi.fn(), renewAssetThumbnail: vi.fn(), suggestLibraryTitles: vi.fn(), applyLibraryTitles: vi.fn(), readableError: (cause: unknown) => cause instanceof Error ? cause.message : "Error",
+  listAssets: vi.fn(async () => assets), listFolders: vi.fn(async () => folders), getHealth: vi.fn().mockRejectedValue(new Error("offline")), updateAsset: vi.fn(), deleteAsset: vi.fn(), deleteAssets: vi.fn(), uploadAsset: vi.fn(), createFolder: vi.fn(), updateFolder: vi.fn(), archiveFolder: vi.fn(), removeFolder: vi.fn(), moveFolder: vi.fn(), moveAssets: vi.fn(), renewAssetThumbnail: vi.fn(), suggestLibraryTitles: vi.fn(), applyLibraryTitles: vi.fn(), readableError: (cause: unknown) => cause instanceof Error ? cause.message : "Error",
 }));
 
-import { applyLibraryTitles, deleteAsset, listAssets, listFolders, renewAssetThumbnail, suggestLibraryTitles, updateAsset } from "../api";
+import { applyLibraryTitles, deleteAsset, deleteAssets, listAssets, listFolders, renewAssetThumbnail, suggestLibraryTitles, updateAsset } from "../api";
 const mockDeleteAsset = vi.mocked(deleteAsset);
+const mockDeleteAssets = vi.mocked(deleteAssets);
 const mockListAssets = vi.mocked(listAssets);
 const mockListFolders = vi.mocked(listFolders);
 const mockRenewAssetThumbnail = vi.mocked(renewAssetThumbnail);
@@ -27,6 +28,8 @@ describe("LibraryView", () => {
   beforeEach(() => {
     mockListAssets.mockResolvedValue(assets);
     mockListFolders.mockResolvedValue(folders);
+    mockDeleteAssets.mockReset();
+    mockUpdateAsset.mockReset();
     mockRenewAssetThumbnail.mockReset();
   });
   it("renews a failed card still once without breaking selection or explicit video preview", async () => {
@@ -82,6 +85,93 @@ describe("LibraryView", () => {
     expect(screen.queryByText("Other logo")).not.toBeInTheDocument();
   });
 
+  it("stars the context-menu target without saving or replacing an inspector draft", async () => {
+    mockUpdateAsset.mockResolvedValueOnce({ ...assets[0], starred: true });
+    const refreshed = [{ ...assets[0], starred: true }, assets[1]];
+    mockListAssets.mockResolvedValueOnce(assets).mockResolvedValue(refreshed);
+    render(<LibraryView />);
+    await screen.findByText("Acme launch");
+    fireEvent.click(screen.getByRole("button", { name: "Select Acme launch for Rule Inspector" }));
+    const title = screen.getByLabelText("Title");
+    fireEvent.focus(title);
+    fireEvent.change(title, { target: { value: "Unsaved inspector draft" } });
+    const card = document.querySelector<HTMLElement>('[data-asset-id="a1"]');
+    expect(card).toBeInTheDocument();
+    fireEvent.contextMenu(card!);
+    expect(mockUpdateAsset).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Star" }));
+    await waitFor(() => expect(mockUpdateAsset).toHaveBeenCalledWith("a1", { starred: true }));
+    await waitFor(() => expect(mockListAssets.mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 3000 });
+    await waitFor(() => expect(title).toHaveValue("Unsaved inspector draft"));
+    expect(screen.getAllByLabelText("Starred")).toHaveLength(1);
+  });
+
+  it("refreshes clean inspector fields from the latest saved asset", async () => {
+    const refreshed = [{ ...assets[0], title: "Fresh title", protected: true }, assets[1]];
+    mockListAssets.mockResolvedValueOnce(assets).mockResolvedValue(refreshed);
+    render(<LibraryView />);
+    await screen.findByText("Acme launch");
+    fireEvent.click(screen.getByRole("button", { name: "Select Acme launch for Rule Inspector" }));
+    emitLibraryChanged();
+    await waitFor(() => expect(screen.getByLabelText("Title")).toHaveValue("Fresh title"), { timeout: 3000 });
+    expect(screen.getByRole("checkbox", { name: /Protected \/ pinned/ })).toBeChecked();
+  });
+
+  it("keeps an edit made while its earlier save is pending", async () => {
+    let finishSave!: (asset: LibraryAsset) => void;
+    mockUpdateAsset.mockImplementationOnce(() => new Promise((resolve) => { finishSave = resolve; }));
+    render(<LibraryView />);
+    await screen.findByText("Acme launch");
+    fireEvent.click(screen.getByRole("button", { name: "Select Acme launch for Rule Inspector" }));
+    const title = screen.getByLabelText("Title");
+    fireEvent.change(title, { target: { value: "First edit" } });
+    fireEvent.blur(title);
+    await waitFor(() => expect(mockUpdateAsset).toHaveBeenCalledWith("a1", { title: "First edit" }));
+    fireEvent.focus(title);
+    fireEvent.change(title, { target: { value: "Later edit" } });
+    finishSave({ ...assets[0], title: "First edit" });
+    await waitFor(() => expect(title).toHaveValue("Later edit"));
+  });
+
+  it("does not change the inspected asset when a save finishes after selection changes", async () => {
+    let finishSave!: (asset: LibraryAsset) => void;
+    mockUpdateAsset.mockImplementationOnce(() => new Promise((resolve) => { finishSave = resolve; }));
+    render(<LibraryView />);
+    await screen.findByText("Acme launch");
+    fireEvent.click(screen.getByRole("button", { name: "Select Acme launch for Rule Inspector" }));
+    const title = screen.getByLabelText("Title");
+    fireEvent.change(title, { target: { value: "Saved title" } });
+    fireEvent.blur(title);
+    await waitFor(() => expect(mockUpdateAsset).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("button", { name: "Select Other logo for Rule Inspector" }));
+    finishSave({ ...assets[0], title: "Saved title" });
+    await waitFor(() => expect(screen.getByLabelText("Title")).toHaveValue("Other logo"));
+  });
+
+  it("restores keyboard focus when Undo star moves the card past result 60", async () => {
+    const starred = { ...assets[0], starred: true };
+    const ordinary = Array.from({ length: 60 }, (_, index) => ({ ...assets[0], id: `video-${index}`, title: `Video ${index}`, blobId: `blob-${index}` }));
+    mockListAssets.mockResolvedValueOnce([...ordinary, starred]).mockResolvedValue([...ordinary, { ...starred, starred: false }]);
+    mockUpdateAsset.mockResolvedValueOnce({ ...starred, starred: false });
+    render(<LibraryView />);
+    await screen.findByRole("button", { name: "Actions for Acme launch" });
+    fireEvent.click(screen.getByRole("button", { name: "Actions for Acme launch" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Undo star" }));
+    await waitFor(() => expect(mockUpdateAsset).toHaveBeenCalledWith("a1", { starred: false }));
+    await waitFor(() => expect(document.querySelectorAll(".asset-card")).toHaveLength(60));
+    await waitFor(() => expect(document.querySelector('[data-asset-id="a1"]')).not.toBeInTheDocument());
+    await waitFor(() => expect(document.activeElement).toHaveAttribute("aria-label", "Actions for Video 0"));
+  });
+
+  it("sorts starred videos before other filtered assets while keeping order within each group", async () => {
+    const secondVideo = { ...assets[0], id: "a3", title: "Second video", blobId: "b3", starred: true };
+    const firstStarred = { ...assets[0], id: "a4", title: "First starred", blobId: "b4", starred: true };
+    mockListAssets.mockResolvedValueOnce([assets[0], secondVideo, assets[1], firstStarred]);
+    render(<LibraryView />);
+    await screen.findByText("First starred");
+    expect([...document.querySelectorAll<HTMLElement>(".asset-card")].map((card) => card.dataset.assetId)).toEqual(["a3", "a4", "a1", "a2"]);
+  });
+
   it("tells a genuinely empty Library to import, not to change its filters", async () => {
     mockListAssets.mockResolvedValue([]);
     render(<LibraryView />);
@@ -128,16 +218,14 @@ describe("LibraryView", () => {
     expect(screen.queryByRole("button", { name: "Explain match" })).not.toBeInTheDocument();
   });
 
-  it("states that deleting project-linked media removes only its Library record", async () => {
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+  it("warns in the shared dialog that deleting a source removes its project history", async () => {
+    mockListAssets.mockResolvedValueOnce([{ ...assets[0], origin: "project-source", sourceProjectId: "project-a" }, assets[1]]);
     render(<LibraryView />);
     await screen.findByText("Acme launch");
     fireEvent.click(screen.getByRole("button", { name: "Select Acme launch for Rule Inspector" }));
     fireEvent.click(screen.getByRole("button", { name: "Remove Library record" }));
-    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("This removes the Library item only. Its project and job history will remain."));
-    expect(confirm).not.toHaveBeenCalledWith(expect.stringContaining("Delete project everywhere"));
-    expect(mockDeleteAsset).not.toHaveBeenCalled();
-    confirm.mockRestore();
+    expect(screen.getAllByRole("dialog").at(-1)).toHaveTextContent("Deleting it also deletes the project, its job history, and generated media.");
+    expect(mockDeleteAssets).not.toHaveBeenCalled();
   });
 
   it("keeps bulk deletion of project-linked media explicitly Library-only", async () => {
@@ -145,8 +233,36 @@ describe("LibraryView", () => {
     await screen.findByText("Acme launch");
     fireEvent.click(screen.getByLabelText("Select Acme launch"));
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
-    expect(screen.getByRole("dialog")).toHaveTextContent("This removes the Library item only. Its project and job history will remain.");
-    expect(screen.getByRole("dialog")).not.toHaveTextContent("Delete project everywhere");
+    expect(screen.getByRole("dialog")).toHaveTextContent("This removes the Library item. Referenced project media and history are retained where applicable.");
+    expect(screen.getByRole("dialog")).not.toHaveTextContent("deletes the project, its job history");
+  });
+
+  it("shows delete failures inside the confirmation dialog", async () => {
+    mockDeleteAssets.mockRejectedValueOnce(new Error("blocked"));
+    render(<LibraryView />);
+    await screen.findByText("Acme launch");
+    fireEvent.click(screen.getByLabelText("Select Acme launch"));
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete media" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not delete the selected media. blocked");
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("clears selection for sibling cards removed by a source deletion cascade", async () => {
+    const source = { ...assets[0], origin: "project-source" as const };
+    const sibling = { ...assets[0], id: "a3", title: "Generated sibling", blobId: "b3" };
+    mockListAssets.mockResolvedValueOnce([source, sibling, assets[1]]).mockResolvedValueOnce([assets[1]]);
+    mockDeleteAssets.mockResolvedValueOnce({ deleted: [source.id], failed: {} });
+    render(<LibraryView />);
+    await screen.findByText("Generated sibling");
+    fireEvent.click(screen.getByLabelText("Select Acme launch"));
+    fireEvent.click(screen.getByLabelText("Select Generated sibling"));
+    fireEvent.contextMenu(document.querySelector<HTMLElement>('[data-asset-id="a1"]')!);
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
+    expect(screen.getByRole("dialog")).toHaveTextContent("deletes the project, its job history, and generated media");
+    fireEvent.click(screen.getByRole("button", { name: "Delete media" }));
+    await waitFor(() => expect(document.querySelector('[data-asset-id="a3"]')).not.toBeInTheDocument());
+    expect(screen.queryByText(/selected/)).not.toBeInTheDocument();
   });
 
   it("opens matching details with the player and removes both on close", async () => {
@@ -181,7 +297,7 @@ describe("LibraryView", () => {
     const article = screen.getByRole("button", { name: "Select Acme launch for Rule Inspector" }).closest("article");
     expect(article).toBeInTheDocument();
     expect(article).not.toHaveAttribute("role");
-    expect(article?.querySelectorAll("button")).toHaveLength(2);
+    expect(article?.querySelectorAll("button")).toHaveLength(3);
     expect(article?.querySelectorAll("input[type=checkbox]")).toHaveLength(1);
     expect(article?.querySelector(".asset-preview-trigger .asset-card-details")).toBeNull();
     expect(article?.querySelector(".asset-card-details .asset-preview-trigger")).toBeNull();

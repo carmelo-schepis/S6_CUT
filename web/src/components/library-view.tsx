@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent, type MouseEvent } from "react";
-import { Archive, FileImage, Folder, FolderPlus, ImagePlus, Library, RefreshCw, Search, ShieldCheck, Sparkles, Trash2, Upload } from "lucide-react";
+import { createPortal } from "react-dom";
+import { Archive, FileImage, Folder, FolderPlus, ImagePlus, Library, MoreHorizontal, RefreshCw, Search, ShieldCheck, Sparkles, Star, Trash2, Upload } from "lucide-react";
 import { applyLibraryTitles, archiveFolder, createFolder, deleteAsset, deleteAssets, getHealth, listAssets, listFolders, moveAssets, moveFolder, readableError, removeFolder, renewAssetThumbnail, suggestLibraryTitles, updateAsset, updateFolder, uploadAsset } from "../api";
 import { bindRevalidationOnFocus, createBoundedRevalidation, emitLibraryChanged, onLibraryChanged } from "../library-sync";
 import type { AssetOrigin, Health, LibraryAsset, LibraryFolder, TitleApplyItem, TitleSuggestionResponse } from "../types";
@@ -10,6 +11,7 @@ import { VideoPreviewDialog } from "./video-preview-dialog";
 
 const originLabels = { "manual-import": "Manual", "project-source": "Source", "generated-clip": "Generated clip", "script-output": "Legacy output" } as const;
 const sleep = (milliseconds: number) => new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+const focusIsInAssetMenu = (target: EventTarget | null) => target instanceof Element && !!target.closest(".asset-actions, .library-asset-menu");
 
 // A full library mounted every card at once — 329 assets meant 332 concurrent
 // <video> elements and a ~15,000px page. Render a page at a time instead.
@@ -18,7 +20,8 @@ const ASSET_PAGE = 60;
 export function LibraryView({ selectedAssetId }: { selectedAssetId?: string | null } = {}) {
   const [assets, setAssets] = useState<LibraryAsset[]>([]);
   const [folders, setFolders] = useState<LibraryFolder[]>([]);
-  const [selected, setSelected] = useState<LibraryAsset | null>(null);
+  const [inspectedAssetId, setInspectedAssetId] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, Record<string, unknown>>>({});
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [folderId, setFolderId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -35,6 +38,15 @@ export function LibraryView({ selectedAssetId }: { selectedAssetId?: string | nu
   const [previewAsset, setPreviewAsset] = useState<LibraryAsset | null>(null);
   const [previewOpener, setPreviewOpener] = useState<HTMLButtonElement | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteTargetIds, setDeleteTargetIds] = useState<string[]>([]);
+  const [deleteOpener, setDeleteOpener] = useState<HTMLElement | null>(null);
+  const [assetMenu, setAssetMenu] = useState<{ id: string; x: number; y: number; opener: HTMLElement } | null>(null);
+  const assetMenuOpen = useRef(false);
+  const contextPressPending = useRef(false);
+  const menuFilterKey = useRef("");
+  const pendingStarFocus = useRef<{ opener: HTMLElement; cardIndex: number; activeAtStart: Element | null } | null>(null);
+  const [pendingStars, setPendingStars] = useState<string[]>([]);
+  const [announcement, setAnnouncement] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [deleteFeedback, setDeleteFeedback] = useState<string | null>(null);
   const [assetLimit, setAssetLimit] = useState(ASSET_PAGE);
@@ -45,15 +57,21 @@ export function LibraryView({ selectedAssetId }: { selectedAssetId?: string | nu
   const [titleApplyError, setTitleApplyError] = useState<string | null>(null);
   const [titleFeedback, setTitleFeedback] = useState<{ message: string; reasons: string[] } | null>(null);
   const loadFlight = useRef<Promise<void> | null>(null);
+  const loadLatest = useRef<((retry?: boolean) => Promise<void>) | null>(null);
+  const refreshAfterFlight = useRef(false);
+  const mutationRevision = useRef(0);
   const initialLoadComplete = useRef(false);
+  const appliedDeepLink = useRef<string | null>(null);
 
   const load = useCallback((retry = true) => {
     if (loadFlight.current) return loadFlight.current;
     const request = async () => {
+      const startedAtRevision = mutationRevision.current;
       setLoading(true);
       for (let attempt = 0; attempt < (retry ? 3 : 1); attempt += 1) {
         try {
           const [nextAssets, nextFolders] = await Promise.all([listAssets({ includeArchived: showArchived || Boolean(selectedAssetId) }), listFolders({ includeArchived: showArchived || Boolean(selectedAssetId) })]);
+          if (startedAtRevision !== mutationRevision.current) { refreshAfterFlight.current = true; return; }
           // Keep the player URL stable for an unchanged blob, but accept newly
           // signed thumbnail URLs so an idle Library cannot retain expired links.
           setAssets((current) => {
@@ -64,9 +82,11 @@ export function LibraryView({ selectedAssetId }: { selectedAssetId?: string | nu
             });
           });
           setFolders(nextFolders); setError(null);
-          const selectedIndex = nextAssets.findIndex((asset) => asset.id === selectedAssetId);
+          setSelectedIds((current) => current.filter((id) => nextAssets.some((asset) => asset.id === id)));
+          setAssetMenu((current) => current && !nextAssets.some((asset) => asset.id === current.id) ? null : current);
+          const selectedIndex = [...nextAssets.filter((asset) => asset.mediaType.startsWith("video/") && asset.starred), ...nextAssets.filter((asset) => !(asset.mediaType.startsWith("video/") && asset.starred))].findIndex((asset) => asset.id === selectedAssetId);
           if (selectedIndex >= 0) setAssetLimit((current) => Math.max(current, Math.ceil((selectedIndex + 1) / ASSET_PAGE) * ASSET_PAGE));
-          setSelected((current) => nextAssets.find((asset) => asset.id === selectedAssetId) || nextAssets.find((asset) => asset.id === current?.id) || nextAssets[0] || null);
+          setInspectedAssetId((current) => current && nextAssets.some((asset) => asset.id === current) ? current : current ? null : nextAssets[0]?.id || null);
           return;
         } catch {
           if (attempt < 2 && retry) await sleep(300 * 2 ** attempt);
@@ -76,10 +96,22 @@ export function LibraryView({ selectedAssetId }: { selectedAssetId?: string | nu
       setError("Could not reach the local S6 Cut media library.");
       void getHealth().then(setHealth).catch(() => setHealth(null));
     };
-    const flight = request().finally(() => { setLoading(false); initialLoadComplete.current = true; loadFlight.current = null; });
+    const flight = request().finally(() => {
+      setLoading(false); initialLoadComplete.current = true; loadFlight.current = null;
+      if (refreshAfterFlight.current) { refreshAfterFlight.current = false; window.setTimeout(() => { if (loadLatest.current) void loadLatest.current(false); }, 0); }
+    });
     loadFlight.current = flight;
     return flight;
   }, [showArchived, selectedAssetId]);
+
+  useEffect(() => { loadLatest.current = load; }, [load]);
+  useEffect(() => {
+    if (!selectedAssetId) { appliedDeepLink.current = null; return; }
+    if (appliedDeepLink.current === selectedAssetId || !assets.some((asset) => asset.id === selectedAssetId)) return;
+    appliedDeepLink.current = selectedAssetId;
+    setInspectedAssetId(selectedAssetId);
+  }, [selectedAssetId, assets]);
+  useEffect(() => { if (!assetMenu) assetMenuOpen.current = false; }, [assetMenu]);
 
   // Initial load on mount
   useEffect(() => {
@@ -104,12 +136,15 @@ export function LibraryView({ selectedAssetId }: { selectedAssetId?: string | nu
     };
   }, [load]);
 
-  const visibleAssets = useMemo(() => assets.filter((asset) => {
-    const terms = [asset.title, asset.filename, ...asset.tags, ...asset.brands, ...asset.people].join(" ").toLowerCase();
-    return (!folderId || asset.folderId === folderId) && (!policy || asset.policy === policy) &&
-      (origin === "all" || asset.origin === origin) &&
-      (mediaType === "all" || asset.mediaType.startsWith(`${mediaType}/`)) && (!query.trim() || terms.includes(query.trim().toLowerCase()));
-  }), [assets, folderId, mediaType, origin, policy, query]);
+  const visibleAssets = useMemo(() => {
+    const filtered = assets.filter((asset) => {
+      const terms = [asset.title, asset.filename, ...asset.tags, ...asset.brands, ...asset.people].join(" ").toLowerCase();
+      return (!folderId || asset.folderId === folderId) && (!policy || asset.policy === policy) &&
+        (origin === "all" || asset.origin === origin) &&
+        (mediaType === "all" || asset.mediaType.startsWith(`${mediaType}/`)) && (!query.trim() || terms.includes(query.trim().toLowerCase()));
+    });
+    return [...filtered.filter((asset) => asset.mediaType.startsWith("video/") && asset.starred), ...filtered.filter((asset) => !(asset.mediaType.startsWith("video/") && asset.starred))];
+  }, [assets, folderId, mediaType, origin, policy, query]);
   // Narrowing the filters should always start again from the first page.
   const filterKey = `${folderId}|${policy}|${origin}|${mediaType}|${query.trim()}`;
   const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
@@ -124,31 +159,85 @@ export function LibraryView({ selectedAssetId }: { selectedAssetId?: string | nu
     card?.scrollIntoView?.({ block: "center" });
   }, [selectedAssetId, assets, assetLimit]);
 
-  // The Library list holds the last loaded or saved copy; the inspector edits a draft.
-  const savedSelected = selected ? assets.find((asset) => asset.id === selected.id) : undefined;
-  const saveIfChanged = (field: "title" | "description") => {
-    if (!selected || (savedSelected && savedSelected[field] === selected[field])) return;
-    void saveSelected({ [field]: selected[field] });
+  const selected = assets.find((asset) => asset.id === inspectedAssetId) || null;
+  const inspector = selected ? { ...selected, ...(drafts[selected.id] || {}) } as LibraryAsset : null;
+  const updateDraft = (field: string, value: unknown) => {
+    if (!inspectedAssetId) return;
+    setDrafts((current) => ({ ...current, [inspectedAssetId]: { ...current[inspectedAssetId], [field]: value } }));
   };
-  const saveSelected = async (patch: Record<string, unknown>) => {
-    if (!selected) return;
-    try { const next = await updateAsset(selected.id, patch); setSelected(next); setAssets((current) => current.map((asset) => asset.id === next.id ? next : asset)); emitLibraryChanged(); } catch (cause) { setError(readableError(cause)); }
-  };
-  const removeSelectedAsset = async () => {
-    const projectLinked = selected?.sourceProjectId;
-    const confirmation = projectLinked
-      ? `Remove “${selected?.title}” from the Library? This removes the Library item only. Its project and job history will remain.`
-      : `Remove “${selected?.title}” from the Library? This removes the Library item only.`;
-    if (!selected || selected.protected || !window.confirm(confirmation)) return;
+  const saveSelectedField = async (field: string) => {
+    if (!selected || !Object.hasOwn(drafts[selected.id] || {}, field)) return;
+    const id = selected.id;
+    const submitted = drafts[id][field];
     try {
-      await deleteAsset(selected.id);
-      setAssets((current) => current.filter((asset) => asset.id !== selected.id));
+      const next = await updateAsset(id, { [field]: submitted });
+      mutationRevision.current += 1;
+      setAssets((current) => current.map((asset) => asset.id === id ? { ...asset, ...next } : asset));
+      setDrafts((current) => {
+        const draft = current[id];
+        if (!draft || !Object.is(draft[field], submitted)) return current;
+        const remaining = { ...draft }; delete remaining[field];
+        const result = { ...current };
+        if (Object.keys(remaining).length) result[id] = remaining; else delete result[id];
+        return result;
+      });
       emitLibraryChanged();
-      setSelected(null);
-      setPreviewAsset(null);
-      setSelectedIds((current) => current.filter((id) => id !== selected.id));
     } catch (cause) { setError(readableError(cause)); }
   };
+  const removeSelectedAsset = () => {
+    if (!selected || selected.protected) return;
+    setDeleteTargetIds([selected.id]); setDeleteOpener(document.activeElement as HTMLElement); setDeleteDialogOpen(true);
+  };
+  const openAssetMenu = (asset: LibraryAsset, x: number, y: number, opener: HTMLElement) => {
+    if (!asset.mediaType.startsWith("video/")) return;
+    assetMenuOpen.current = true;
+    setAssetMenu({ id: asset.id, x, y, opener });
+  };
+  const closeAssetMenu = useCallback((restore = true) => {
+    const opener = assetMenu?.opener;
+    assetMenuOpen.current = false; setAssetMenu(null);
+    if (restore) queueMicrotask(() => opener?.focus());
+  }, [assetMenu]);
+  const menuAsset = assetMenu ? assets.find((asset) => asset.id === assetMenu.id) : undefined;
+  const starAsset = async (asset: LibraryAsset) => {
+    if (pendingStars.includes(asset.id)) return;
+    const opener = assetMenu?.opener;
+    const card = opener?.closest<HTMLElement>(".asset-card");
+    pendingStarFocus.current = opener && card ? { opener, cardIndex: [...document.querySelectorAll(".asset-card")].indexOf(card), activeAtStart: document.activeElement } : null;
+    setPendingStars((current) => [...current, asset.id]); closeAssetMenu(false);
+    try {
+      const next = await updateAsset(asset.id, { starred: !asset.starred });
+      mutationRevision.current += 1;
+      setAssets((current) => current.map((item) => item.id === next.id ? { ...item, ...next, previewUrl: item.blobId === next.blobId ? item.previewUrl || next.previewUrl : next.previewUrl } : item));
+      setAnnouncement(next.starred ? `${next.title} starred` : `${next.title} unstarred`);
+      emitLibraryChanged();
+    } catch (cause) { pendingStarFocus.current = null; setError(`Could not update star. ${readableError(cause)}`); }
+    finally { setPendingStars((current) => current.filter((id) => id !== asset.id)); }
+  };
+  useEffect(() => {
+    const pending = pendingStarFocus.current;
+    if (!pending) return;
+    pendingStarFocus.current = null;
+    requestAnimationFrame(() => {
+      if (pending.activeAtStart !== document.activeElement && document.activeElement !== document.body && !document.activeElement?.closest(".library-asset-menu")) return;
+      if (pending.opener.isConnected) { pending.opener.focus(); return; }
+      const cards = [...document.querySelectorAll<HTMLElement>(".asset-card")];
+      const neighbor = cards[Math.min(pending.cardIndex, cards.length - 1)] || cards[Math.max(0, pending.cardIndex - 1)];
+      const action = neighbor?.querySelector<HTMLElement>(".asset-actions");
+      if (action) action.focus(); else document.querySelector<HTMLInputElement>('[aria-label="Search media"]')?.focus();
+    });
+  }, [assets, pagedAssets]);
+  const beginContextDelete = (asset: LibraryAsset) => {
+    closeAssetMenu(false); setDeleteTargetIds([asset.id]); setDeleteOpener(assetMenu?.opener || null); setDeleteFeedback(null); setDeleteDialogOpen(true);
+  };
+  useEffect(() => {
+    if (!assetMenu) return;
+    const dismiss = () => closeAssetMenu(false);
+    const outside = (event: globalThis.PointerEvent) => { if (!(event.target as Element | null)?.closest(".library-asset-menu")) dismiss(); };
+    window.addEventListener("scroll", dismiss, true); window.addEventListener("resize", dismiss); document.addEventListener("pointerdown", outside);
+    return () => { window.removeEventListener("scroll", dismiss, true); window.removeEventListener("resize", dismiss); document.removeEventListener("pointerdown", outside); };
+  }, [assetMenu, closeAssetMenu]);
+  useEffect(() => { if (menuFilterKey.current && menuFilterKey.current !== filterKey) closeAssetMenu(false); menuFilterKey.current = filterKey; }, [filterKey, closeAssetMenu]);
   const addFolder = async (parentId?: string) => {
     const name = window.prompt(parentId ? "Subfolder name" : "Business folder name");
     if (!name?.trim()) return;
@@ -175,7 +264,7 @@ export function LibraryView({ selectedAssetId }: { selectedAssetId?: string | nu
     try { await removeFolder(folder.id, destination.id); setFolderId(destination.id); emitLibraryChanged(); await load(false); } catch (cause) { setError(readableError(cause)); }
   };
   const openPreview = (asset: LibraryAsset, opener: HTMLButtonElement) => {
-    setSelected(asset);
+    setInspectedAssetId(asset.id);
     setPreviewOpener(opener);
     setPreviewAsset(asset);
   };
@@ -207,8 +296,8 @@ export function LibraryView({ selectedAssetId }: { selectedAssetId?: string | nu
     finally { setApplyingTitles(false); }
   };
   const confirmDelete = async () => {
-    if (deleting || !selectedIds.length) return;
-    const ids = [...selectedIds];
+    if (deleting || !deleteTargetIds.length) return;
+    const ids = [...deleteTargetIds];
     setDeleting(true); setDeleteFeedback(null);
     try {
       const result = await deleteAssets(ids);
@@ -216,15 +305,17 @@ export function LibraryView({ selectedAssetId }: { selectedAssetId?: string | nu
       setAssets((current) => current.filter((asset) => !result.deleted.includes(asset.id)));
       if (deletedCount) emitLibraryChanged();
       setSelectedIds((current) => current.filter((id) => !result.deleted.includes(id)));
-      setSelected((current) => current && result.deleted.includes(current.id) ? null : current);
+      setInspectedAssetId((current) => current && result.deleted.includes(current) ? null : current);
       if (result.failed && Object.keys(result.failed).length) {
         setDeleteFeedback(`${deletedCount} item${deletedCount === 1 ? "" : "s"} deleted. ${Object.keys(result.failed).length} could not be deleted. ${Object.values(result.failed)[0]}`);
       } else {
         setDeleteFeedback(`${deletedCount} media item${deletedCount === 1 ? "" : "s"} deleted`);
       }
-      setDeleteDialogOpen(false);
+      setDeleteDialogOpen(false); setDeleteTargetIds([]);
+      if (deletedCount) void load(false);
     } catch (cause) {
       setDeleteFeedback(`Could not delete the selected media. ${readableError(cause)}`);
+      void load(false);
     } finally { setDeleting(false); }
   };
 
@@ -242,11 +333,16 @@ export function LibraryView({ selectedAssetId }: { selectedAssetId?: string | nu
       </aside>
 
       <section className="library-centre panel"><div className="library-toolbar"><div className="search-box"><Search size={15} /><input aria-label="Search media" placeholder="Search titles, tags, people, brands…" value={query} onChange={(event) => setQuery(event.target.value)} /></div><select aria-label="Media type" value={mediaType} onChange={(event) => setMediaType(event.target.value)}><option value="all">All media</option><option value="image">Images</option><option value="video">Video</option><option value="audio">Audio</option></select><select aria-label="Asset origin" value={origin} onChange={(event) => setOrigin(event.target.value as AssetOrigin | "all")}><option value="all">All origins</option><option value="project-source">Sources</option><option value="generated-clip">Generated clips</option><option value="script-output">Legacy outputs</option><option value="manual-import">Manual imports</option></select><Button className="seo-titles-button" data-testid="suggest-seo-titles" disabled={suggestingTitles} aria-busy={suggestingTitles || undefined} onClick={() => void suggestTitles()}><Sparkles size={14} aria-hidden="true" /> {suggestingTitles ? "Writing titles…" : selectedIds.length ? `Suggest SEO titles (${selectedIds.length})` : "Suggest SEO titles"}</Button></div>
-        {selectedIds.length > 0 && <div className="bulk-bar"><strong>{selectedIds.length} selected</strong><select aria-label="Move selected assets" defaultValue="" onChange={(event) => { if (event.target.value) void moveSelected(event.target.value); }}><option value="" disabled>Move to…</option>{folders.filter((folder) => !folder.archived).map((folder) => <option value={folder.id} key={folder.id}>{folder.name}</option>)}</select><Button variant="danger" data-delete-selected="true" disabled={deleting} onClick={() => setDeleteDialogOpen(true)}><Trash2 size={15} aria-hidden="true" /> Delete</Button></div>}
+        {selectedIds.length > 0 && <div className="bulk-bar"><strong>{selectedIds.length} selected</strong><select aria-label="Move selected assets" defaultValue="" onChange={(event) => { if (event.target.value) void moveSelected(event.target.value); }}><option value="" disabled>Move to…</option>{folders.filter((folder) => !folder.archived).map((folder) => <option value={folder.id} key={folder.id}>{folder.name}</option>)}</select><Button variant="danger" data-delete-selected="true" disabled={deleting} onClick={(event) => { setDeleteTargetIds([...selectedIds]); setDeleteOpener(event.currentTarget); setDeleteFeedback(null); setDeleteDialogOpen(true); }}><Trash2 size={15} aria-hidden="true" /> Delete</Button></div>}
         {deleteFeedback && <div className="library-feedback" role="status">{deleteFeedback}</div>}
         {titleError && <p className="form-error library-title-error" role="alert">{titleError}</p>}
         {titleFeedback && <div className="library-feedback" role="status" data-testid="seo-title-feedback">{titleFeedback.message}{titleFeedback.reasons.length > 0 && <ul className="seo-title-conflicts">{titleFeedback.reasons.map((reason, index) => <li key={index}>{reason}</li>)}</ul>}</div>}
-        {visibleAssets.length ? <><div className="asset-grid">{pagedAssets.map((asset) => <LibraryAssetCard key={asset.id} asset={asset} isSelected={selectedIds.includes(asset.id)} isInspected={selected?.id === asset.id} onPreview={openPreview} onInspect={openPreview} onToggleSelected={(assetId, checked) => setSelectedIds((current) => checked ? [...current, assetId] : current.filter((id) => id !== assetId))} />)}</div>
+        {announcement && <span className="sr-only" role="status">{announcement}</span>}
+        {visibleAssets.length ? <><div className="asset-grid">{pagedAssets.map((asset) => <LibraryAssetCard key={asset.id} asset={asset} isSelected={selectedIds.includes(asset.id)} isInspected={inspectedAssetId === asset.id} onPreview={openPreview} onInspect={openPreview} onToggleSelected={(assetId, checked) => setSelectedIds((current) => checked ? [...current, assetId] : current.filter((id) => id !== assetId))} onRightMouseDown={(event) => {
+          if (!asset.mediaType.startsWith("video/") || event.button !== 2) return;
+          assetMenuOpen.current = true; contextPressPending.current = true;
+          window.setTimeout(() => { if (!contextPressPending.current) return; contextPressPending.current = false; if (!document.querySelector(".library-asset-menu")) assetMenuOpen.current = false; }, 0);
+        }} onContextMenu={(event) => { contextPressPending.current = false; if (!asset.mediaType.startsWith("video/")) return; event.preventDefault(); openAssetMenu(asset, event.clientX, event.clientY, event.currentTarget); }} onActions={(event) => { const rect = event.currentTarget.getBoundingClientRect(); openAssetMenu(asset, rect.left, rect.bottom, event.currentTarget); }} />)}</div>
           {remainingAssets > 0 && <button className="show-all-projects" onClick={() => setAssetLimit((value) => value + ASSET_PAGE)}>Show {Math.min(ASSET_PAGE, remainingAssets)} more of {visibleAssets.length}</button>}</>
           : loading && !assets.length ? <EmptyState icon={<Library size={30} />} title="Opening your Library">Reading local media from the engine…</EmptyState>
             : assets.length
@@ -258,37 +354,38 @@ export function LibraryView({ selectedAssetId }: { selectedAssetId?: string | nu
 
     {titleSuggestions && <SeoTitleReviewDialog result={titleSuggestions} applying={applyingTitles} error={titleApplyError} onCancel={closeTitleReview} onApply={(items) => void applyTitles(items)} />}
     {previewAsset && <VideoPreviewDialog asset={previewAsset} opener={previewOpener} onClose={closePreview}>
-      <aside className="asset-inspector panel" aria-label="Rule Inspector"><div className="panel-title"><strong>Rule Inspector</strong>{selected && <span>{formatAge(selected.createdAt)}</span>}</div>{selected ? <div className="asset-fields">
+      <aside className="asset-inspector panel" aria-label="Rule Inspector"><div className="panel-title"><strong>Rule Inspector</strong>{inspector && <span>{formatAge(inspector.createdAt)}</span>}</div>{inspector ? <div className="asset-fields">
         <FieldGroup title="Identity" headingLevel={2}>
-          <Field label="Title"><input value={selected.title} onChange={(event) => setSelected({ ...selected, title: event.target.value })} onBlur={() => saveIfChanged("title")} /></Field>
-          <Field label="Filename"><input readOnly value={selected.filename} /></Field>
-          <Field label="Description"><textarea value={selected.description} onChange={(event) => setSelected({ ...selected, description: event.target.value })} onBlur={() => saveIfChanged("description")} rows={4} aria-label="Full description" /></Field>
-          <Field label="Policy" hint="Controls whether this asset may be chosen automatically."><select value={selected.policy} onChange={(event) => saveSelected({ policy: event.target.value })}><option value="required">Required</option><option value="prefer">Prefer</option><option value="neutral">Neutral</option><option value="never">Never</option></select></Field>
+          <Field label="Title"><input value={inspector.title} onChange={(event) => updateDraft("title", event.target.value)} onBlur={(event) => { if (!assetMenuOpen.current && !focusIsInAssetMenu(event.relatedTarget)) void saveSelectedField("title"); }} /></Field>
+          <Field label="Filename"><input readOnly value={inspector.filename} /></Field>
+          <Field label="Description"><textarea value={inspector.description} onChange={(event) => updateDraft("description", event.target.value)} onBlur={(event) => { if (!assetMenuOpen.current && !focusIsInAssetMenu(event.relatedTarget)) void saveSelectedField("description"); }} rows={4} aria-label="Full description" /></Field>
+          <Field label="Policy" hint="Controls whether this asset may be chosen automatically."><select value={inspector.policy} onChange={(event) => updateDraft("policy", event.target.value)} onBlur={() => void saveSelectedField("policy")}><option value="required">Required</option><option value="prefer">Prefer</option><option value="neutral">Neutral</option><option value="never">Never</option></select></Field>
         </FieldGroup>
         <FieldGroup title="Matching" headingLevel={2}>
-          <Field label="Trigger phrases"><input value={selected.triggers.join(", ")} onChange={(event) => setSelected({ ...selected, triggers: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} onBlur={() => saveSelected({ triggers: selected.triggers })} /></Field>
-          <Field label="Tags"><input value={selected.tags.join(", ")} onChange={(event) => setSelected({ ...selected, tags: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} onBlur={() => saveSelected({ tags: selected.tags })} /></Field>
-          <Field label="Brands"><input value={selected.brands.join(", ")} onChange={(event) => setSelected({ ...selected, brands: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} onBlur={() => saveSelected({ brands: selected.brands })} /></Field>
-          <Field label="People"><input value={selected.people.join(", ")} onChange={(event) => setSelected({ ...selected, people: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} onBlur={() => saveSelected({ people: selected.people })} /></Field>
+          <Field label="Trigger phrases"><input value={inspector.triggers.join(", ")} onChange={(event) => updateDraft("triggers", event.target.value.split(",").map((item) => item.trim()).filter(Boolean))} onBlur={(event) => { if (!assetMenuOpen.current && !focusIsInAssetMenu(event.relatedTarget)) void saveSelectedField("triggers"); }} /></Field>
+          <Field label="Tags"><input value={inspector.tags.join(", ")} onChange={(event) => updateDraft("tags", event.target.value.split(",").map((item) => item.trim()).filter(Boolean))} onBlur={(event) => { if (!assetMenuOpen.current && !focusIsInAssetMenu(event.relatedTarget)) void saveSelectedField("tags"); }} /></Field>
+          <Field label="Brands"><input value={inspector.brands.join(", ")} onChange={(event) => updateDraft("brands", event.target.value.split(",").map((item) => item.trim()).filter(Boolean))} onBlur={(event) => { if (!assetMenuOpen.current && !focusIsInAssetMenu(event.relatedTarget)) void saveSelectedField("brands"); }} /></Field>
+          <Field label="People"><input value={inspector.people.join(", ")} onChange={(event) => updateDraft("people", event.target.value.split(",").map((item) => item.trim()).filter(Boolean))} onBlur={(event) => { if (!assetMenuOpen.current && !focusIsInAssetMenu(event.relatedTarget)) void saveSelectedField("people"); }} /></Field>
         </FieldGroup>
         <FieldGroup title="Usage limits" columns={2} headingLevel={2}>
-          <Field label="Min spacing (s)"><input type="number" min={0} value={selected.minSpacingSeconds} onChange={(event) => saveSelected({ minSpacingSeconds: Number(event.target.value) })} /></Field>
-          <Field label="Max uses"><input type="number" min={1} value={selected.maxUsesPerProject} onChange={(event) => saveSelected({ maxUsesPerProject: Number(event.target.value) })} /></Field>
+          <Field label="Min spacing (s)"><input type="number" min={0} value={inspector.minSpacingSeconds} onChange={(event) => updateDraft("minSpacingSeconds", Number(event.target.value))} onBlur={() => void saveSelectedField("minSpacingSeconds")} /></Field>
+          <Field label="Max uses"><input type="number" min={1} value={inspector.maxUsesPerProject} onChange={(event) => updateDraft("maxUsesPerProject", Number(event.target.value))} onBlur={() => void saveSelectedField("maxUsesPerProject")} /></Field>
         </FieldGroup>
         <FieldGroup title="Rights" headingLevel={2}>
-          <Field label="Licence"><input value={selected.licence} onChange={(event) => setSelected({ ...selected, licence: event.target.value })} onBlur={() => saveSelected({ licence: selected.licence })} /></Field>
-          <label className="check-row"><input type="checkbox" checked={selected.protected} onChange={(event) => saveSelected({ protected: event.target.checked })} /><span><strong>Protected / pinned</strong><small>Prevents accidental removal and marks campaign media.</small></span></label>
-          {selected.origin === "manual-import" && /^(image|video)\//i.test(selected.mediaType) && <label className="check-row"><input type="checkbox" aria-label="Eligible for automatic B-roll" checked={Boolean(selected.videoOverlayEligible)} onChange={(event) => saveSelected({ videoOverlayEligible: event.target.checked })} /><span><strong>Eligible for automatic B-roll</strong><small>Required in addition to enabling Library B-roll in a new job.</small></span></label>}
+          <Field label="Licence"><input value={inspector.licence} onChange={(event) => updateDraft("licence", event.target.value)} onBlur={(event) => { if (!assetMenuOpen.current && !focusIsInAssetMenu(event.relatedTarget)) void saveSelectedField("licence"); }} /></Field>
+          <label className="check-row"><input type="checkbox" checked={inspector.protected} onChange={(event) => updateDraft("protected", event.target.checked)} onBlur={() => void saveSelectedField("protected")} /><span><strong>Protected / pinned</strong><small>Prevents accidental removal and marks campaign media.</small></span></label>
+          {inspector.origin === "manual-import" && /^(image|video)\//i.test(inspector.mediaType) && <label className="check-row"><input type="checkbox" aria-label="Eligible for automatic B-roll" checked={Boolean(inspector.videoOverlayEligible)} onChange={(event) => updateDraft("videoOverlayEligible", event.target.checked)} onBlur={() => void saveSelectedField("videoOverlayEligible")} /><span><strong>Eligible for automatic B-roll</strong><small>Required in addition to enabling Library B-roll in a new job.</small></span></label>}
         </FieldGroup>
-        <Button variant="ghost" className="asset-remove" disabled={selected.protected} onClick={() => void removeSelectedAsset()}>Remove Library record</Button>
+        <Button variant="ghost" className="asset-remove" disabled={inspector.protected} onClick={removeSelectedAsset}>Remove Library record</Button>
       </div> : <p className="muted inspector-empty">Select an asset to edit its deterministic matching rules.</p>}</aside>
     </VideoPreviewDialog>}
-    {deleteDialogOpen && selectedIds.length > 0 && <DeleteConfirmationDialog count={selectedIds.length} projectLinked={selectedIds.some((assetId) => assets.find((asset) => asset.id === assetId)?.sourceProjectId)} deleting={deleting} onCancel={() => { setDeleteDialogOpen(false); queueMicrotask(() => document.querySelector<HTMLButtonElement>('[data-delete-selected="true"]')?.focus()); }} onConfirm={() => void confirmDelete()} />}
+    {assetMenu && menuAsset && createPortal(<AssetContextMenu asset={menuAsset} x={assetMenu.x} y={assetMenu.y} pending={pendingStars.includes(menuAsset.id)} onStar={() => void starAsset(menuAsset)} onDelete={() => beginContextDelete(menuAsset)} onClose={(restore) => closeAssetMenu(restore)} />, document.body)}
+    {deleteDialogOpen && deleteTargetIds.length > 0 && <DeleteConfirmationDialog count={deleteTargetIds.length} title={deleteTargetIds.length === 1 ? assets.find((asset) => asset.id === deleteTargetIds[0])?.title : undefined} projectSource={deleteTargetIds.some((id) => assets.find((asset) => asset.id === id)?.origin === "project-source" && assets.find((asset) => asset.id === id)?.sourceProjectId)} deleting={deleting} feedback={deleteFeedback} onCancel={() => { setDeleteDialogOpen(false); setDeleteTargetIds([]); queueMicrotask(() => deleteOpener?.focus()); }} onConfirm={() => void confirmDelete()} />}
 
   </div>;
 }
 
-function DeleteConfirmationDialog({ count, projectLinked, deleting, onCancel, onConfirm }: { count: number; projectLinked: boolean; deleting: boolean; onCancel: () => void; onConfirm: () => void }) {
+function DeleteConfirmationDialog({ count, title, projectSource, deleting, feedback, onCancel, onConfirm }: { count: number; title?: string; projectSource: boolean; deleting: boolean; feedback: string | null; onCancel: () => void; onConfirm: () => void }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     dialogRef.current?.querySelector<HTMLButtonElement>("button:not([disabled])")?.focus();
@@ -304,16 +401,17 @@ function DeleteConfirmationDialog({ count, projectLinked, deleting, onCancel, on
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [deleting, onCancel]);
-  const title = count === 1 ? "Delete selected media?" : `Delete ${count} media items?`;
-  const message = count === 1 ? "This will permanently delete the selected media item. This action cannot be undone." : `This will permanently delete these ${count} media items. This action cannot be undone.`;
-  const projectHistoryNote = projectLinked ? " This removes the Library item only. Its project and job history will remain." : "";
+  const dialogTitle = count === 1 ? `Delete “${title || "selected media"}”?` : `Delete ${count} media items?`;
+  const message = projectSource
+    ? "This project source video is required by its project. Deleting it also deletes the project, its job history, and generated media. This action cannot be undone."
+    : count === 1 ? "This removes the Library item. Referenced project media and history are retained where applicable." : `This removes these ${count} Library items. Referenced project media and history are retained where applicable.`;
   return <div className="dialog-backdrop"><div ref={dialogRef} className="confirmation-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-dialog-title" aria-describedby="delete-dialog-message">
-    <h2 id="delete-dialog-title">{title}</h2><p id="delete-dialog-message">{message}{projectHistoryNote}</p>
+    <h2 id="delete-dialog-title">{dialogTitle}</h2><p id="delete-dialog-message">{message}</p>{feedback && <p className="form-error" role="alert">{feedback}</p>}
     <div className="dialog-actions"><Button disabled={deleting} onClick={onCancel}>Cancel</Button><Button variant="danger" disabled={deleting} onClick={onConfirm}><Trash2 size={15} aria-hidden="true" />{deleting ? "Deleting…" : count === 1 ? "Delete media" : `Delete ${count} items`}</Button></div>
   </div></div>;
 }
 
-function LibraryAssetCard({ asset, isSelected, isInspected, onPreview, onInspect, onToggleSelected }: { asset: LibraryAsset; isSelected: boolean; isInspected: boolean; onPreview: (asset: LibraryAsset, opener: HTMLButtonElement) => void; onInspect: (asset: LibraryAsset, opener: HTMLButtonElement) => void; onToggleSelected: (assetId: string, checked: boolean) => void }) {
+function LibraryAssetCard({ asset, isSelected, isInspected, onPreview, onInspect, onToggleSelected, onRightMouseDown, onContextMenu, onActions }: { asset: LibraryAsset; isSelected: boolean; isInspected: boolean; onPreview: (asset: LibraryAsset, opener: HTMLButtonElement) => void; onInspect: (asset: LibraryAsset, opener: HTMLButtonElement) => void; onToggleSelected: (assetId: string, checked: boolean) => void; onRightMouseDown: (event: MouseEvent<HTMLElement>) => void; onContextMenu: (event: MouseEvent<HTMLElement>) => void; onActions: (event: MouseEvent<HTMLButtonElement>) => void }) {
   const canPreview = asset.mediaType.startsWith("video/") && !!asset.previewUrl;
   const handlePreview = (event: MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
@@ -333,13 +431,32 @@ function LibraryAssetCard({ asset, isSelected, isInspected, onPreview, onInspect
   const secondaryLine = descriptionOnCard ? asset.description : asset.tags.slice(0, 3).join(" · ") || asset.filename;
   const details = <div className="asset-card-details-content" aria-hidden="true"><strong title={asset.title}>{asset.title}</strong><span className={descriptionOnCard ? "asset-card-description" : undefined} title={descriptionOnCard ? undefined : secondaryLine}>{secondaryLine}</span><span className="origin-badge">{originLabels[asset.origin]}</span><StatusBadge state={asset.policy === "never" ? "failed" : asset.policy === "required" ? "fallback" : "local"} label={asset.policy} /></div>;
 
-  return <article className={`asset-card ${isInspected ? "active" : ""}`} data-asset-id={asset.id}>
+  return <article tabIndex={-1} className={`asset-card ${isInspected ? "active" : ""}`} data-asset-id={asset.id} onMouseDown={onRightMouseDown} onContextMenu={onContextMenu} onKeyDown={(event) => { if (asset.mediaType.startsWith("video/") && (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10"))) { event.preventDefault(); event.currentTarget.querySelector<HTMLButtonElement>(".asset-actions")?.click(); } }}>
     <label className="asset-select"><input aria-label={`Select ${asset.title}`} type="checkbox" checked={isSelected} onChange={handleToggleSelected} /></label>
+    {asset.mediaType.startsWith("video/") && <button className="asset-actions" type="button" aria-label={`Actions for ${asset.title}`} onClick={onActions}><MoreHorizontal size={16} /></button>}
+    {asset.mediaType.startsWith("video/") && asset.starred && <span className="library-star-badge" aria-label="Starred"><Star size={15} fill="currentColor" /></span>}
     {canPreview ? <>
       <button className="asset-preview-trigger" aria-label={`Preview ${asset.title}`} type="button" onClick={handlePreview}><AssetPreview key={asset.blobId} asset={asset} /></button>
       <button className="asset-card-details" aria-label={`Select ${asset.title} for Rule Inspector`} type="button" onClick={handleInspect}>{details}</button>
     </> : <button className="asset-card-details asset-card-details-full" aria-label={`Select ${asset.title} for Rule Inspector`} type="button" onClick={handleInspect}><AssetPreview key={asset.blobId} asset={asset} />{details}</button>}
   </article>;
+}
+
+function AssetContextMenu({ asset, x, y, pending, onStar, onDelete, onClose }: { asset: LibraryAsset; x: number; y: number; pending: boolean; onStar: () => void; onDelete: () => void; onClose: (restore?: boolean) => void }) {
+  const menuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { const node = menuRef.current; if (!node) return; const rect = node.getBoundingClientRect(); node.style.left = `${Math.max(8, Math.min(x, window.innerWidth - rect.width - 8))}px`; node.style.top = `${Math.max(8, Math.min(y, window.innerHeight - rect.height - 8))}px`; node.querySelector<HTMLElement>("[role=menuitem]")?.focus(); }, [x, y]);
+  const keyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const items = [...(menuRef.current?.querySelectorAll<HTMLElement>("[role=menuitem]:not([aria-disabled=true]):not([disabled])") || [])];
+    const index = items.indexOf(document.activeElement as HTMLElement);
+    if (event.key === "Escape") { event.preventDefault(); onClose(); return; }
+    if (event.key === "Tab") { onClose(false); return; }
+    if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) { event.preventDefault(); const target = event.key === "Home" ? items[0] : event.key === "End" ? items.at(-1) : items[(index + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]; target?.focus(); }
+    if (event.key === "Enter" || event.key === " ") { event.preventDefault(); (document.activeElement as HTMLElement)?.click(); }
+  };
+  return <div ref={menuRef} className="library-asset-menu" role="menu" aria-label={`${asset.title} actions`} onKeyDown={keyDown} style={{ left: x, top: y }}>
+    <button role="menuitem" type="button" className="destructive" aria-disabled={asset.protected} aria-label={asset.protected ? "Delete; this asset is protected and cannot be deleted" : "Delete"} title={asset.protected ? "This asset is protected" : undefined} onClick={() => { if (!asset.protected) onDelete(); }}>Delete</button>
+    <button role="menuitem" type="button" disabled={pending} onClick={onStar}>{asset.starred ? "Undo star" : "Star"}</button>
+  </div>;
 }
 
 function AssetPreview({ asset }: { asset: LibraryAsset }) {

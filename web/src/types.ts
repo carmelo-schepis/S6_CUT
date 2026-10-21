@@ -392,6 +392,7 @@ export const assetSchema = z.object({
   negativeTriggers: z.array(z.string()),
   policy: z.enum(["required", "prefer", "neutral", "never"]),
   protected: z.boolean(),
+  starred: z.boolean().optional(),
   minSpacingSeconds: z.number(),
   maxUsesPerProject: z.number(),
   activeFrom: z.string().nullable().optional(),

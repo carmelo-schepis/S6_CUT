@@ -8,9 +8,30 @@ import pytest
 from fastapi.testclient import TestClient
 
 from engine.app import _project_name, app, db, settings, signer
+from engine.models import Asset, AssetUpdate
 
 
 client = TestClient(app)
+
+
+def test_asset_star_update_is_optional_boolean_and_rejects_null() -> None:
+    assert "starred" not in AssetUpdate().model_dump(exclude_unset=True)
+    with pytest.raises(ValueError):
+        AssetUpdate.model_validate({"starred": None})
+
+
+def test_library_asset_star_can_be_updated_without_clobbering_other_fields(monkeypatch) -> None:
+    from engine import app as app_module
+
+    asset = Asset(id="star-api", title="Star test", filename="star.mp4", media_type="video/mp4", content_hash="star-hash")
+    saved = {}
+    monkeypatch.setattr(app_module.db, "get_asset", lambda _id: asset)
+    monkeypatch.setattr(app_module.db, "save_asset", lambda next_asset: saved.update(asset=next_asset))
+    response = client.put("/api/v1/library/assets/star-api", json={"starred": True})
+    assert response.status_code == 200, response.text
+    assert response.json()["starred"] is True
+    assert saved["asset"].title == "Star test"
+    assert client.put("/api/v1/library/assets/star-api", json={"starred": None}).status_code == 422
 
 
 @pytest.fixture(autouse=True)
