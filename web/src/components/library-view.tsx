@@ -446,8 +446,10 @@ function LibraryAssetCard({ asset, isSelected, isInspected, onPreview, onInspect
 
   return <article tabIndex={-1} className={`asset-card ${isInspected ? "active" : ""}`} data-asset-id={asset.id} onMouseDown={onRightMouseDown} onContextMenu={onContextMenu} onKeyDown={(event) => { if (asset.mediaType.startsWith("video/") && (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10"))) { event.preventDefault(); event.currentTarget.querySelector<HTMLButtonElement>(".asset-actions")?.click(); } }}>
     <label className="asset-select"><input aria-label={`Select ${asset.title}`} type="checkbox" checked={isSelected} onChange={handleToggleSelected} /></label>
-    {asset.mediaType.startsWith("video/") && <button className="asset-actions" type="button" aria-label={`Actions for ${asset.title}`} onClick={onActions}><MoreHorizontal size={16} /></button>}
-    {asset.mediaType.startsWith("video/") && asset.starred && <span className="library-star-badge" aria-label="Starred"><Star size={15} fill="currentColor" /></span>}
+    {asset.mediaType.startsWith("video/") && <button className="asset-actions" type="button" aria-label={`Actions for ${asset.title}`} aria-description={asset.starred ? "Starred" : undefined} onClick={onActions}>
+      {asset.starred && <span className="library-star-badge" role="img" aria-label="Starred"><Star size={14} strokeWidth={0} fill="currentColor" aria-hidden="true" /></span>}
+      <MoreHorizontal size={16} aria-hidden="true" />
+    </button>}
     {canPreview ? <>
       <button className="asset-preview-trigger" aria-label={`Preview ${asset.title}`} type="button" onClick={handlePreview}><AssetPreview key={asset.blobId} asset={asset} /></button>
       <button className="asset-card-details" aria-label={`Select ${asset.title} for Rule Inspector`} type="button" onClick={handleInspect}>{details}</button>

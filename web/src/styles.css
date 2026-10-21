@@ -477,10 +477,32 @@ select { line-height: var(--type-text-line); }
   .nav-item .nav-work-progress.is-processing .nav-work-progress-ring { animation: none; }
 }
 
-/* Desktop Library video actions and saved star marker. */
-.library-page .asset-card > .asset-actions { position: absolute; z-index: 4; top: 6px; right: 6px; width: 32px; height: 32px; display: grid; place-items: center; padding: 0; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-primary); opacity: .82; }
-.library-page .asset-card > .asset-actions:hover, .library-page .asset-card > .asset-actions:focus-visible { opacity: 1; background: var(--surface-2); }
-.library-star-badge { position: absolute; z-index: 3; top: 12px; right: 46px; display: grid; place-items: center; width: 25px; height: 25px; border: 1px solid var(--border-strong); border-radius: 50%; background: var(--surface-1); color: var(--copper-light); pointer-events: none; }
+/* One compact control keeps the saved star and Library menu aligned. */
+.library-page .asset-card > .asset-actions {
+  position: absolute;
+  z-index: 4;
+  top: 8px;
+  right: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: auto;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 8px;
+  outline: none;
+  background: color-mix(in srgb, var(--surface-1) 88%, transparent);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background-color .12s ease;
+}
+.library-page .asset-card > .asset-actions:hover { background: var(--surface-3); }
+.library-page .asset-card > .asset-actions:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.library-page .asset-actions > svg, .library-star-badge svg { display: block; flex: none; }
+.library-star-badge { display: flex; align-items: center; flex: none; color: var(--copper-light); line-height: 0; pointer-events: none; }
 .library-asset-menu { position: fixed; z-index: 80; min-width: 170px; display: grid; gap: 2px; padding: 5px; border: 1px solid var(--border-strong); border-radius: var(--radius-md); background: var(--surface-1); box-shadow: 0 12px 34px rgba(0,0,0,.45); }
 .library-asset-menu button { width: 100%; padding: 8px 10px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-primary); text-align: left; }
 .library-asset-menu button:hover, .library-asset-menu button:focus-visible { background: var(--surface-2); outline-color: var(--selector-highlight-hover); }
