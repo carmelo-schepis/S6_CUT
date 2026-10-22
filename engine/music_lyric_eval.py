@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import math
+import os
 import resource
 import sys
 import time
@@ -12,9 +13,14 @@ import unicodedata
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
+from collections import Counter
 
 from .config import Settings
-from .media import transcribe
+from .media import (
+    extract_music_audio_16k, is_whisper_model_cached, probe_audio,
+    transcription_cache_identity,
+)
+from .transcription import supervise
 
 
 def sha256(path: Path) -> str:
@@ -44,6 +50,8 @@ def tokens(text: str) -> list[str]:
 def align(ref: list[str], hyp: list[str]) -> tuple[dict[str, int], list[tuple[int, int]]]:
     """Return edit counts and exact-match index pairs from a Levenshtein alignment."""
     rows, columns = len(ref) + 1, len(hyp) + 1
+    if rows * columns > 1_000_000:
+        raise ValueError("alignment is too large for the bounded evaluator; score shorter contiguous excerpts")
     costs = [[0] * columns for _ in range(rows)]
     back = [[""] * columns for _ in range(rows)]
     for i in range(1, rows):
@@ -86,6 +94,27 @@ def align(ref: list[str], hyp: list[str]) -> tuple[dict[str, int], list[tuple[in
     return counts, matches
 
 
+def character_error_rate(reference: str, hypothesis: str) -> float | None:
+    left, right = "".join(tokens(reference)), "".join(tokens(hypothesis))
+    if not left:
+        return None
+    if (len(left) + 1) * (len(right) + 1) > 20_000_000:
+        return None
+    if len(left) < len(right):
+        left, right = right, left
+    previous = list(range(len(right) + 1))
+    for row, left_char in enumerate(left, 1):
+        current = [row]
+        for column, right_char in enumerate(right, 1):
+            current.append(min(
+                current[-1] + 1,
+                previous[column] + 1,
+                previous[column - 1] + (left_char != right_char),
+            ))
+        previous = current
+    return round(previous[-1] / len("".join(tokens(reference))), 6)
+
+
 def read_timing_reference(path: Path) -> list[dict[str, Any]]:
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, list):
@@ -102,19 +131,30 @@ def read_timing_reference(path: Path) -> list[dict[str, Any]]:
     return result
 
 
-def read_instrumental_spans(path: Path) -> list[tuple[float, float]]:
+def read_time_spans(path: Path) -> list[tuple[float, float]]:
     spans = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(spans, list):
-        raise ValueError("instrumental spans must be a JSON list of [start,end]")
+        raise ValueError("time spans must be a JSON list of [start,end]")
     result = []
     for span in spans:
         if not isinstance(span, list) or len(span) != 2:
-            raise ValueError("instrumental spans must be [start,end]")
+            raise ValueError("time spans must be [start,end]")
         start, end = map(float, span)
         if not math.isfinite(start) or not math.isfinite(end) or start < 0 or end <= start:
-            raise ValueError("invalid instrumental span")
+            raise ValueError("invalid time span")
         result.append((start, end))
     return result
+
+
+def cgroup_peak_memory_mib() -> float | None:
+    for candidate in (Path("/sys/fs/cgroup/memory.peak"), Path("/sys/fs/cgroup/memory/memory.max_usage_in_bytes")):
+        try:
+            value = candidate.read_text(encoding="ascii").strip()
+            if value != "max":
+                return round(int(value) / (1024 * 1024), 2)
+        except (OSError, ValueError):
+            continue
+    return None
 
 
 def evaluate(args: argparse.Namespace) -> dict[str, Any]:
@@ -125,13 +165,55 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
     reference_tokens = tokens(reference_path.read_text(encoding="utf-8"))
     if not reference_tokens:
         raise ValueError("reference contains no words")
-
     settings = Settings.from_env()
     if args.data_path:
         settings = replace(settings, data_path=args.data_path.expanduser().resolve())
-    started = time.monotonic()
-    transcript = transcribe(audio, settings, profile="music", language=args.language)
-    elapsed = time.monotonic() - started
+    audio_metadata = probe_audio(audio, settings)
+    audio_duration = float(audio_metadata["duration"])
+    instrumental_spans = read_time_spans(args.instrumental_spans.expanduser().resolve(strict=True)) if args.instrumental_spans else None
+    timing_reference = read_timing_reference(args.timing_reference.expanduser().resolve(strict=True)) if args.timing_reference else None
+    sung_spans = read_time_spans(args.sung_spans.expanduser().resolve(strict=True)) if args.sung_spans else None
+    if timing_reference is not None and [row["text"] for row in timing_reference] != reference_tokens:
+        raise ValueError("timing reference words must exactly match normalized reference text in order")
+    if sung_spans is not None and timing_reference is None:
+        raise ValueError("--sung-spans requires --timing-reference with one timed word per reference token")
+    for label, spans in (("instrumental", instrumental_spans), ("sung", sung_spans)):
+        if spans and any(end > audio_duration for _, end in spans):
+            raise ValueError(f"{label} span exceeds audio duration")
+    if timing_reference and any(row["end"] > audio_duration for row in timing_reference):
+        raise ValueError("timing reference exceeds audio duration")
+    if os.getenv("S6_TEST_TRANSCRIPT_JSON"):
+        raise ValueError("unset S6_TEST_TRANSCRIPT_JSON; the evaluator must use real local transcription")
+    if args.offline and not args.hypothesis:
+        os.environ["HF_HUB_OFFLINE"] = "1"
+        os.environ["TRANSFORMERS_OFFLINE"] = "1"
+        if not is_whisper_model_cached(settings, profile="music"):
+            raise ValueError("selected Music model is not cached; offline evaluation will not download models")
+
+    preprocessing_seconds = 0.0
+    decode_seconds = 0.0
+    transcript = None
+    if args.hypothesis:
+        transcript = json.loads(args.hypothesis.expanduser().resolve(strict=True).read_text(encoding="utf-8"))
+        if not isinstance(transcript, dict) or not isinstance(transcript.get("words"), list):
+            raise ValueError("saved hypothesis must be a transcript JSON object containing words")
+    else:
+        speed = round(min(1.5, max(0.75, float(args.speed))), 3)
+        audio_digest = sha256(audio)
+        eval_data = args.data_path.expanduser().resolve() if args.data_path else settings.data_path
+        recognition_audio = eval_data / "music-lyric-eval" / f"{audio_digest}-{speed:.3f}.wav"
+        preprocess_started = time.monotonic()
+        extract_music_audio_16k(audio, settings, output=recognition_audio, speed=speed, duration=float(audio_metadata["duration"]))
+        preprocessing_seconds = time.monotonic() - preprocess_started
+        decode_started = time.monotonic()
+        transcript = supervise(recognition_audio, settings, profile="music", language=args.language, source_seconds=float(audio_metadata["duration"]))
+        decode_seconds = time.monotonic() - decode_started
+        if args.save_hypothesis:
+            destination = args.save_hypothesis.expanduser().resolve()
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            temporary = destination.with_suffix(destination.suffix + ".partial")
+            temporary.write_text(json.dumps(transcript, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            temporary.replace(destination)
 
     words = transcript.get("words", [])
     hypothesis_tokens: list[str] = []
@@ -142,23 +224,23 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
         hypothesis_word_indexes.extend([word_index] * len(word_tokens))
     counts, matches = align(reference_tokens, hypothesis_tokens)
     error_count = sum(counts.values())
+    matched_reference_indexes = {reference_index for reference_index, _ in matches}
 
     instrumental_result = None
-    if args.instrumental_spans:
-        spans = read_instrumental_spans(args.instrumental_spans.expanduser().resolve(strict=True))
+    if instrumental_spans is not None:
         inserted_words = sum(
-            any(start <= (float(word["start"]) + float(word["end"])) / 2 < end for start, end in spans)
+            any(start <= (float(word["start"]) + float(word["end"])) / 2 < end for start, end in instrumental_spans)
             for word in words
         )
         instrumental_result = {
-            "annotated_spans": len(spans),
+            "annotated_spans": len(instrumental_spans),
             "hypothesis_words_in_spans": inserted_words,
         }
 
     timing_result = None
     timing_alignment_errors = None
-    if args.timing_reference:
-        timing_reference = read_timing_reference(args.timing_reference.expanduser().resolve(strict=True))
+    sung_omission_result = None
+    if timing_reference is not None:
         timing_counts, timing_matches = align(
             [row["text"] for row in timing_reference], hypothesis_tokens
         )
@@ -174,6 +256,8 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
         if onset_errors:
             timing_result = {
                 "matched_words": len(onset_errors),
+                "reference_coverage": round(len(onset_errors) / max(1, len(timing_reference)), 6),
+                "repeated_reference_tokens": sum(1 for count in Counter(row["text"] for row in timing_reference).values() if count > 1),
                 "onset_mae_seconds": round(sum(onset_errors) / len(onset_errors), 4),
                 "offset_mae_seconds": round(sum(offset_errors) / len(offset_errors), 4),
                 "word_boundary_mae_seconds": round(
@@ -181,8 +265,22 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
                 ),
             }
 
+    if sung_spans is not None:
+        sung_indexes = {
+            index for index, row in enumerate(timing_reference)
+            if any(start <= (row["start"] + row["end"]) / 2 < end for start, end in sung_spans)
+        }
+        matched_sung = sung_indexes & matched_reference_indexes
+        sung_omission_result = {
+            "annotated_sung_reference_words": len(sung_indexes),
+            "matched_words": len(matched_sung),
+            "omitted_words": len(sung_indexes - matched_sung),
+            "omission_rate": round(len(sung_indexes - matched_sung) / max(1, len(sung_indexes)), 6),
+        }
+
     return {
-        "schema_version": 1,
+        "schema_version": 2,
+        "normalizer_version": "nfkc-casefold-apostrophe-v1",
         "track_id": args.track_id,
         "audio_sha256": sha256(audio),
         "reference_sha256": sha256(reference_path),
@@ -191,12 +289,23 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
         "hypothesis_word_count": len(hypothesis_tokens),
         **counts,
         "word_error_rate": round(error_count / len(reference_tokens), 6),
+        "character_error_rate": character_error_rate(
+            reference_path.read_text(encoding="utf-8"),
+            " ".join(str(word.get("text", "")) for word in words),
+        ),
         "instrumental_insertions": instrumental_result,
+        "sung_span_omissions": sung_omission_result,
         "timing_reference_alignment_errors": timing_alignment_errors,
         "timing_error": timing_result,
-        "transcription_runtime_seconds": round(elapsed, 3),
+        "transcription_runtime_seconds": round(preprocessing_seconds + decode_seconds, 3),
+        "preprocessing_runtime_seconds": round(preprocessing_seconds, 3),
+        "decoder_supervision_runtime_seconds": round(decode_seconds, 3),
         "process_peak_rss_mib": round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024, 2),
+        "cgroup_peak_memory_mib": cgroup_peak_memory_mib(),
         "model": settings.music_whisper_model,
+        "decoder_cache_identity": transcription_cache_identity(settings, profile="music", language=args.language),
+        "music_speed": round(min(1.5, max(0.75, float(args.speed))), 3),
+        "transcript_diagnostics": transcript.get("diagnostics"),
         "segment_count": len(transcript.get("segments", [])),
     }
 
@@ -204,12 +313,17 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--audio", type=Path, required=True, help="local audio/video file")
+    parser.add_argument("--hypothesis", type=Path, help="score a saved raw transcript JSON without rerunning ASR")
+    parser.add_argument("--save-hypothesis", type=Path, help="save the raw transcript JSON for repeat scoring")
+    parser.add_argument("--offline", action="store_true", help="require the selected model to be cached and forbid Hub downloads")
+    parser.add_argument("--speed", type=float, default=1.0, help="audible soundtrack speed used to prepare recognition audio")
     parser.add_argument("--reference", type=Path, required=True, help="private UTF-8 human-corrected lyrics")
     parser.add_argument("--track-id", required=True, help="non-sensitive fixture ID")
     parser.add_argument("--data-path", type=Path, help="directory containing the cached local model")
     parser.add_argument("--language", help="optional language code; default uses local autodetection")
     parser.add_argument("--instrumental-spans", type=Path, help="private JSON [[start,end], ...]")
     parser.add_argument("--timing-reference", type=Path, help="private JSON [{text,start,end}, ...], one word per row")
+    parser.add_argument("--sung-spans", type=Path, help="private JSON [[start,end], ...] for annotated sung-vocal regions; requires timing reference")
     parser.add_argument("--report", type=Path, help="write aggregate-only JSON here; otherwise print")
     args = parser.parse_args(argv)
     try:

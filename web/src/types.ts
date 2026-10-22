@@ -313,6 +313,8 @@ export type Project = Omit<z.infer<typeof projectSchema>, "contentFormat"> & { c
 export const healthSchema = z.object({
   status: z.enum(["ready", "degraded", "starting"]),
   version: z.string(),
+  buildRevision: z.string().optional(),
+  musicTranscriptionProfile: z.string().optional(),
   database: z.boolean(),
   ffmpeg: z.boolean(),
   ffprobe: z.boolean(),

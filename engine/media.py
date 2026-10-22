@@ -126,6 +126,9 @@ _WHISPER_MODEL_REPOS: dict[str, str] = {
 }
 
 _TRANSCRIPTION_CACHE_VERSION = "v3"
+_MUSIC_TRANSCRIPTION_CACHE_VERSION = "v4"
+MUSIC_TRANSCRIPTION_PROFILE_VERSION = _MUSIC_TRANSCRIPTION_CACHE_VERSION
+_MUSIC_AUDIO_PREPROCESSING_VERSION = "pcm16k-pitch-shift-v1"
 _TRANSCRIPTION_AUDIO_CONDITIONING = {
     "speech": "speech-unfiltered-v1",
     "music": "music-unfiltered-v1",
@@ -201,6 +204,15 @@ def transcription_options(
         # to a low-confidence language guess from only that first window.
         # Include these settings in the cache identity as well as the decoder.
         options.update(_MUSIC_LANGUAGE_DETECTION)
+        # Spell out Faster-Whisper defaults so music cache identity remains
+        # stable and diagnostics describe the actual decoding behavior.
+        options.update({
+            "condition_on_previous_text": True,
+            "temperature": (0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
+            "compression_ratio_threshold": 2.4,
+            "log_prob_threshold": -1.0,
+            "no_speech_threshold": 0.6,
+        })
     return options
 
 
@@ -224,8 +236,15 @@ def transcription_cache_identity(
         beam_size=beam_size,
         word_timestamps=word_timestamps,
     )
-    digest = hashlib.sha256(json.dumps(options, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-    return f"transcript:{_TRANSCRIPTION_CACHE_VERSION}:{digest}"
+    identity_options = dict(options)
+    if profile == "music":
+        resolved_model = _whisper_model_cache_path(settings, options["model"])
+        identity_options["model_revision"] = (
+            resolved_model.name if resolved_model is not None else "unresolved"
+        )
+    digest = hashlib.sha256(json.dumps(identity_options, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    version = _MUSIC_TRANSCRIPTION_CACHE_VERSION if profile == "music" else _TRANSCRIPTION_CACHE_VERSION
+    return f"transcript:{version}:{digest}"
 
 
 def transcription_cache_key(
@@ -265,13 +284,25 @@ def _whisper_model_cache_path(settings: Settings, model: str | None = None) -> P
     if (candidate / "model.bin").is_file():
         return candidate
     repo_id = _whisper_repo_id(model_name)
-    snapshots = settings.data_path / "models" / f"models--{repo_id.replace('/', '--')}" / "snapshots"
+    model_cache = settings.data_path / "models" / f"models--{repo_id.replace('/', '--')}"
+    snapshots = model_cache / "snapshots"
     if not snapshots.is_dir():
         return None
-    for revision in sorted(snapshots.iterdir()):
+    # Follow the Hub's selected ref when present so cache identity describes
+    # the snapshot Faster-Whisper will resolve, not an arbitrary cached commit.
+    try:
+        revision_id = (model_cache / "refs" / "main").read_text(encoding="ascii").strip()
+    except OSError:
+        revision_id = ""
+    if revision_id:
+        revision = snapshots / revision_id
         if revision.is_dir() and (revision / "model.bin").is_file():
             return revision
-    return None
+    candidates = [
+        revision for revision in snapshots.iterdir()
+        if revision.is_dir() and (revision / "model.bin").is_file()
+    ]
+    return max(candidates, key=lambda path: path.stat().st_mtime, default=None)
 
 
 def is_whisper_model_cached(settings: Settings, *, profile: str = "speech") -> bool:
@@ -453,6 +484,45 @@ def prepare_music_track(source: Path, target: Path, speed: float, settings: Sett
     probe_audio(temporary, settings)
     os.replace(temporary, target)
     return target
+
+
+def music_transcription_source_hash(source_hash: str, speed: float, duration: float) -> str:
+    """Identify the exact selected soundtrack and Music ASR preprocessing."""
+    payload = {
+        "source_sha256": source_hash,
+        "speed": round(min(1.5, max(0.75, float(speed))), 3),
+        "duration": round(max(0.0, float(duration)), 6),
+        "preprocessing": _MUSIC_AUDIO_PREPROCESSING_VERSION,
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def extract_music_audio_16k(source: Path, settings: Settings, *, output: Path, speed: float = 1.0, duration: float | None = None, cancellation_callback: Callable[[], bool] | None = None) -> Path:
+    """Create Music recognition PCM directly, without an intermediate MP3.
+
+    The pitch and tempo shift match the soundtrack users hear. Rendering still
+    uses its separate prepared MP3; this path only feeds the local ASR decoder.
+    """
+    speed = round(min(1.5, max(0.75, float(speed))), 3)
+    target = output
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_suffix(".partial.wav")
+    temporary.unlink(missing_ok=True)
+    command = [settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y"]
+    if duration is not None:
+        command.extend(["-stream_loop", "-1"])
+    command.extend(["-i", str(source), "-vn", "-af", f"aresample=48000,asetrate=48000*{speed:.6f},aresample=16000"])
+    if duration is not None:
+        command.extend(["-t", f"{max(0.1, float(duration)):.6f}"])
+    command.extend(["-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(temporary)])
+    try:
+        run(command, timeout=7200, cancellation_callback=cancellation_callback)
+        if not temporary.is_file() or temporary.stat().st_size < 44:
+            raise MediaError("Music audio extraction did not produce usable 16 kHz PCM")
+        os.replace(temporary, target)
+        return target
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def validate_video_upload(path: Path, original_name: str, settings: Settings, *, max_seconds: int | None = None) -> dict[str, Any]:
@@ -783,6 +853,14 @@ def extract_audio_16k(source: Path, settings: Settings, *, output: Path | None =
 
 # DO-NOT-CHANGE: Faster-Whisper with word timestamps REQUIRED (captions depend on them);
 # S6_TEST_TRANSCRIPT_JSON env var is the test fixture hook — keep it
+def _finite_or_none(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
 def transcribe(
     path: Path,
     settings: Settings,
@@ -854,6 +932,11 @@ def transcribe(
     settings.prepare_model_cache()
     try:
         from faster_whisper import WhisperModel  # type: ignore
+        from importlib.metadata import PackageNotFoundError, version as package_version
+        try:
+            faster_whisper_version = package_version("faster-whisper")
+        except PackageNotFoundError:
+            faster_whisper_version = "unknown"
     except ImportError as exc:
         raise MediaError("Local Whisper is not installed in this engine runtime") from exc
 
@@ -869,6 +952,7 @@ def transcribe(
         if cancellation_callback is not None and cancellation_callback():
             raise TranscriptionCancelled("Transcription cancelled before model load")
 
+    model_load_started = time.monotonic()
     with _whisper_lock:
         model_key = f"{run_model}:{run_device}:{run_compute}"
         model = _whisper_models.get(model_key)
@@ -882,6 +966,7 @@ def transcribe(
                 download_root=str(settings.data_path / "models"),
             )
             _whisper_models[model_key] = model
+    model_load_seconds = time.monotonic() - model_load_started
 
     if cancellation_callback is not None and cancellation_callback():
         raise TranscriptionCancelled("Transcription cancelled before decoding")
@@ -892,7 +977,14 @@ def transcribe(
         "beam_size": run_beam,
     }
     if profile == "music":
-        transcribe_kwargs.update({key: options[key] for key in _MUSIC_LANGUAGE_DETECTION})
+        transcribe_kwargs.update({
+            key: options[key]
+            for key in (
+                *_MUSIC_LANGUAGE_DETECTION,
+                "condition_on_previous_text", "temperature", "compression_ratio_threshold",
+                "log_prob_threshold", "no_speech_threshold",
+            )
+        })
     if options["language"] is not None:
         transcribe_kwargs["language"] = options["language"]
     segments, info = model.transcribe(str(path), **transcribe_kwargs)
@@ -901,7 +993,15 @@ def transcribe(
     for segment in segments:
         if cancellation_callback is not None and cancellation_callback():
             raise TranscriptionCancelled("Transcription cancelled during decoding")
-        segment_records.append({"start": float(segment.start), "end": float(segment.end), "text": segment.text.strip()})
+        segment_record = {"start": float(segment.start), "end": float(segment.end), "text": segment.text.strip()}
+        if profile == "music":
+            segment_record.update({
+                "avg_logprob": _finite_or_none(getattr(segment, "avg_logprob", None)),
+                "compression_ratio": _finite_or_none(getattr(segment, "compression_ratio", None)),
+                "no_speech_prob": _finite_or_none(getattr(segment, "no_speech_prob", None)),
+                "temperature": _finite_or_none(getattr(segment, "temperature", None)),
+            })
+        segment_records.append(segment_record)
         for word in segment.words or []:
             text = str(word.word).strip()
             if text:
@@ -913,7 +1013,29 @@ def transcribe(
         if profile == "music":
             raise MediaError("No sung words with usable timestamps were detected. Instrumentals, buried vocals, and unclear mixes may not produce lyric clips; no audio was padded or duplicated.")
         raise MediaError("No speech was detected. Automatic clips require a readable speech track; the source remains available for manual editing.")
-    return {"language": getattr(info, "language", "unknown"), "words": words, "segments": segment_records}
+    language_probability = _finite_or_none(getattr(info, "language_probability", None))
+    invalid_timing_count = sum(
+        not (math.isfinite(word["start"]) and math.isfinite(word["end"]) and word["start"] >= 0 and word["end"] > word["start"])
+        for word in words
+    )
+    result = {
+        "language": getattr(info, "language", "unknown"), "words": words, "segments": segment_records,
+    }
+    if profile == "music":
+        result["diagnostics"] = {
+            "profile_version": _MUSIC_TRANSCRIPTION_CACHE_VERSION,
+            "audio_preprocessing": _MUSIC_AUDIO_PREPROCESSING_VERSION,
+            "language_probability": language_probability,
+            "invalid_timing_count": invalid_timing_count,
+            "model_revision": (
+                _whisper_model_cache_path(settings, run_model).name
+                if _whisper_model_cache_path(settings, run_model) is not None else "unknown"
+            ),
+            "runtime": {"faster_whisper": faster_whisper_version},
+            "model_load_seconds": round(model_load_seconds, 4),
+            "options": options,
+        }
+    return result
 
 
 def dimensions(aspect: str) -> tuple[int, int]:

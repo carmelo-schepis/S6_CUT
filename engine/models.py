@@ -354,6 +354,8 @@ class Project(ApiModel):
 class Health(ApiModel):
     status: Literal["ready", "degraded", "starting"]
     version: str
+    build_revision: str = "unknown"
+    music_transcription_profile: str = "unknown"
     database: bool
     ffmpeg: bool
     ffprobe: bool

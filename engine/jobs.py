@@ -1612,15 +1612,20 @@ class JobManager:
         model_label = "Preparing transcription model" if cached else "Downloading transcription model"
         self.start_step(job, "transcribe", detail=model_label, label=model_label, progress=16, private=private)
         started = time.monotonic()
+        last_persist = started
         job.transcription_started_at = now_iso()
         job.transcription_total_seconds = duration
         job.transcription_activity = model_label
         self._save(job, private)
 
         def heartbeat() -> None:
+            nonlocal last_persist
+            now = time.monotonic()
             job.last_heartbeat_at = now_iso()
-            job.transcription_elapsed_seconds = time.monotonic() - started
-            self._save(job, private)
+            job.transcription_elapsed_seconds = now - started
+            if now - last_persist >= 1.0:
+                self._save(job, private)
+                last_persist = now
 
         callback = self._transcription_progress(job, private, duration)
         transcription_label = "Transcribing music without speech VAD" if profile == "music" else "Transcribing audio"
@@ -2244,24 +2249,25 @@ class JobManager:
             if warning not in job.warnings:
                 job.warnings.append(warning)
         source_duration = float(metadata["duration"])
+        # Keep the selected source separate from the render-ready copy. Music
+        # ASR can now cache/check the original identity before doing any audio
+        # conversion, and produce decoder PCM without an intermediate MP3.
+        music_track_source = music_track
         transcript_source = source
-        transcript_duration = float(metadata["duration"])
-        if music_track is not None:
-            speed = float(private.get("music_track_speed", 1.0))
-            transcript_source = _media_fn("prepare_music_track")(
-                music_track, self.settings.data_path / "jobs" / job.id / "transcription" / f"music-{speed:.2f}.mp3", speed, self.settings,
-                duration=source_duration, cancellation_callback=lambda: not self._cooperate(job),
-            )
-            music_track = transcript_source
-            transcript_duration = float(_media_fn("probe_audio")(transcript_source, self.settings)["duration"])
-        planning_duration = min(source_duration, transcript_duration) if profile == "music" else source_duration
+        transcript_duration = source_duration
+        speed = float(private.get("music_track_speed", 1.0)) if music_track_source is not None else 1.0
+        planning_duration = source_duration
         target = self._resolve_batch_target(job, private, planning_duration)
         if profile == "music":
             feasible_count = math.floor((planning_duration + 1e-9) / float(private["min_duration"]))
             if feasible_count < int(private["count"]):
                 raise MediaError(f"Cannot create {private['count']} non-overlapping music clips of at least {float(private['min_duration']):g}s from the {planning_duration:.1f}s available music timeline; at most {feasible_count} can fit without padding or duplication.")
-        source_hash = sha256_file(transcript_source) if music_track is not None else str(private.get("source_hash") or sha256_file(source))
-        if music_track is None:
+        if music_track_source is not None:
+            source_hash = _media_fn("music_transcription_source_hash")(
+                sha256_file(music_track_source), speed, transcript_duration,
+            )
+        else:
+            source_hash = str(private.get("source_hash") or sha256_file(source))
             private["source_hash"] = source_hash
         language = private.get("transcription_language")
         beam = self.settings.music_whisper_beam_size if profile == "music" else self.settings.whisper_beam_size
@@ -2290,11 +2296,17 @@ class JobManager:
                 job.warnings.append("Reused a validated local transcript cache entry.")
             else:
                 self.start_step(job, "audio", detail="Extracting 16 kHz mono audio", label="Preparing audio for transcription", progress=12, private=private)
-                audio = media_module.extract_audio_16k(
-                    transcript_source, self.settings,
-                    output=self.settings.data_path / "jobs" / job.id / "transcription" / "audio-16k.wav",
-                    **({"cancellation_callback": lambda: not self._cooperate(job)} if music_track is not None else {}),
-                )
+                audio_path = self.settings.data_path / "jobs" / job.id / "transcription" / "audio-16k.wav"
+                if music_track_source is not None:
+                    audio = _media_fn("extract_music_audio_16k")(
+                        music_track_source, self.settings, output=audio_path, speed=speed,
+                        duration=transcript_duration,
+                        cancellation_callback=lambda: not self._cooperate(job),
+                    )
+                else:
+                    audio = media_module.extract_audio_16k(
+                        transcript_source, self.settings, output=audio_path,
+                    )
                 self.complete_step(job, "audio", detail="16 kHz mono audio prepared", private=private)
                 transcript = self._transcribe_with_stages(job, audio, transcript_duration, private)
                 self.db.cache_put(cache_key, now_iso(), transcript)
@@ -2304,6 +2316,15 @@ class JobManager:
             self.complete_step(job, "transcribe", detail=self._transcript_detail(transcript, source_duration=source_duration, music=profile == "music"), private=private)
         words = transcript["words"]
         if profile == "music":
+            diagnostics = transcript.get("diagnostics") if isinstance(transcript.get("diagnostics"), dict) else {}
+            invalid_count = int(diagnostics.get("invalid_timing_count") or 0)
+            if invalid_count:
+                warning = (
+                    f"Music transcription returned {invalid_count} word(s) with invalid timing; "
+                    "they were kept in the transcript diagnostics and excluded from clip boundaries."
+                )
+                if warning not in job.warnings:
+                    job.warnings.append(warning)
             words = [
                 {**word, "end": min(float(word["end"]), planning_duration)}
                 for word in words
@@ -2400,6 +2421,13 @@ class JobManager:
                     )
                 previous_end = clip.end
         self._snapshot_video_overlays(job, private, words)
+        if music_track_source is not None:
+            music_track = _media_fn("prepare_music_track")(
+                music_track_source,
+                self.settings.data_path / "jobs" / job.id / "transcription" / f"music-{speed:.2f}.mp3",
+                speed, self.settings, duration=source_duration,
+                cancellation_callback=lambda: not self._cooperate(job),
+            )
         output_dir = self.settings.data_path / "jobs" / job.id / "clips"
         output_dir.mkdir(parents=True, exist_ok=True)
         for position, clip in enumerate(job.clips, 1):
@@ -2426,6 +2454,16 @@ class JobManager:
             clip_words = _render_words_for_clip(private, clip, words)
             if profile == "music":
                 clip.caption_cues = [CaptionCue.model_validate(cue) for cue in media_module.music_caption_cues(clip_words, clip.start, clip.end)]
+                if clip.caption_revision == 0:
+                    uncertain = sum(
+                        cue.confidence is None or cue.confidence < 0.35
+                        for cue in clip.caption_cues
+                    )
+                    if uncertain:
+                        clip.caption_qa_warnings = [
+                            f"{uncertain} lyric word(s) have low ASR confidence; check them against the audio."
+                        ]
+                        clip.review_required = True
             overlays, provenance = self._video_overlay_for_clip(job, clip, private)
             # Provenance describes media actually composited into this source
             # clip. Remove legacy/generated-card records and replace any prior

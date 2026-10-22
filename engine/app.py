@@ -30,7 +30,7 @@ from .config import settings
 from .database import Database, MAX_FOLDER_DEPTH, MetadataGenerationClaimError, UNSORTED_FOLDER_ID
 from .jobs import JobManager, ProjectDeletingError, QueueFullError, RetiredScriptJobError, SwitchFastError, can_retry_import, resolve_batch_target, uses_fast_pipeline
 from .library import LibraryRules
-from .media import _SUBTITLE_PRESETS, WHISPER_LANGUAGE_CODES, MediaError, available, caption_font_mismatches, probe, probe_audio, validate_audio_track, validate_video_upload
+from .media import _SUBTITLE_PRESETS, MUSIC_TRANSCRIPTION_PROFILE_VERSION, WHISPER_LANGUAGE_CODES, MediaError, available, caption_font_mismatches, probe, probe_audio, validate_audio_track, validate_video_upload
 from .models import (
     Asset, AssetDelete, AssetDeleteResult, AssetMove, AssetOrigin, AssetUpdate, AssetPage, CaptionCue, CaptionDownload, CaptionReviewInput, Clip, FolderCreate, FolderMove, FolderUpdate, Health, Job, LibraryPurgeInput, LibraryPurgeResult, SourceOnlyRegenerationRequest,
     LibraryFolder, MatchExplanation, MobileClip, MobileDownload, MobileJob, MobileOverview, RecentClipsPage, ContentFormat, ProcessingMode, ProfileInput, Project, ProjectFolderUpdate,
@@ -304,7 +304,9 @@ def runtime_health() -> Health:
         free_bytes = 0
     return Health(
         status="ready" if ffmpeg and ffprobe and whisper and database else "degraded",
-        version=__version__, database=database, ffmpeg=ffmpeg, ffprobe=ffprobe, whisper=whisper,
+        version=__version__, build_revision=os.getenv("S6_BUILD_REVISION", "unknown"),
+        music_transcription_profile=MUSIC_TRANSCRIPTION_PROFILE_VERSION,
+        database=database, ffmpeg=ffmpeg, ffprobe=ffprobe, whisper=whisper,
         ytdlp=available(settings.ytdlp),
         data_path="Container data directory" if str(settings.data_path).startswith("/app/") else "Local mounted data directory",
         free_bytes=free_bytes, configured_workers=settings.job_workers,

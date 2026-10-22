@@ -35,6 +35,7 @@ services:
         condition: service_healthy
     environment:
       S6_DATA_PATH: /app/data
+      S6_BUILD_REVISION: ${S6_BUILD_REVISION:-unknown}
       S6_WHISPER_MODEL: ${S6_WHISPER_MODEL:-base}
       S6_WHISPER_DEVICE: ${S6_WHISPER_DEVICE:-cpu}
       S6_WHISPER_COMPUTE_TYPE: ${S6_WHISPER_COMPUTE_TYPE:-int8}

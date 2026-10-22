@@ -248,3 +248,40 @@ Deploy measured changes with saved revision/config and separate Music options/ca
 versions. Roll back by selecting the previous profile/build; never rewrite existing
 published media. Rollout, acoustic experiments and model downloads are future work,
 not actions taken by this diagnosis.
+
+
+## Implementation status
+
+Implementation branch: feat/general-music-lyric-accuracy-20261022.
+
+Implemented in this increment:
+- Health output now reports the effective Music profile version and an optional
+  S6_BUILD_REVISION value (Compose defaults it to unknown), with matching
+  frontend schema support. Rollout automation still needs to supply the source
+  revision when building/running an image for live-build attribution.
+- Music transcripts now preserve Faster-Whisper segment quality fields and detected
+  language probability, plus a private diagnostics object with explicit decoder
+  options, profile/preprocessing version and invalid-timing count. Music cache
+  identity is versioned separately from Speech and includes the resolved cached
+  model snapshot where available.
+- Music cache lookup hashes the selected soundtrack, speed and timeline before
+  conversion. Cache misses create 16 kHz mono PCM directly from the source; the
+  existing pitch/tempo-adjusted MP3 remains the render input and is created only
+  after transcript/cache use.
+- Decoder heartbeat checks still poll cancellation at the supervision cadence,
+  while persistence is limited to about one save per second and a final save.
+- Initial Music captions surface low-confidence words as a review warning, and
+  invalid-timing counts are reported on the job. Confidence is a review signal,
+  not a claim that a word is wrong.
+- The local evaluator can save raw supervised hypotheses and score them later,
+  rejects the synthetic fixture, supports an explicit offline/cached-model mode,
+  follows production PCM preprocessing, reports stage timing and available cgroup
+  peak memory, includes timing coverage and bounds edit alignment memory.
+
+Not promoted in this increment: changing model size/beam, distributed language
+sampling, original-pitch recognition, singing-aware segmentation, vocal separation,
+or bounded ASR retries. No multi-recording, performance-matched human-reference
+corpus is available in this worktree, so those recognition changes cannot be
+claimed to improve accuracy against held-out songs. No lyric website, song title,
+artist name, reference lyric or song-specific prompt was added to runtime code.
+The running service was not restarted or deployed by this implementation.
