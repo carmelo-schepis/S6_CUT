@@ -30,7 +30,7 @@ from .config import settings
 from .database import Database, MAX_FOLDER_DEPTH, MetadataGenerationClaimError, UNSORTED_FOLDER_ID
 from .jobs import JobManager, ProjectDeletingError, QueueFullError, RetiredScriptJobError, SwitchFastError, can_retry_import, resolve_batch_target, uses_fast_pipeline
 from .library import LibraryRules
-from .media import _SUBTITLE_PRESETS, MediaError, available, caption_font_mismatches, probe, probe_audio, validate_audio_track, validate_video_upload
+from .media import _SUBTITLE_PRESETS, MUSIC_TRANSCRIPTION_PROFILE_VERSION, WHISPER_LANGUAGE_CODES, MediaError, available, caption_font_mismatches, probe, probe_audio, validate_audio_track, validate_video_upload
 from .models import (
     Asset, AssetDelete, AssetDeleteResult, AssetMove, AssetOrigin, AssetUpdate, AssetPage, CaptionCue, CaptionDownload, CaptionReviewInput, Clip, FolderCreate, FolderMove, FolderUpdate, Health, Job, LibraryPurgeInput, LibraryPurgeResult, SourceOnlyRegenerationRequest,
     LibraryFolder, MatchExplanation, MobileClip, MobileDownload, MobileJob, MobileOverview, RecentClipsPage, ContentFormat, ProcessingMode, ProfileInput, Project, ProjectFolderUpdate,
@@ -304,7 +304,9 @@ def runtime_health() -> Health:
         free_bytes = 0
     return Health(
         status="ready" if ffmpeg and ffprobe and whisper and database else "degraded",
-        version=__version__, database=database, ffmpeg=ffmpeg, ffprobe=ffprobe, whisper=whisper,
+        version=__version__, build_revision=os.getenv("S6_BUILD_REVISION", "unknown"),
+        music_transcription_profile=MUSIC_TRANSCRIPTION_PROFILE_VERSION,
+        database=database, ffmpeg=ffmpeg, ffprobe=ffprobe, whisper=whisper,
         ytdlp=available(settings.ytdlp),
         data_path="Container data directory" if str(settings.data_path).startswith("/app/") else "Local mounted data directory",
         free_bytes=free_bytes, configured_workers=settings.job_workers,
@@ -421,6 +423,7 @@ async def create_clip_job(
     subscribe_animation: Annotated[str, Form()] = "{}",
     music_presentation: Annotated[str, Form()] = "{}",
     music_top_text: Annotated[str, Form()] = "",
+    music_lyrics_language: Annotated[str | None, Form(max_length=3)] = None,
     hook_text: Annotated[bool, Form()] = False,
     manual_hook_text: Annotated[str, Form(max_length=150)] = "",
     youtube_metadata: Annotated[bool | None, Form()] = None,
@@ -443,8 +446,16 @@ async def create_clip_job(
         raise HTTPException(422, "Minimum duration must be shorter than maximum duration")
     if len(music_top_text) > 100:
         raise HTTPException(422, "Music top text must be 100 characters or fewer")
+    if music_lyrics_language is not None:
+        if source_profile != "music":
+            raise HTTPException(422, "Lyrics language is only available in Music mode")
+        if music_lyrics_language not in WHISPER_LANGUAGE_CODES:
+            raise HTTPException(422, "Choose a supported lyrics language or use automatic detection")
     music_config = _music_presentation_request(music_presentation)
-    if source_profile != "music" and (music_top_text or music_presentation != "{}" or music_config.subtitle_theme != "clean"):
+    if source_profile != "music" and (
+        music_top_text or music_presentation != "{}" or music_config.subtitle_theme != "clean"
+        or music_config.lyric_animation is not None or music_config.hook_text_format is not None
+    ):
         raise HTTPException(422, "Music presentation options are only available for Music / sung vocals")
     if source_profile == "music" and batch_mode == "high_volume":
         raise HTTPException(422, "High-volume batches are available for Speech sources; Music keeps its existing non-overlapping planner.")
@@ -519,6 +530,8 @@ async def create_clip_job(
     }
     if source_profile == "music":
         private["music_presentation"] = music_config.model_dump()
+        if music_lyrics_language is not None:
+            private["transcription_language"] = music_lyrics_language
         private["music_top_text"] = music_top_text if music_top_text.strip() else None
         private["music_track_speed"] = music_track_speed
         private["music_audio_mode"] = music_audio_mode

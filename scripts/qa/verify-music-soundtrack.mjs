@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 /** Isolated real media integration gate. ASR timestamps and yt-dlp transport are
  * controlled to make speed, loops, persistence and recovery reproducible. */
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { cp, mkdir, mkdtemp, rm, writeFile, chmod } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { tmpdir } from 'node:os';
 
 const root = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const id = `s6-music-check-${Date.now()}-${process.pid}`;
@@ -14,7 +15,7 @@ const engine = `${id}-engine`, web = `${id}-web`, network = `${id}-net`, volume 
 const engineImage = process.env.S6_MUSIC_ENGINE_IMAGE || `${id}-engine`;
 const webImage = process.env.S6_MUSIC_WEB_IMAGE || `${id}-web`;
 await mkdir(artifacts, { recursive: true });
-const bindData = process.env.S6_MUSIC_DATA_ROOT ? await mkdtemp(join(resolve(process.env.S6_MUSIC_DATA_ROOT), 's6-music-data-')) : null;
+const bindData = await mkdtemp(join(resolve(process.env.S6_MUSIC_DATA_ROOT || tmpdir()), 's6-music-data-'));
 const browserTemp = process.env.S6_MUSIC_BROWSER_ROOT ? await mkdtemp(join(resolve(process.env.S6_MUSIC_BROWSER_ROOT), 's6-music-browser-')) : null;
 function run(command, args, env = process.env) {
   return new Promise((resolve, reject) => {
@@ -50,6 +51,7 @@ print('download:finished|1000|1000|NA|200|0|100.0%',flush=True)
 `);
 await chmod(join(artifacts, 'song-ytdlp.py'), 0o755);
 let provisioned = false;
+let testPassed = false;
 try {
   if (!process.env.S6_MUSIC_ENGINE_IMAGE) await run('docker', ['build', '-f', 'engine/Dockerfile', '-t', engineImage, '.']);
   if (!process.env.S6_MUSIC_WEB_IMAGE) await run('docker', ['build', '-f', 'Dockerfile', '-t', webImage, '.']);
@@ -76,14 +78,24 @@ try {
   if (!healthy) throw new Error('Isolated gateway did not become ready');
   console.log(`Real media verification at ${url}; evidence: ${artifacts}`);
   await run('npx', ['playwright', 'test', '--config', 'playwright.config.ts', 'tests/acceptance/music-soundtrack-real.spec.ts', '--project=Desktop Chromium'], { ...process.env, S6_ACCEPTANCE_URL: url, S6_SOUNDTRACK_FIXTURES: artifacts, S6_SOUNDTRACK_CONTAINER: engine, S6_PLAYWRIGHT_ARTIFACTS: browserTemp || join(artifacts, 'playwright') });
+  testPassed = true;
 } finally {
   if (provisioned) {
-    await run('docker', ['logs', engine]).catch(() => {});
+    try {
+      const logs = execFileSync('docker', ['logs', engine], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+      await writeFile(join(artifacts, 'engine.log'), logs);
+    } catch (error) {
+      await writeFile(join(artifacts, 'engine.log'), String(error));
+    }
     await run('docker', ['rm', '-f', web, engine]).catch(() => {});
     await run('docker', ['network', 'rm', network]).catch(() => {});
-    if (!bindData) await run('docker', ['volume', 'rm', volume]).catch(() => {});
   }
-  if (bindData) await rm(bindData, { recursive: true, force: true });
+  if (bindData) {
+    if (testPassed) await rm(bindData, { recursive: true, force: true });
+    else await writeFile(join(artifacts, 'failed-data-path.txt'), bindData + '\n');
+  } else if (provisioned) {
+    await run('docker', ['volume', 'rm', volume]).catch(() => {});
+  }
   if (browserTemp) {
     await cp(browserTemp, join(artifacts, 'playwright'), { recursive: true });
     await rm(browserTemp, { recursive: true, force: true });

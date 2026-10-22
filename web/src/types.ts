@@ -29,9 +29,18 @@ export const batchModeSchema = z.enum(["standard", "high_volume"]);
 export type BatchMode = z.infer<typeof batchModeSchema>;
 export const sourceProfileSchema = z.enum(["speech", "music"]);
 export type SourceProfile = z.infer<typeof sourceProfileSchema>;
-export const musicThemeSchema = z.enum(["clean", "warm", "serif", "reference_white_sans", "reference_yellow_sans", "reference_white_serif"]);
+export const musicThemeSchema = z.enum(["clean", "warm", "serif", "reference_white_sans", "reference_yellow_sans", "reference_white_serif", "condensed_black", "condensed_white", "handwritten_stack"]);
 export type MusicTheme = z.infer<typeof musicThemeSchema>;
-export const musicPresentationSchema = z.object({ version: z.literal(1), subtitleTheme: musicThemeSchema });
+export const musicLyricAnimationSchema = z.enum(["legacy", "slow_fade", "line_crossfade", "word_build"]);
+export type MusicLyricAnimation = z.infer<typeof musicLyricAnimationSchema>;
+export const musicHookTextFormatSchema = z.enum(["plain", "white_banner"]);
+export type MusicHookTextFormat = z.infer<typeof musicHookTextFormatSchema>;
+export const musicPresentationSchema = z.object({
+  version: z.literal(1),
+  subtitleTheme: musicThemeSchema,
+  lyricAnimation: musicLyricAnimationSchema.nullable().optional(),
+  hookTextFormat: musicHookTextFormatSchema.nullable().optional(),
+});
 export type MusicPresentationConfig = z.infer<typeof musicPresentationSchema>;
 export const musicTrackSchema = z.object({ assetId: z.string().nullable().optional(), title: z.string(), source: z.enum(["upload", "youtube"]), speed: z.union([z.literal(.75), z.literal(.85), z.literal(1), z.literal(1.25), z.literal(1.5)]) });
 export type MusicTrack = z.infer<typeof musicTrackSchema>;
@@ -313,6 +322,8 @@ export type Project = Omit<z.infer<typeof projectSchema>, "contentFormat"> & { c
 export const healthSchema = z.object({
   status: z.enum(["ready", "degraded", "starting"]),
   version: z.string(),
+  buildRevision: z.string().optional(),
+  musicTranscriptionProfile: z.string().optional(),
   database: z.boolean(),
   ffmpeg: z.boolean(),
   ffprobe: z.boolean(),

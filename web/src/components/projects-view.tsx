@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, Film, Plus, Sparkles, Zap } from "lucide-react";
 import { createClipJob, createFolder, listFolders, readableError } from "../api";
-import { DEFAULT_SUBSCRIBE_ANIMATION, type BatchMode, type ContentFormat, type Health, type LibraryFolder, type ProcessingMode, type Project, type ProviderProfile, type SourceProfile, type Style, type SubscribeAnimationConfig, type MusicTheme } from "../types";
+import { DEFAULT_SUBSCRIBE_ANIMATION, type BatchMode, type ContentFormat, type Health, type LibraryFolder, type ProcessingMode, type Project, type ProviderProfile, type SourceProfile, type Style, type SubscribeAnimationConfig, type MusicTheme, type MusicLyricAnimation, type MusicHookTextFormat } from "../types";
 import { Button, Field, FieldGroup, StepBadge, useSingleFlight } from "./common";
 import { VideoSourcePicker } from "./video-source-picker";
 import { VideoOnlyDownload } from "./video-only-download";
 import { SubscribeAnimationControl } from "./subscribe-animation-control";
 import { RecentClips } from "./recent-clips";
+import { MusicHookFormatPicker, MusicLyricAnimationPicker } from "./music-typography-controls";
 
 const RECENT_FOLDER_KEY = "s6-cut.recent-library-folder";
 const PROVIDER_CALLOUT_DISMISSED_KEY = "s6-cut.provider-callout-dismissed";
@@ -53,6 +54,9 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
   const [executionPolicy, setExecutionPolicy] = useState<"auto" | "engine_only">("auto");
   const [sourceProfile, setSourceProfile] = useState<SourceProfile>("speech");
   const [musicTheme, setMusicTheme] = useState<MusicTheme>("clean");
+  const [musicLyricsLanguage, setMusicLyricsLanguage] = useState("");
+  const [musicLyricAnimation, setMusicLyricAnimation] = useState<MusicLyricAnimation>("legacy");
+  const [musicHookFormat, setMusicHookFormat] = useState<MusicHookTextFormat>("plain");
   const [musicTopText, setMusicTopText] = useState("");
   const [musicTrackFile, setMusicTrackFile] = useState<File | null>(null);
   const musicTrackInput = useRef<HTMLInputElement>(null);
@@ -167,7 +171,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
           // Eligible: always send the explicit choice so an untick is respected.
           ...(metadataDisabledReason === null ? { youtubeMetadata: youtubeMetadataActive } : {}),
           subscribeAnimation, libraryFolderId: libraryFolderId || undefined, libraryOverlaysEnabled: libraryOverlaysEnabled && libraryOverlaysSupported,
-          ...(sourceProfile === "music" ? { musicPresentation: { version: 1 as const, subtitleTheme: musicTheme }, musicTopText: musicHookTextEnabled ? musicTopText : "" } : {}),
+          ...(sourceProfile === "music" ? { musicPresentation: { version: 1 as const, subtitleTheme: musicTheme, ...(musicLyricAnimation !== "legacy" ? { lyricAnimation: musicLyricAnimation } : {}), ...(musicHookTextEnabled && musicHookFormat !== "plain" ? { hookTextFormat: musicHookFormat } : {}) }, musicTopText: musicHookTextEnabled ? musicTopText : "", musicLyricsLanguage: musicLyricsLanguage || undefined } : {}),
           ...(sourceProfile === "music" ? { musicTrackFile: musicTrackFile || undefined, musicTrackUrl: musicTrackUrl.trim() || undefined, musicTrackSpeed: Number(musicTrackSpeed), musicAudioMode, ...(musicAudioMode === "mix_original" ? { musicSongGain: musicSongVolume / 100 } : {}) } : {}),
         });
       if (libraryFolderId) localStorage.setItem(RECENT_FOLDER_KEY, libraryFolderId);
@@ -272,6 +276,15 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
 
           <>
             {sourceProfile === "music" && <FieldGroup title="Lyrics presentation" hint={MUSIC_PROFILE_NOTE}>
+              <Field label="Lyrics language" hint="For quiet vocals or a long instrumental intro, choose the song’s language to improve recognition.">
+                <select aria-label="Lyrics language" value={musicLyricsLanguage} onChange={(event) => setMusicLyricsLanguage(event.target.value)}>
+                  <option value="">Detect automatically</option>
+                  <option value="en">English</option><option value="es">Spanish</option><option value="fr">French</option>
+                  <option value="de">German</option><option value="it">Italian</option><option value="pt">Portuguese</option>
+                  <option value="ar">Arabic</option><option value="zh">Chinese</option><option value="hi">Hindi</option>
+                  <option value="ja">Japanese</option><option value="ko">Korean</option><option value="ru">Russian</option>
+                </select>
+              </Field>
               <div role="group" aria-label="Lyrics subtitle theme">
               <p className="music-theme-group-label">Current styles</p>
               <div className="music-theme-options">
@@ -285,7 +298,14 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
                 <button type="button" aria-label="Reference yellow sans" aria-pressed={musicTheme === "reference_yellow_sans"} className={musicTheme === "reference_yellow_sans" ? "active" : ""} onClick={() => setMusicTheme("reference_yellow_sans")}><span className="theme-reference-yellow-sans">do you think<br />that i’ve forgotten<br />about</span><strong>Reference yellow sans</strong><small>Pale yellow · spaced</small></button>
                 <button type="button" aria-label="Reference white serif" aria-pressed={musicTheme === "reference_white_serif"} className={musicTheme === "reference_white_serif" ? "active" : ""} onClick={() => setMusicTheme("reference_white_serif")}><span className="theme-reference-white-serif">do you think<br />that i’ve forgotten<br />about</span><strong>Reference white serif</strong><small>White · editorial</small></button>
               </div>
+              <p className="music-theme-group-label">Typography styles</p>
+              <div className="music-theme-options">
+                <button type="button" aria-label="Condensed black" aria-pressed={musicTheme === "condensed_black"} className={musicTheme === "condensed_black" ? "active" : ""} onClick={() => setMusicTheme("condensed_black")}><span className="theme-condensed-black">do you think<br />that i’ve forgotten<br />about</span><strong>Condensed black</strong><small>Narrow · light halo</small></button>
+                <button type="button" aria-label="Condensed white" aria-pressed={musicTheme === "condensed_white"} className={musicTheme === "condensed_white" ? "active" : ""} onClick={() => setMusicTheme("condensed_white")}><span className="theme-condensed-white">do you think<br />that i’ve forgotten<br />about</span><strong>Condensed white</strong><small>Narrow · for dark footage</small></button>
+                <button type="button" aria-label="Handwritten stack" aria-pressed={musicTheme === "handwritten_stack"} className={musicTheme === "handwritten_stack" ? "active" : ""} onClick={() => setMusicTheme("handwritten_stack")}><span className="theme-handwritten-stack">do you<br />think that<br />i’ve</span><strong>Handwritten stack</strong><small>White · vertical stack</small></button>
               </div>
+              </div>
+              <MusicLyricAnimationPicker value={musicLyricAnimation} theme={musicTheme} onChange={setMusicLyricAnimation} />
             </FieldGroup>}
             <FieldGroup title="Format">
               <div className="segmented mode-tabs format-tabs" aria-label="Content format">
@@ -352,6 +372,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
           {sourceProfile === "speech" && <label className="subtitle-toggle"><input type="checkbox" checked={fastMode ? false : burnSubtitles} disabled={fastMode} onChange={(event) => setBurnSubtitles(event.target.checked)} /> <span><strong>Burn in subtitles</strong><small>{fastMode ? "Fast mode skips transcription and captions. Choose Auto or Smart to enable them." : "Uses local word timing. Fast mode skips captions."}</small></span></label>}
           <label className="subtitle-toggle"><input type="checkbox" aria-label="Hook text" checked={hookTextEnabled} disabled={!hookTextEligible} onChange={(event) => sourceProfile === "music" ? setMusicHookTextChoice(event.target.checked) : setHookTextChoice(event.target.checked)} /> <span><strong>Hook text</strong><small>{hookTextDisabledReason ?? (sourceProfile === "music" ? "Off by default. Tick to enter optional text shown in the upper black area of each clip (up to 100 characters)." : "Off by default. Tick to enter your own hook or leave blank to generate one from the transcript.")}</small></span></label>
           {musicHookTextEnabled && <Field label="Top text" hint="Optional · displayed in the upper black area. Up to 100 characters."><input aria-label="Top text" value={musicTopText} maxLength={100} onChange={(event) => setMusicTopText(event.target.value)} placeholder="Leave blank to omit" /></Field>}
+          {musicHookTextEnabled && <MusicHookFormatPicker value={musicHookFormat} onChange={setMusicHookFormat} />}
           {speechHookTextEnabled && <Field label="Hook text to display" hint="Up to 150 characters. Your text will be shown on each clip."><textarea aria-label="Hook text to display" rows={2} maxLength={150} value={manualHookText} onChange={(event) => setManualHookText(event.target.value)} placeholder="Leave blank to generate a hook from the transcript" /></Field>}
           <label className="subtitle-toggle"><input type="checkbox" aria-label="Write SEO titles with AI (YouTube metadata)" data-testid="youtube-metadata-toggle" checked={youtubeMetadataActive} disabled={metadataDisabledReason !== null} onChange={(event) => setYoutubeMetadataChoice(event.target.checked)} /> <span><strong>Generate YouTube metadata</strong><small>{metadataDisabledReason ?? (processingMode === "fast" ? "Fast mode has no transcript. Choose Auto or Smart." : executionPolicy === "engine_only" ? "Uses transcript-based local descriptions and deterministic titles." : `${youtubeMetadataDefault ? "On by default (Settings › Auto-write SEO titles)" : "Off by default"}. Uses ${selectedProfile?.youtubeMetadataModelId || "the configured Settings model"} when available, with local fallback. Editable and separate from burned-in text.`)}</small></span></label>
 

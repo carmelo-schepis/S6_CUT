@@ -35,6 +35,16 @@ from .security import confined, redact, safe_archive_title, safe_filename
 from .selection import Candidate, _score, _timed_words, candidate_quality, clip_from_candidate, select_candidates, select_music_candidates
 
 logger = logging.getLogger(__name__)
+_MUSIC_TRANSCRIPTION_CONTEXT_SECONDS = 30.0
+
+
+def _music_transcription_duration(video_duration: float, has_selected_track: bool, maximum_duration: float) -> float:
+    """Return the recognition timeline, with bounded song context beyond video."""
+    video_duration = max(0.0, float(video_duration))
+    maximum_duration = max(video_duration, float(maximum_duration))
+    if not has_selected_track:
+        return video_duration
+    return min(video_duration + _MUSIC_TRANSCRIPTION_CONTEXT_SECONDS, maximum_duration)
 
 
 def _probe_detail(metadata: dict[str, Any]) -> str:
@@ -452,7 +462,7 @@ def _subscribe_render_kwargs(render, config: dict[str, Any] | None) -> dict[str,
     return {}
 
 
-def _music_render_kwargs(render, theme: str, top_text: str | None, treatment: str | None) -> dict[str, Any]:
+def _music_render_kwargs(render, theme: str, top_text: str | None, treatment: str | None, lyric_animation: str | None = None, hook_text_format: str | None = None) -> dict[str, Any]:
     try:
         parameters = inspect.signature(render).parameters.values()
     except (TypeError, ValueError):
@@ -460,6 +470,12 @@ def _music_render_kwargs(render, theme: str, top_text: str | None, treatment: st
     accepts_any = any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters)
     accepted = {parameter.name for parameter in parameters}
     values = {"music_theme": theme, "music_top_text": top_text, "music_treatment": treatment}
+    # Additive options are sent only when they differ from the legacy/plain
+    # defaults, so older render adapters and recorded call shapes are unchanged.
+    if lyric_animation and lyric_animation != "legacy":
+        values["music_lyric_animation"] = lyric_animation
+    if hook_text_format and hook_text_format != "plain":
+        values["music_hook_text_format"] = hook_text_format
     return values if accepts_any else {name: value for name, value in values.items() if name in accepted}
 
 
@@ -1542,6 +1558,8 @@ class JobManager:
                 music_presentation.get("subtitle_theme", "clean") if isinstance(music_presentation, dict) else "clean",
                 clip.music_top_text or private.get("music_top_text"),
                 clip.music_treatment or (music_treatments.get(clip.id) if isinstance(music_treatments, dict) else None),
+                music_presentation.get("lyric_animation") if isinstance(music_presentation, dict) else None,
+                music_presentation.get("hook_text_format") if isinstance(music_presentation, dict) else None,
             ) if job.source_profile == "music" else {}
             rerender_kwargs = {
                 "start": clip.start, "end": clip.end, "aspect": private["aspect_ratio"], "settings": self.settings,
@@ -1612,15 +1630,20 @@ class JobManager:
         model_label = "Preparing transcription model" if cached else "Downloading transcription model"
         self.start_step(job, "transcribe", detail=model_label, label=model_label, progress=16, private=private)
         started = time.monotonic()
+        last_persist = started
         job.transcription_started_at = now_iso()
         job.transcription_total_seconds = duration
         job.transcription_activity = model_label
         self._save(job, private)
 
         def heartbeat() -> None:
+            nonlocal last_persist
+            now = time.monotonic()
             job.last_heartbeat_at = now_iso()
-            job.transcription_elapsed_seconds = time.monotonic() - started
-            self._save(job, private)
+            job.transcription_elapsed_seconds = now - started
+            if now - last_persist >= 1.0:
+                self._save(job, private)
+                last_persist = now
 
         callback = self._transcription_progress(job, private, duration)
         transcription_label = "Transcribing music without speech VAD" if profile == "music" else "Transcribing audio"
@@ -2247,21 +2270,33 @@ class JobManager:
             if warning not in job.warnings:
                 job.warnings.append(warning)
         source_duration = float(metadata["duration"])
+        # Keep the selected source separate from the render-ready copy. Music
+        # ASR can now cache/check the original identity before doing any audio
+        # conversion, and produce decoder PCM without an intermediate MP3.
+        music_track_source = music_track
         transcript_source = source
-        transcript_duration = float(metadata["duration"])
-        if music_track is not None:
-            speed = float(private.get("music_track_speed", 1.0))
-            transcript_source = _media_fn("prepare_music_track")(
-                music_track, self.settings.data_path / "jobs" / job.id / "transcription" / f"music-{speed:.2f}.mp3", speed, self.settings,
-                duration=source_duration, cancellation_callback=lambda: not self._cooperate(job),
+        # A selected song often continues past the visual source boundary. Keep
+        # bounded real audio after that boundary so Whisper can finish its last
+        # phrase; clip selection/rendering remain limited to the video duration.
+        transcript_duration = (
+            _music_transcription_duration(
+                source_duration,
+                music_track_source is not None,
+                self.settings.max_long_source_seconds,
             )
-            music_track = transcript_source
-            transcript_duration = float(_media_fn("probe_audio")(transcript_source, self.settings)["duration"])
-        planning_duration = min(source_duration, transcript_duration) if profile == "music" else source_duration
+            if profile == "music" else source_duration
+        )
+        music_context_seconds = max(0.0, transcript_duration - source_duration)
+        speed = float(private.get("music_track_speed", 1.0)) if music_track_source is not None else 1.0
+        planning_duration = source_duration
         target = self._resolve_batch_target(job, private, planning_duration)
-        source_hash = sha256_file(transcript_source) if music_track is not None else str(private.get("source_hash") or sha256_file(source))
-        if music_track is None:
-            private["source_hash"] = source_hash
+        if music_track_source is not None:
+            source_hash = _media_fn("music_transcription_source_hash")(
+                sha256_file(music_track_source), speed, transcript_duration,
+            )
+        else:
+            source_hash = str(private.get("source_hash") or sha256_file(source))
+        private["source_hash"] = source_hash
         language = private.get("transcription_language")
         beam = self.settings.music_whisper_beam_size if profile == "music" else self.settings.whisper_beam_size
         cache_key = transcription_cache_key(
@@ -2289,20 +2324,45 @@ class JobManager:
                 job.warnings.append("Reused a validated local transcript cache entry.")
             else:
                 self.start_step(job, "audio", detail="Extracting 16 kHz mono audio", label="Preparing audio for transcription", progress=12, private=private)
-                audio = media_module.extract_audio_16k(
-                    transcript_source, self.settings,
-                    output=self.settings.data_path / "jobs" / job.id / "transcription" / "audio-16k.wav",
-                    **({"cancellation_callback": lambda: not self._cooperate(job)} if music_track is not None else {}),
-                )
+                audio_path = self.settings.data_path / "jobs" / job.id / "transcription" / "audio-16k.wav"
+                if music_track_source is not None:
+                    audio = _media_fn("extract_music_audio_16k")(
+                        music_track_source, self.settings, output=audio_path, speed=speed,
+                        duration=transcript_duration,
+                        cancellation_callback=lambda: not self._cooperate(job),
+                    )
+                else:
+                    audio = media_module.extract_audio_16k(
+                        transcript_source, self.settings, output=audio_path,
+                    )
                 self.complete_step(job, "audio", detail="16 kHz mono audio prepared", private=private)
                 transcript = self._transcribe_with_stages(job, audio, transcript_duration, private)
+                if profile == "music" and isinstance(transcript, dict):
+                    diagnostics = transcript.setdefault("diagnostics", {})
+                    if isinstance(diagnostics, dict):
+                        diagnostics["source_duration_seconds"] = round(source_duration, 3)
+                        diagnostics["context_after_source_seconds"] = round(music_context_seconds, 3)
                 self.db.cache_put(cache_key, now_iso(), transcript)
             private["transcript"] = transcript
             private["transcript_cache_key"] = cache_key
             self._save(job, private)
             self.complete_step(job, "transcribe", detail=self._transcript_detail(transcript, source_duration=source_duration, music=profile == "music"), private=private)
         words = transcript["words"]
+        boundary_truncated_words: list[dict[str, Any]] = []
         if profile == "music":
+            boundary_truncated_words = [
+                word for word in words
+                if float(word.get("start", 0)) < planning_duration < float(word.get("end", 0))
+            ]
+            diagnostics = transcript.get("diagnostics") if isinstance(transcript.get("diagnostics"), dict) else {}
+            invalid_count = int(diagnostics.get("invalid_timing_count") or 0)
+            if invalid_count:
+                warning = (
+                    f"Music transcription returned {invalid_count} word(s) with invalid timing; "
+                    "they were kept in the transcript diagnostics and excluded from clip boundaries."
+                )
+                if warning not in job.warnings:
+                    job.warnings.append(warning)
             words = [
                 {**word, "end": min(float(word["end"]), planning_duration)}
                 for word in words
@@ -2413,6 +2473,13 @@ class JobManager:
                     )
                 previous_end = end
         self._snapshot_video_overlays(job, private, words)
+        if music_track_source is not None:
+            music_track = _media_fn("prepare_music_track")(
+                music_track_source,
+                self.settings.data_path / "jobs" / job.id / "transcription" / f"music-{speed:.2f}.mp3",
+                speed, self.settings, duration=source_duration,
+                cancellation_callback=lambda: not self._cooperate(job),
+            )
         output_dir = self.settings.data_path / "jobs" / job.id / "clips"
         output_dir.mkdir(parents=True, exist_ok=True)
         for position, clip in enumerate(job.clips, 1):
@@ -2438,7 +2505,26 @@ class JobManager:
             # when this job is a source-only regeneration or a retry.
             clip_words = _render_words_for_clip(private, clip, words)
             if profile == "music":
+                clipped_final_word = any(
+                    clip.start <= float(word.get("start", 0)) < clip.end
+                    and float(word.get("end", 0)) > planning_duration
+                    for word in boundary_truncated_words
+                )
+                if clipped_final_word:
+                    warning = "A lyric word continues beyond the source video and may be cut off in this clip."
+                    clip.caption_qa_warnings = list(dict.fromkeys([*clip.caption_qa_warnings, warning]))
+                    clip.review_required = True
+                    clip.review_reason = clip.review_reason or "The final lyric may be truncated by the source video boundary."
                 clip.caption_cues = [CaptionCue.model_validate(cue) for cue in media_module.music_caption_cues(clip_words, clip.start, clip.end)]
+                if clip.caption_revision == 0:
+                    uncertain = sum(
+                        cue.confidence is None or cue.confidence < 0.35
+                        for cue in clip.caption_cues
+                    )
+                    if uncertain:
+                        warning = f"{uncertain} lyric word(s) have low ASR confidence; check them against the audio."
+                        clip.caption_qa_warnings = list(dict.fromkeys([*clip.caption_qa_warnings, warning]))
+                        clip.review_required = True
             overlays, provenance = self._video_overlay_for_clip(job, clip, private)
             # Provenance describes media actually composited into this source
             # clip. Remove legacy/generated-card records and replace any prior
@@ -2471,6 +2557,8 @@ class JobManager:
                         render_clip,
                         (private.get("music_presentation") or {}).get("subtitle_theme", "clean"),
                         clip.music_top_text, clip.music_treatment,
+                        (private.get("music_presentation") or {}).get("lyric_animation"),
+                        (private.get("music_presentation") or {}).get("hook_text_format"),
                     ) if profile == "music" else {}),
                     **({"music_track": music_track, "music_track_speed": 1.0} if music_track else {}),
                     **({"music_audio_mode": job.music_audio_mode, "music_song_gain": job.music_song_gain, "music_original_audio_gain": job.music_original_audio_gain} if job.source_profile == "music" else {}),
@@ -3051,6 +3139,15 @@ class JobManager:
                 "provenance": [record.model_dump(mode="json") for record in clip.provenance],
                 "music_track": clip.music_track.model_dump(mode="json") if clip.music_track else None,
                 "music_audio": {"mode": clip.music_audio_mode.value, "song_gain": clip.music_song_gain, "original_audio_gain": clip.music_original_audio_gain},
+                # Additive, Music jobs only: resolved choices (omitted options mean Original / Plain).
+                **({
+                    "music_presentation": {
+                        "subtitle_theme": job.music_presentation.subtitle_theme if job.music_presentation else "clean",
+                        "lyric_animation": (job.music_presentation.lyric_animation if job.music_presentation else None) or "legacy",
+                        "hook_text_format": (job.music_presentation.hook_text_format if job.music_presentation else None) or "plain",
+                    },
+                    "music_top_text": clip.music_top_text or job.music_top_text,
+                } if job.source_profile == "music" else {}),
             })
             if clip.creator_credit or clip.provenance:
                 credits.append({

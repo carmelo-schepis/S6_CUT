@@ -464,6 +464,12 @@ def test_music_smart_path_repeats_shortfall_windows_deterministically(
     monkeypatch.setattr(media_module, "prepare_music_track", lambda source, _target, speed, _settings, **kwargs: (extracted_from.append(source), prepared_song)[1])
     monkeypatch.setattr(media_module, "probe_audio", lambda *_args, **_kwargs: {"duration": 256.9, "audio_codec": "mp3"})
     monkeypatch.setattr(media_module, "extract_audio_16k", lambda source, _settings, **_kwargs: (extracted_from.append(source), tmp_path / "song-audio.wav")[1])
+    asr_audio_calls: list[dict[str, Any]] = []
+    def extract_music_audio(source, _settings, **kwargs):
+        asr_audio_calls.append(kwargs)
+        extracted_from.append(source)
+        return tmp_path / "song-audio.wav"
+    monkeypatch.setattr(media_module, "extract_music_audio_16k", extract_music_audio)
     monkeypatch.setattr(media_module, "is_whisper_model_cached", lambda *_args, **_kwargs: True)
     monkeypatch.setattr("engine.jobs.render_clip", _fake_render_clip)
     source = tmp_path / "music-source.mp4"
@@ -499,9 +505,10 @@ def test_music_smart_path_repeats_shortfall_windows_deterministically(
     saved = test_db.get_job_private("music-checkpoint")
     assert result.state == "complete"
     assert calls and calls[0]["profile"] == "music"
-    assert saved["transcript_cache_key"].startswith("transcript:v3:")
+    assert saved["transcript_cache_key"].startswith("transcript:v4:")
     assert saved["transcript"]["words"][0]["text"] == "Lyric0_0"
-    assert extracted_from == [tmp_path / "selected-song.mp3", prepared_song]
+    assert extracted_from == [tmp_path / "selected-song.mp3", tmp_path / "selected-song.mp3"]
+    assert asr_audio_calls[0]["duration"] == 286.9
     assert len(result.clips) == expected_count
     assert [clip.index for clip in result.clips] == list(range(1, expected_count + 1))
     assert len({clip.id for clip in result.clips}) == expected_count
@@ -530,7 +537,6 @@ def test_music_smart_path_repeats_shortfall_windows_deterministically(
             output_names = [output["filename"] for output in manifest["outputs"]]
             assert len(output_names) == expected_count
             assert len(set(output_names)) == expected_count
-        # A recovered checkpoint must reuse the persisted clip plan and warning.
         clip_ids = [clip.id for clip in result.clips]
         result.state = "recovered"
         result.steps = [step.model_copy(update={"status": "pending", "completed_at": None}) if step.id == "ready" else step for step in result.steps]

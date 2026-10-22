@@ -21,12 +21,19 @@ def _child(
     events: Any,
     profile: str = "speech",
     language: str | None = None,
+    beam_size: int | None = None,
+    condition_on_previous_text: bool | None = None,
 ) -> None:
     try:
         events.put({"type": "started", "run_id": run_id})
         def progress(fraction: float, detail: str = "") -> None:
             events.put({"type": "progress", "run_id": run_id, "fraction": fraction, "detail": detail})
-        result = media.transcribe(Path(path), settings, progress_callback=progress, cancellation_callback=lambda: False, word_timestamps=True, profile=profile, language=language)
+        result = media.transcribe(
+            Path(path), settings, progress_callback=progress,
+            cancellation_callback=lambda: False, word_timestamps=True,
+            profile=profile, language=language, beam_size=beam_size,
+            condition_on_previous_text=condition_on_previous_text,
+        )
         events.put({"type": "completed", "run_id": run_id, "result": result})
     except BaseException as exc:
         events.put({"type": "failed", "run_id": run_id, "error": str(exc)[:500]})
@@ -55,7 +62,21 @@ def startup_budget_seconds(settings: Settings, source_seconds: float | None) -> 
     return max(float(settings.transcription_stall_seconds), source_seconds * 0.25 + 60.0)
 
 
-def supervise(path: Path, settings: Settings, *, progress: Callable[[float, str], None] | None = None, cancelled: Callable[[], bool] | None = None, heartbeat: Callable[[], None] | None = None, meaningful: Callable[[float], None] | None = None, worker: Callable[..., None] = _child, source_seconds: float | None = None, profile: str = "speech", language: str | None = None) -> dict[str, Any]:
+def supervise(
+    path: Path,
+    settings: Settings,
+    *,
+    progress: Callable[[float, str], None] | None = None,
+    cancelled: Callable[[], bool] | None = None,
+    heartbeat: Callable[[], None] | None = None,
+    meaningful: Callable[[float], None] | None = None,
+    worker: Callable[..., None] = _child,
+    source_seconds: float | None = None,
+    profile: str = "speech",
+    language: str | None = None,
+    beam_size: int | None = None,
+    condition_on_previous_text: bool | None = None,
+) -> dict[str, Any]:
     run_id = uuid.uuid4().hex
     # Jobs run on background threads. Forking the multithreaded Uvicorn process
     # can inherit a locked OpenMP/BLAS runtime and leave Faster-Whisper consuming
@@ -67,21 +88,22 @@ def supervise(path: Path, settings: Settings, *, progress: Callable[[float, str]
     base_args = (run_id, str(path), settings, events)
     worker_args = base_args
     worker_kwargs: dict[str, Any] = {}
-    try:
-        signature = inspect.signature(worker)
+    if worker is _child:
+        worker_args += (profile, language, beam_size, condition_on_previous_text)
+    else:
         try:
-            signature.bind(*base_args, profile, language)
-        except TypeError:
-            signature.bind(*base_args, profile=profile, language=language)
-            worker_kwargs = {"profile": profile, "language": language}
-        else:
-            worker_args += (profile, language)
-    except (TypeError, ValueError):
-        # Preserve compatibility with injected four-argument adapters whose
-        # callable signature cannot be inspected. The production _child has a
-        # stable signature and therefore takes the profile above.
-        if worker is _child:
-            worker_args += (profile, language)
+            signature = inspect.signature(worker)
+            try:
+                signature.bind(*base_args, profile, language)
+            except TypeError:
+                signature.bind(*base_args, profile=profile, language=language)
+                worker_kwargs = {"profile": profile, "language": language}
+            else:
+                worker_args += (profile, language)
+        except (TypeError, ValueError):
+            # Preserve compatibility with injected adapters whose signatures
+            # cannot be inspected. Production uses the stable _child signature.
+            pass
     process = context.Process(target=worker, args=worker_args, kwargs=worker_kwargs, name=f"s6-transcription-{run_id[:8]}")
     process.start()
     started = time.monotonic()

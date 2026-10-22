@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer, model_validator
 
 
 def now_iso() -> str:
@@ -96,9 +96,29 @@ class CaptionCue(ApiModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+MusicSubtitleTheme = Literal[
+    "clean", "warm", "serif", "reference_white_sans", "reference_yellow_sans", "reference_white_serif",
+    "condensed_black", "condensed_white", "handwritten_stack",
+]
+MusicLyricAnimation = Literal["legacy", "slow_fade", "line_crossfade", "word_build"]
+MusicHookTextFormat = Literal["plain", "white_banner"]
+
+
 class MusicPresentationConfig(ApiModel):
     version: Literal[1] = 1
-    subtitle_theme: Literal["clean", "warm", "serif", "reference_white_sans", "reference_yellow_sans", "reference_white_serif"] = "clean"
+    subtitle_theme: MusicSubtitleTheme = "clean"
+    # Additive options: omitted means "not chosen" and resolves to the legacy
+    # lyric renderer / plain hook at the rendering boundary.
+    lyric_animation: MusicLyricAnimation | None = None
+    hook_text_format: MusicHookTextFormat | None = None
+
+    @model_serializer(mode="wrap")
+    def _omit_unset_additive_options(self, handler):
+        data = handler(self)
+        for name in ("lyric_animation", "lyricAnimation", "hook_text_format", "hookTextFormat"):
+            if data.get(name, False) is None:
+                del data[name]
+        return data
 
 
 class YouTubeMetadataUpdate(ApiModel):
@@ -354,6 +374,8 @@ class Project(ApiModel):
 class Health(ApiModel):
     status: Literal["ready", "degraded", "starting"]
     version: str
+    build_revision: str = "unknown"
+    music_transcription_profile: str = "unknown"
     database: bool
     ffmpeg: bool
     ffprobe: bool

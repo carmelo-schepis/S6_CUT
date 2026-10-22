@@ -27,6 +27,24 @@ const chooseFile = () => fireEvent.change(screen.getByLabelText("Choose video fi
 beforeEach(() => { vi.mocked(createClipJob).mockReset(); });
 
 describe("Music presentation creation controls", () => {
+  it("offers automatic lyrics language and sends an explicit English choice only in Music", async () => {
+    vi.mocked(createClipJob).mockResolvedValue({ project, job: undefined as never });
+    render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    expect(screen.queryByRole("combobox", { name: "Lyrics language" })).not.toBeInTheDocument();
+    fireEvent.click(mode("Music"));
+    const language = screen.getByRole("combobox", { name: "Lyrics language" });
+    expect(language).toHaveValue("");
+    fireEvent.change(language, { target: { value: "en" } });
+    chooseFile();
+    fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
+    await waitFor(() => expect(createClipJob).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(createClipJob).mock.calls[0][0]).toMatchObject({ sourceProfile: "music", musicLyricsLanguage: "en" });
+    fireEvent.click(mode("Clip"));
+    fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
+    await waitFor(() => expect(createClipJob).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(createClipJob).mock.calls[1][0]).not.toHaveProperty("musicLyricsLanguage");
+  });
+
   it("keeps Clip as the initial mode and promotes Music", () => {
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
     expect(mode("Clip")).toHaveAttribute("aria-pressed", "true");
@@ -65,6 +83,95 @@ describe("Music presentation creation controls", () => {
     await waitFor(() => expect(createClipJob).toHaveBeenCalled());
     const payload = vi.mocked(createClipJob).mock.calls[0][0];
     expect(payload).toMatchObject({ sourceProfile: "music", processingMode: "smart", contentFormat: "short", aspectRatio: "9:16", musicTopText: topText, musicPresentation: { version: 1, subtitleTheme: "warm" } });
+  });
+
+  it("offers the typography themes, an independent lyric animation selector and a still preview under reduced motion", async () => {
+    const matchMedia = window.matchMedia;
+    window.matchMedia = ((query: string) => ({ matches: query.includes("reduce"), media: query, addEventListener: vi.fn(), removeEventListener: vi.fn() })) as unknown as typeof window.matchMedia;
+    try {
+      vi.mocked(createClipJob).mockResolvedValue({ project: { ...project, sourceProfile: "music" }, job: undefined as never });
+      render(<ProjectsView health={health} onCreated={vi.fn()} />);
+      fireEvent.click(mode("Music"));
+      const themeGroup = within(screen.getByRole("group", { name: "Lyrics subtitle theme" }));
+      for (const label of ["Condensed black", "Condensed white", "Handwritten stack"]) expect(themeGroup.getByRole("button", { name: new RegExp(`^${label}$`) })).toBeVisible();
+      const animations = within(screen.getByRole("group", { name: "Lyric animation" }));
+      expect(animations.getAllByRole("button").map((button) => button.getAttribute("aria-label"))).toEqual(["Original", "Slow fade", "Line crossfade", "Word build"]);
+      expect(animations.getByRole("button", { name: "Original" })).toHaveAttribute("aria-pressed", "true");
+      // Reduced motion: the sample starts still and only animates after an explicit Play.
+      const preview = document.querySelector(".lyric-preview")!;
+      expect(preview).toHaveAttribute("data-state", "still");
+      fireEvent.click(animations.getByRole("button", { name: "Word build" }));
+      expect(animations.getByRole("button", { name: "Word build" })).toHaveAttribute("aria-pressed", "true");
+      expect(animations.getByRole("button", { name: "Original" })).toHaveAttribute("aria-pressed", "false");
+      expect(document.querySelector(".lyric-preview")).toHaveAttribute("data-animation", "word_build");
+      expect(document.querySelector(".lyric-preview")).toHaveAttribute("data-state", "still");
+      fireEvent.click(screen.getByRole("button", { name: "Play preview" }));
+      expect(document.querySelector(".lyric-preview")).toHaveAttribute("data-state", "playing");
+      // Theme and animation are independent: choosing a theme keeps the animation.
+      fireEvent.click(themeGroup.getByRole("button", { name: /^Handwritten stack$/ }));
+      expect(animations.getByRole("button", { name: "Word build" })).toHaveAttribute("aria-pressed", "true");
+      chooseFile();
+      fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
+      await waitFor(() => expect(createClipJob).toHaveBeenCalledTimes(1));
+      expect(vi.mocked(createClipJob).mock.calls[0][0].musicPresentation).toEqual({ version: 1, subtitleTheme: "handwritten_stack", lyricAnimation: "word_build" });
+    } finally {
+      window.matchMedia = matchMedia;
+    }
+  });
+
+  it("autoplays the sample when motion is allowed and replays on request", () => {
+    render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    fireEvent.click(mode("Music"));
+    expect(document.querySelector(".lyric-preview")).toHaveAttribute("data-state", "playing");
+    fireEvent.click(within(screen.getByRole("group", { name: "Lyric animation" })).getByRole("button", { name: "Slow fade" }));
+    expect(screen.getByRole("button", { name: "Replay preview" })).toBeVisible();
+    expect(screen.getByRole("img", { name: /Slow fade lyric animation/ })).toBeVisible();
+  });
+
+  it("offers a hook text format only inside the checked Hook text section and keeps plain as the default", async () => {
+    vi.mocked(createClipJob).mockResolvedValue({ project: { ...project, sourceProfile: "music" }, job: undefined as never });
+    render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    fireEvent.click(mode("Music"));
+    expect(screen.getByRole("checkbox", { name: "Hook text" })).not.toBeChecked();
+    expect(screen.queryByRole("group", { name: "Hook text format" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Hook text" }));
+    const format = within(screen.getByRole("group", { name: "Hook text format" }));
+    expect(format.getByRole("button", { name: "Plain" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("img", { name: /plain hook text/i })).toBeVisible();
+    fireEvent.change(screen.getByRole("textbox", { name: "Top text" }), { target: { value: "Exact hook" } });
+    chooseFile();
+    fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
+    await waitFor(() => expect(createClipJob).toHaveBeenCalledTimes(1));
+    // Plain/Original defaults are omitted, so the config keeps its historical shape.
+    expect(vi.mocked(createClipJob).mock.calls[0][0].musicPresentation).toEqual({ version: 1, subtitleTheme: "clean" });
+    fireEvent.click(format.getByRole("button", { name: "White banner" }));
+    expect(format.getByRole("button", { name: "White banner" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("img", { name: /white banner above the footage/i })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
+    await waitFor(() => expect(createClipJob).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(createClipJob).mock.calls[1][0]).toMatchObject({ musicTopText: "Exact hook", musicPresentation: { version: 1, subtitleTheme: "clean", hookTextFormat: "white_banner" } });
+  });
+
+  it("does not send the banner format when Hook text is unchecked and never leaks Music options into Clip submissions", async () => {
+    vi.mocked(createClipJob).mockResolvedValue({ project, job: undefined as never });
+    render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    fireEvent.click(mode("Music"));
+    fireEvent.click(within(screen.getByRole("group", { name: "Lyric animation" })).getByRole("button", { name: "Line crossfade" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Hook text" }));
+    fireEvent.click(within(screen.getByRole("group", { name: "Hook text format" })).getByRole("button", { name: "White banner" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Hook text" }));
+    chooseFile();
+    fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
+    await waitFor(() => expect(createClipJob).toHaveBeenCalledTimes(1));
+    const music = vi.mocked(createClipJob).mock.calls[0][0];
+    expect(music.musicPresentation).toEqual({ version: 1, subtitleTheme: "clean", lyricAnimation: "line_crossfade" });
+    expect(music.musicTopText).toBe("");
+    fireEvent.click(mode("Clip"));
+    fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
+    await waitFor(() => expect(createClipJob).toHaveBeenCalledTimes(2));
+    const clip = vi.mocked(createClipJob).mock.calls[1][0];
+    for (const field of ["musicPresentation", "musicTopText", "musicAudioMode"]) expect(clip).not.toHaveProperty(field);
+    expect(JSON.stringify(clip)).not.toMatch(/lyricAnimation|hookTextFormat|white_banner|line_crossfade/);
   });
 
   it("offers audio combination only after a song is selected and submits the choice", async () => {
