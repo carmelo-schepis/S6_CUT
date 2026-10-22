@@ -22,12 +22,14 @@ from .config import Settings
 from .emoji_assets import find_emoji_sequences, resolve_emoji
 from .hook_text import remove_hook_em_dashes
 from .recipes import CAPTION_REFERENCE_SHORT_EDGE, LookTreatment, caption_preset, known_styles, recipe_for
+from . import music_typography
 from .subscribe_animation import (
     ANIMATION_ASSET,
     ANIMATION_BUTTON_WIDTH,
     ANIMATION_CANVAS_HEIGHT,
     ANIMATION_CANVAS_WIDTH,
     ANIMATION_DURATION_SECONDS,
+    ANIMATION_VISIBLE_BOTTOM,
     schedule_subscribe_animation,
 )
 from .security import redact, validate_youtube_url
@@ -973,6 +975,17 @@ def resolve_font_face(fontname: str, style: str) -> str:
         return ""
 
 
+# Exact (family, requested style, expected resolved style) for every face a Music
+# theme or hook banner names. Roboto Condensed deliberately expects Light: a
+# nominal-400 request resolves to the sole installed face, so adding a Regular
+# under that family would silently change every existing reference render.
+MUSIC_EXACT_FACES = (
+    ("Barlow", "Regular", "Regular"), ("Barlow", "Bold", "Bold"), ("Lora", "Regular", "Regular"),
+    ("Roboto Condensed", "Regular", "Light"), ("Bodoni Moda", "Regular", "Regular"),
+    ("Oswald", "Regular", "Regular"), ("Gaegu", "Bold", "Bold"),
+)
+
+
 def caption_font_mismatches() -> dict[str, str]:
     """Caption families fontconfig cannot satisfy, as requested -> resolved.
 
@@ -993,6 +1006,13 @@ def caption_font_mismatches() -> dict[str, str]:
     resolved_style = face_parts[1].split(",", 1)[0].strip().casefold() if len(face_parts) == 2 else ""
     if "montserrat extrabold" not in family_parts or resolved_style != "extrabold italic":
         mismatches["Montserrat ExtraBold Italic"] = exact_face or "(fontconfig unavailable)"
+    for family, requested_style, expected_style in MUSIC_EXACT_FACES:
+        exact_face = resolve_font_face(family, requested_style)
+        face_parts = exact_face.split("|", 1)
+        family_parts = {part.strip().casefold() for part in face_parts[0].split(",")} if face_parts else set()
+        resolved_style = face_parts[1].split(",", 1)[0].strip().casefold() if len(face_parts) == 2 else ""
+        if family.casefold() not in family_parts or resolved_style != expected_style.casefold():
+            mismatches[f"{family} {expected_style}"] = exact_face or "(fontconfig unavailable)"
     return mismatches
 
 
@@ -1364,6 +1384,132 @@ def _reference_music_events(group: list[dict[str, Any]], theme: str, *, width: i
         text = position + (r"\h" * line_spacing(line, len(events))).join(timed_line)
         events.append(f"Dialogue: 10,{_ass_time(start)},{_ass_time(end)},Caption,,0,0,0,,{text}")
     return events
+
+
+MUSIC_SUBTITLE_THEMES = frozenset({
+    "clean", "warm", "serif", "reference_white_sans", "reference_yellow_sans", "reference_white_serif",
+    "condensed_black", "condensed_white", "handwritten_stack",
+})
+# New faces are separate families (Oswald, Gaegu) so no existing theme's
+# resolved font can change. Black text carries a pale halo so it stays legible
+# over dark footage; the white faces keep the dark stroke the other themes use.
+_CONDENSED_AND_HAND_PRESETS = {
+    "condensed_black": {"fontname": "Oswald", "font": 120, "primary": "&H00000000&", "outline_color": "&H88FFFFFF&", "outline": 2, "shadow": 0, "spacing": 0, "scale_x": 100},
+    "condensed_white": {"fontname": "Oswald", "font": 120, "primary": "&H00FFFFFF&", "outline_color": "&H99000000&", "outline": 2, "shadow": 0, "spacing": 0, "scale_x": 100},
+    "handwritten_stack": {"fontname": "Gaegu", "font": 104, "primary": "&H00FFFFFF&", "outline_color": "&H99000000&", "outline": 2, "shadow": 0, "spacing": 0, "scale_x": 100},
+}
+_MUSIC_THEME_FONT_FILES = {
+    "clean": "barlow/Barlow-Regular.ttf", "warm": "lora/Lora.ttf", "serif": "lora/Lora.ttf",
+    "reference_white_sans": "roboto_condensed/RobotoCondensed-Light.ttf",
+    "reference_yellow_sans": "roboto_condensed/RobotoCondensed-Light.ttf",
+    "reference_white_serif": "bodoni_moda/BodoniModa-Variable.ttf",
+    "condensed_black": "oswald/Oswald-Regular.ttf", "condensed_white": "oswald/Oswald-Regular.ttf",
+    "handwritten_stack": "gaegu/Gaegu-Bold.ttf",
+}
+_MUSIC_THEME_LAYOUTS = {
+    "clean": music_typography.Layout(max_rows=2, max_words_per_row=8, width_fraction=0.78, max_words_per_block=12),
+    "warm": music_typography.Layout(max_rows=2, max_words_per_row=8, width_fraction=0.78, max_words_per_block=12),
+    "serif": music_typography.Layout(max_rows=2, max_words_per_row=8, width_fraction=0.78, max_words_per_block=12),
+    "reference_white_sans": music_typography.Layout(max_rows=5, max_words_per_row=1, width_fraction=0.5, max_words_per_block=6, align="left"),
+    "reference_yellow_sans": music_typography.Layout(max_rows=3, max_words_per_row=3, width_fraction=0.82, max_words_per_block=7),
+    "reference_white_serif": music_typography.Layout(max_rows=3, max_words_per_row=4, width_fraction=0.82, max_words_per_block=7),
+    "condensed_black": music_typography.Layout(max_rows=3, max_words_per_row=4, width_fraction=0.78, max_words_per_block=12),
+    "condensed_white": music_typography.Layout(max_rows=3, max_words_per_row=4, width_fraction=0.78, max_words_per_block=12),
+    "handwritten_stack": music_typography.Layout(max_rows=6, max_words_per_row=2, width_fraction=0.46, max_words_per_block=8),
+}
+# Fraction of the canvas height a lyric block may occupy before it shrinks or paginates.
+_MUSIC_LYRIC_HEIGHT_FRACTION = 0.5
+
+
+def _music_text_measure(relative_font: str, preset: dict[str, Any]) -> Callable[[str, float], float]:
+    font_path = str(Path(__file__).parent / "fonts" / relative_font)
+    units_per_em, advances = _font_advance_metrics(font_path)
+    height_units = _libass_height_units(font_path)
+    scale_x = float(preset.get("scale_x", 100)) / 100
+    spacing = float(preset.get("spacing", 0))
+
+    def measure(text: str, size: float) -> float:
+        return sum(advances.get(ord(char), units_per_em * 0.55) for char in text) * size / height_units * scale_x + spacing * len(text)
+
+    return measure
+
+
+def _music_animated_events(words: list[dict[str, Any]], theme: str, preset: dict[str, Any], animation: str, *, width: int, height: int, fontsize: int, duration: float) -> list[str]:
+    """Lyric events with real opacity motion: measured stable blocks plus display envelopes.
+
+    Used only for Music with a non-legacy animation. libass multiplies ``\\fad``
+    with inline alpha transforms, so one event per block keeps every word at its
+    measured position while it fades or builds.
+    """
+    layout = _MUSIC_THEME_LAYOUTS[theme]
+    measure = _music_text_measure(_MUSIC_THEME_FONT_FILES[theme], preset)
+    blocks = music_typography.plan_blocks(
+        words, layout=layout, base_size=fontsize, line_height=1.0, canvas_width=width,
+        max_height=height * _MUSIC_LYRIC_HEIGHT_FRACTION, measure=measure,
+    )
+    envelopes = music_typography.plan_envelopes(blocks, animation, duration)
+    x = round(width * 0.225) if layout.align == "left" else width // 2
+    outline_alpha = int(str(preset["outline_color"])[2:4], 16)
+    return [
+        music_typography.block_event(
+            envelope, animation=animation, ass_time=_ass_time, escape=_ass_escape, position=(x, round(height * 0.5)),
+            align=layout.align, primary=str(preset["primary"]), highlight=str(preset["highlight"]), outline_alpha=outline_alpha,
+        )
+        for envelope in envelopes
+    ]
+
+
+def _subscribe_reserve_top(width: int, height: int, content_format: str | None) -> int:
+    """Lowest y the subscribe animation's visible pixels can reach on this canvas."""
+    landscape = width > height
+    visible_button_fraction = 0.45 if landscape else 0.60
+    overlay_width = max(2, round(width * visible_button_fraction * ANIMATION_CANVAS_WIDTH / ANIMATION_BUTTON_WIDTH / 2) * 2)
+    overlay_height = max(2, round(overlay_width * ANIMATION_CANVAS_HEIGHT / ANIMATION_CANVAS_WIDTH / 2) * 2)
+    return math.ceil(height * 0.08 + overlay_height * ANIMATION_VISIBLE_BOTTOM / ANIMATION_CANVAS_HEIGHT)
+
+
+def _music_hook_banner_events(text: str, *, width: int, height: int, duration: float, source_dimensions: tuple[int, int] | None,
+                              reserve_top: int | None, end_time: float | None) -> list[str]:
+    """White strip + black centred text immediately above the fitted footage.
+
+    Returns [] when there is no headroom, so the caller falls back to the plain
+    top text instead of drawing an empty rectangle. With the subscribe animation
+    enabled (``reserve_top``), the strip first tries to stay clear of it for the
+    whole clip; if that leaves no readable room it yields at ``end_time`` (the
+    first animation start), the same rule the speech hook uses.
+    """
+    _band, _scaled, footage_top = _music_layout_geometry(width, height, source_dimensions)
+    font_path = str(Path(__file__).parent / "fonts" / "barlow" / "Barlow-Bold.ttf")
+    units_per_em, advances = _font_advance_metrics(font_path)
+    height_units = _libass_height_units(font_path)
+
+    def measure(value: str, size: float) -> float:
+        return sum(advances.get(ord(char), units_per_em * 0.55) for char in value) * size / height_units
+
+    scale = width / 1080
+    base_size, min_size = round(60 * scale), max(16, round(32 * scale))
+    stop = duration
+    plan = None
+    if reserve_top is not None:
+        plan = music_typography.plan_hook_banner(
+            text, canvas_width=width, footage_top=footage_top, base_size=base_size, min_size=min_size, line_height=1.0,
+            measure=measure, available_height=max(0, footage_top - reserve_top), strict=True,
+        )
+        if plan is None:
+            stop = duration if end_time is None else max(0.0, min(duration, end_time))
+    if plan is None:
+        plan = music_typography.plan_hook_banner(
+            text, canvas_width=width, footage_top=footage_top, base_size=base_size, min_size=min_size, line_height=1.0, measure=measure,
+        )
+    if plan is None or stop <= 0:
+        return []
+    body = r"\N".join(_ass_escape(line) for line in plan.lines)
+    end = _ass_time(stop)
+    rect = f"m 0 {plan.top} l {width} {plan.top} {width} {plan.bottom} 0 {plan.bottom}"
+    return [
+        f"Dialogue: 15,{_ass_time(0)},{end},HookScrim,,0,0,0,,{{\\p1\\an7\\pos(0,0)\\1c&HFFFFFF&\\1a&H00&\\bord0\\shad0}}{rect}{{\\p0}}",
+        f"Dialogue: 20,{_ass_time(0)},{end},MusicTop,,0,0,0,,{{\\an5\\pos({width // 2},{round(plan.centre_y)})\\fnBarlow\\b1\\fs{plan.font_size}\\1c&H000000&\\1a&H00&\\bord0\\shad0}}{body}",
+    ]
 
 
 def _caption_group_for_index(local: list[dict[str, Any]], index: int, desired: int, max_chars: int) -> list[dict[str, Any]]:
@@ -1957,7 +2103,7 @@ def _smart_speech_lines(group: list[dict[str, Any]], width: int, fontsize: int, 
     return lines
 
 
-def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duration: float, visuals: Iterable[tuple[str, float, float]], width: int, height: int, style: str = "educational", creator_credit: str | None = None, credit_alignment: int = 3, content_format: str | None = None, music_theme: str | None = None, music_top_text: str | None = None, hook_text: str | None = None, hook_end_time: float | None = None, presentation: str | None = None, reaction_policy: str | None = None, burn_emoji_images: bool = False) -> None:
+def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duration: float, visuals: Iterable[tuple[str, float, float]], width: int, height: int, style: str = "educational", creator_credit: str | None = None, credit_alignment: int = 3, content_format: str | None = None, music_theme: str | None = None, music_top_text: str | None = None, hook_text: str | None = None, hook_end_time: float | None = None, presentation: str | None = None, reaction_policy: str | None = None, burn_emoji_images: bool = False, music_lyric_animation: str | None = None, music_hook_text_format: str | None = None, music_source_dimensions: tuple[int, int] | None = None, music_banner_reserve_top: int | None = None) -> None:
     # Unknown additive presentation values intentionally project to the legacy
     # renderer, keeping newer callers forward/backward compatible.
     smart_speech = presentation == "smart_speech_v1"
@@ -1985,13 +2131,14 @@ def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duratio
         "reference_yellow_sans": {"fontname": "Roboto Condensed", "font": 122, "primary": "&H00AAE8F5&", "outline_color": "&H99000000&", "outline": 1, "shadow": 0, "spacing": 1, "scale_x": 115},
         "reference_white_serif": {"fontname": "Bodoni Moda", "font": 150, "primary": "&H00FFFFFF&", "outline_color": "&H99000000&", "outline": 1, "shadow": 0, "spacing": 0, "scale_x": 85},
     }
-    if music_theme in reference_presets:
+    styled_music_presets = {**reference_presets, **_CONDENSED_AND_HAND_PRESETS}
+    if music_theme in styled_music_presets:
         preset = dict(preset)
-        preset.update({**reference_presets[music_theme], "bold": 0, "italic": 0, "group": 1, "highlight": reference_presets[music_theme]["primary"]})
+        preset.update({**styled_music_presets[music_theme], "bold": 0, "italic": 0, "group": 1, "highlight": styled_music_presets[music_theme]["primary"]})
     scrim_style, scrim_events = _scrim_events(recipe_for(style, content_format).look, width, height, duration)
     if speech_presentation:
         scrim_style, scrim_events = "", []
-    if music_theme in reference_presets:
+    if music_theme in styled_music_presets:
         scrim_style, scrim_events = "", []
     metrics = _ass_style_metrics(width, height)
     type_scale = min(width, height) / _CAPTION_REFERENCE_SHORT_EDGE
@@ -1999,7 +2146,7 @@ def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duratio
     fontsize = max(28, round(preset["font"] * type_scale))
     if content_format == "short" and not speech_presentation:
         fontsize = round(fontsize * SHORT_FORM_SUBTITLE_SIZE_MULTIPLIER)
-    if music_theme in reference_presets:
+    if music_theme in styled_music_presets:
         outline = round(preset["outline"] * type_scale)
         shadow = round(preset["shadow"] * type_scale)
     elif styled_speech:
@@ -2066,7 +2213,11 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
 """
     events: list[str] = list(scrim_events)
     if music_theme and music_top_text:
-        events.append(f"Dialogue: 20,0,{_ass_time(duration)},MusicTop,,0,0,0,,{_ass_escape(music_top_text)}")
+        banner_events = _music_hook_banner_events(
+            music_top_text, width=width, height=height, duration=duration, source_dimensions=music_source_dimensions,
+            reserve_top=music_banner_reserve_top, end_time=hook_end_time,
+        ) if music_hook_text_format == "white_banner" else []
+        events.extend(banner_events or [f"Dialogue: 20,0,{_ass_time(duration)},MusicTop,,0,0,0,,{_ass_escape(music_top_text)}"])
     if hook_text:
         # A stepped top-edge ramp reaches at most 45% opacity and fades away
         # before the lower edge of the ~30% screen region.
@@ -2113,12 +2264,15 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
     local = selected_words if music_theme or speech_presentation or reaction_policy == "ironic_v1" else _caption_words_with_emojis(selected_words, style)
     if burn_emoji_images:
         local = [{**word, "_emoji_text": str(word.get("text", "")), "text": _emoji_layout_text(str(word.get("text", "")))} for word in local]
-    if music_theme in reference_presets:
+    music_animated = bool(music_theme) and music_lyric_animation in {"slow_fade", "line_crossfade", "word_build"}
+    if music_animated:
+        events.extend(_music_animated_events(local, str(music_theme), preset, str(music_lyric_animation), width=width, height=height, fontsize=fontsize, duration=duration))
+    elif music_theme in reference_presets:
         for group in _reference_music_groups(local, max_words=3 if music_theme == "reference_white_sans" else 7):
             events.extend(_reference_music_events(group, music_theme, width=width, height=height, duration=duration, content_format=content_format))
     serious_next_index = 0
     for index, word in enumerate(local):
-        if music_theme in reference_presets:
+        if music_animated or music_theme in reference_presets:
             continue
         if music_theme:
             group = _music_caption_group(local, index, max_chars)
@@ -2193,14 +2347,23 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
 def write_music_ass(
     path: Path, words: list[dict[str, Any]], *, offset: float, duration: float,
     width: int, height: int, top_text: str | None = None, subtitle_theme: str = "clean",
+    lyric_animation: str | None = None, hook_text_format: str | None = None,
+    source_dimensions: tuple[int, int] | None = None, banner_reserve_top: int | None = None,
+    hook_end_time: float | None = None,
 ) -> None:
     if top_text is not None and len(top_text) > 100:
         raise ValueError("Music top text must be 100 characters or fewer")
-    if subtitle_theme not in {"clean", "warm", "serif", "reference_white_sans", "reference_yellow_sans", "reference_white_serif"}:
+    if subtitle_theme not in MUSIC_SUBTITLE_THEMES:
         raise ValueError("Unknown music subtitle theme")
+    if lyric_animation not in {None, *music_typography.LYRIC_ANIMATIONS}:
+        raise ValueError("Unknown music lyric animation")
+    if hook_text_format not in {None, *music_typography.HOOK_TEXT_FORMATS}:
+        raise ValueError("Unknown music hook text format")
     write_ass(
         path, words, offset=offset, duration=duration, visuals=[], width=width, height=height,
         style="educational", content_format="short", music_theme=subtitle_theme, music_top_text=top_text,
+        hook_end_time=hook_end_time, music_lyric_animation=lyric_animation, music_hook_text_format=hook_text_format,
+        music_source_dimensions=source_dimensions, music_banner_reserve_top=banner_reserve_top,
     )
 
 
@@ -2371,13 +2534,22 @@ def _composite_subscribe_animations(
     return current
 
 
-def _music_source_layout_filter(width: int, height: int, source_dimensions: tuple[int, int], grayscale: bool) -> str:
-    source_width, source_height = source_dimensions
+def _music_layout_geometry(width: int, height: int, source_dimensions: tuple[int, int] | None) -> tuple[int, int, int]:
+    """(band height, fitted footage height, footage top) shared by the filter and the hook banner."""
     band_height = min(height, round(width * 0.75 / 2) * 2)
-    scale = min(width / source_width, band_height / source_height)
-    scaled_height = round(source_height * scale)
+    if source_dimensions is None:
+        scaled_height = band_height
+    else:
+        source_width, source_height = source_dimensions
+        scale = min(width / source_width, band_height / source_height)
+        scaled_height = round(source_height * scale)
     pad_y = max(0, round((height - scaled_height) / 2 - height * 0.045))
     pad_y -= pad_y % 2
+    return band_height, scaled_height, pad_y
+
+
+def _music_source_layout_filter(width: int, height: int, source_dimensions: tuple[int, int], grayscale: bool) -> str:
+    band_height, _scaled_height, pad_y = _music_layout_geometry(width, height, source_dimensions)
     treatment = ",format=gray,format=yuv420p" if grayscale else ""
     return (
         f"scale={width}:{band_height}:force_original_aspect_ratio=decrease:flags=lanczos,"
@@ -2460,7 +2632,7 @@ def _music_audio_filters(*, source_audio: bool, muted: bool, source_volume: floa
     return filters, "mixedout", True
 
 
-def render_clip(source: Path, output: Path, *, start: float, end: float, aspect: str, words: list[dict[str, Any]], visuals: list[tuple[str, float, float]], overlays: list[tuple[Path, float, float]], settings: Settings, style: str = "educational", has_audio: bool = True, embed_subtitles: bool = False, subtitle_language: str = "und", creator_credit: str | None = None, content_format: str | None = None, centered_partial_fill: bool = False, subscribe_animation: dict[str, Any] | None = None, music_theme: str | None = None, music_top_text: str | None = None, music_treatment: str | None = None, hook_text: str | None = None, presentation: str | None = None, reaction_policy: str | None = None, source_profile: str = "speech", subtitles_enabled: bool = True, muted: bool = False, volume: float = 1.0, filter_preset: str = "none", filter_intensity: float = 1.0, tint_color: str = "#d58a55", tint_opacity: int = 0, text_overlays: list[dict[str, Any]] | None = None, music_track: Path | None = None, music_track_speed: float = 1.0, music_audio_mode: str = "song_only", music_song_gain: float = 1.0, music_original_audio_gain: float = 1.0) -> None:
+def render_clip(source: Path, output: Path, *, start: float, end: float, aspect: str, words: list[dict[str, Any]], visuals: list[tuple[str, float, float]], overlays: list[tuple[Path, float, float]], settings: Settings, style: str = "educational", has_audio: bool = True, embed_subtitles: bool = False, subtitle_language: str = "und", creator_credit: str | None = None, content_format: str | None = None, centered_partial_fill: bool = False, subscribe_animation: dict[str, Any] | None = None, music_theme: str | None = None, music_top_text: str | None = None, music_treatment: str | None = None, hook_text: str | None = None, presentation: str | None = None, reaction_policy: str | None = None, source_profile: str = "speech", subtitles_enabled: bool = True, muted: bool = False, volume: float = 1.0, filter_preset: str = "none", filter_intensity: float = 1.0, tint_color: str = "#d58a55", tint_opacity: int = 0, text_overlays: list[dict[str, Any]] | None = None, music_track: Path | None = None, music_track_speed: float = 1.0, music_audio_mode: str = "song_only", music_song_gain: float = 1.0, music_original_audio_gain: float = 1.0, music_lyric_animation: str | None = None, music_hook_text_format: str | None = None) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     has_supported_emoji = presentation in {"smart_speech_v1", "smart_speech_v2"} and any(find_emoji_sequences(str(word.get("text", ""))) for word in words)
     separate_burn_script = bool(creator_credit or hook_text or not subtitles_enabled or has_supported_emoji)
@@ -2475,7 +2647,7 @@ def render_clip(source: Path, output: Path, *, start: float, end: float, aspect:
         src_width, src_height = src_height, src_width
     credit_alignment = _credit_alignment(source, start=start, end=end, width=width, height=height, settings=settings) if creator_credit else 3
     caption_words = words if subtitles_enabled else []
-    write_ass(ass, caption_words, offset=start, duration=duration, visuals=visuals, width=width, height=height, style=style, creator_credit=creator_credit, credit_alignment=credit_alignment, content_format=content_format, music_theme=music_theme, music_top_text=music_top_text, hook_text=hook_text, hook_end_time=hook_end_time, presentation=presentation, reaction_policy=reaction_policy, burn_emoji_images=presentation in {"smart_speech_v1", "smart_speech_v2"})
+    write_ass(ass, caption_words, offset=start, duration=duration, visuals=visuals, width=width, height=height, style=style, creator_credit=creator_credit, credit_alignment=credit_alignment, content_format=content_format, music_theme=music_theme, music_top_text=music_top_text, hook_text=hook_text, hook_end_time=hook_end_time, presentation=presentation, reaction_policy=reaction_policy, burn_emoji_images=presentation in {"smart_speech_v1", "smart_speech_v2"}, music_lyric_animation=music_lyric_animation, music_hook_text_format=music_hook_text_format, music_source_dimensions=(src_width, src_height) if music_theme else None, music_banner_reserve_top=_subscribe_reserve_top(width, height, content_format) if music_theme and subscribe_schedule else None)
     _append_text_overlays(ass, text_overlays or [], duration, width, height)
     # Downloadable sidecars remain independent of the burn-in toggle; the
     # internal ASS and MP4 overlay receive no speech captions when disabled.
@@ -2483,7 +2655,7 @@ def render_clip(source: Path, output: Path, *, start: float, end: float, aspect:
     if separate_burn_script:
         # Downloadable ASS remains plain Unicode text. The internal burn script
         # can contain image-layout placeholders and is never substituted for it.
-        write_ass(output.with_suffix(".ass"), words, offset=start, duration=duration, visuals=visuals, width=width, height=height, style=style, content_format=content_format, music_theme=music_theme, music_top_text=music_top_text, presentation=presentation, reaction_policy=reaction_policy)
+        write_ass(output.with_suffix(".ass"), words, offset=start, duration=duration, visuals=visuals, width=width, height=height, style=style, content_format=content_format, music_theme=music_theme, music_top_text=music_top_text, presentation=presentation, reaction_policy=reaction_policy, music_lyric_animation=music_lyric_animation, music_hook_text_format=music_hook_text_format, music_source_dimensions=(src_width, src_height) if music_theme else None)
     temp = output.with_suffix(".partial.mp4")
     command = [settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{start:.3f}", "-i", str(source)]
     _overlay_inputs(command, overlays)
@@ -2801,6 +2973,8 @@ def render_fast_clip(
     music_audio_mode: str = "song_only",
     music_song_gain: float = 1.0,
     music_original_audio_gain: float = 1.0,
+    music_lyric_animation: str | None = None,
+    music_hook_text_format: str | None = None,
 ) -> None:
     """Render a fast clip with optional captions and no overlays or visual beats.
 
@@ -2874,6 +3048,7 @@ def render_fast_clip(
             creator_credit=creator_credit, content_format=content_format,
             centered_partial_fill=centered_partial_fill, subscribe_animation=subscribe_animation, music_theme=music_theme,
             music_top_text=music_top_text, music_treatment=music_treatment,
+            music_lyric_animation=music_lyric_animation, music_hook_text_format=music_hook_text_format,
             muted=muted, volume=volume, filter_preset=filter_preset, filter_intensity=filter_intensity,
             tint_color=tint_color, tint_opacity=tint_opacity, text_overlays=text_overlays,
             music_track=music_track, music_track_speed=music_track_speed,
