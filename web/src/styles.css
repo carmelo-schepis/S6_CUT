@@ -3,6 +3,8 @@
 @font-face { font-family: "Music Lora"; src: url("/fonts/lora/Lora.ttf") format("truetype"); font-weight: 400; font-display: swap; }
 @font-face { font-family: "Reference Roboto Condensed"; src: url("/fonts/roboto_condensed/RobotoCondensed-Light.ttf") format("truetype"); font-weight: 300; font-display: swap; }
 @font-face { font-family: "Reference Bodoni Moda"; src: url("/fonts/bodoni_moda/BodoniModa-Variable.ttf") format("truetype"); font-weight: 100 900; font-display: swap; }
+@font-face { font-family: "Music Oswald"; src: url("/fonts/oswald/Oswald-Regular.ttf") format("truetype"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Music Gaegu"; src: url("/fonts/gaegu/Gaegu-Bold.ttf") format("truetype"); font-weight: 700; font-display: swap; }
 /* DO-NOT-CHANGE: see DO-NOT-CHANGE/AGENTS.md — design tokens; extend them, don't bypass */
 :root {
   color-scheme: dark;
@@ -809,6 +811,50 @@ main { min-width: 0; }
 .music-theme-options strong { color: var(--text); font-size: var(--type-small-size); line-height: 1.2; }
 .music-theme-options small { font-size: 11px; line-height: 1.25; }
 @media (max-width: 520px) { .music-theme-options { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.music-theme-options .theme-condensed-black, .music-theme-options .theme-condensed-white { font-family: "Music Oswald", sans-serif; font-size: 15px; }
+.music-theme-options .theme-condensed-black { padding: 3px 6px; border-radius: 4px; background: #f2f2f2; color: #111; }
+.music-theme-options .theme-handwritten-stack { font-family: "Music Gaegu", cursive; font-weight: 700; font-size: 16px; line-height: 1.05; }
+.music-animation-options { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-2); }
+.music-animation-options button { display: grid; align-content: start; gap: 3px; min-width: 0; padding: 8px; border: 1px solid transparent; border-radius: var(--radius-md); background: var(--surface-2); color: var(--text-primary); text-align: left; }
+.music-animation-options button:focus-visible { outline: 2px solid var(--selector-highlight); outline-offset: 2px; }
+.music-animation-options button.active { border-color: var(--selector-highlight); background: var(--surface-3); }
+.music-animation-options strong { color: var(--text); font-size: var(--type-small-size); line-height: 1.2; }
+.music-animation-options small { font-size: 11px; line-height: 1.25; }
+.music-motion-picker, .music-hook-format { display: grid; gap: var(--space-2); margin-top: var(--space-2); }
+.music-hook-format .music-animation-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.lyric-preview { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+.lyric-preview-stage { position: relative; display: grid; place-items: center; width: 160px; height: 92px; border-radius: var(--radius-md); background: #14181d; color: #fff; overflow: hidden; }
+.lyric-preview-line { grid-area: 1 / 1; margin: 0; font-size: 17px; line-height: 1.15; text-align: center; opacity: 1; }
+.lyric-preview-stage.theme-clean { font-family: "Music Barlow", sans-serif; }
+.lyric-preview-stage.theme-warm, .lyric-preview-stage.theme-serif { font-family: "Music Lora", serif; }
+.lyric-preview-stage.theme-warm { color: #e3bd61; }
+.lyric-preview-stage.theme-reference-white-sans, .lyric-preview-stage.theme-reference-yellow-sans { font-family: "Reference Roboto Condensed", sans-serif; font-weight: 300; }
+.lyric-preview-stage.theme-reference-yellow-sans { color: #f5e8aa; }
+.lyric-preview-stage.theme-reference-white-serif { font-family: "Reference Bodoni Moda", serif; }
+.lyric-preview-stage.theme-condensed-black { font-family: "Music Oswald", sans-serif; background: #f2f2f2; color: #111; }
+.lyric-preview-stage.theme-condensed-white { font-family: "Music Oswald", sans-serif; }
+.lyric-preview-stage.theme-handwritten-stack { font-family: "Music Gaegu", cursive; font-weight: 700; }
+.lyric-preview[data-state="playing"][data-animation="slow_fade"] .line-0 { animation: lyric-slow-fade 3.2s ease-in-out both; }
+.lyric-preview[data-state="playing"][data-animation="slow_fade"] .line-1 { animation: lyric-slow-fade 3.2s ease-in-out 3.2s both; opacity: 0; }
+.lyric-preview[data-state="playing"][data-animation="line_crossfade"] .line-0 { animation: lyric-out 2.4s ease-in-out 1.2s both; }
+.lyric-preview[data-state="playing"][data-animation="line_crossfade"] .line-1 { animation: lyric-in 2.4s ease-in-out 1.2s both; opacity: 0; }
+.lyric-preview[data-state="playing"][data-animation="word_build"] .lyric-preview-word { opacity: 0; animation: lyric-in 0.45s ease-out both; }
+.lyric-preview[data-state="playing"][data-animation="word_build"] .line-0 { animation: lyric-hold-out 3.4s linear both; }
+.lyric-preview[data-state="playing"][data-animation="legacy"] .line-0 { animation: lyric-step-out 1.6s steps(1, end) both; }
+.lyric-preview[data-state="playing"][data-animation="legacy"] .line-1 { animation: lyric-step-in 1.6s steps(1, end) both; opacity: 0; }
+.lyric-preview[data-state="still"][data-animation="slow_fade"] .line-1, .lyric-preview[data-state="still"][data-animation="line_crossfade"] .line-1, .lyric-preview[data-state="still"][data-animation="legacy"] .line-1 { opacity: 0; }
+@keyframes lyric-slow-fade { 0% { opacity: 0; } 16% { opacity: 1; } 78% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes lyric-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes lyric-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes lyric-hold-out { 0%, 70% { opacity: 1; } 100% { opacity: 0.1; } }
+@keyframes lyric-step-out { 0% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes lyric-step-in { 0% { opacity: 0; } 100% { opacity: 1; } }
+.hook-format-sample { position: relative; width: 160px; height: 92px; border-radius: var(--radius-md); background: #000; overflow: hidden; }
+.hook-format-sample i { position: absolute; left: 0; right: 0; bottom: 0; height: 52px; background: linear-gradient(135deg, #3b6ea5, #c0705a); }
+.hook-format-sample span { position: absolute; left: 0; right: 0; top: 0; height: 40px; display: grid; place-items: center; padding: 0 8px; font-family: "Music Barlow", sans-serif; font-weight: 700; font-size: 13px; text-align: center; color: #fff; }
+.hook-format-sample.is-banner span { background: #fff; color: #000; }
+@media (max-width: 520px) { .music-animation-options { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* Reduced motion is handled in the component: it starts on a still frame and only animates after an explicit Play. */
 .style-card { min-height: 56px; display: grid; grid-template-columns: var(--space-2) minmax(0, 1fr); align-content: center; gap: var(--space-1) var(--space-2); padding: var(--space-2); text-align: left; border: 1px solid transparent; background: var(--surface-2); color: var(--text-primary); }
 .style-card:hover { background: var(--surface-3); }
 .style-card:hover, .style-card.active { border-color: var(--selector-highlight); }

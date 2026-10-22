@@ -462,7 +462,7 @@ def _subscribe_render_kwargs(render, config: dict[str, Any] | None) -> dict[str,
     return {}
 
 
-def _music_render_kwargs(render, theme: str, top_text: str | None, treatment: str | None) -> dict[str, Any]:
+def _music_render_kwargs(render, theme: str, top_text: str | None, treatment: str | None, lyric_animation: str | None = None, hook_text_format: str | None = None) -> dict[str, Any]:
     try:
         parameters = inspect.signature(render).parameters.values()
     except (TypeError, ValueError):
@@ -470,6 +470,12 @@ def _music_render_kwargs(render, theme: str, top_text: str | None, treatment: st
     accepts_any = any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters)
     accepted = {parameter.name for parameter in parameters}
     values = {"music_theme": theme, "music_top_text": top_text, "music_treatment": treatment}
+    # Additive options are sent only when they differ from the legacy/plain
+    # defaults, so older render adapters and recorded call shapes are unchanged.
+    if lyric_animation and lyric_animation != "legacy":
+        values["music_lyric_animation"] = lyric_animation
+    if hook_text_format and hook_text_format != "plain":
+        values["music_hook_text_format"] = hook_text_format
     return values if accepts_any else {name: value for name, value in values.items() if name in accepted}
 
 
@@ -1552,6 +1558,8 @@ class JobManager:
                 music_presentation.get("subtitle_theme", "clean") if isinstance(music_presentation, dict) else "clean",
                 clip.music_top_text or private.get("music_top_text"),
                 clip.music_treatment or (music_treatments.get(clip.id) if isinstance(music_treatments, dict) else None),
+                music_presentation.get("lyric_animation") if isinstance(music_presentation, dict) else None,
+                music_presentation.get("hook_text_format") if isinstance(music_presentation, dict) else None,
             ) if job.source_profile == "music" else {}
             rerender_kwargs = {
                 "start": clip.start, "end": clip.end, "aspect": private["aspect_ratio"], "settings": self.settings,
@@ -2536,6 +2544,8 @@ class JobManager:
                         render_clip,
                         (private.get("music_presentation") or {}).get("subtitle_theme", "clean"),
                         clip.music_top_text, clip.music_treatment,
+                        (private.get("music_presentation") or {}).get("lyric_animation"),
+                        (private.get("music_presentation") or {}).get("hook_text_format"),
                     ) if profile == "music" else {}),
                     **({"music_track": music_track, "music_track_speed": 1.0} if music_track else {}),
                     **({"music_audio_mode": job.music_audio_mode, "music_song_gain": job.music_song_gain, "music_original_audio_gain": job.music_original_audio_gain} if job.source_profile == "music" else {}),
@@ -3116,6 +3126,15 @@ class JobManager:
                 "provenance": [record.model_dump(mode="json") for record in clip.provenance],
                 "music_track": clip.music_track.model_dump(mode="json") if clip.music_track else None,
                 "music_audio": {"mode": clip.music_audio_mode.value, "song_gain": clip.music_song_gain, "original_audio_gain": clip.music_original_audio_gain},
+                # Additive, Music jobs only: resolved choices (omitted options mean Original / Plain).
+                **({
+                    "music_presentation": {
+                        "subtitle_theme": job.music_presentation.subtitle_theme if job.music_presentation else "clean",
+                        "lyric_animation": (job.music_presentation.lyric_animation if job.music_presentation else None) or "legacy",
+                        "hook_text_format": (job.music_presentation.hook_text_format if job.music_presentation else None) or "plain",
+                    },
+                    "music_top_text": clip.music_top_text or job.music_top_text,
+                } if job.source_profile == "music" else {}),
             })
             if clip.creator_credit or clip.provenance:
                 credits.append({

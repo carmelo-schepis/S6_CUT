@@ -452,7 +452,10 @@ async def create_clip_job(
         if music_lyrics_language not in WHISPER_LANGUAGE_CODES:
             raise HTTPException(422, "Choose a supported lyrics language or use automatic detection")
     music_config = _music_presentation_request(music_presentation)
-    if source_profile != "music" and (music_top_text or music_presentation != "{}" or music_config.subtitle_theme != "clean"):
+    if source_profile != "music" and (
+        music_top_text or music_presentation != "{}" or music_config.subtitle_theme != "clean"
+        or music_config.lyric_animation is not None or music_config.hook_text_format is not None
+    ):
         raise HTTPException(422, "Music presentation options are only available for Music / sung vocals")
     if source_profile == "music" and batch_mode == "high_volume":
         raise HTTPException(422, "High-volume batches are available for Speech sources; Music keeps its existing non-overlapping planner.")

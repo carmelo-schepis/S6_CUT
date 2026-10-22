@@ -544,6 +544,7 @@ def test_source_publication_and_exports_preserved(monkeypatch: pytest.MonkeyPatc
     assert manifest["project"]["name"] == "Publication campaign"
     assert manifest["outputs"][0]["creator_credit"] == "Source: Example Creator"
     assert manifest["outputs"][0]["provenance"][0]["attribution"] == "Example Creator"
+    assert "music_presentation" not in manifest["outputs"][0] and "music_top_text" not in manifest["outputs"][0]
     assert credits["credits"][0]["provenance"][0]["licence"] == "CC BY 4.0"
     assert "One output used a local fallback." in warnings["job_warnings"]
 
