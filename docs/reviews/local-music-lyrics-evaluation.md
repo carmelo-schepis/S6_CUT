@@ -1,42 +1,43 @@
 # Local music-lyric evaluation
 
 `python -m engine.music_lyric_eval` runs the existing Music transcription profile
-on a local audio file and compares it with a human-corrected reference. It needs
-no network service or lyric site. Keep the audio, reference, and optional
-annotations outside Git; the JSON report contains content hashes and aggregate
-metrics only.
+on local audio and compares it with a human-corrected reference. This is a
+measurement tool; it does not change recognition in the application. Keep audio,
+reference text and optional annotations outside Git. Its JSON report contains
+content hashes and aggregate metrics.
 
-Example (run from the repository root, with the local Faster-Whisper model cache
-available):
+Run from the repository root using an environment with the engine dependencies
+and a locally cached Faster-Whisper model:
 
 ```sh
-.venv/bin/python -m engine.music_lyric_eval \
-  --audio /path/to/authorized-cas-recording.wav \
-  --reference /private/path/cas-bubblegum-reviewed.txt \
-  --track-id cas-bubblegum-v1 \
-  --data-path /home/linuxpc/Git_projects/S6_CUT/data \
-  --instrumental-spans /private/path/cas-bubblegum-instrumentals.json \
-  --timing-reference /private/path/cas-bubblegum-word-times.json \
-  --report /private/path/cas-bubblegum-report.json
+python -m engine.music_lyric_eval \
+  --audio /private/evaluation/recording.wav \
+  --reference /private/evaluation/reference.txt \
+  --track-id recording-001 \
+  --data-path /path/to/local-data \
+  --instrumental-spans /private/evaluation/instrumentals.json \
+  --timing-reference /private/evaluation/word-times.json \
+  --report /private/evaluation/report.json
 ```
 
-`--instrumental-spans` is a JSON array of `[start_seconds,end_seconds]` ranges.
-Words whose midpoint lands in an annotated range are counted as likely
-instrumental insertions. `--timing-reference` is a JSON array with one word per
-record, for example `[{"text":"example","start":12.3,"end":12.7}]`. Timing
-MAE is computed only for exact words matched by the reference/hypothesis edit
-alignment. Mark each recording/version against its actual performance; studio
-lyrics alone are not ground truth for a live or shortened performance.
+The last two input annotations are optional. Instrumental spans use a JSON array
+of `[start_seconds,end_seconds]` ranges. A recognized word whose midpoint falls
+in a range is counted as an instrumental insertion. The timing reference is a
+JSON array with one word per record, for example
+`[{"text":"example","start":12.3,"end":12.7}]`.
 
-The report includes normalized word-error rate and substitution/deletion/
-insertion counts, annotated instrumental insertions, optional word-boundary
-MAE, detected language, audio/reference SHA-256, transcription runtime, and
-process peak RSS. Punctuation and case are ignored; Unicode text is normalized
-with NFKC, and curly apostrophes are canonicalized so contractions compare
-consistently. The command does not print or write lyric text. Supply a stable,
-non-sensitive fixture ID via `--track-id`; do not put lyric text in IDs.
+Timing MAE uses exact words matched by edit alignment. Repeated phrases and
+missing words can make this correspondence ambiguous. References must match the
+actual performance, including repetitions and truncation. A published lyric
+page is a provisional comparison, not necessarily ground truth for a recording.
 
-There is no human-reviewed Bubblegum reference in the saved jobs, so this
-command cannot currently produce a meaningful accuracy score for that recording.
-The previous transcript and audio can be evaluated once an authorized listener
-has corrected a private reference against that same recording.
+The report includes normalized WER and S/D/I counts, optional instrumental and
+timing measurements, detected language, audio/reference hashes, decoder runtime
+and process peak RSS. Punctuation and case are ignored; Unicode uses NFKC and
+curly apostrophes are canonicalized. Use non-sensitive recording IDs.
+
+Current limits: this command calls the decoder directly, does not enforce cached
+models/offline execution, and measures its own process rather than the API and
+all processing stages together. It must not be run with the synthetic-transcript
+fixture environment enabled. The [general implementation plan](general-music-lyric-accuracy-plan.md)
+addresses these limits before using its reports as production promotion gates.
