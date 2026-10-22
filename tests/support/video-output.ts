@@ -172,9 +172,14 @@ export async function verifyVideoOutput(options: VerifyVideoOutputOptions): Prom
   for (let index = 0; index < requestedTimestamps.length; index += 1) {
     samples.push(await seekAndSample(video, requestedTimestamps[index], screenshots[index]));
   }
-  for (const sample of samples) {
+  for (const [index, sample] of samples.entries()) {
     expect(sample.variance, `frame at ${sample.time}s is blank or uniform`).toBeGreaterThan(20);
-    expect(sample.blackRatio, `frame at ${sample.time}s is almost entirely black`).toBeLessThan(0.98);
+    // A source can intentionally fade to black at its end. Treat that as a
+    // content comparison question, while still rejecting black opening/midpoint
+    // samples where the generated video should show the source image.
+    if (index < samples.length - 1) {
+      expect(sample.blackRatio, `frame at ${sample.time}s is almost entirely black`).toBeLessThan(0.98);
+    }
   }
   const frameDifferences = samples.slice(1).map((sample, index) =>
     sample.grayscale.reduce((sum, value, pixel) => sum + Math.abs(value - samples[index].grayscale[pixel]), 0) / sample.grayscale.length,

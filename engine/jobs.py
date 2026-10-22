@@ -35,6 +35,16 @@ from .security import confined, redact, safe_archive_title, safe_filename
 from .selection import Candidate, _score, _timed_words, candidate_quality, clip_from_candidate, select_candidates, select_music_candidates
 
 logger = logging.getLogger(__name__)
+_MUSIC_TRANSCRIPTION_CONTEXT_SECONDS = 30.0
+
+
+def _music_transcription_duration(video_duration: float, has_selected_track: bool, maximum_duration: float) -> float:
+    """Return the recognition timeline, with bounded song context beyond video."""
+    video_duration = max(0.0, float(video_duration))
+    maximum_duration = max(video_duration, float(maximum_duration))
+    if not has_selected_track:
+        return video_duration
+    return min(video_duration + _MUSIC_TRANSCRIPTION_CONTEXT_SECONDS, maximum_duration)
 
 
 def _probe_detail(metadata: dict[str, Any]) -> str:
@@ -2254,7 +2264,18 @@ class JobManager:
         # conversion, and produce decoder PCM without an intermediate MP3.
         music_track_source = music_track
         transcript_source = source
-        transcript_duration = source_duration
+        # A selected song often continues past the visual source boundary. Keep
+        # bounded real audio after that boundary so Whisper can finish its last
+        # phrase; clip selection/rendering remain limited to the video duration.
+        transcript_duration = (
+            _music_transcription_duration(
+                source_duration,
+                music_track_source is not None,
+                self.settings.max_long_source_seconds,
+            )
+            if profile == "music" else source_duration
+        )
+        music_context_seconds = max(0.0, transcript_duration - source_duration)
         speed = float(private.get("music_track_speed", 1.0)) if music_track_source is not None else 1.0
         planning_duration = source_duration
         target = self._resolve_batch_target(job, private, planning_duration)
@@ -2309,13 +2330,23 @@ class JobManager:
                     )
                 self.complete_step(job, "audio", detail="16 kHz mono audio prepared", private=private)
                 transcript = self._transcribe_with_stages(job, audio, transcript_duration, private)
+                if profile == "music" and isinstance(transcript, dict):
+                    diagnostics = transcript.setdefault("diagnostics", {})
+                    if isinstance(diagnostics, dict):
+                        diagnostics["source_duration_seconds"] = round(source_duration, 3)
+                        diagnostics["context_after_source_seconds"] = round(music_context_seconds, 3)
                 self.db.cache_put(cache_key, now_iso(), transcript)
             private["transcript"] = transcript
             private["transcript_cache_key"] = cache_key
             self._save(job, private)
             self.complete_step(job, "transcribe", detail=self._transcript_detail(transcript, source_duration=source_duration, music=profile == "music"), private=private)
         words = transcript["words"]
+        boundary_truncated_words: list[dict[str, Any]] = []
         if profile == "music":
+            boundary_truncated_words = [
+                word for word in words
+                if float(word.get("start", 0)) < planning_duration < float(word.get("end", 0))
+            ]
             diagnostics = transcript.get("diagnostics") if isinstance(transcript.get("diagnostics"), dict) else {}
             invalid_count = int(diagnostics.get("invalid_timing_count") or 0)
             if invalid_count:
@@ -2453,6 +2484,16 @@ class JobManager:
             # when this job is a source-only regeneration or a retry.
             clip_words = _render_words_for_clip(private, clip, words)
             if profile == "music":
+                clipped_final_word = any(
+                    clip.start <= float(word.get("start", 0)) < clip.end
+                    and float(word.get("end", 0)) > planning_duration
+                    for word in boundary_truncated_words
+                )
+                if clipped_final_word:
+                    warning = "A lyric word continues beyond the source video and may be cut off in this clip."
+                    clip.caption_qa_warnings = list(dict.fromkeys([*clip.caption_qa_warnings, warning]))
+                    clip.review_required = True
+                    clip.review_reason = clip.review_reason or "The final lyric may be truncated by the source video boundary."
                 clip.caption_cues = [CaptionCue.model_validate(cue) for cue in media_module.music_caption_cues(clip_words, clip.start, clip.end)]
                 if clip.caption_revision == 0:
                     uncertain = sum(
@@ -2460,9 +2501,8 @@ class JobManager:
                         for cue in clip.caption_cues
                     )
                     if uncertain:
-                        clip.caption_qa_warnings = [
-                            f"{uncertain} lyric word(s) have low ASR confidence; check them against the audio."
-                        ]
+                        warning = f"{uncertain} lyric word(s) have low ASR confidence; check them against the audio."
+                        clip.caption_qa_warnings = list(dict.fromkeys([*clip.caption_qa_warnings, warning]))
                         clip.review_required = True
             overlays, provenance = self._video_overlay_for_clip(job, clip, private)
             # Provenance describes media actually composited into this source

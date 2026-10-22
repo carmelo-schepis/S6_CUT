@@ -168,6 +168,12 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
     settings = Settings.from_env()
     if args.data_path:
         settings = replace(settings, data_path=args.data_path.expanduser().resolve())
+    if getattr(args, "model", None):
+        settings = replace(settings, music_whisper_model=args.model.strip())
+    beam_size = getattr(args, "beam_size", None)
+    if beam_size is not None and not 1 <= int(beam_size) <= 8:
+        raise ValueError("--beam-size must be between 1 and 8")
+    condition_on_previous_text = getattr(args, "condition_on_previous_text", None)
     audio_metadata = probe_audio(audio, settings)
     audio_duration = float(audio_metadata["duration"])
     instrumental_spans = read_time_spans(args.instrumental_spans.expanduser().resolve(strict=True)) if args.instrumental_spans else None
@@ -206,7 +212,11 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
         extract_music_audio_16k(audio, settings, output=recognition_audio, speed=speed, duration=float(audio_metadata["duration"]))
         preprocessing_seconds = time.monotonic() - preprocess_started
         decode_started = time.monotonic()
-        transcript = supervise(recognition_audio, settings, profile="music", language=args.language, source_seconds=float(audio_metadata["duration"]))
+        transcript = supervise(
+            recognition_audio, settings, profile="music", language=args.language,
+            source_seconds=float(audio_metadata["duration"]), beam_size=beam_size,
+            condition_on_previous_text=condition_on_previous_text,
+        )
         decode_seconds = time.monotonic() - decode_started
         if args.save_hypothesis:
             destination = args.save_hypothesis.expanduser().resolve()
@@ -303,7 +313,14 @@ def evaluate(args: argparse.Namespace) -> dict[str, Any]:
         "process_peak_rss_mib": round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024, 2),
         "cgroup_peak_memory_mib": cgroup_peak_memory_mib(),
         "model": settings.music_whisper_model,
-        "decoder_cache_identity": transcription_cache_identity(settings, profile="music", language=args.language),
+        "decoder_cache_identity": transcription_cache_identity(
+            settings, profile="music", language=args.language, beam_size=beam_size,
+            condition_on_previous_text=condition_on_previous_text,
+        ),
+        "decoder_options": {
+            "beam_size": beam_size or settings.music_whisper_beam_size,
+            "condition_on_previous_text": True if condition_on_previous_text is None else condition_on_previous_text,
+        },
         "music_speed": round(min(1.5, max(0.75, float(args.speed))), 3),
         "transcript_diagnostics": transcript.get("diagnostics"),
         "segment_count": len(transcript.get("segments", [])),
@@ -321,6 +338,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--track-id", required=True, help="non-sensitive fixture ID")
     parser.add_argument("--data-path", type=Path, help="directory containing the cached local model")
     parser.add_argument("--language", help="optional language code; default uses local autodetection")
+    parser.add_argument("--model", help="local model name/path candidate; with --offline it must already be cached")
+    parser.add_argument("--beam-size", type=int, help="Music decoding beam candidate (1..8)")
+    conditioning = parser.add_mutually_exclusive_group()
+    conditioning.add_argument("--condition-on-previous-text", dest="condition_on_previous_text", action="store_true", help="retain cross-window text context")
+    conditioning.add_argument("--no-condition-on-previous-text", dest="condition_on_previous_text", action="store_false", help="disable cross-window text context")
+    parser.set_defaults(condition_on_previous_text=None)
     parser.add_argument("--instrumental-spans", type=Path, help="private JSON [[start,end], ...]")
     parser.add_argument("--timing-reference", type=Path, help="private JSON [{text,start,end}, ...], one word per row")
     parser.add_argument("--sung-spans", type=Path, help="private JSON [[start,end], ...] for annotated sung-vocal regions; requires timing reference")

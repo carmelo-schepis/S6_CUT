@@ -78,6 +78,28 @@ def test_real_fast_render_accepts_music_on_silent_video(tmp_path: Path, settings
     assert any(stream.get("codec_type") == "audio" for stream in _probe_audio(output, settings)["streams"])
 
 
+def test_music_asr_extracts_bounded_tail_context_without_altering_track(tmp_path: Path, settings: Settings, monkeypatch: pytest.MonkeyPatch) -> None:
+    from engine.media import extract_music_audio_16k
+
+    source = tmp_path / "original-song.mp3"
+    source.write_bytes(b"source is read-only")
+    target = tmp_path / "asr.wav"
+    captured: list[list[str]] = []
+
+    def fake_run(command, **_kwargs):
+        captured.append([str(item) for item in command])
+        Path(command[-1]).write_bytes(b"wav fixture" * 8)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr("engine.media.run", fake_run)
+    extract_music_audio_16k(source, settings, output=target, speed=1.0, duration=150.0)
+
+    assert source.read_bytes() == b"source is read-only"
+    assert target.read_bytes() == b"wav fixture" * 8
+    assert captured[0][captured[0].index("-t") + 1] == "150.000000"
+    assert captured[0][-1].endswith(".partial.wav")
+
+
 def test_corrupt_mp3_is_rejected_by_ffprobe(tmp_path: Path, settings: Settings) -> None:
     _require_media(settings)
     corrupt = tmp_path / "corrupt.mp3"

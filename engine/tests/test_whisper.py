@@ -387,8 +387,12 @@ class TestWhisperModelCached:
         music = transcription_cache_identity(settings, profile="music", language="en")
         other_language = transcription_cache_identity(settings, profile="music", language="fr")
         other_beam = transcription_cache_identity(settings, profile="music", language="en", beam_size=4)
+        unconditioned = transcription_cache_identity(
+            settings, profile="music", language="en", condition_on_previous_text=False,
+        )
 
         assert speech != music
+        assert music != unconditioned
         assert music != other_language
         assert music != other_beam
         assert transcription_cache_identity(settings, profile="music", language="en") == music
@@ -645,6 +649,18 @@ class TestTranscribeModelInit:
         assert tx_call["language_detection_threshold"] == 0.8
         assert tx_call["word_timestamps"] is True
         assert tx_call["vad_filter"] is False
+
+    def test_music_conditioning_candidate_is_forwarded_and_cache_separated(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        _mock_whisper(monkeypatch)
+        source = _dummy_source(tmp_path)
+
+        transcribe(source, Settings.from_env(), profile="music", condition_on_previous_text=False)
+
+        tx_call = next(entry[1] for entry in MockWhisperModel.LOG if entry[0] == "transcribe")
+        assert tx_call["condition_on_previous_text"] is False
+        assert transcription_cache_identity(Settings.from_env(), profile="music") != transcription_cache_identity(
+            Settings.from_env(), profile="music", condition_on_previous_text=False,
+        )
 
     def test_transcribe_passes_beam_and_word_timestamps(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         _mock_whisper(monkeypatch)

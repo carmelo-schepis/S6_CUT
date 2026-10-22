@@ -172,6 +172,7 @@ def transcription_options(
     compute_type: str | None = None,
     beam_size: int | None = None,
     word_timestamps: bool | None = None,
+    condition_on_previous_text: bool | None = None,
 ):
     """Resolve the deterministic Faster-Whisper options for a profile.
 
@@ -207,7 +208,7 @@ def transcription_options(
         # Spell out Faster-Whisper defaults so music cache identity remains
         # stable and diagnostics describe the actual decoding behavior.
         options.update({
-            "condition_on_previous_text": True,
+            "condition_on_previous_text": True if condition_on_previous_text is None else bool(condition_on_previous_text),
             "temperature": (0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
             "compression_ratio_threshold": 2.4,
             "log_prob_threshold": -1.0,
@@ -225,6 +226,7 @@ def transcription_cache_identity(
     compute_type: str | None = None,
     beam_size: int | None = None,
     word_timestamps: bool | None = True,
+    condition_on_previous_text: bool | None = None,
 ):
     """Return a stable identity for a transcript's decoding conditions."""
     options = transcription_options(
@@ -235,6 +237,7 @@ def transcription_cache_identity(
         compute_type=compute_type,
         beam_size=beam_size,
         word_timestamps=word_timestamps,
+        condition_on_previous_text=condition_on_previous_text,
     )
     identity_options = dict(options)
     if profile == "music":
@@ -257,6 +260,7 @@ def transcription_cache_key(
     compute_type: str | None = None,
     beam_size: int | None = None,
     word_timestamps: bool | None = True,
+    condition_on_previous_text: bool | None = None,
 ):
     """Return a source-specific transcript cache key."""
     identity = transcription_cache_identity(
@@ -267,6 +271,7 @@ def transcription_cache_key(
         compute_type=compute_type,
         beam_size=beam_size,
         word_timestamps=word_timestamps,
+        condition_on_previous_text=condition_on_previous_text,
     )
     return f"{identity}:{source_hash}"
 
@@ -873,6 +878,7 @@ def transcribe(
     word_timestamps: bool | None = None,
     profile: str = "speech",
     language: str | None = None,
+    condition_on_previous_text: bool | None = None,
 ) -> dict[str, Any]:
     """Transcribe media with Faster-Whisper and return word-level timing.
 
@@ -922,6 +928,7 @@ def transcribe(
         compute_type=compute_type,
         beam_size=beam_size,
         word_timestamps=word_timestamps,
+        condition_on_previous_text=condition_on_previous_text,
     )
     fixture = os.getenv("S6_TEST_TRANSCRIPT_JSON")
     if fixture:

@@ -456,6 +456,12 @@ def test_music_smart_path_replaces_sparse_checkpoint_and_keeps_bounded_windows(m
     monkeypatch.setattr(media_module, "prepare_music_track", lambda source, _target, speed, _settings, **kwargs: (extracted_from.append(source), prepared_song)[1])
     monkeypatch.setattr(media_module, "probe_audio", lambda *_args, **_kwargs: {"duration": 100.0, "audio_codec": "mp3"})
     monkeypatch.setattr(media_module, "extract_audio_16k", lambda source, _settings, **_kwargs: (extracted_from.append(source), tmp_path / "song-audio.wav")[1])
+    asr_audio_calls: list[dict[str, Any]] = []
+    def extract_music_audio(source, _settings, **kwargs):
+        asr_audio_calls.append(kwargs)
+        extracted_from.append(source)
+        return tmp_path / "song-audio.wav"
+    monkeypatch.setattr(media_module, "extract_music_audio_16k", extract_music_audio)
     monkeypatch.setattr(media_module, "is_whisper_model_cached", lambda *_args, **_kwargs: True)
     monkeypatch.setattr("engine.jobs.render_clip", _fake_render_clip)
     source = tmp_path / "music-source.mp4"
@@ -474,7 +480,7 @@ def test_music_smart_path_replaces_sparse_checkpoint_and_keeps_bounded_windows(m
         start = float(line * 12)
         lyric_words.extend([
             {"text": f"Lyric{line}", "start": start, "end": start + 4, "confidence": .9},
-            {"text": "continues", "start": start + 4.2, "end": start + 9, "confidence": .9},
+            {"text": "continues", "start": start + 4.2, "end": start + (20 if line == 7 else 9), "confidence": .9},
         ])
 
     def music_transcribe(_: Path, __: Settings, **kwargs: Any) -> dict[str, Any]:
@@ -487,10 +493,16 @@ def test_music_smart_path_replaces_sparse_checkpoint_and_keeps_bounded_windows(m
     saved = test_db.get_job_private("music-checkpoint")
     assert result.state == "complete"
     assert calls and calls[0]["profile"] == "music"
-    assert saved["transcript_cache_key"].startswith("transcript:v3:")
+    assert saved["transcript_cache_key"].startswith("transcript:v4:")
     assert saved["transcript"]["words"][0]["text"] == "Lyric0"
-    assert extracted_from == [tmp_path / "selected-song.mp3", prepared_song]
+    assert extracted_from == [tmp_path / "selected-song.mp3", tmp_path / "selected-song.mp3"]
+    assert asr_audio_calls[0]["duration"] == 130.0
     assert len(result.clips) == 4
+    assert any(
+        "continues beyond the source video" in warning
+        for clip in result.clips for warning in clip.caption_qa_warnings
+    )
+    assert all(clip.end <= 100 for clip in result.clips)
     assert all(10 <= clip.duration <= 30 for clip in result.clips)
     assert all(left.end <= right.start for left, right in zip(result.clips, result.clips[1:]))
     assert any("instead of 5" in warning and "no clips were padded or duplicated" in warning for warning in result.warnings), result.warnings
