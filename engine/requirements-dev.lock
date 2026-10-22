@@ -1,2 +1,3 @@
 -r requirements.lock
 pytest==9.1.1
+pillow==13.0.0
