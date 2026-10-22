@@ -131,6 +131,20 @@ _TRANSCRIPTION_AUDIO_CONDITIONING = {
     "music": "music-unfiltered-v1",
 }
 
+# Language codes supported by the pinned Faster-Whisper 1.2.1 tokenizer. Keep
+# validation lightweight: importing the ML runtime in the API loads native libs.
+WHISPER_LANGUAGE_CODES = frozenset(
+    "af am ar as az ba be bg bn bo br bs ca cs cy da de el en es et eu fa fi fo fr "
+    "gl gu ha haw he hi hr ht hu hy id is it ja jw ka kk km kn ko la lb ln lo lt "
+    "lv mg mi mk ml mn mr ms mt my ne nl nn no oc pa pl ps pt ro ru sa sd si sk "
+    "sl sn so sq sr su sv sw ta te tg th tk tl tr tt uk ur uz vi yi yo yue zh".split()
+)
+
+_MUSIC_LANGUAGE_DETECTION = {
+    "language_detection_segments": 3,
+    "language_detection_threshold": 0.8,
+}
+
 
 def _whisper_repo_id(model: str) -> str:
     """Hugging Face repo ID for a faster-whisper model name or explicit repo ID."""
@@ -171,7 +185,7 @@ def transcription_options(
         resolved_words = settings.whisper_word_timestamps
     else:
         resolved_words = bool(word_timestamps)
-    return {
+    options = {
         "profile": profile,
         "model": model,
         "language": language,
@@ -182,6 +196,12 @@ def transcription_options(
         "vad_filter": profile == "speech",
         "audio_conditioning": _TRANSCRIPTION_AUDIO_CONDITIONING[profile],
     }
+    if profile == "music":
+        # Slow songs can begin with 30+ seconds of instruments. Do not commit
+        # to a low-confidence language guess from only that first window.
+        # Include these settings in the cache identity as well as the decoder.
+        options.update(_MUSIC_LANGUAGE_DETECTION)
+    return options
 
 
 def transcription_cache_identity(
@@ -871,6 +891,8 @@ def transcribe(
         "vad_filter": options["vad_filter"],
         "beam_size": run_beam,
     }
+    if profile == "music":
+        transcribe_kwargs.update({key: options[key] for key in _MUSIC_LANGUAGE_DETECTION})
     if options["language"] is not None:
         transcribe_kwargs["language"] = options["language"]
     segments, info = model.transcribe(str(path), **transcribe_kwargs)

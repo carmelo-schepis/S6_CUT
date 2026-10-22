@@ -223,6 +223,7 @@ type ClipJobInput = {
   musicTrackFile?: File;
   musicTrackUrl?: string;
   musicTrackSpeed?: number;
+  musicLyricsLanguage?: string;
   musicAudioMode?: "song_only" | "mix_original";
   musicSongGain?: number;
   hookText?: boolean;
@@ -259,6 +260,7 @@ export async function createClipJob(input: ClipJobInput): Promise<{ project: Pro
   if (input.libraryFolderId) form.set("library_folder_id", input.libraryFolderId);
   if (input.subscribeAnimation) form.set("subscribe_animation", JSON.stringify(input.subscribeAnimation));
   if (input.sourceProfile === "music") {
+    if (input.musicLyricsLanguage) form.set("music_lyrics_language", input.musicLyricsLanguage);
     form.set("music_presentation", JSON.stringify(input.musicPresentation ?? { version: 1, subtitleTheme: "clean" }));
     if (input.musicTopText !== undefined) form.set("music_top_text", input.musicTopText);
     if (input.musicTrackFile) form.set("music_track_file", input.musicTrackFile);

@@ -151,6 +151,17 @@ Smart-mode transcription runs locally with Faster-Whisper. The CPU-friendly defa
 - On an NVIDIA GPU, set `S6_WHISPER_DEVICE=cuda` with `S6_WHISPER_COMPUTE_TYPE=float16` for the fastest decode.
 - `S6_WHISPER_WORD_TIMESTAMPS=false` skips per-word alignment (faster) but disables word-timed captions; keep it `true` for captioned clips.
 
+Music mode uses a separate local model (`S6_MUSIC_WHISPER_MODEL=small`, beam 5).
+For slow songs with quiet vocals or a long instrumental intro, choose **Lyrics
+language → English** (or the appropriate language) in Music creation. Automatic
+detection now considers up to three initial audio windows instead of relying only
+on the intro. New Music transcripts use a separate cache identity for these
+settings. Existing completed videos need a new job or reviewed caption rerender
+to change their lyrics. Recognition can still make word/timing mistakes; see the
+[slow-song diagnosis and local-first accuracy plan](docs/reviews/slow-song-lyric-accuracy.md)
+for the verified Cigarettes After Sex reproduction and proposed local reference
+lyrics/alignment workflow.
+
 Whisper job stages report real, incrementally observed progress: each fraction is derived from an actual decoded segment boundary (`segment.end / duration`), never simulated, and stage labels show the text of the segment just decoded. YouTube imports likewise persist actual downloader byte counts, known totals, speed, ETA, and the last byte-progress timestamp in the job record. A retained partial can be retried with yt-dlp continuation; the import only cleans partial artifacts inside that job directory when it needs a fallback attempt. The engine checks the model cache on disk, so a pre-downloaded model (under `S6_DATA_PATH/models`) skips straight to transcription.
 
 ## Provider and fallback matrix

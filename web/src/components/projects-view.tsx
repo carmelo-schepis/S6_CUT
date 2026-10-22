@@ -53,6 +53,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
   const [executionPolicy, setExecutionPolicy] = useState<"auto" | "engine_only">("auto");
   const [sourceProfile, setSourceProfile] = useState<SourceProfile>("speech");
   const [musicTheme, setMusicTheme] = useState<MusicTheme>("clean");
+  const [musicLyricsLanguage, setMusicLyricsLanguage] = useState("");
   const [musicTopText, setMusicTopText] = useState("");
   const [musicTrackFile, setMusicTrackFile] = useState<File | null>(null);
   const musicTrackInput = useRef<HTMLInputElement>(null);
@@ -168,7 +169,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
           // Eligible: always send the explicit choice so an untick is respected.
           ...(metadataDisabledReason === null ? { youtubeMetadata: youtubeMetadataActive } : {}),
           subscribeAnimation, libraryFolderId: libraryFolderId || undefined, libraryOverlaysEnabled: libraryOverlaysEnabled && libraryOverlaysSupported,
-          ...(sourceProfile === "music" ? { musicPresentation: { version: 1 as const, subtitleTheme: musicTheme }, musicTopText: musicHookTextEnabled ? musicTopText : "" } : {}),
+          ...(sourceProfile === "music" ? { musicPresentation: { version: 1 as const, subtitleTheme: musicTheme }, musicTopText: musicHookTextEnabled ? musicTopText : "", musicLyricsLanguage: musicLyricsLanguage || undefined } : {}),
           ...(sourceProfile === "music" ? { musicTrackFile: musicTrackFile || undefined, musicTrackUrl: musicTrackUrl.trim() || undefined, musicTrackSpeed: Number(musicTrackSpeed), musicAudioMode, ...(musicAudioMode === "mix_original" ? { musicSongGain: musicSongVolume / 100 } : {}) } : {}),
         });
       if (libraryFolderId) localStorage.setItem(RECENT_FOLDER_KEY, libraryFolderId);
@@ -273,6 +274,15 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
 
           <>
             {sourceProfile === "music" && <FieldGroup title="Lyrics presentation" hint={MUSIC_PROFILE_NOTE}>
+              <Field label="Lyrics language" hint="For quiet vocals or a long instrumental intro, choose the song’s language to improve recognition.">
+                <select aria-label="Lyrics language" value={musicLyricsLanguage} onChange={(event) => setMusicLyricsLanguage(event.target.value)}>
+                  <option value="">Detect automatically</option>
+                  <option value="en">English</option><option value="es">Spanish</option><option value="fr">French</option>
+                  <option value="de">German</option><option value="it">Italian</option><option value="pt">Portuguese</option>
+                  <option value="ar">Arabic</option><option value="zh">Chinese</option><option value="hi">Hindi</option>
+                  <option value="ja">Japanese</option><option value="ko">Korean</option><option value="ru">Russian</option>
+                </select>
+              </Field>
               <div role="group" aria-label="Lyrics subtitle theme">
               <p className="music-theme-group-label">Current styles</p>
               <div className="music-theme-options">

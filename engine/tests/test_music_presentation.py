@@ -15,6 +15,42 @@ from engine.models import Clip, Job, MusicPresentationConfig, Project
 client = TestClient(app)
 
 
+@pytest.mark.parametrize("language", [None, "en", "fr", "yue"])
+def test_music_lyrics_language_is_persisted_for_worker_and_cache(monkeypatch, language) -> None:
+    from engine import app as app_module
+
+    monkeypatch.setattr(app_module, "_rate_limit", lambda request: None)
+    monkeypatch.setattr(app_module, "validate_video_upload", lambda *args, **kwargs: {"duration": 40.0, "width": 640, "height": 360, "audio": True})
+    monkeypatch.setattr(app_module.profiles, "smart_available", lambda: False)
+    monkeypatch.setattr(app_module.manager.queue, "full", lambda: False)
+    async def enqueue(_: str) -> None:
+        return None
+    monkeypatch.setattr(app_module.manager, "enqueue", enqueue)
+    fields = {"source_profile": "music", "count": "1", "min_duration": "8", "max_duration": "20", "library_folder_id": app_module.db.list_folders()[0].id}
+    if language:
+        fields["music_lyrics_language"] = language
+    response = client.post("/api/v1/jobs/clip", data=fields, files={"file": ("song.mp4", b"fixture", "video/mp4")})
+    assert response.status_code == 202, response.text
+    private = app_module.db.get_job_private(response.json()["job"]["id"])
+    assert private.get("transcription_language") == language
+
+
+@pytest.mark.parametrize("profile,language", [("music", "xx"), ("music", "EN"), ("music", "eng"), ("speech", "en")])
+def test_invalid_or_speech_lyrics_language_is_rejected_before_upload(monkeypatch, profile, language) -> None:
+    from engine import app as app_module
+
+    monkeypatch.setattr(app_module, "_rate_limit", lambda request: None)
+    def unexpected_validation(*args, **kwargs):
+        pytest.fail("Invalid lyrics language must fail before media validation")
+    monkeypatch.setattr(app_module, "validate_video_upload", unexpected_validation)
+    monkeypatch.setattr(app_module.manager.queue, "full", lambda: False)
+    response = client.post("/api/v1/jobs/clip", data={
+        "source_profile": profile, "music_lyrics_language": language,
+        "library_folder_id": app_module.db.list_folders()[0].id,
+    }, files={"file": ("song.mp4", b"fixture", "video/mp4")})
+    assert response.status_code == 422, response.text
+
+
 def test_legacy_project_and_job_payloads_keep_music_defaults() -> None:
     project = Project.model_validate({
         "id": "legacy-project", "name": "Legacy", "mode": "clip", "style": "serious",

@@ -50,6 +50,7 @@ describe("engine API boundary", () => {
       expect(body.get("processing_mode")).toBe("fast");
       expect(body.get("execution_policy")).toBe("engine_only");
       expect(body.get("source_profile")).toBe("speech");
+      expect(body.has("music_lyrics_language")).toBe(false);
       expect(body.get("batch_mode")).toBe("high_volume");
       expect(body.get("style")).toBe("serious");
       expect(body.get("library_folder_id")).toBe("business-1");
@@ -69,6 +70,7 @@ describe("engine API boundary", () => {
     const result = await createClipJob({
       style: "serious", count: 3, minDuration: 20, maxDuration: 60, aspectRatio: "9:16",
       batchMode: "high_volume", processingMode: "fast", executionPolicy: "engine_only", libraryFolderId: "business-1",
+      musicLyricsLanguage: "en",
     });
     expect(result.project.id).toBe("p");
     expect(result.job.processingMode).toBe("smart"); // legacy backend omission defaults to Smart
@@ -146,6 +148,7 @@ describe("engine API boundary", () => {
     vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
       const body = init?.body as FormData;
       expect(body.get("source_profile")).toBe("music");
+      expect(body.get("music_lyrics_language")).toBe("en");
       expect(body.get("processing_mode")).toBe("smart");
       return new Response(JSON.stringify({
         project: {
@@ -162,7 +165,7 @@ describe("engine API boundary", () => {
     }));
     const result = await createClipJob({
       style: "serious", count: 1, minDuration: 8, maxDuration: 20, aspectRatio: "9:16",
-      processingMode: "smart", sourceProfile: "music",
+      processingMode: "smart", sourceProfile: "music", musicLyricsLanguage: "en",
     });
     expect(result.project.sourceProfile).toBe("music");
     expect(result.job.sourceProfile).toBe("music");
