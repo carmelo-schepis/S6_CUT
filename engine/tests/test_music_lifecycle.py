@@ -181,3 +181,31 @@ def test_stop_wins_after_song_import_retry(cluster, monkeypatch, stop_before_wor
     manager._process('job')
     assert database.get_job('job').state == 'cancelled_kept'
     assert bool(called) is not stop_before_worker
+
+
+def test_export_manifest_adds_resolved_music_presentation_keys(cluster):
+    from engine.models import MusicPresentationConfig
+
+    database, manager, _, _, _ = cluster
+    job = database.get_job('job')
+    job.music_presentation = MusicPresentationConfig(subtitle_theme='condensed_white', lyric_animation='slow_fade', hook_text_format='white_banner')
+    job.music_top_text = 'Exact hook'
+    database.save_job(job)
+    archive = manager.build_export('job', ['clip'])
+    with zipfile.ZipFile(archive) as export:
+        names = sorted(export.namelist())
+        manifest = json.loads(export.read('Soundtrack lifecycle/manifest.json'))
+    output = manifest['outputs'][0]
+    assert output['music_presentation'] == {'subtitle_theme': 'condensed_white', 'lyric_animation': 'slow_fade', 'hook_text_format': 'white_banner'}
+    assert output['music_top_text'] == 'Exact hook'
+    # Existing keys and files are untouched.
+    assert {'music_track', 'music_audio', 'hook_text', 'provenance', 'filename'} <= set(output)
+    assert any(name.endswith('manifest.json') for name in names) and any(name.endswith('.mp4') for name in names)
+    # Omitted options resolve to Original / Plain without inventing a hook.
+    job.music_presentation = MusicPresentationConfig(subtitle_theme='warm')
+    job.music_top_text = None
+    database.save_job(job)
+    with zipfile.ZipFile(manager.build_export('job', ['clip'])) as export:
+        resolved = json.loads(export.read('Soundtrack lifecycle/manifest.json'))['outputs'][0]
+    assert resolved['music_presentation'] == {'subtitle_theme': 'warm', 'lyric_animation': 'legacy', 'hook_text_format': 'plain'}
+    assert resolved['music_top_text'] is None

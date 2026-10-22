@@ -15,6 +15,17 @@ describe("versioned UI contracts", () => {
     expect(musicPresentationSchema.parse({ version: 1, subtitleTheme: "clean" })).toEqual({ version: 1, subtitleTheme: "clean" });
     expect(() => musicPresentationSchema.parse({ version: 1, subtitleTheme: "unsupported" })).toThrow();
   });
+  it("accepts the additive typography themes, lyric animation and hook format without changing version 1", () => {
+    for (const subtitleTheme of ["condensed_black", "condensed_white", "handwritten_stack"]) {
+      expect(musicPresentationSchema.parse({ version: 1, subtitleTheme })).toEqual({ version: 1, subtitleTheme });
+    }
+    expect(musicPresentationSchema.parse({ version: 1, subtitleTheme: "clean", lyricAnimation: "line_crossfade", hookTextFormat: "white_banner" })).toEqual({ version: 1, subtitleTheme: "clean", lyricAnimation: "line_crossfade", hookTextFormat: "white_banner" });
+    for (const lyricAnimation of ["legacy", "slow_fade", "line_crossfade", "word_build", null]) expect(musicPresentationSchema.parse({ version: 1, subtitleTheme: "clean", lyricAnimation }).lyricAnimation).toBe(lyricAnimation);
+    expect(() => musicPresentationSchema.parse({ version: 1, subtitleTheme: "clean", lyricAnimation: "spin" })).toThrow();
+    expect(() => musicPresentationSchema.parse({ version: 1, subtitleTheme: "clean", hookTextFormat: "neon" })).toThrow();
+    // A historical two-field response parses without gaining keys.
+    expect(Object.keys(musicPresentationSchema.parse({ version: 1, subtitleTheme: "warm" }))).toEqual(["version", "subtitleTheme"]);
+  });
   it("rejects malformed clip ranges and scores", () => {
     expect(() => clipSchema.parse({ id: "one", index: 1, state: "complete", start: -1, end: 5, duration: 6, openingLine: "Hello", score, selected: true, fallbackUsed: false, provenance: [] })).toThrow();
     expect(() => clipSchema.parse({ id: "one", index: 1, state: "complete", start: 0, end: 5, duration: 5, openingLine: "Hello", score: { ...score, total: 102 }, selected: true, fallbackUsed: false, provenance: [] })).toThrow();

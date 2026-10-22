@@ -159,6 +159,26 @@
       "use": "Selected visual-fit candidate for the reference white serif preset, not a claim to recover the screenshot's source font; bundled variable face default axes (opsz 14, wght 400) were confirmed by production libass selecting BodoniModa-Regular",
       "vendoredAt": "engine/fonts/bodoni_moda/BodoniModa-Variable.ttf; web/public/fonts/bodoni_moda/BodoniModa-Variable.ttf",
       "licenceFile": "engine/fonts/bodoni_moda/OFL.txt"
+    },
+    {
+      "name": "Oswald Regular",
+      "version": "Static wght=400 instance of the Oswald[wght] variable font at google/fonts commit 45e3d5269e4a17d823f6d84470bc084dc5ae46f6 (upstream sha256 5b38c246e255a12f5712d640d56bcced0472466fc68983d2d0410ec0457c2817)",
+      "licence": "SIL Open Font License 1.1",
+      "source": "https://github.com/google/fonts/tree/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/oswald",
+      "sha256": "d2327333d1d63b1c656938170a52c24963ebecb580d9e99204dbf4d060e3f03b",
+      "use": "Music condensed black/white lyric themes (visual-fit candidate for the condensed reference lettering, not a claim to recover the creators' font). Generated deterministically by scripts/build-music-fonts.py with fontTools varLib.instancer (wght=400, names updated) so libass never has to choose a variable-font axis; the web preview file is a Latin subset (sha256 ab2861cae8947974f3fc4bacb2fa22fe985837f0735b465fba01c368081b9b4b).",
+      "vendoredAt": "engine/fonts/oswald/Oswald-Regular.ttf; web/public/fonts/oswald/Oswald-Regular.ttf",
+      "licenceFile": "engine/fonts/oswald/OFL.txt"
+    },
+    {
+      "name": "Gaegu Bold",
+      "version": "Gaegu-Bold.ttf static TTF at google/fonts commit 45e3d5269e4a17d823f6d84470bc084dc5ae46f6",
+      "licence": "SIL Open Font License 1.1",
+      "source": "https://github.com/google/fonts/tree/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/gaegu/Gaegu-Bold.ttf",
+      "sha256": "cc38a4af9506a45254d1ce07c589ec473d9e5f0be319e5a77b17c214903f8c1c",
+      "use": "Music handwritten stack lyric theme (visual-fit candidate for the rounded handwritten reference, not a claim to recover the creator's font). The engine file is the unmodified upstream asset; the web preview file is a Latin subset of it (sha256 a5f589c5fcb8fa3beb9bd28e05ce0b03b988bc2965b751be99fb1596bd929a10).",
+      "vendoredAt": "engine/fonts/gaegu/Gaegu-Bold.ttf; web/public/fonts/gaegu/Gaegu-Bold.ttf",
+      "licenceFile": "engine/fonts/gaegu/OFL.txt"
     }
   ]
 }

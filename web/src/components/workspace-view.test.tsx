@@ -764,3 +764,41 @@ describe("WorkspaceView – stable responsive media controls", () => {
     expect(pauseMethod).toHaveBeenCalled();
   });
 });
+describe("WorkspaceView – Music presentation details", () => {
+  const musicJob: Job = {
+    ...responsiveJob, sourceProfile: "music",
+    musicPresentation: { version: 1, subtitleTheme: "handwritten_stack", lyricAnimation: "word_build", hookTextFormat: "white_banner" },
+    musicTopText: "Exact hook line",
+  };
+
+  it("shows the saved typography, motion and hook format read-only", async () => {
+    mockGetJob.mockResolvedValue(musicJob);
+    renderView({ project: { ...project, sourceProfile: "music" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Captions" }));
+    const summary = screen.getByLabelText("Music presentation");
+    expect(summary).toHaveTextContent("Handwritten stack");
+    expect(summary).toHaveTextContent("Word build");
+    expect(summary).toHaveTextContent("Exact hook line");
+    expect(summary).toHaveTextContent("White banner");
+    expect(summary).toHaveTextContent("Read-only");
+    expect(summary.querySelector("input, select, button")).toBeNull();
+  });
+
+  it("resolves omitted options to Original and Plain, and hides the format when there is no hook", async () => {
+    mockGetJob.mockResolvedValue({ ...musicJob, musicPresentation: { version: 1, subtitleTheme: "warm" }, musicTopText: null });
+    renderView({ project: { ...project, sourceProfile: "music" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Captions" }));
+    const summary = screen.getByLabelText("Music presentation");
+    expect(summary).toHaveTextContent("Warm highlight");
+    expect(summary).toHaveTextContent("Original");
+    expect(summary).toHaveTextContent("Off");
+    expect(summary).not.toHaveTextContent("Hook format");
+  });
+
+  it("is not shown for Speech jobs", async () => {
+    mockGetJob.mockResolvedValue(responsiveJob);
+    renderView();
+    fireEvent.click(await screen.findByRole("button", { name: "Captions" }));
+    expect(screen.queryByLabelText("Music presentation")).not.toBeInTheDocument();
+  });
+});
