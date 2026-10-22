@@ -417,6 +417,7 @@ def test_shorts_editor_caption_request_uses_smart_pipeline(monkeypatch) -> None:
     assert body["job"]["libraryOverlaysEnabled"] is False
     assert [step["id"] for step in body["job"]["steps"]][:4] == ["source", "probe", "audio", "transcribe"]
     assert saved["private"]["processing_mode"] == "smart"
+    assert saved["private"]["transcription_language"] == "en"
     assert saved["private"]["subscribe_animation"] == {"version": 1, "enabled": True, "short_form_lead_seconds": 10}
 
 
@@ -448,6 +449,7 @@ def test_shorts_library_request_persists_animation_configuration(monkeypatch, tm
     assert saved["private"]["trim_end"] == 12
     assert saved["private"]["source_path"] == str(source)
     assert saved["private"]["source_hash"] == asset.content_hash
+    assert saved["private"]["transcription_language"] == "en"
     assert response.json()["project"]["sourceName"] == asset.filename
     assert response.json()["job"]["clips"][0]["start"] == 2
     assert response.json()["job"]["clips"][0]["end"] == 12

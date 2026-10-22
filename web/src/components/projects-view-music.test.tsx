@@ -27,22 +27,25 @@ const chooseFile = () => fireEvent.change(screen.getByLabelText("Choose video fi
 beforeEach(() => { vi.mocked(createClipJob).mockReset(); });
 
 describe("Music presentation creation controls", () => {
-  it("offers automatic lyrics language and sends an explicit English choice only in Music", async () => {
+  it("defaults Music to English and preserves explicit automatic detection", async () => {
     vi.mocked(createClipJob).mockResolvedValue({ project, job: undefined as never });
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
     expect(screen.queryByRole("combobox", { name: "Lyrics language" })).not.toBeInTheDocument();
     fireEvent.click(mode("Music"));
     const language = screen.getByRole("combobox", { name: "Lyrics language" });
-    expect(language).toHaveValue("");
-    fireEvent.change(language, { target: { value: "en" } });
+    expect(language).toHaveValue("en");
     chooseFile();
     fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
     await waitFor(() => expect(createClipJob).toHaveBeenCalledTimes(1));
     expect(vi.mocked(createClipJob).mock.calls[0][0]).toMatchObject({ sourceProfile: "music", musicLyricsLanguage: "en" });
-    fireEvent.click(mode("Clip"));
+    fireEvent.change(language, { target: { value: "auto" } });
     fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
     await waitFor(() => expect(createClipJob).toHaveBeenCalledTimes(2));
-    expect(vi.mocked(createClipJob).mock.calls[1][0]).not.toHaveProperty("musicLyricsLanguage");
+    expect(vi.mocked(createClipJob).mock.calls[1][0]).toMatchObject({ sourceProfile: "music", musicLyricsLanguage: "auto" });
+    fireEvent.click(mode("Clip"));
+    fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
+    await waitFor(() => expect(createClipJob).toHaveBeenCalledTimes(3));
+    expect(vi.mocked(createClipJob).mock.calls[2][0]).not.toHaveProperty("musicLyricsLanguage");
   });
 
   it("keeps Clip as the initial mode and promotes Music", () => {

@@ -153,10 +153,14 @@ Smart-mode transcription runs locally with Faster-Whisper. The CPU-friendly defa
 - On an NVIDIA GPU, set `S6_WHISPER_DEVICE=cuda` with `S6_WHISPER_COMPUTE_TYPE=float16` for the fastest decode.
 - `S6_WHISPER_WORD_TIMESTAMPS=false` skips per-word alignment (faster) but disables word-timed captions; keep it `true` for captioned clips.
 
+New content and clips default to **English** transcription in Speech and Music,
+including short-form, long-form, and high-volume jobs. Generated captions, hooks,
+and metadata use that transcript. This does not translate or dub source audio.
 Music mode uses a separate local model (`S6_MUSIC_WHISPER_MODEL=small`, beam 5).
-For slow songs with quiet vocals or a long instrumental intro, choose **Lyrics
-language → English** (or the appropriate language) in Music creation. Automatic
-detection now considers up to three initial audio windows instead of relying only
+**Lyrics language** starts on **English**; choose another language or explicitly
+select **Detect automatically** for other songs. API clients can send
+`music_lyrics_language=auto` to request automatic detection. Automatic
+detection considers up to three initial audio windows instead of relying only
 on the intro. New Music transcripts use a separate cache identity for these
 settings. Existing completed videos need a new job or reviewed caption rerender
 to change their lyrics. Recognition can still make word/timing mistakes; see the

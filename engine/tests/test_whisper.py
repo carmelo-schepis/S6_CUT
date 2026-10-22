@@ -333,6 +333,13 @@ class TestMediaDuration:
 
 
 class TestWhisperModelCached:
+    @pytest.mark.parametrize("profile", ["speech", "music"])
+    def test_default_english_cache_is_separate_from_auto_detection(self, settings: Settings, profile: str) -> None:
+        default = transcription_cache_key("same-source", settings, profile=profile)
+        assert default == transcription_cache_key("same-source", settings, profile=profile, language="en")
+        assert default != transcription_cache_key("same-source", settings, profile=profile, language=None)
+        assert default != transcription_cache_key("same-source", settings, profile=profile, language="fr")
+
     def test_not_cached_when_no_model_dir(self, settings: Settings, tmp_path: Path) -> None:
         # Point to a clean temp dir so no models are cached
         s = Settings(
@@ -595,6 +602,14 @@ class TestTranscribeSignature:
 
 
 class TestTranscribeModelInit:
+    @pytest.mark.parametrize("profile", ["speech", "music"])
+    @pytest.mark.parametrize("overrides,expected", [({}, "en"), ({"language": None}, None), ({"language": "fr"}, "fr")])
+    def test_language_default_and_explicit_overrides_reach_decoder(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, profile: str, overrides: dict, expected: str | None) -> None:
+        _mock_whisper(monkeypatch)
+        transcribe(_dummy_source(tmp_path), Settings.from_env(), profile=profile, **overrides)
+        tx_call = next(entry[1] for entry in MockWhisperModel.LOG if entry[0] == "transcribe")
+        assert tx_call.get("language") == expected
+
     def test_model_init_uses_settings_defaults(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         _mock_whisper(monkeypatch)
         monkeypatch.setattr("engine.media._media_duration", lambda *a, **kw: 30.0)
@@ -642,7 +657,7 @@ class TestTranscribeModelInit:
 
     def test_music_auto_detection_checks_beyond_instrumental_intro(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         _mock_whisper(monkeypatch)
-        transcribe(_dummy_source(tmp_path), Settings.from_env(), profile="music")
+        transcribe(_dummy_source(tmp_path), Settings.from_env(), profile="music", language=None)
         tx_call = next(entry[1] for entry in MockWhisperModel.LOG if entry[0] == "transcribe")
         assert "language" not in tx_call
         assert tx_call["language_detection_segments"] == 3
@@ -676,6 +691,7 @@ class TestTranscribeModelInit:
         assert kwargs["beam_size"] == 2
         assert kwargs["word_timestamps"] is False
         assert kwargs["vad_filter"] is True
+        assert kwargs["language"] == "en"
         assert "language_detection_segments" not in kwargs
         assert "language_detection_threshold" not in kwargs
 

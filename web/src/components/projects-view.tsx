@@ -54,7 +54,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
   const [executionPolicy, setExecutionPolicy] = useState<"auto" | "engine_only">("auto");
   const [sourceProfile, setSourceProfile] = useState<SourceProfile>("speech");
   const [musicTheme, setMusicTheme] = useState<MusicTheme>("clean");
-  const [musicLyricsLanguage, setMusicLyricsLanguage] = useState("");
+  const [musicLyricsLanguage, setMusicLyricsLanguage] = useState("en");
   const [musicLyricAnimation, setMusicLyricAnimation] = useState<MusicLyricAnimation>("legacy");
   const [musicHookFormat, setMusicHookFormat] = useState<MusicHookTextFormat>("plain");
   const [musicTopText, setMusicTopText] = useState("");
@@ -276,9 +276,9 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
 
           <>
             {sourceProfile === "music" && <FieldGroup title="Lyrics presentation" hint={MUSIC_PROFILE_NOTE}>
-              <Field label="Lyrics language" hint="For quiet vocals or a long instrumental intro, choose the song’s language to improve recognition.">
+              <Field label="Lyrics language" hint="English is the default. Choose another language or automatic detection for songs in other languages.">
                 <select aria-label="Lyrics language" value={musicLyricsLanguage} onChange={(event) => setMusicLyricsLanguage(event.target.value)}>
-                  <option value="">Detect automatically</option>
+                  <option value="auto">Detect automatically</option>
                   <option value="en">English</option><option value="es">Spanish</option><option value="fr">French</option>
                   <option value="de">German</option><option value="it">Italian</option><option value="pt">Portuguese</option>
                   <option value="ar">Arabic</option><option value="zh">Chinese</option><option value="hi">Hindi</option>
