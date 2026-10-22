@@ -31,6 +31,14 @@ def test_supervision_propagates_profile_and_language_through_spawn(tmp_path: Pat
     assert result == {"profile": "music", "language": "fr"}
 
 
+@pytest.mark.parametrize("profile", ["speech", "music"])
+def test_supervision_defaults_to_english_through_spawn(tmp_path: Path, profile: str) -> None:
+    source = tmp_path / "audio.wav"
+    source.write_bytes(b"test")
+    result = supervise(source, Settings.from_env(), worker=_profile_worker, profile=profile)
+    assert result == {"profile": profile, "language": "en"}
+
+
 def test_supervision_uses_a_fresh_spawned_interpreter(monkeypatch, tmp_path: Path) -> None:
     """A threaded server must not fork native Whisper/OpenMP state."""
     requested: list[str] = []
