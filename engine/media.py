@@ -1508,7 +1508,7 @@ def _music_hook_banner_events(text: str, *, width: int, height: int, duration: f
     rect = f"m 0 {plan.top} l {width} {plan.top} {width} {plan.bottom} 0 {plan.bottom}"
     return [
         f"Dialogue: 15,{_ass_time(0)},{end},HookScrim,,0,0,0,,{{\\p1\\an7\\pos(0,0)\\1c&HFFFFFF&\\1a&H00&\\bord0\\shad0}}{rect}{{\\p0}}",
-        f"Dialogue: 20,{_ass_time(0)},{end},MusicTop,,0,0,0,,{{\\an5\\pos({width // 2},{round(plan.centre_y)})\\fnBarlow\\b1\\fs{plan.font_size}\\1c&H000000&\\1a&H00&\\bord0\\shad0}}{body}",
+        f"Dialogue: 20,{_ass_time(0)},{end},MusicTop,,0,0,0,,{{\\an5\\q2\\pos({width // 2},{round(plan.centre_y)})\\fnBarlow\\b1\\fs{plan.font_size}\\1c&H000000&\\1a&H00&\\bord0\\shad0}}{body}",
     ]
 
 

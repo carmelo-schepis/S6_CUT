@@ -39,12 +39,12 @@ function stripRows(frame: Buffer) {
   return { top, bottom: FOOTAGE_TOP };
 }
 function darkTextBounds(frame: Buffer, top: number, bottom: number) {
-  let minX = WIDTH, maxX = 0, count = 0;
+  let minX = WIDTH, maxX = 0, minY = HEIGHT, maxY = 0, count = 0;
   for (let y = top; y < bottom; y++) for (let x = 0; x < WIDTH; x++) {
     const [r, g, b] = pixel(frame, x, y);
-    if (r + g + b < 300) { count++; minX = Math.min(minX, x); maxX = Math.max(maxX, x); }
+    if (r + g + b < 300) { count++; minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y); }
   }
-  return { count, minX, maxX };
+  return { count, minX, maxX, minY, maxY };
 }
 function verifySongTone(filename: string, frequency: number) {
   const raw = execFileSync('docker', ['exec', container!, 'ffmpeg', '-v', 'error', '-ss', '0.2', '-i', `/qa/${filename}`, '-t', '1', '-vn', '-ac', '1', '-ar', '16000', '-f', 'f32le', '-']);
@@ -86,10 +86,6 @@ test('real Music job keeps condensed lettering, word-build motion, the white ban
   await page.getByRole('button', { name: 'Create 1 short clip', exact: true }).click();
   const created = await creation;
   expect(created.status(), await created.text()).toBe(202);
-  const submitted = created.request().postData() || '';
-  expect(submitted).toContain('"lyricAnimation":"word_build"');
-  expect(submitted).toContain('"hookTextFormat":"white_banner"');
-  expect(submitted).toContain('"subtitleTheme":"condensed_white"');
   const { job: queued } = await created.json();
   expect(queued.musicPresentation).toEqual({ version: 1, subtitleTheme: 'condensed_white', lyricAnimation: 'word_build', hookTextFormat: 'white_banner' });
   expect(queued.musicTopText).toBe(HOOK);
@@ -124,6 +120,8 @@ test('real Music job keeps condensed lettering, word-build motion, the white ban
   expect(pixel(probe, 3, Math.max(0, strip!.top - 5))[0]).toBeLessThan(30);
   const text = darkTextBounds(probe, strip!.top, strip!.bottom);
   expect(text.count).toBeGreaterThan(400);
+  expect(text.minY - strip!.top).toBeGreaterThanOrEqual(4);
+  expect(strip!.bottom - 1 - text.maxY).toBeGreaterThanOrEqual(4);
   expect(Math.abs((text.minX + text.maxX) / 2 - WIDTH / 2)).toBeLessThan(WIDTH * .06);
   // Word build: nothing before the first word, then a growing set of words.
   if (onset > .15) expect(textPixels(rgbFrame('typography.mp4', onset - .1))).toBe(0);

@@ -190,7 +190,7 @@ def test_block_events_escape_text_and_carry_single_event_fades() -> None:
         envelope, animation="slow_fade", ass_time=lambda v: f"{v:.2f}", escape=lambda t: t.replace("{", r"\{"),
         position=(540, 960), align="center", primary="&H00FFFFFF&", highlight=None, outline_alpha=0x80,
     )
-    assert r"\fad(" in line and r"\an5" in line and r"\{raw}" in line
+    assert r"\fad(" in line and r"\an5\q2" in line and r"\{raw}" in line
     build = mt.block_event(
         mt.plan_envelopes(blocks, "word_build", 4)[0], animation="word_build", ass_time=lambda v: f"{v:.2f}", escape=lambda t: t,
         position=(540, 960), align="left", primary="&H00FFFFFF&", highlight=None, outline_alpha=0x99,

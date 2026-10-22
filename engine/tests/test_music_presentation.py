@@ -155,6 +155,8 @@ def test_rejected_video_does_not_stage_the_uploaded_song(monkeypatch, tmp_path: 
     mp3 = tmp_path / "song.mp3"
     subprocess.run([runtime.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=1", "-codec:a", "libmp3lame", "-q:a", "4", str(mp3)], check=True, capture_output=True)
     monkeypatch.setattr(app_module, "validate_video_upload", lambda *args, **kwargs: (_ for _ in ()).throw(MediaError("invalid video")))
+    # Earlier tests enqueue into the shared, worker-less queue; this one is about validation, not capacity.
+    monkeypatch.setattr(app_module.manager.queue, "full", lambda: False)
     before = set((app_module.settings.data_path / "jobs").glob("*/source/background.mp3"))
     folder = app_module.db.list_folders()[0]
     fields = {"source_profile": "music", "processing_mode": "smart", "count": "1", "min_duration": "8", "max_duration": "20", "library_folder_id": folder.id}

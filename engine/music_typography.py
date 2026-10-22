@@ -299,7 +299,7 @@ def block_event(
     show = envelope.show_start
     x, y = position
     anchor = r"\an4" if align == "left" else r"\an5"
-    tags = [anchor, rf"\pos({x},{y})", rf"\fs{max(1, round(block.font_size))}"]
+    tags = [anchor, r"\q2", rf"\pos({x},{y})", rf"\fs{max(1, round(block.font_size))}"]
     if animation != "word_build" and (envelope.fade_in > 0 or envelope.fade_out > 0):
         tags.append(rf"\fad({_ms(envelope.fade_in)},{_ms(envelope.fade_out)})")
     elif animation == "word_build" and envelope.fade_out > 0:

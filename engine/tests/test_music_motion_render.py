@@ -256,6 +256,7 @@ def test_white_banner_pixels_strip_text_and_untouched_footage() -> None:
     assert dark.sum() > 400, "black text expected on the strip"
     assert abs((xs.min() + xs.max()) / 2 - WIDTH / 2) < WIDTH * 0.06, "text is horizontally centred"
     assert xs.min() > WIDTH * 0.03 and xs.max() < WIDTH * 0.97
+    assert ys.min() >= 4 and ys.max() <= (bottom - top) - 4, "text must sit inside the strip with padding"
     bands = np.nonzero(np.diff((dark.any(axis=1)).astype(int)) == 1)[0]
     assert 1 <= len(bands) + int(dark[0].any()) <= 3, "wrapped onto up to three lines"
     reference = frame(none, 1.0)
