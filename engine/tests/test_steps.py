@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import threading
 import time
@@ -507,6 +508,8 @@ def test_music_smart_path_repeats_shortfall_windows_deterministically(
     assert calls and calls[0]["profile"] == "music"
     assert saved["transcript_cache_key"].startswith("transcript:v4:")
     assert saved["transcript"]["words"][0]["text"] == "Lyric0_0"
+    source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+    assert saved["source_hash"] == source_hash
     assert extracted_from == [tmp_path / "selected-song.mp3", tmp_path / "selected-song.mp3"]
     assert asr_audio_calls[0]["duration"] == 286.9
     assert len(result.clips) == expected_count
@@ -549,6 +552,7 @@ def test_music_smart_path_repeats_shortfall_windows_deterministically(
         assert recovered.state == "complete"
         assert [clip.id for clip in recovered.clips] == clip_ids
         assert len(test_db.list_assets(origin="generated-clip")) == expected_count
+        assert test_db.get_job_private(result.id)["source_hash"] == source_hash
         assert len([warning for warning in recovered.warnings if "valid unique lyric windows" in warning]) == 1
     else:
         assert not result.warnings, result.warnings

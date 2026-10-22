@@ -2291,16 +2291,16 @@ class JobManager:
         planning_duration = source_duration
         target = self._resolve_batch_target(job, private, planning_duration)
         if music_track_source is not None:
-            source_hash = _media_fn("music_transcription_source_hash")(
+            transcription_source_hash = _media_fn("music_transcription_source_hash")(
                 sha256_file(music_track_source), speed, transcript_duration,
             )
         else:
-            source_hash = str(private.get("source_hash") or sha256_file(source))
-        private["source_hash"] = source_hash
+            transcription_source_hash = str(private.get("source_hash") or sha256_file(source))
+            private["source_hash"] = transcription_source_hash
         language = private.get("transcription_language")
         beam = self.settings.music_whisper_beam_size if profile == "music" else self.settings.whisper_beam_size
         cache_key = transcription_cache_key(
-            source_hash,
+            transcription_source_hash,
             self.settings,
             profile=profile,
             language=language,
