@@ -4,6 +4,9 @@ test.use({ serviceWorkers: "block" });
 
 test("editorial style cards clearly mark exactly one selection by mouse and keyboard", async ({ page }) => {
   await page.goto("/", { waitUntil: "domcontentloaded" });
+  // DOM visibility does not guarantee keyboard access during startup.
+  await expect(page.locator("#startup-screen")).toHaveCount(0);
+  await expect(page.locator("#root")).not.toHaveAttribute("inert", "");
   const group = page.getByRole("region", { name: "Editorial style" });
   const cards = group.locator(".style-card");
   await expect(cards).toHaveCount(4);
@@ -13,6 +16,7 @@ test("editorial style cards clearly mark exactly one selection by mouse and keyb
   for (const title of ["Funny", "Serious", "Educational", "Hype"]) {
     const button = group.getByRole("button", { name: new RegExp(`^${title}`) });
     await button.focus();
+    await expect(button).toBeFocused();
     await button.press("Enter");
     await expect(button).toHaveAttribute("aria-pressed", "true");
     await expect(group.locator('[aria-pressed="true"]')).toHaveCount(1);
