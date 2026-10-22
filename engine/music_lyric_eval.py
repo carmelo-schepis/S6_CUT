@@ -26,7 +26,8 @@ def sha256(path: Path) -> str:
 
 
 def tokens(text: str) -> list[str]:
-    text = unicodedata.normalize("NFKC", text).casefold()
+    text = unicodedata.normalize("NFKC", text)
+    text = text.translate(str.maketrans({"’": "'", "‘": "'", "ʼ": "'"})).casefold()
     result: list[str] = []
     current: list[str] = []
     for char in text:

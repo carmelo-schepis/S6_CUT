@@ -32,7 +32,8 @@ The report includes normalized word-error rate and substitution/deletion/
 insertion counts, annotated instrumental insertions, optional word-boundary
 MAE, detected language, audio/reference SHA-256, transcription runtime, and
 process peak RSS. Punctuation and case are ignored; Unicode text is normalized
-with NFKC. It does not print or write either lyric text. Supply a stable,
+with NFKC, and curly apostrophes are canonicalized so contractions compare
+consistently. The command does not print or write lyric text. Supply a stable,
 non-sensitive fixture ID via `--track-id`; do not put lyric text in IDs.
 
 There is no human-reviewed Bubblegum reference in the saved jobs, so this
