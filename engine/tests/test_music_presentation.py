@@ -207,7 +207,7 @@ def test_music_renderer_contract_and_ass_boundaries(tmp_path: Path) -> None:
         caption_style = next(line for line in content.splitlines() if line.startswith("Style: Caption,"))
         assert caption_style.split(",")[18] == "5"  # Music lyrics occupy the source band, not the lower black margin
         title_event = next(line for line in events if ",MusicTop," in line)
-        assert title_event.startswith("Dialogue: 20,0,0:00:02.00,MusicTop,")
+        assert title_event.startswith("Dialogue: 20,0:00:00.00,0:00:02.00,MusicTop,")
         assert title_event.endswith(",," + escaped_title)
         top_style = next(line for line in content.splitlines() if line.startswith("Style: MusicTop,"))
         assert top_style.split(",")[2] == "54"  # top title size is not coupled to lyric scaling

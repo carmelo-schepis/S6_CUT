@@ -284,7 +284,7 @@ def test_youtube_creator_credit_shows_eight_seconds_then_fades_in_safe_corner(tm
     assert credit["Alignment"] == "3"  # lower-right, outside centred captions
     assert credit["MarginR"] == credit["MarginL"]
     assert int(credit["MarginV"]) == _credit_margin(1920) == 24
-    assert "Dialogue: 2,0,0:00:09.00,Credit,,0,0,0,,{\\fad(0,1000)}Source: Maker \\{One\\}" in ass
+    assert "Dialogue: 2,0:00:00.00,0:00:09.00,Credit,,0,0,0,,{\\fad(0,1000)}Source: Maker \\{One\\}" in ass
 
 
 @pytest.mark.parametrize(
@@ -296,7 +296,7 @@ def test_creator_credit_duration_and_fade_are_capped(duration: float, end: str, 
     write_ass(path, [], offset=0, duration=duration, visuals=[], width=1080, height=1920, creator_credit="Source: Creator")
     events = _dialogue_events(path.read_text(encoding="utf-8"), "Credit")
     assert len(events) == 1
-    assert events[0] == f"Dialogue: 2,0,{end},Credit,,0,0,0,,{fade}Source: Creator"
+    assert events[0] == f"Dialogue: 2,0:00:00.00,{end},Credit,,0,0,0,,{fade}Source: Creator"
 
 
 def test_youtube_creator_credit_does_not_change_caption_dialogues(tmp_path: Path) -> None:
