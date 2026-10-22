@@ -27,6 +27,7 @@ CROSSFADE_FADE_IN = 0.45  # first block, or a block that follows silence
 WORD_RAMP = 0.18
 WORD_RAMP_MIN = 0.04
 WORD_BUILD_FADE_OUT = 0.50
+WORD_BUILD_MIN_FADE_OUT = 0.20  # when the next block follows immediately
 READABLE_BLOCK_SECONDS = 1.2  # a block this short gets an end-of-phrase hold
 MAX_END_HOLD = 0.8
 MIN_READABLE_FRACTION = 0.40  # fully-opaque share of a block's lifetime
@@ -257,7 +258,10 @@ def plan_envelopes(blocks: Sequence[LyricBlock], animation: str, duration: float
             if next_start is not None:
                 end = min(end, max(hold_end, next_start))
             settled = start + ramps[-1].offset + ramps[-1].length
-            fade_out = min(WORD_BUILD_FADE_OUT, max(0.0, end - settled))
+            # The completed block gets a readable hold before it fades: the fade
+            # is as long as the time after the end-hold allows, but never shorter
+            # than the minimum nor starting before the last word has settled.
+            fade_out = min(WORD_BUILD_FADE_OUT, max(0.0, end - settled), max(WORD_BUILD_MIN_FADE_OUT, end - hold_end))
             fade_out = fade_out if fade_out >= MIN_OVERLAP else 0.0
             envelopes.append(BlockEnvelope(block, start, end, 0.0, fade_out, tuple(ramps)))
     return envelopes

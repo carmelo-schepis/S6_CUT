@@ -3048,6 +3048,15 @@ class JobManager:
                 "provenance": [record.model_dump(mode="json") for record in clip.provenance],
                 "music_track": clip.music_track.model_dump(mode="json") if clip.music_track else None,
                 "music_audio": {"mode": clip.music_audio_mode.value, "song_gain": clip.music_song_gain, "original_audio_gain": clip.music_original_audio_gain},
+                # Additive, Music jobs only: resolved choices (omitted options mean Original / Plain).
+                **({
+                    "music_presentation": {
+                        "subtitle_theme": job.music_presentation.subtitle_theme if job.music_presentation else "clean",
+                        "lyric_animation": (job.music_presentation.lyric_animation if job.music_presentation else None) or "legacy",
+                        "hook_text_format": (job.music_presentation.hook_text_format if job.music_presentation else None) or "plain",
+                    },
+                    "music_top_text": clip.music_top_text or job.music_top_text,
+                } if job.source_profile == "music" else {}),
             })
             if clip.creator_credit or clip.provenance:
                 credits.append({
