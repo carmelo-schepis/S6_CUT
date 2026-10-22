@@ -1623,7 +1623,7 @@ class JobManager:
 
     def _transcribe_with_stages(self, job: Job, audio: Path, duration: float, private: dict[str, Any]) -> dict[str, Any]:
         profile = job.source_profile
-        language = private.get("transcription_language")
+        language = private.get("transcription_language", "en")
         # Keep the legacy speech call shape for injected/test adapters; the
         # music branch must explicitly consult its separate selected model.
         cached = media_module.is_whisper_model_cached(self.settings, profile=profile) if profile == "music" else media_module.is_whisper_model_cached(self.settings)
@@ -2298,7 +2298,7 @@ class JobManager:
         else:
             source_hash = str(private.get("source_hash") or sha256_file(source))
             private["source_hash"] = source_hash
-        language = private.get("transcription_language")
+        language = private.get("transcription_language", "en")
         beam = self.settings.music_whisper_beam_size if profile == "music" else self.settings.whisper_beam_size
         cache_key = transcription_cache_key(
             source_hash,
@@ -2574,10 +2574,11 @@ class JobManager:
         """Transcribe only one selected window; returned timings are clip-relative."""
         source_hash = str(private.get("source_hash") or sha256_file(source))
         private["source_hash"] = source_hash
+        language = private.get("transcription_language", "en")
         cache_key = (
-            f"fast-transcript:v1:{source_hash}:{clip.start:.6f}:{clip.end:.6f}:"
+            f"fast-transcript:v2:{source_hash}:{clip.start:.6f}:{clip.end:.6f}:"
             f"{self.settings.whisper_model}:{self.settings.whisper_device}:"
-            f"{self.settings.whisper_compute_type}:beam{self.settings.whisper_beam_size}:words1"
+            f"{self.settings.whisper_compute_type}:beam{self.settings.whisper_beam_size}:words1:language={language}"
         )
         transcripts = private.setdefault("fast_transcripts", {})
         cached = self.db.cache_get(cache_key)
@@ -2605,6 +2606,7 @@ class JobManager:
             progress_callback=lambda fraction, _: self._fast_transcription_progress(job, private, fraction),
             cancellation_callback=lambda: not self._cooperate(job),
             word_timestamps=True,
+            language=language,
         )
         words = [
             word

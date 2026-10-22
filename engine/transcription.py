@@ -20,7 +20,7 @@ def _child(
     settings: Settings,
     events: Any,
     profile: str = "speech",
-    language: str | None = None,
+    language: str | None = "en",
     beam_size: int | None = None,
     condition_on_previous_text: bool | None = None,
 ) -> None:
@@ -73,7 +73,7 @@ def supervise(
     worker: Callable[..., None] = _child,
     source_seconds: float | None = None,
     profile: str = "speech",
-    language: str | None = None,
+    language: str | None = "en",
     beam_size: int | None = None,
     condition_on_previous_text: bool | None = None,
 ) -> dict[str, Any]:

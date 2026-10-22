@@ -423,7 +423,7 @@ async def create_clip_job(
     subscribe_animation: Annotated[str, Form()] = "{}",
     music_presentation: Annotated[str, Form()] = "{}",
     music_top_text: Annotated[str, Form()] = "",
-    music_lyrics_language: Annotated[str | None, Form(max_length=3)] = None,
+    music_lyrics_language: Annotated[str | None, Form(max_length=4)] = None,
     hook_text: Annotated[bool, Form()] = False,
     manual_hook_text: Annotated[str, Form(max_length=150)] = "",
     youtube_metadata: Annotated[bool | None, Form()] = None,
@@ -449,7 +449,7 @@ async def create_clip_job(
     if music_lyrics_language is not None:
         if source_profile != "music":
             raise HTTPException(422, "Lyrics language is only available in Music mode")
-        if music_lyrics_language not in WHISPER_LANGUAGE_CODES:
+        if music_lyrics_language != "auto" and music_lyrics_language not in WHISPER_LANGUAGE_CODES:
             raise HTTPException(422, "Choose a supported lyrics language or use automatic detection")
     music_config = _music_presentation_request(music_presentation)
     if source_profile != "music" and (
@@ -518,6 +518,7 @@ async def create_clip_job(
         "count": count, "batch_mode": batch_mode, "min_duration": min_duration, "max_duration": max_duration,
         "aspect_ratio": aspect_ratio, "content_format": content_format, "processing_mode": mode,
         "execution_policy": execution_policy,
+        "transcription_language": "en",
         "provider_available": execution_policy == "auto" and smart_available,
         "presentation": presentation,
         "reaction_policy": {"version": 1, "name": "ironic_v1"} if source_profile == "speech" and burn_subtitles else None,
@@ -531,7 +532,7 @@ async def create_clip_job(
     if source_profile == "music":
         private["music_presentation"] = music_config.model_dump()
         if music_lyrics_language is not None:
-            private["transcription_language"] = music_lyrics_language
+            private["transcription_language"] = None if music_lyrics_language == "auto" else music_lyrics_language
         private["music_top_text"] = music_top_text if music_top_text.strip() else None
         private["music_track_speed"] = music_track_speed
         private["music_audio_mode"] = music_audio_mode
@@ -711,6 +712,7 @@ async def _queue_shorts_job(
     if processing_mode == "fast":
         manager._apply_step(job, job.steps[2], status="skipped", detail="Trim supplied by Shorts Editor", completed_at=timestamp)
     private = {"source_path": str(source_path) if source_path else None, "source_kind": source_kind, "source_hash": source_hash, "source_metadata": source_metadata, "url": url, "trim_start": start, "trim_end": end, "aspect_ratio": aspect_ratio, "count": 1, "min_duration": max(0.1, clip.duration), "max_duration": max(0.1, clip.duration), "processing_mode": processing_mode, "burn_subtitles": burn_subtitles, "embed_subtitles": embed_subtitles, "library_folder_id": library_folder_id, "subscribe_animation": (subscribe_animation or SubscribeAnimationConfig()).model_dump(), "muted": muted, "volume": volume, "filter_preset": filter_preset, "filter_intensity": filter_intensity, "tint_color": tint_color, "tint_opacity": tint_opacity, "text_overlays": text_overlays or [], "reaction_policy": {"version": 1, "name": "ironic_v1"} if burn_subtitles else None}
+    private["transcription_language"] = "en"
     db.save_project(project)
     db.save_job(job, private)
     try:

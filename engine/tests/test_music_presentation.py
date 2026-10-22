@@ -15,8 +15,18 @@ from engine.models import Clip, Job, MusicPresentationConfig, Project
 client = TestClient(app)
 
 
-@pytest.mark.parametrize("language", [None, "en", "fr", "yue"])
-def test_music_lyrics_language_is_persisted_for_worker_and_cache(monkeypatch, language) -> None:
+@pytest.mark.parametrize("profile,content_format,batch_mode,language,expected", [
+    ("music", "short", "standard", None, "en"),
+    ("music", "short", "standard", "en", "en"),
+    ("music", "short", "standard", "fr", "fr"),
+    ("music", "short", "standard", "yue", "yue"),
+    ("music", "short", "standard", "auto", None),
+    ("speech", "short", "standard", None, "en"),
+    ("speech", "long", "standard", None, "en"),
+    ("speech", "short", "high_volume", None, "en"),
+    ("speech", "long", "high_volume", None, "en"),
+])
+def test_language_default_and_overrides_are_persisted_for_worker_and_cache(monkeypatch, profile, content_format, batch_mode, language, expected) -> None:
     from engine import app as app_module
 
     monkeypatch.setattr(app_module, "_rate_limit", lambda request: None)
@@ -26,13 +36,14 @@ def test_music_lyrics_language_is_persisted_for_worker_and_cache(monkeypatch, la
     async def enqueue(_: str) -> None:
         return None
     monkeypatch.setattr(app_module.manager, "enqueue", enqueue)
-    fields = {"source_profile": "music", "count": "1", "min_duration": "8", "max_duration": "20", "library_folder_id": app_module.db.list_folders()[0].id}
+    fields = {"source_profile": profile, "content_format": content_format, "batch_mode": batch_mode, "count": "1", "min_duration": "8", "max_duration": "20", "library_folder_id": app_module.db.list_folders()[0].id}
     if language:
         fields["music_lyrics_language"] = language
     response = client.post("/api/v1/jobs/clip", data=fields, files={"file": ("song.mp4", b"fixture", "video/mp4")})
     assert response.status_code == 202, response.text
     private = app_module.db.get_job_private(response.json()["job"]["id"])
-    assert private.get("transcription_language") == language
+    assert "transcription_language" in private
+    assert private["transcription_language"] == expected
 
 
 @pytest.mark.parametrize("profile,language", [("music", "xx"), ("music", "EN"), ("music", "eng"), ("speech", "en")])

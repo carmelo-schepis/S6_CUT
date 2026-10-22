@@ -169,7 +169,7 @@ def transcription_options(
     settings: Settings,
     *,
     profile: str = "speech",
-    language: str | None = None,
+    language: str | None = "en",
     device: str | None = None,
     compute_type: str | None = None,
     beam_size: int | None = None,
@@ -223,7 +223,7 @@ def transcription_cache_identity(
     settings: Settings,
     *,
     profile: str = "speech",
-    language: str | None = None,
+    language: str | None = "en",
     device: str | None = None,
     compute_type: str | None = None,
     beam_size: int | None = None,
@@ -257,7 +257,7 @@ def transcription_cache_key(
     settings: Settings,
     *,
     profile: str = "speech",
-    language: str | None = None,
+    language: str | None = "en",
     device: str | None = None,
     compute_type: str | None = None,
     beam_size: int | None = None,
@@ -879,7 +879,7 @@ def transcribe(
     beam_size: int | None = None,
     word_timestamps: bool | None = None,
     profile: str = "speech",
-    language: str | None = None,
+    language: str | None = "en",
     condition_on_previous_text: bool | None = None,
 ) -> dict[str, Any]:
     """Transcribe media with Faster-Whisper and return word-level timing.
@@ -913,7 +913,8 @@ def transcribe(
         the separate model/beam settings, disables speech VAD, and always
         requests word timestamps.
     language : str | None
-        Optional language hint forwarded to Faster-Whisper.
+        Language hint forwarded to Faster-Whisper; defaults to English.
+        Pass ``None`` explicitly to use automatic language detection.
 
     Returns
     -------
