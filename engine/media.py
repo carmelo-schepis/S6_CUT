@@ -1394,7 +1394,7 @@ MUSIC_SUBTITLE_THEMES = frozenset({
 # resolved font can change. Black text carries a pale halo so it stays legible
 # over dark footage; the white faces keep the dark stroke the other themes use.
 _CONDENSED_AND_HAND_PRESETS = {
-    "condensed_black": {"fontname": "Oswald", "font": 120, "primary": "&H00000000&", "outline_color": "&H88FFFFFF&", "outline": 2, "shadow": 0, "spacing": 0, "scale_x": 100},
+    "condensed_black": {"fontname": "Oswald", "font": 120, "primary": "&H00000000&", "outline_color": "&H40FFFFFF&", "outline": 3, "shadow": 0, "spacing": 0, "scale_x": 100},
     "condensed_white": {"fontname": "Oswald", "font": 120, "primary": "&H00FFFFFF&", "outline_color": "&H99000000&", "outline": 2, "shadow": 0, "spacing": 0, "scale_x": 100},
     "handwritten_stack": {"fontname": "Gaegu", "font": 104, "primary": "&H00FFFFFF&", "outline_color": "&H99000000&", "outline": 2, "shadow": 0, "spacing": 0, "scale_x": 100},
 }

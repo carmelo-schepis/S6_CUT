@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { MusicHookTextFormat, MusicLyricAnimation, MusicTheme } from "../types";
 
 export const LYRIC_ANIMATIONS: { id: MusicLyricAnimation; label: string; note: string }[] = [
@@ -30,9 +30,14 @@ function prefersReducedMotion(): boolean {
 export function LyricAnimationPreview({ animation, theme }: { animation: MusicLyricAnimation; theme: MusicTheme }) {
   const [reduced] = useState(prefersReducedMotion);
   // Reduced motion starts on a still frame; Play is then an explicit request.
-  const [playing, setPlaying] = useState(!reduced);
-  const [run, setRun] = useState(0);
-  useEffect(() => { setPlaying(!reduced); setRun((value) => value + 1); }, [animation, reduced]);
+  // Changing the animation resets the sample while rendering, not in an effect.
+  const [sample, setSample] = useState({ animation, playing: !reduced, run: 0 });
+  let current = sample;
+  if (sample.animation !== animation) {
+    current = { animation, playing: !reduced, run: sample.run + 1 };
+    setSample(current);
+  }
+  const { playing, run } = current;
   const lines = animation === "line_crossfade" || animation === "slow_fade" || animation === "legacy" ? [FIRST_LINE, SECOND_LINE] : [FIRST_LINE];
   return <div className="lyric-preview" data-animation={animation} data-state={playing ? "playing" : "still"}>
     <div key={run} className={`lyric-preview-stage ${THEME_PREVIEW_CLASS[theme]}`} role="img" aria-label={`Sample of the ${LYRIC_ANIMATIONS.find((item) => item.id === animation)?.label ?? "Original"} lyric animation`}>
@@ -40,7 +45,7 @@ export function LyricAnimationPreview({ animation, theme }: { animation: MusicLy
         {words.map((word, wordIndex) => <span key={word} className="lyric-preview-word" style={{ animationDelay: animation === "word_build" ? `${0.3 + wordIndex * 0.45}s` : undefined }}>{word}{" "}</span>)}
       </p>)}
     </div>
-    <button type="button" className="button button-quiet" onClick={() => { setPlaying(true); setRun((value) => value + 1); }}>{playing ? "Replay preview" : "Play preview"}</button>
+    <button type="button" className="button button-quiet" onClick={() => setSample({ animation, playing: true, run: run + 1 })}>{playing ? "Replay preview" : "Play preview"}</button>
   </div>;
 }
 
