@@ -455,19 +455,39 @@ def test_shorts_library_request_persists_animation_configuration(monkeypatch, tm
     assert saved["private"]["subscribe_animation"] == {"version": 1, "enabled": True, "short_form_lead_seconds": 5}
 
 
-def test_music_upload_rejects_impossible_non_overlapping_count(monkeypatch) -> None:
+def test_music_upload_accepts_requested_count_beyond_source_capacity(monkeypatch, tmp_path: Path) -> None:
     from engine import app as app_module
 
+    saved: dict[str, object] = {}
+    monkeypatch.setattr(app_module, "settings", replace(app_module.settings, data_path=tmp_path))
+
+    async def stream_upload(upload, destination: Path, _max_bytes: int) -> tuple[int, str]:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        payload = await upload.read()
+        destination.write_bytes(payload)
+        return len(payload), "a" * 64
+
+    monkeypatch.setattr(app_module, "_stream_upload", stream_upload)
     monkeypatch.setattr(app_module, "validate_video_upload", lambda *args, **kwargs: {
-        "duration": 284.0, "width": 1920, "height": 1080, "audio": True,
+        "duration": 256.9, "width": 1920, "height": 1080, "audio": True,
     })
+    monkeypatch.setattr(app_module.db, "save_project", lambda project: saved.update(project=project))
+    monkeypatch.setattr(app_module.db, "save_job", lambda job, private=None: saved.update(job=job, private=private))
+
+    async def enqueue(_: str) -> None:
+        return None
+
+    monkeypatch.setattr(app_module.manager, "enqueue", enqueue)
     folder = app_module.db.list_folders()[0]
     response = client.post("/api/v1/jobs/clip", data={
-        "source_profile": "music", "count": "21", "min_duration": "20", "max_duration": "60",
+        "source_profile": "music", "count": "13", "min_duration": "20", "max_duration": "60",
         "library_folder_id": folder.id,
     }, files={"file": ("song.mp4", b"fixture", "video/mp4")})
-    assert response.status_code == 422
-    assert "at most 14" in response.json()["detail"]
+    assert response.status_code == 202, response.text
+    assert response.json()["job"]["requestedCount"] == 13
+    assert saved["private"]["count"] == 13
+    assert saved["private"]["min_duration"] == 20
+    assert saved["private"]["source_metadata"]["duration"] == 256.9
 
 
 def test_project_name_normalization_has_safe_fallbacks() -> None:

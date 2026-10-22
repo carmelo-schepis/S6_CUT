@@ -152,7 +152,6 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
       if (sourceProfile === "music" && musicTrackFile && musicTrackUrl.trim()) return setError("Choose an MP3 upload or a YouTube song link, not both.");
       if (sourceProfile === "music" && musicTrackUrl.trim() && !isYouTubeUrl(musicTrackUrl.trim())) return setError("Only public HTTPS YouTube URLs are supported for the background song.");
       if (musicConfigurationMessage) return setError(musicConfigurationMessage);
-      if (musicFeasibilityMessage) return setError(musicFeasibilityMessage);
     setSubmitting(true);
     try {
       const result = await createClipJob({
@@ -221,7 +220,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
       : Math.min(500, Math.max(1, Number(rawActiveCount)))
     : count;
   const musicFeasibilityMessage = sourceProfile === "music" && knownSourceDuration !== null && Number.isFinite(minDuration) && minDuration > 0 && activeCount > Math.floor((knownSourceDuration + 1e-9) / minDuration)
-    ? `This ${knownSourceDuration.toFixed(1)}s source can fit at most ${Math.floor(knownSourceDuration / minDuration)} non-overlapping clips of at least ${minDuration}s. Reduce the count or minimum duration; the requested count will not be changed automatically.`
+    ? `This ${knownSourceDuration.toFixed(1)}s source may not contain enough distinct lyric windows for ${activeCount} clips of at least ${minDuration}s. Music will check lyric availability and repeat valid windows when possible.`
     : null;
   return <div className="page projects-page">
     {/* Every screen carries exactly one h1. The page introduction that used to
@@ -363,9 +362,10 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
           </div>}
 
           <div className="create-actions">
-            {(musicConfigurationMessage || musicFeasibilityMessage) && <p className="form-error" role="status">{musicConfigurationMessage || musicFeasibilityMessage}</p>}
+            {musicConfigurationMessage && <p className="form-error" role="status">{musicConfigurationMessage}</p>}
+            {!musicConfigurationMessage && musicFeasibilityMessage && <p className="form-hint" role="status">{musicFeasibilityMessage}</p>}
             {error && <p className="form-error" role="alert">{error}</p>}
-            <Button variant="primary" className="create-button" disabled={submitting || health?.ffmpeg === false || Boolean(musicConfigurationMessage || musicFeasibilityMessage)} onClick={submit}>{submitting ? "Creating…" : <><Plus size={16} /> {`Create ${activeCount} ${contentFormat === "long" ? "landscape clip" : "short clip"}${activeCount === 1 ? "" : "s"}`}</>}</Button>
+            <Button variant="primary" className="create-button" disabled={submitting || health?.ffmpeg === false || Boolean(musicConfigurationMessage)} onClick={submit}>{submitting ? "Creating…" : <><Plus size={16} /> {`Create ${activeCount} ${contentFormat === "long" ? "landscape clip" : "short clip"}${activeCount === 1 ? "" : "s"}`}</>}</Button>
           </div>
         </div>
 

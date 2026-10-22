@@ -541,12 +541,6 @@ async def create_clip_job(
         except MediaError as exc:
             source.unlink(missing_ok=True)
             raise HTTPException(422, str(exc)) from exc
-        if source_profile == "music" and isinstance(source_metadata, dict):
-            source_duration = float(source_metadata["duration"])
-            feasible_count = math.floor((source_duration + 1e-9) / min_duration)
-            if feasible_count < count:
-                source.unlink(missing_ok=True)
-                raise HTTPException(422, f"Cannot create {count} non-overlapping music clips of at least {min_duration:g}s from a {source_duration:.1f}s source; at most {feasible_count} can fit without padding or duplication.")
         private["source_path"] = str(source)
         private["source_hash"] = source_hash
         if isinstance(source_metadata, dict):
