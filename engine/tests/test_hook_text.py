@@ -61,8 +61,8 @@ def test_hook_ass_style_wrap_layer_and_end_time(tmp_path):
     ass = path.read_text(encoding="utf-8")
     assert "Style: Hook,Montserrat,72," in ass
     assert ",8,60,60,211,1" in ass
-    assert "Dialogue: 5,0,0:00:15.00,Hook" in ass
-    assert "Dialogue: 0,0,0:00:20.00,HookScrim" in ass
+    assert "Dialogue: 5,0:00:00.00,0:00:15.00,Hook" in ass
+    assert "Dialogue: 0,0:00:00.00,0:00:20.00,HookScrim" in ass
     assert "Dialogue: 10," not in ass
     hook_event = next(line for line in ass.splitlines() if ",Hook,," in line)
     body = hook_event.split(",,", 1)[-1]
@@ -187,9 +187,9 @@ def test_rendered_hook_is_only_in_burn_ass_and_stops_for_subscribe(monkeypatch, 
     assert " ".join(hook_body.split()) == hook
     assert hook not in caption_ass
     assert hook not in output.with_suffix(".srt").read_text(encoding="utf-8")
-    assert "Dialogue: 5,0,0:00:15.00,Hook" in burn_ass
+    assert "Dialogue: 5,0:00:00.00,0:00:15.00,Hook" in burn_ass
     credit_event = next(line for line in burn_ass.splitlines() if line.startswith("Dialogue: 2,"))
-    assert credit_event.startswith("Dialogue: 2,0,0:00:09.00,Credit,")
+    assert credit_event.startswith("Dialogue: 2,0:00:00.00,0:00:09.00,Credit,")
     assert r"{\fad(0,1000)}" in credit_event
     assert ",Caption," in burn_ass and ",Caption," in caption_ass
     caption_events = [line for line in caption_ass.splitlines() if line.startswith("Dialogue:")]

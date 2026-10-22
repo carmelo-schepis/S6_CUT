@@ -47,11 +47,11 @@ def settings() -> Settings:
 
 
 @lru_cache(maxsize=None)
-def make_source(name: str, size: str, colour: str = "0x203040") -> Path:
-    name = f"{name}-{colour}"
+def make_source(name: str, size: str, colour: str = "0x203040", duration: float = 9) -> Path:
+    name = f"{name}-{colour}-{duration:g}"
     path = WORK / f"{name}.mp4"
     if not path.exists():
-        subprocess.run([settings().ffmpeg, "-v", "error", "-y", "-f", "lavfi", "-i", f"color=c={colour}:s={size}:r=30:d=9", "-pix_fmt", "yuv420p", str(path)], check=True)
+        subprocess.run([settings().ffmpeg, "-v", "error", "-y", "-f", "lavfi", "-i", f"color=c={colour}:s={size}:r=30:d={duration:g}", "-pix_fmt", "yuv420p", str(path)], check=True)
     return path
 
 
@@ -60,12 +60,17 @@ def render(key: str) -> Path:
     """Render one fixture; key encodes the variant so results are cached per module run."""
     parts = dict(item.split("=", 1) for item in key.split(";"))
     output = WORK / f"out-{abs(hash(key))}.mp4"
-    source = make_source(parts.get("src", "wide"), parts.get("size", "1280x720"), parts.get("colour", "0x203040"))
+    long_clip = parts.get("long", "0") == "1"
+    duration = float(parts.get("dur", DURATION))
+    start = 0.0 if long_clip else CLIP_START
+    source = make_source(parts.get("src", "wide"), parts.get("size", "1280x720"), parts.get("colour", "0x203040"), start + duration + 1 if long_clip else 9)
     text = parts.get("text", "1") == "1"
     kwargs: dict = dict(
-        start=CLIP_START, end=CLIP_START + float(parts.get("dur", DURATION)), aspect="9:16", settings=settings(), has_audio=False, content_format="short",
+        start=start, end=start + duration, aspect="9:16", settings=settings(), has_audio=False, content_format="short",
         subtitles_enabled=text, music_theme=parts.get("theme", "condensed_white"), music_treatment="color",
     )
+    if parts.get("credit") == "1":
+        kwargs["creator_credit"] = "Source: Controlled Creator"
     if "anim" in parts:
         kwargs["music_lyric_animation"] = parts["anim"]
     if "hook" in parts:
@@ -261,6 +266,58 @@ def test_white_banner_pixels_strip_text_and_untouched_footage() -> None:
     assert 1 <= len(bands) + int(dark[0].any()) <= 3, "wrapped onto up to three lines"
     reference = frame(none, 1.0)
     assert np.abs(image[footage_top:footage_bottom] - reference[footage_top:footage_bottom]).mean() < 0.5, "banner must not cover footage"
+
+
+@pytest.mark.parametrize(("theme", "animation"), (("condensed_black", "word_build"), ("condensed_white", "line_crossfade")))
+def test_white_banner_with_creator_credit_renders_and_credit_fades(theme: str, animation: str) -> None:
+    """Exercise creator-attributed and control renders through the real FFmpeg renderer."""
+    source_size = (1920, 1080)
+    footage_top, footage_bottom = footage_rows(source_size)
+    common = dict(long="1", dur="21", src="credit-wide", size="1920x1080", colour="0x203040",
+                  text="1", hook="she never stopped loving him", fmt="white_banner", theme=theme, anim=animation)
+    credited = render(key(**common, credit="1"))
+    control = render(key(**common, credit="0"))
+
+    for moment in (1.0, 12.0, 20.0):
+        image = frame(credited, moment)
+        rows = strip_rows(image, footage_top)
+        assert rows is not None and rows[1] == footage_top and rows[1] - rows[0] >= 80, (theme, animation, moment)
+        top, bottom = rows
+        assert (image[top:bottom, 3, :] > 240).all()
+        assert (image[top:bottom, WIDTH - 4, :] > 240).all()
+        dark = image[top:bottom].mean(axis=2) < 100
+        ys, xs = np.nonzero(dark)
+        assert len(xs) > 400
+        assert abs((xs.min() + xs.max()) / 2 - WIDTH / 2) < WIDTH * 0.06
+        assert image[:max(0, top - 2)].max() < 30
+        assert np.abs(image[footage_top:footage_bottom] - frame(control, moment)[footage_top:footage_bottom]).mean() < 0.5
+
+    # Credit remains visible at 1 s and has completed its established 8 s + 1 s fade by 12 s.
+    for moment, expected_visible in ((1.0, True), (12.0, False), (20.0, False)):
+        actual = frame(credited, moment)[1750:1900, 500:1070]
+        plain = frame(control, moment)[1750:1900, 500:1070]
+        changed = np.abs(actual - plain).max(axis=2) > 8
+        count = int(changed.sum())
+        if expected_visible:
+            assert count > 30, (theme, animation, moment, count)
+        else:
+            assert count < 10, (theme, animation, moment, count)
+
+    # The actual render emitted burn-in and downloadable ASS. The creator credit
+    # belongs only to the burn-in track; both scripts must have canonical times.
+    burn = credited.with_name(f"{credited.stem}.burn.ass").read_text(encoding="utf-8")
+    downloadable = credited.with_suffix(".ass").read_text(encoding="utf-8")
+    assert "Dialogue: 2,0:00:00.00,0:00:09.00,Credit," in burn
+    assert "Source: Controlled Creator" in burn and "Source: Controlled Creator" not in downloadable
+    import re
+    for ass in (burn, downloadable):
+        for event in (line for line in ass.splitlines() if line.startswith("Dialogue:")):
+            fields = event.split(",", 3)
+            assert re.fullmatch(r"\d+:\d{2}:\d{2}\.\d{2}", fields[1]), event
+            assert re.fullmatch(r"\d+:\d{2}:\d{2}\.\d{2}", fields[2]), event
+    parser = subprocess.run([settings().ffmpeg, "-hide_banner", "-loglevel", "warning", "-f", "lavfi", "-i", "color=c=black:s=1080x1920:r=24:d=1", "-vf", f"subtitles={credited.with_name(f'{credited.stem}.burn.ass')}", "-frames:v", "1", "-f", "null", "-"], capture_output=True, text=True)
+    assert parser.returncode == 0, parser.stderr
+    assert "Bad timestamp" not in parser.stderr
 
 
 def test_unchecked_or_blank_hook_leaves_no_strip() -> None:
