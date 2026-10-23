@@ -193,7 +193,7 @@ test.describe("Shorts Editor complete undo and redo", () => {
     await name.focus();
     await name.press("End");
     await page.keyboard.type("x");
-    await name.press("Control+z");
+    await name.press("ControlOrMeta+z");
     await expect(name).toHaveValue("Base title");
     await expect(aspect).toHaveValue("4:5");
 
