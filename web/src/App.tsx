@@ -316,7 +316,7 @@ export function App() {
           const workspace = item.id === "workspace";
           return <button key={item.id} className={page === item.id ? "nav-item active" : "nav-item"} onClick={() => { if (workspace) resumeWorkspaceFollowing(); else setPage(item.id); }} aria-label={item.name} title={item.name} aria-current={page === item.id ? "page" : undefined} aria-describedby={workspace && activity ? "workspace-work-description" : undefined}>
             <span className="nav-icon-wrap">
-              <Icon className={workspace ? "nav-main-icon" : undefined} data-testid={workspace ? "workspace-nav-icon" : undefined} size={19} aria-hidden="true" />
+              <Icon className={workspace ? "nav-main-icon" : undefined} data-testid={workspace ? "workspace-nav-icon" : undefined} size={20} aria-hidden="true" />
               {workspace && activity ? <WorkspaceProgressIndicator
                 value={activity.remainingClips}
                 isProcessing={activity.isProcessing}
