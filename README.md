@@ -6,32 +6,18 @@ There is no S6_cut account, credit system, watermark, artificial usage limit, or
 
 ## Quick start (Docker)
 
-The repository is currently **private**. Authenticated GitHub CLI users can install now using the commands below. Once the repository is made public, the standard anonymous one-liners will work from any device. The commands below pin both the bootstrap script and the installer checkout to the current default branch (`main`).
+Install Git and Docker with Compose v2, then paste one command into your terminal. No GitHub account is needed.
 
 ### Linux / macOS (bash)
 
-**Private repo / authenticated (works now):**
 ```bash
-gh api -H "Accept: application/vnd.github.raw+json" repos/carmelo-schepis/S6_CUT/contents/install.sh?ref=main | S6_BRANCH=main bash
-```
-
-**Public repo / anonymous (works after repository visibility is changed to public):**
-```bash
-curl -fsSL https://raw.githubusercontent.com/carmelo-schepis/S6_CUT/main/install.sh | S6_BRANCH=main bash
+curl -fsSL https://raw.githubusercontent.com/carmelo-schepis/S6_CUT/main/install.sh | bash
 ```
 
 ### Windows (PowerShell)
 
-**Private repo / authenticated (works now):**
 ```powershell
-$script = (gh api -H "Accept: application/vnd.github.raw+json" repos/carmelo-schepis/S6_CUT/contents/Install-S6_CUT.ps1?ref=main) -join "`n"
-& ([scriptblock]::Create($script)) -Branch main
-```
-
-**Public repo / anonymous (works after repository visibility is changed to public):**
-```powershell
-$script = irm https://raw.githubusercontent.com/carmelo-schepis/S6_CUT/main/Install-S6_CUT.ps1
-& ([scriptblock]::Create($script)) -Branch main
+irm https://raw.githubusercontent.com/carmelo-schepis/S6_CUT/main/Install-S6_CUT.ps1 | iex
 ```
 
 The installer checks for Git, Docker, and Docker Compose v2, clones S6_cut into `~/s6_cut` (or updates an existing installation in place), creates `.env` from the template on first run — and never overwrites your configuration — then builds, starts, and waits for the app to become ready. When it finishes you will see:

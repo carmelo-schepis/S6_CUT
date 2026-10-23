@@ -4,11 +4,7 @@
 # ====================================
 # One-command install/update via Docker Compose.
 #
-# PRIVATE REPO (authenticated — works now):
-#   gh api -H "Accept: application/vnd.github.raw+json" repos/carmelo-schepis/S6_CUT/contents/install.sh | bash
-#
-# PUBLIC REPO (anonymous — works after repository is made public):
-#   curl -fsSL https://raw.githubusercontent.com/carmelo-schepis/S6_CUT/master/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/carmelo-schepis/S6_CUT/main/install.sh | bash
 #
 # Installs into ~/s6_cut by default. Safe to run repeatedly: an existing
 # installation is updated and rebuilt in place, and your .env, projects,
@@ -18,7 +14,7 @@
 # Environment overrides (set these before running the command):
 #   S6_INSTALL_DIR    installation directory      (default: ~/s6_cut)
 #   S6_REPO_URL       repository to clone/update  (default: https://github.com/carmelo-schepis/S6_CUT.git)
-#   S6_BRANCH         branch to track             (default: master)
+#   S6_BRANCH         branch to track             (default: main)
 #   S6_START_TIMEOUT  seconds to wait for startup (default: 300)
 #   S6_FORCE_RECREATE force recreate containers   (default: false)
 
@@ -26,7 +22,7 @@ set -euo pipefail
 
 INSTALL_DIR="${S6_INSTALL_DIR:-$HOME/s6_cut}"
 REPO_URL="${S6_REPO_URL:-https://github.com/carmelo-schepis/S6_CUT.git}"
-BRANCH="${S6_BRANCH:-master}"
+BRANCH="${S6_BRANCH:-main}"
 START_TIMEOUT="${S6_START_TIMEOUT:-300}"
 FORCE_RECREATE="${S6_FORCE_RECREATE:-false}"
 COMPOSE_FILE="compose.yaml"
