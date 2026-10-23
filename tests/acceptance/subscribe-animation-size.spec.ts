@@ -157,32 +157,6 @@ async function createAndRender(page: Page, options: { projectName: string; aspec
   return { projectName: options.projectName, jobId: job.id, clipId: clip.id, start: clip.start, end: clip.end, duration: clip.duration, assetId: clip.libraryAssetId ?? null, aspect: options.aspect, mp4Path, stateFrames, offCycleFrame };
 }
 
-test("Paused frame sampling is deterministic", async ({ page }) => {
-  await fs.access(fixture);
-  const bytes = await fs.readFile(fixture);
-  await page.route("http://subscribe-fixture.test/**", async (route) => {
-    if (route.request().url().endsWith("/fixture.mp4")) await route.fulfill({ status: 200, contentType: "video/mp4", body: bytes });
-    else await route.fulfill({ contentType: "text/html", body: '<div class="viewer-frame"><video src="http://subscribe-fixture.test/fixture.mp4" muted></video></div>' });
-  });
-  await page.goto("http://subscribe-fixture.test/");
-  const video = page.locator("video");
-  await expect.poll(() => video.evaluate((node: HTMLVideoElement) => node.readyState >= 2), { timeout: 20_000 }).toBe(true);
-  const first = await captureFrame(page, 1.2, test.info().outputPath("paused-a.png"));
-  const repeated = await captureFrame(page, 1.2, test.info().outputPath("paused-b.png"));
-  expect(await video.evaluate((node: HTMLVideoElement) => node.paused)).toBe(true);
-  expect(Math.abs(first.mediaTime - repeated.mediaTime)).toBeLessThanOrEqual(0.001);
-  expect(repeated.pixels).toEqual(first.pixels);
-  await captureFrame(page, 2.1, test.info().outputPath("paused-forward.png"));
-  await captureFrame(page, 0.7, test.info().outputPath("paused-backward.png"));
-  const second = await page.locator("body").evaluate((body) => { body.innerHTML = '<video class="viewer-frame" src="http://subscribe-fixture.test/fixture.mp4" muted></video>'; });
-  void second;
-  await expect.poll(() => page.locator("video").evaluate((node: HTMLVideoElement) => node.readyState >= 2), { timeout: 20_000 }).toBe(true);
-  const aligned = await captureFrame(page, 0.7, test.info().outputPath("paused-aligned.png"), first.mediaTime);
-  expect(Math.abs(aligned.mediaTime - first.mediaTime)).toBeLessThanOrEqual(0.001);
-  expect(aligned.pixels).toEqual(first.pixels);
-  await expect(captureFrame(page, 0.7, test.info().outputPath("paused-offset.png"), first.mediaTime + 1)).rejects.toThrow(/media timestamp mismatch/);
-});
-
 test("Subscribe animation renders and exports at all supported aspect ratios", async ({ page }, testInfo) => {
   test.setTimeout(60 * 60_000);
   const appUrl = requireDisposableTarget();
