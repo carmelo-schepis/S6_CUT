@@ -7,6 +7,8 @@ const mockGetHealth = vi.fn();
 const mockListProjects = vi.fn();
 const mockListJobs = vi.fn();
 const mockListProfiles = vi.fn();
+const mockGetJob = vi.fn();
+const mockCreateClipJob = vi.fn();
 
 vi.mock("./api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./api")>();
@@ -16,7 +18,8 @@ vi.mock("./api", async (importOriginal) => {
     listProjects: (...args: unknown[]) => mockListProjects(...args),
     listJobs: (...args: unknown[]) => mockListJobs(...args),
     listProfiles: (...args: unknown[]) => mockListProfiles(...args),
-    getJob: vi.fn(async () => null),
+    getJob: (...args: unknown[]) => mockGetJob(...args),
+    createClipJob: (...args: unknown[]) => mockCreateClipJob(...args),
     listRecentClips: vi.fn(async () => ({ items: [], page: 1, pageSize: 12, hasMore: false, total: 0 })),
     listFolders: vi.fn(async () => []),
   };
@@ -58,12 +61,56 @@ function job(id: string, projectId: string, state: "active" | "queued" | "comple
 }
 
 describe("Workspace project selection", () => {
+  it("immediately follows the active job from the last snapshot when creating a queued project", async () => {
+    const activeProject = project("active-project", "Currently processing", "2026-01-01", "active-job");
+    const activeJob = job("active-job", activeProject.id, "active", "2026-01-01");
+    const previouslyOpenedProject = project("opened-queue", "Previously opened queued project", "2026-01-08", "opened-queue-job");
+    const previouslyOpenedJob = job("opened-queue-job", previouslyOpenedProject.id, "queued", "2026-01-08", 1);
+    const newlyCreatedProject = project("new-queue", "New queued project", "2026-01-09", "new-queue-job");
+    const newlyCreatedJob = job("new-queue-job", newlyCreatedProject.id, "queued", "2026-01-09", 2);
+    const lastSnapshot = [activeJob, previouslyOpenedJob];
+    let holdJobsPoll = false;
+    let resolveHeldPoll!: (value: typeof lastSnapshot) => void;
+    const heldJobsPoll = new Promise<typeof lastSnapshot>((resolve) => { resolveHeldPoll = resolve; });
+    mockListProjects.mockResolvedValue([activeProject, previouslyOpenedProject]);
+    mockListJobs.mockImplementation(() => holdJobsPoll ? heldJobsPoll : Promise.resolve(lastSnapshot));
+    mockGetJob.mockImplementation(async (id: string) => lastSnapshot.find((item) => item.id === id) || null);
+    mockCreateClipJob.mockResolvedValue({ project: newlyCreatedProject, job: newlyCreatedJob });
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Jobs" }));
+    await screen.findByRole("heading", { name: "Jobs & recovery" });
+    const openedQueue = document.querySelector<HTMLButtonElement>(`.job-card[data-project-id="${previouslyOpenedProject.id}"] button`);
+    expect(openedQueue).toBeTruthy();
+    fireEvent.click(openedQueue!);
+    await waitFor(() => expect(mockGetJob.mock.calls.at(-1)?.[0]).toBe("opened-queue-job"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Projects" }));
+    fireEvent.click(screen.getByRole("tab", { name: "YouTube" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "YouTube URL" }), {
+      target: { value: "https://www.youtube.com/watch?v=queued-fixture" },
+    });
+    holdJobsPoll = true;
+    fireEvent.click(screen.getByRole("button", { name: "Create 5 short clips" }));
+
+    await waitFor(() => expect(mockCreateClipJob).toHaveBeenCalledTimes(1));
+    // Keep the post-create /jobs response pending: the result must come from
+    // the active identity already present in the prior authoritative snapshot.
+    expect(document.querySelector(".topbar-context")).toHaveTextContent(activeProject.name);
+    await waitFor(() => expect(mockGetJob.mock.calls.at(-1)?.[0]).toBe("active-job"));
+    expect(mockGetJob).not.toHaveBeenCalledWith("new-queue-job");
+
+    holdJobsPoll = false;
+    await act(async () => { resolveHeldPoll(lastSnapshot); });
+  });
   beforeEach(() => {
     vi.stubGlobal("EventSource", class { close() {} });
     mockGetHealth.mockReset().mockResolvedValue(health);
     mockListProjects.mockReset().mockResolvedValue([]);
     mockListJobs.mockReset().mockResolvedValue([]);
     mockListProfiles.mockReset().mockResolvedValue([profile]);
+    mockGetJob.mockReset().mockResolvedValue(null);
+    mockCreateClipJob.mockReset();
   });
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 

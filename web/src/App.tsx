@@ -255,18 +255,29 @@ export function App() {
     const nextProjects = [project, ...projectsRef.current.filter((item) => item.id !== project.id)];
     projectsRef.current = nextProjects;
     setProjects(nextProjects);
-    // The guarded poll picks up the job immediately without racing the shell's
-    // existing /jobs request. If that request began before creation and returns
-    // an older snapshot, one guarded follow-up closes the gap without ever
-    // putting two /jobs requests on the wire together.
+    // Preserve the current run synchronously before navigating. The newly
+    // created project may still be queued, while a /jobs poll already in flight
+    // still describes the clip the user should keep seeing.
+    const current = workspaceSelectionRef.current;
+    const previous = current && nextProjects.some((item) => item.id === current.projectId) ? current : null;
+    const selection = selectWorkspaceJob(
+      latestJobsSnapshot.current.filter((job) => nextProjects.some((item) => item.id === job.projectId)),
+      previous,
+    );
+    workspaceSelectionRef.current = selection;
+    setWorkspaceSelection(selection);
+    setSelectedProjectId(selection?.projectId ?? project.id);
+    followWorkspaceRef.current = true;
+    setFollowWorkspace(true);
+    setPage("workspace");
+
+    // The guarded poll picks up the new job without racing the shell's existing
+    // /jobs request. If that request began before creation, one guarded follow-up
+    // closes the gap without ever putting two /jobs requests on the wire together.
     void runJobs().then(() => {
       const createdJobIsLive = project.mode === "clip" && latestJobsSnapshot.current.some((job) => job.projectId === project.id && job.mode === "clip" && hasLiveWork([job]));
       if (!createdJobIsLive) void runJobs();
     });
-    setSelectedProjectId(project.id);
-    followWorkspaceRef.current = true;
-    setFollowWorkspace(true);
-    setPage("workspace");
   };
   const workspaceProjectId = followWorkspace && workspaceSelection ? workspaceSelection.projectId : selectedProjectId;
   const selected = projects.find((project) => project.id === workspaceProjectId) || null;
