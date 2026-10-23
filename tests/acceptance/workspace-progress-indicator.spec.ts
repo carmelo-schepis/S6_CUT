@@ -24,28 +24,30 @@ function job(remaining: number) {
   };
 }
 
-test("renders a stable centered Workspace progress ring at desktop and mobile sizes", async ({ page }) => {
-  // Measure the ring in the labelled sidebar: pin it open rather than relying on the folded default.
-  await page.addInitScript(() => localStorage.setItem("s6.rail.collapsed", "0"));
+test("renders a stable centered Workspace progress ring at desktop and mobile sizes", async ({ context }) => {
   let remaining = 7;
-  await page.route("**/api/v1/**", async (route) => {
-    const path = new URL(route.request().url()).pathname;
-    const body = path.endsWith("/health") ? health
-      : path.endsWith("/projects") ? [project()]
-        : path.endsWith("/jobs") ? [job(remaining)]
-          : [];
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
-  });
-
-  for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+  // The pinned sidebar labels each row; the folded rail and the phone bar show icons only.
+  for (const { viewport, rail, labelled } of [
+    { viewport: { width: 1440, height: 900 }, rail: "0", labelled: true },
+    { viewport: { width: 1440, height: 900 }, rail: "1", labelled: false },
+    { viewport: { width: 390, height: 844 }, rail: "0", labelled: false },
+  ]) {
     remaining = 7;
+    const page = await context.newPage();
+    await page.addInitScript((value) => localStorage.setItem("s6.rail.collapsed", value), rail);
+    await page.route("**/api/v1/**", async (route) => {
+      const path = new URL(route.request().url()).pathname;
+      const body = path.endsWith("/health") ? health
+        : path.endsWith("/projects") ? [project()]
+          : path.endsWith("/jobs") ? [job(remaining)]
+            : [];
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+    });
     await page.setViewportSize(viewport);
     await page.emulateMedia({ reducedMotion: "no-preference" });
     await page.goto("/", { waitUntil: "domcontentloaded" });
     const progress = page.getByTestId("workspace-work-progress");
     const button = page.getByRole("button", { name: "Workspace", exact: true });
-    const icon = page.getByTestId("workspace-nav-icon");
-    const label = page.locator(".nav-label", { hasText: "Workspace" });
     await expect(progress).toBeVisible();
     await expect(button).toHaveAccessibleDescription(/Loading progress: 7 clips remaining across 1 active job/);
     await expect(progress).toHaveAttribute("role", "img");
@@ -57,6 +59,7 @@ test("renders a stable centered Workspace progress ring at desktop and mobile si
       const value = document.querySelector<HTMLElement>("[data-testid='workspace-work-count']")!;
       const icon = document.querySelector<SVGElement>("[data-testid='workspace-nav-icon']")!;
       const label = [...document.querySelectorAll<HTMLElement>(".nav-label")].find((item) => item.textContent === "Workspace")!;
+      const projects = document.querySelector<HTMLElement>(".nav-item[aria-label='Projects']")!;
       const rect = (element: Element) => {
         const box = element.getBoundingClientRect();
         return { x: box.x, y: box.y, width: box.width, height: box.height };
@@ -67,6 +70,8 @@ test("renders a stable centered Workspace progress ring at desktop and mobile si
       const ringStyle = getComputedStyle(ring);
       return {
         progress: rect(progress), value: rect(value), icon: rect(icon), label: rect(label),
+        projectsIcon: rect(projects.querySelector("svg")!), projectsLabel: rect(projects.querySelector(".nav-label")!),
+        iconVisibility: getComputedStyle(icon).visibility,
         button: rect(progress.closest("button")!), animationName: ringStyle.animationName,
         animationDuration: ringStyle.animationDuration, transform: ringStyle.transform,
         stroke: indicatorStyle.stroke, linecap: indicator.getAttribute("stroke-linecap"),
@@ -78,12 +83,26 @@ test("renders a stable centered Workspace progress ring at desktop and mobile si
     expect(initial.progress.height).toBe(28);
     expect(initial.value.width).toBe(28);
     expect(initial.value.height).toBe(28);
-    expect(initial.progress.x).toBeGreaterThan(initial.icon.x + initial.icon.width);
-    expect(initial.progress.x - (initial.icon.x + initial.icon.width)).toBeLessThanOrEqual(5);
+    // The ring never moves the Workspace icon off the line the other destinations share:
+    // a column in the sidebar, a row in the phone's bottom bar.
+    const centre = (box: { x: number; y: number; width: number; height: number }) => viewport.width > 820 ? box.x + box.width / 2 : box.y + box.height / 2;
+    expect(Math.abs(centre(initial.icon) - centre(initial.projectsIcon))).toBeLessThanOrEqual(1);
+    expect(initial.progress.x).toBeGreaterThanOrEqual(initial.button.x);
+    expect(initial.progress.x + initial.progress.width).toBeLessThanOrEqual(initial.button.x + initial.button.width);
+    if (labelled) {
+      // A labelled row keeps icon and caption in line and carries the ring at its trailing edge.
+      expect(initial.iconVisibility).toBe("visible");
+      expect(Math.abs(initial.label.x - initial.projectsLabel.x)).toBeLessThanOrEqual(1);
+      expect(initial.progress.x).toBeGreaterThan(initial.label.x + initial.label.width);
+      expect(Math.abs((initial.button.x + initial.button.width) - (initial.progress.x + initial.progress.width) - 8)).toBeLessThanOrEqual(1);
+    } else {
+      // An icon-only row shows the ring in the Workspace icon's place, centred on it.
+      expect(initial.iconVisibility).toBe("hidden");
+      expect(Math.abs((initial.progress.x + initial.progress.width / 2) - (initial.icon.x + initial.icon.width / 2))).toBeLessThanOrEqual(1);
+      expect(Math.abs((initial.progress.y + initial.progress.height / 2) - (initial.icon.y + initial.icon.height / 2))).toBeLessThanOrEqual(1);
+    }
     expect(Math.abs((initial.progress.x + initial.progress.width / 2) - (initial.value.x + initial.value.width / 2))).toBeLessThanOrEqual(1);
     expect(Math.abs((initial.progress.y + initial.progress.height / 2) - (initial.value.y + initial.value.height / 2))).toBeLessThanOrEqual(1);
-    // The labelled sidebar sets the caption beside the icon and its ring.
-    if (viewport.width > 1180) expect(initial.label.x).toBeGreaterThan(initial.progress.x + initial.progress.width);
     expect(initial.animationName).toBe("workspace-nav-progress-spin");
     expect(initial.animationDuration).not.toBe("0s");
     expect(initial.stroke).toBe("rgb(76, 183, 130)");
@@ -130,5 +149,6 @@ test("renders a stable centered Workspace progress ring at desktop and mobile si
     });
     expect(reducedMotion.name).toBe("none");
     expect(Number.parseFloat(reducedMotion.duration)).toBeLessThan(0.001);
+    await page.close();
   }
 });

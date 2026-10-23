@@ -424,18 +424,34 @@ select { line-height: var(--type-text-line); }
 .app-rail nav { display: grid; gap: 2px; min-width: 0; }
 .nav-item { position: relative; display: flex; align-items: center; justify-content: flex-start; gap: 10px; min-height: 36px; min-width: 0; width: 100%; padding: 0 var(--space-2); border: 0; border-radius: var(--radius-md); background: transparent; color: var(--text-primary); transition: background-color .12s ease; }
 .nav-item span { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.nav-item .nav-icon-wrap { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-1); min-width: 0; max-width: none; overflow: visible; white-space: normal; }
-.nav-item .nav-main-icon { width: 19px; height: 19px; flex: 0 0 19px; }
+/* Each row is a size container so the Workspace ring can follow the row's
+   shape rather than every rail state (pinned, folded, peeking, tablet, bottom
+   bar) separately. */
+.nav-item { --nav-icon-size: 19px; container: nav-item / inline-size; }
+/* The icon and the Workspace ring share one cell the size of an icon, so the
+   ring never widens the row or pushes the icon off its column. */
+.nav-item .nav-icon-wrap { display: inline-grid; place-items: center; flex: 0 0 auto; min-width: 0; max-width: none; overflow: visible; white-space: normal; }
+.nav-item .nav-icon-wrap > * { grid-area: 1 / 1; }
+.nav-item .nav-main-icon { width: var(--nav-icon-size); height: var(--nav-icon-size); flex: 0 0 var(--nav-icon-size); }
 .nav-item .nav-work-progress {
   position: relative;
   display: inline-grid;
   place-items: center;
-  flex: 0 0 var(--workspace-progress-size);
   width: var(--workspace-progress-size);
   height: var(--workspace-progress-size);
   max-width: none;
+  margin: calc((var(--nav-icon-size) - var(--workspace-progress-size)) / 2);
   overflow: visible;
   color: var(--success);
+}
+/* Where the row is only an icon (folded rail, tablet rail, bottom bar) the ring
+   stands in for the Workspace icon, centred where the icon sits. */
+.nav-item .nav-icon-wrap:has(.nav-work-progress) .nav-main-icon { visibility: hidden; }
+/* In a labelled row the icon and caption stay in line with the other rows and
+   the ring moves to the row's trailing edge. */
+@container nav-item (min-width: 160px) {
+  .nav-item .nav-icon-wrap:has(.nav-work-progress) .nav-main-icon { visibility: visible; }
+  .nav-item .nav-work-progress { position: absolute; top: 50%; right: var(--space-2); margin: calc(var(--workspace-progress-size) / -2) 0 0; }
 }
 .nav-item .nav-work-progress-ring {
   position: absolute;
@@ -474,6 +490,8 @@ select { line-height: var(--type-text-line); }
   white-space: nowrap;
   pointer-events: none;
 }
+/* Three digits need a step down to stay inside the ring. */
+.nav-item .nav-work-progress[data-digits="3"] .nav-work-progress-value { font-size: calc(var(--type-text-size) - 3px); letter-spacing: -0.4px; }
 @keyframes workspace-nav-progress-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
   .nav-item .nav-work-progress.is-processing .nav-work-progress-ring { animation: none; }
@@ -1491,12 +1509,9 @@ main { min-width: 0; }
   .nav-item { gap: 0; }
   .nav-item span { display: none; }
   .nav-item .nav-label { display: none; }
-  .nav-item .nav-icon-wrap { display: inline-flex; width: auto; min-width: 0; max-width: none; overflow: visible; gap: 4px; }
-  .nav-item .nav-main-icon { width: 22px; height: 22px; flex-basis: 22px; }
-  .nav-item .nav-work-spinner { display: inline-block; width: 11px; height: 11px; flex-basis: 11px; }
-  .nav-item .nav-work-count { top: 1px; right: 2px; display: inline-grid; }
+  .nav-item { --nav-icon-size: 22px; }
+  .nav-item .nav-icon-wrap { width: auto; }
   .nav-item svg { width: 22px; height: 22px; }
-  .nav-item .nav-work-spinner { width: 11px; height: 11px; }
 }
 
 @media (max-width: 700px) { .shorts-trim-grid { grid-template-columns: 1fr; } }
