@@ -124,6 +124,12 @@ test("renders a stable centered Workspace progress ring at desktop and mobile si
       await expect(page.getByTestId("workspace-work-count")).toHaveText(String(value));
       await hideArc();
       await page.evaluate(() => document.fonts.ready);
+      // A reload shows the startup splash over the sidebar for a moment; wait until the ring is what's on top.
+      await expect.poll(() => page.evaluate(() => {
+        const ring = document.querySelector("[data-testid='workspace-work-progress']")!;
+        const box = ring.getBoundingClientRect();
+        return ring.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
+      })).toBe(true);
       const shot = await page.getByTestId("workspace-work-progress").screenshot({ scale: "device" });
       const gaps = await page.evaluate(async (base64) => {
         const image = new Image();
@@ -142,8 +148,10 @@ test("renders a stable centered Workspace progress ring at desktop and mobile si
           }
         }
         const scale = canvas.width / 28;
-        return { left: left / scale, right: (canvas.width - 1 - right) / scale, top: top / scale, bottom: (canvas.height - 1 - bottom) / scale };
+        return { found: right >= 0, left: left / scale, right: (canvas.width - 1 - right) / scale, top: top / scale, bottom: (canvas.height - 1 - bottom) / scale };
       }, shot.toString("base64"));
+      // With no digits drawn both gaps come out equal, so insist that something was found.
+      expect(gaps.found, `digits of ${value} are drawn`).toBe(true);
       // On a 1x display the digits snap to whole pixels, so allow a pixel and a half of difference.
       expect(Math.abs(gaps.left - gaps.right), `digits of ${value} centred left to right`).toBeLessThanOrEqual(1.5);
       expect(Math.abs(gaps.top - gaps.bottom), `digits of ${value} centred top to bottom`).toBeLessThanOrEqual(1.5);
