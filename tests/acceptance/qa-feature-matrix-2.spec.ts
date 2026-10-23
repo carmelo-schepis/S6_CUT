@@ -107,20 +107,25 @@ test.describe("§6.4 Shorts Editor", () => {
 });
 
 test.describe("§6.6 Jobs", () => {
-  test("job cards carry a mode tag and only unsettled jobs show a progress bar", async ({ page }) => {
+  test("job cards omit clip mode tags and only unsettled jobs show a progress bar", async ({ page }) => {
     await boot(page);
     await rail(page, "Jobs");
-    await expect(page.locator(".job-card, article").first()).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator("#main-content article.job-card").first()).toBeVisible({ timeout: 30_000 });
     const settled = await page.evaluate(() => {
-      const cards = [...document.querySelectorAll("#main-content article")];
+      const cards = [...document.querySelectorAll("#main-content article.job-card")];
       return cards.map((c) => ({
-        text: (c.textContent || "").slice(0, 80),
+        status: c.querySelector(".status-badge")?.textContent?.trim() || "",
         hasProgress: !!c.querySelector(".progress-wrap"),
       }));
     });
     expect(settled.length, "the Jobs screen should list jobs").toBeGreaterThan(0);
-    const tagged = settled.filter((c) => /CLIP/i.test(c.text));
-    expect(tagged.length, "every remaining job card should carry a CLIP tag").toBe(settled.length);
+    // This acceptance seed contains only clip jobs; mode badges are reserved for historical non-clip jobs.
+    await expect(page.locator("#main-content article.job-card .job-mode")).toHaveCount(0);
+    for (const card of settled) {
+      expect(card.status, "each job card should have a status").not.toBe("");
+      const isSettled = /^(complete|failed|cancelled kept)$/i.test(card.status);
+      expect(card.hasProgress, `progress visibility for ${card.status}`).toBe(!isSettled);
+    }
   });
 
   test("Open navigates to that project's Workspace", async ({ page }) => {
