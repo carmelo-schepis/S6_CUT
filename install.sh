@@ -74,6 +74,20 @@ check_prerequisites() {
   command -v git >/dev/null 2>&1 \
     || die "Git is not installed. Install it first (https://git-scm.com/downloads), then re-run the install command."
   ok "Git found"
+  # SSH and other non-login shells on macOS may omit Docker Desktop/Homebrew
+  # from PATH even when Docker is installed and running.
+  if ! command -v docker >/dev/null 2>&1 && [[ "$(uname -s)" == "Darwin" ]]; then
+    local docker_dir
+    for docker_dir in "$HOME/.docker/bin" \
+      "/Applications/Docker.app/Contents/Resources/bin" \
+      "$HOME/Applications/Docker.app/Contents/Resources/bin" \
+      /opt/homebrew/bin /usr/local/bin; do
+      if [[ -x "$docker_dir/docker" ]]; then
+        export PATH="$docker_dir:$PATH"
+        break
+      fi
+    done
+  fi
   command -v docker >/dev/null 2>&1 \
     || die "Docker is not installed. S6_cut runs in Docker: install Docker Engine on Linux (https://docs.docker.com/engine/install/) or Docker Desktop on macOS (https://docs.docker.com/desktop/), then re-run the install command."
   ok "Docker found"
@@ -148,6 +162,12 @@ start_containers() {
 
 read_env() {
   local name="$1" default="$2" value=""
+  # Compose gives exported variables precedence over the .env file.
+  value="${!name:-}"
+  if [[ -n "$value" ]]; then
+    printf '%s' "$value"
+    return
+  fi
   if [[ -f .env ]]; then
     value="$(grep -E "^${name}=" .env 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '"' | tr -d "'" || true)"
   fi
