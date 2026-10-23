@@ -20,7 +20,7 @@ const dimensions = {
   "4:5": [1080, 1350],
 } as const;
 type Aspect = keyof typeof dimensions;
-type Frame = { width: number; height: number; pixels: number[] };
+type Frame = { width: number; height: number; pixels: number[]; requestedTime: number; mediaTime: number };
 type RenderResult = { projectName: string; jobId: string; clipId: string; start: number; end: number; duration: number; assetId: string | null; aspect: Aspect; mp4Path: string; stateFrames: Frame[]; offCycleFrame: Frame };
 
 function requireDisposableTarget() {
@@ -36,27 +36,40 @@ function requireDisposableTarget() {
   return url;
 }
 
-async function captureFrame(page: Page, time: number, screenshotPath: string): Promise<Frame> {
+async function captureFrame(page: Page, time: number, screenshotPath: string, expectedMediaTime?: number): Promise<Frame> {
   const video = page.locator(".viewer-frame video");
-  await video.evaluate(async (node: HTMLVideoElement, target) => {
-    const at = Math.min(target, Math.max(0, node.duration - 0.05));
-    if (Math.abs(node.currentTime - at) > 0.01) await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`video seek timed out at ${at}s`)), 15_000);
-      node.addEventListener("seeked", () => { clearTimeout(timer); resolve(); }, { once: true });
-      node.currentTime = at;
-    });
-    node.muted = true;
-    await node.play();
-    await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`video did not decode at ${at}s`)), 10_000);
-      node.requestVideoFrameCallback(() => { clearTimeout(timer); resolve(); });
-    });
+  const decoded = await video.evaluate(async (node: HTMLVideoElement, options: { target: number; expected?: number }) => {
     node.pause();
-  }, time);
+    node.muted = true;
+    const duration = node.duration;
+    if (!Number.isFinite(duration) || duration <= 0) throw new Error("video duration unavailable");
+    let requested = Math.max(0, Math.min(options.expected ?? options.target, duration - 0.001));
+    let mediaTime = NaN;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const seek = (at: number) => new Promise<number>((resolve, reject) => {
+        let seeked = false, presented = false, callback = 0;
+        const cleanup = () => { clearTimeout(timer); node.removeEventListener("seeked", onSeeked); if (callback) node.cancelVideoFrameCallback(callback); };
+        const finish = () => { if (seeked && presented) { cleanup(); resolve(mediaTime); } };
+        const onSeeked = () => { seeked = true; finish(); };
+        const timer = setTimeout(() => { cleanup(); reject(new Error(`seek/decode timeout requested=${at} decoded=${mediaTime}`)); }, 12_000);
+        node.addEventListener("seeked", onSeeked);
+        callback = node.requestVideoFrameCallback((_now, metadata) => { mediaTime = metadata.mediaTime; presented = true; finish(); });
+        node.currentTime = at;
+      });
+      if (Math.abs(node.currentTime - requested) < 0.0005) {
+        const intermediate = requested < duration / 2 ? Math.min(duration - 0.01, requested + 0.05) : Math.max(0, requested - 0.05);
+        await seek(intermediate);
+      }
+      mediaTime = await seek(requested);
+      if (options.expected === undefined || Math.abs(mediaTime - options.expected) <= 0.001) break;
+      if (attempt === 2) throw new Error(`media timestamp mismatch requested=${requested} decoded=${mediaTime} expected=${options.expected}`);
+      requested = Math.max(0, Math.min(options.expected + 0.01 * (attempt + 1), duration - 0.001));
+    }
+    return { requestedTime: requested, mediaTime };
+  }, { target: time, expected: expectedMediaTime });
   await video.screenshot({ path: screenshotPath });
-  return video.evaluate((node: HTMLVideoElement) => {
+  const frame = await video.evaluate((node: HTMLVideoElement) => {
     const canvas = document.createElement("canvas");
-    // Keep enough resolution for a stable pixel-derived artwork bounding box.
     canvas.width = 192;
     canvas.height = Math.round(192 * node.videoHeight / node.videoWidth);
     const context = canvas.getContext("2d", { willReadFrequently: true });
@@ -64,6 +77,7 @@ async function captureFrame(page: Page, time: number, screenshotPath: string): P
     context.drawImage(node, 0, 0, canvas.width, canvas.height);
     return { width: canvas.width, height: canvas.height, pixels: [...context.getImageData(0, 0, canvas.width, canvas.height).data] };
   });
+  return { ...frame, ...decoded };
 }
 
 function differenceBox(on: Frame, off: Frame) {
@@ -80,7 +94,7 @@ function differenceBox(on: Frame, off: Frame) {
   return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1, changed };
 }
 
-async function createAndRender(page: Page, options: { projectName: string; aspect: Aspect; subscribe: boolean; testInfo: { outputPath(...segments: string[]): string } }): Promise<RenderResult> {
+async function createAndRender(page: Page, options: { projectName: string; aspect: Aspect; subscribe: boolean; testInfo: { outputPath(...segments: string[]): string }; reference?: RenderResult }): Promise<RenderResult> {
   await page.getByRole("button", { name: "Projects", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
   await page.getByLabel("Choose video file").setInputFiles(fixture);
@@ -137,10 +151,36 @@ async function createAndRender(page: Page, options: { projectName: string; aspec
   expect((await fs.stat(mp4Path)).size).toBeGreaterThan(50_000);
   const start = evidence.duration - 5;
   const stateFrames: Frame[] = [];
-  for (const [index, offset] of [0.65, 1.05, 2.0].entries()) stateFrames.push(await captureFrame(page, start + offset, options.testInfo.outputPath(`${prefix}-state-${index}.png`)));
-  const offCycleFrame = await captureFrame(page, evidence.duration - 0.15, options.testInfo.outputPath(`${prefix}-after-animation.png`));
+  for (const [index, offset] of [0.65, 1.05, 2.0].entries()) stateFrames.push(await captureFrame(page, start + offset, options.testInfo.outputPath(`${prefix}-state-${index}.png`), options.reference?.stateFrames[index].mediaTime));
+  const offCycleFrame = await captureFrame(page, evidence.duration - 0.15, options.testInfo.outputPath(`${prefix}-after-animation.png`), options.reference?.offCycleFrame.mediaTime);
   return { projectName: options.projectName, jobId: job.id, clipId: clip.id, start: clip.start, end: clip.end, duration: clip.duration, assetId: clip.libraryAssetId ?? null, aspect: options.aspect, mp4Path, stateFrames, offCycleFrame };
 }
+
+test("Paused frame sampling is deterministic", async ({ page }) => {
+  await fs.access(fixture);
+  const bytes = await fs.readFile(fixture);
+  await page.route("http://subscribe-fixture.test/**", async (route) => {
+    if (route.request().url().endsWith("/fixture.mp4")) await route.fulfill({ status: 200, contentType: "video/mp4", body: bytes });
+    else await route.fulfill({ contentType: "text/html", body: '<video class="viewer-frame" src="http://subscribe-fixture.test/fixture.mp4" muted></video>' });
+  });
+  await page.goto("http://subscribe-fixture.test/");
+  const video = page.locator("video");
+  await expect.poll(() => video.evaluate((node: HTMLVideoElement) => node.readyState >= 2), { timeout: 20_000 }).toBe(true);
+  const first = await captureFrame(page, 1.2, test.info().outputPath("paused-a.png"));
+  const repeated = await captureFrame(page, 1.2, test.info().outputPath("paused-b.png"));
+  expect(await video.evaluate((node: HTMLVideoElement) => node.paused)).toBe(true);
+  expect(Math.abs(first.mediaTime - repeated.mediaTime)).toBeLessThanOrEqual(0.001);
+  expect(repeated.pixels).toEqual(first.pixels);
+  await captureFrame(page, 2.1, test.info().outputPath("paused-forward.png"));
+  await captureFrame(page, 0.7, test.info().outputPath("paused-backward.png"));
+  const second = await page.locator("body").evaluate((body) => { body.innerHTML = '<video class="viewer-frame" src="http://subscribe-fixture.test/fixture.mp4" muted></video>'; });
+  void second;
+  await expect.poll(() => page.locator("video").evaluate((node: HTMLVideoElement) => node.readyState >= 2), { timeout: 20_000 }).toBe(true);
+  const aligned = await captureFrame(page, 0.7, test.info().outputPath("paused-aligned.png"), first.mediaTime);
+  expect(Math.abs(aligned.mediaTime - first.mediaTime)).toBeLessThanOrEqual(0.001);
+  expect(aligned.pixels).toEqual(first.pixels);
+  await expect(captureFrame(page, 0.7, test.info().outputPath("paused-offset.png"), first.mediaTime + 1)).rejects.toThrow(/media timestamp mismatch/);
+});
 
 test("Subscribe animation renders and exports at all supported aspect ratios", async ({ page }, testInfo) => {
   test.setTimeout(60 * 60_000);
@@ -156,7 +196,7 @@ test("Subscribe animation renders and exports at all supported aspect ratios", a
   }
   const disabledOutputs: RenderResult[] = [];
   for (const aspect of ["9:16", "16:9", "1:1", "4:5"] as const) {
-    disabledOutputs.push(await createAndRender(page, { projectName: `Subscribe disabled ${aspect} ${tag}`, aspect, subscribe: false, testInfo }));
+    disabledOutputs.push(await createAndRender(page, { projectName: `Subscribe disabled ${aspect} ${tag}`, aspect, subscribe: false, testInfo, reference: rendered[disabledOutputs.length] }));
   }
   for (const [index, output] of rendered.entries()) {
     expect(disabledOutputs[index].start).toBeCloseTo(output.start, 1);
@@ -168,6 +208,8 @@ test("Subscribe animation renders and exports at all supported aspect ratios", a
   // 55–65% of output width; landscape is 40–50%.
   for (const [index, output] of rendered.entries()) {
     const reference = disabledOutputs[index];
+    for (const [state, frame] of output.stateFrames.entries()) expect(Math.abs(frame.mediaTime - reference.stateFrames[state].mediaTime), `paired frame timestamps ${output.aspect} state ${state}`).toBeLessThanOrEqual(0.001);
+    expect(Math.abs(output.offCycleFrame.mediaTime - reference.offCycleFrame.mediaTime), `paired off-cycle timestamps ${output.aspect}`).toBeLessThanOrEqual(0.001);
     const boxes = output.stateFrames.map((frame, state) => differenceBox(frame, reference.stateFrames[state]));
     const box = { x: Math.min(...boxes.map((item) => item.x)), y: Math.min(...boxes.map((item) => item.y)), right: Math.max(...boxes.map((item) => item.x + item.width)), bottom: Math.max(...boxes.map((item) => item.y + item.height)), changed: boxes.reduce((sum, item) => sum + item.changed, 0) };
     const ratio = (box.right - box.x) / output.stateFrames[0].width;
