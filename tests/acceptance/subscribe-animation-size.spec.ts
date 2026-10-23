@@ -38,6 +38,7 @@ function requireDisposableTarget() {
 
 async function captureFrame(page: Page, time: number, screenshotPath: string, expectedMediaTime?: number): Promise<Frame> {
   const video = page.locator(".viewer-frame video");
+  await expect.poll(() => video.evaluate((node: HTMLVideoElement) => Number.isFinite(node.duration) && node.duration > 0), { timeout: 15_000, message: `video duration unavailable before sampling at ${time}s` }).toBe(true);
   const decoded = await video.evaluate(async (node: HTMLVideoElement, options: { target: number; expected?: number }) => {
     node.pause();
     node.muted = true;
@@ -161,7 +162,7 @@ test("Paused frame sampling is deterministic", async ({ page }) => {
   const bytes = await fs.readFile(fixture);
   await page.route("http://subscribe-fixture.test/**", async (route) => {
     if (route.request().url().endsWith("/fixture.mp4")) await route.fulfill({ status: 200, contentType: "video/mp4", body: bytes });
-    else await route.fulfill({ contentType: "text/html", body: '<video class="viewer-frame" src="http://subscribe-fixture.test/fixture.mp4" muted></video>' });
+    else await route.fulfill({ contentType: "text/html", body: '<div class="viewer-frame"><video src="http://subscribe-fixture.test/fixture.mp4" muted></video></div>' });
   });
   await page.goto("http://subscribe-fixture.test/");
   const video = page.locator("video");
