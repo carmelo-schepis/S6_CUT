@@ -17,3 +17,10 @@ class TestIntersectionObserver {
 window.IntersectionObserver = TestIntersectionObserver as unknown as typeof IntersectionObserver;
 
 afterEach(cleanup);
+
+// jsdom does not implement Server-Sent Events. Workspace tests need a closeable stub.
+Object.defineProperty(globalThis, "EventSource", {
+  configurable: true,
+  writable: true,
+  value: class { close() {} },
+});

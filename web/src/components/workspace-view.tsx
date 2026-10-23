@@ -184,7 +184,7 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
     let backoff = 1000;
     let lastUpdatedAt = jobRef.current?.updatedAt || "";
     const update = (next: Job) => {
-      if (disposed || (lastUpdatedAt && next.updatedAt < lastUpdatedAt)) return;
+      if (disposed || next.id !== currentJobId || next.projectId !== project.id || (lastUpdatedAt && next.updatedAt < lastUpdatedAt)) return;
       lastUpdatedAt = next.updatedAt;
       const wasTerminal = terminal;
       terminal = isTerminalJob(next);
