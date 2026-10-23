@@ -116,12 +116,13 @@ test("renders a stable centered Workspace progress ring at desktop and mobile si
     // The number is centred on its drawn digits: measure the rendered pixels, with the arc hidden,
     // so the gaps either side of "100" (and above and below) match whatever the font's side bearings are.
     await page.emulateMedia({ reducedMotion: "reduce" });
-    await page.addStyleTag({ content: ".nav-work-progress-ring { visibility: hidden !important; }" });
+    // The production CSP forbids injected stylesheets, so hide the arc through the CSSOM instead.
+    const hideArc = () => page.evaluate(() => document.querySelectorAll<SVGElement>(".nav-work-progress-ring").forEach((ring) => { ring.style.visibility = "hidden"; }));
     for (const value of [7, 42, 100]) {
       remaining = value;
       await page.reload({ waitUntil: "domcontentloaded" });
       await expect(page.getByTestId("workspace-work-count")).toHaveText(String(value));
-      await page.addStyleTag({ content: ".nav-work-progress-ring { visibility: hidden !important; }" });
+      await hideArc();
       await page.evaluate(() => document.fonts.ready);
       const shot = await page.getByTestId("workspace-work-progress").screenshot({ scale: "device" });
       const gaps = await page.evaluate(async (base64) => {
