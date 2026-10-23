@@ -36,8 +36,12 @@ async function createViaUi(page: import("@playwright/test").Page, name: string) 
 test("follows actual one-worker sequential processing after a second UI-submitted video queues", async ({ page }) => {
   test.setTimeout(12 * 60_000);
   const errors: string[] = [];
+  const browserWarnings: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+  page.on("console", (message) => {
+    if (message.text().includes("Cross-Origin-Opener-Policy header has been ignored")) browserWarnings.push(message.text());
+    else if (message.type() === "error") errors.push(message.text());
+  });
   const firstName = `Follow queue first ${Date.now()}`;
   const secondName = `Follow queue second ${Date.now()}`;
 
@@ -79,5 +83,6 @@ test("follows actual one-worker sequential processing after a second UI-submitte
   await expect(page.locator(".topbar-context")).toContainText(secondName, { timeout: 30_000 });
   await expect(page.locator(".workspace-controls")).toContainText(secondJob!.stageLabel);
   await expect(errors).toEqual([]);
+  if (browserWarnings.length) test.info().annotations.push({ type: "browser-warning", description: browserWarnings.join(" | ") });
   await page.screenshot({ path: test.info().outputPath("workspace-follow-sequential-live.png"), fullPage: true });
 });

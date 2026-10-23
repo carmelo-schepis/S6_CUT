@@ -66,8 +66,12 @@ for (const viewport of [
     test.setTimeout(30_000);
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     const browserErrors: string[] = [];
+    const browserWarnings: string[] = [];
     page.on("pageerror", (error) => browserErrors.push(error.message));
-    page.on("console", (message) => { if (message.type() === "error") browserErrors.push(message.text()); });
+    page.on("console", (message) => {
+      if (message.text().includes("Cross-Origin-Opener-Policy header has been ignored")) browserWarnings.push(message.text());
+      else if (message.type() === "error") browserErrors.push(message.text());
+    });
     jobs = [
       job("a-job", "project-a", "active", "2026-10-23T08:00:00Z", "Rendering stable job"),
       job("b-job-old", "project-b", "complete", "2026-10-23T09:00:00Z", "Complete"),
@@ -107,6 +111,7 @@ for (const viewport of [
     await expect.poll(() => controlledPath).toBe("/jobs/b-job-new/control/pause");
     await expect(page.locator(".topbar-context")).toContainText("Next running project");
     await expect(browserErrors).toEqual([]);
+    if (browserWarnings.length) test.info().annotations.push({ type: "browser-warning", description: browserWarnings.join(" | ") });
     await page.screenshot({ path: test.info().outputPath(`workspace-follow-${viewport.label}.png`), fullPage: true });
   });
 }
