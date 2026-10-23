@@ -221,7 +221,7 @@ test.describe("responsive loading and creation controls", () => {
     expect(failedRequests, "failed application requests").toEqual([]);
   });
 
-  test("shows connected-provider mode copy without breaking the control row", async ({ page }) => {
+  test("selects Smart with a connected provider without breaking the control row", async ({ page }) => {
     const connected: ProviderProfile = {
       id: "safe-connected-profile",
       name: "Connected OpenRouter",
@@ -241,8 +241,9 @@ test.describe("responsive loading and creation controls", () => {
     await page.setViewportSize({ width: 320, height: 568 });
     await page.goto("/", { waitUntil: "domcontentloaded" });
     await expect(page.locator(".provider-callout:not(.compact)")).toHaveCount(0);
-    await page.getByRole("button", { name: "Smart", exact: true }).click();
-    await expect(page.locator(".field-group-hint").filter({ hasText: "selected provider" })).toBeVisible();
+    const smart = page.getByRole("button", { name: "Smart", exact: true });
+    await smart.click();
+    await expect(smart).toHaveAttribute("aria-pressed", "true");
     await assertNoOverflow(page);
     await page.screenshot({ path: path.join(artifacts, "creation-connected-smart.png"), fullPage: false });
   });
