@@ -28,6 +28,9 @@ param(
     [switch]$ForceRecreate
 )
 
+$InstallDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($InstallDir)
+$GitImage = "alpine/git:2.54.0@sha256:4fac439ee3b9204bec99c712b8a15942999632458f716ae8149fbb97cb760cd4"
+
 # --- formatting ---------------------------------------------------------------
 
 function Write-Info { param([string]$Message) Write-Host "`n$Message" -ForegroundColor Cyan }
@@ -55,12 +58,6 @@ Write-Ok "Windows detected"
 # Check prerequisites
 $CurrentStep = "checking prerequisites"
 
-# Git
-if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-    Die "Git is not installed. Install it from https://git-scm.com/downloads, then re-run the install command."
-}
-Write-Ok "Git found"
-
 # Docker
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     Die "Docker is not installed. Install Docker Desktop from https://www.docker.com/products/docker-desktop/, then re-run the install command."
@@ -81,7 +78,24 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Ok "Docker Compose found"
 
+$UseDockerGit = -not (Get-Command git -ErrorAction SilentlyContinue)
+if ($UseDockerGit) {
+    Write-Step "Using Git inside Docker (no separate Git installation needed)"
+}
+else {
+    Write-Ok "Git found"
+}
+
 # --- repository ----------------------------------------------------------------
+
+function Invoke-RepositoryGit {
+    if ($UseDockerGit) {
+        & docker run --rm --mount "type=bind,source=$InstallDir,target=/s6_cut" --workdir /s6_cut $GitImage -c safe.directory=/s6_cut @args
+    }
+    else {
+        & git @args
+    }
+}
 
 $CurrentStep = "preparing repository"
 $ComposeFile = "compose.yaml"
@@ -90,9 +104,9 @@ if (Test-Path (Join-Path $InstallDir ".git")) {
     Write-Ok "S6_cut repository found at $InstallDir"
     Write-Step "Updating repository..."
     Set-Location $InstallDir
-    git fetch --quiet origin
+    Invoke-RepositoryGit fetch --quiet origin
     if ($LASTEXITCODE -eq 0) {
-        git pull --quiet --ff-only origin $Branch 2>$null
+        Invoke-RepositoryGit pull --quiet --ff-only origin $Branch 2>$null
         if ($LASTEXITCODE -ne 0) {
             Write-Warn "Could not fast-forward to the latest ${Branch} (local changes?). Keeping the current source."
         }
@@ -113,7 +127,8 @@ elseif ((Test-Path $InstallDir) -and (Get-ChildItem $InstallDir -Force)) {
 else {
     Write-Step "Downloading S6_cut into $InstallDir..."
     New-Item -ItemType Directory -Path $InstallDir -Force -ErrorAction Stop | Out-Null
-    git clone --quiet --depth 1 --branch $Branch $RepoUrl $InstallDir
+    Set-Location $InstallDir -ErrorAction Stop
+    Invoke-RepositoryGit clone --quiet --depth 1 --branch $Branch $RepoUrl .
     if ($LASTEXITCODE -ne 0) {
         Die "Could not download S6_cut. Check your network connection and re-run the install command."
     }

@@ -4,11 +4,11 @@ S6_cut is a free, open-source, local-first video studio. Drop a long video or pa
 
 There is no S6_cut account, credit system, watermark, artificial usage limit, or mandatory hosted application backend. The web gateway and private media engine run on hardware you control.
 
-## Quick start (Docker)
+## One-paste install
 
-Install Git and Docker with Compose v2, then paste one command into your terminal. No GitHub account is needed.
+With Docker running (Compose v2 or newer), paste the command for your OS:
 
-### Linux / macOS (bash)
+### Linux / macOS
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/carmelo-schepis/S6_CUT/main/install.sh | bash
@@ -20,31 +20,45 @@ curl -fsSL https://raw.githubusercontent.com/carmelo-schepis/S6_CUT/main/install
 irm https://raw.githubusercontent.com/carmelo-schepis/S6_CUT/main/Install-S6_CUT.ps1 | iex
 ```
 
-The installer checks for Git, Docker, and Docker Compose v2, clones S6_cut into `~/s6_cut` (or updates an existing installation in place), creates `.env` from the template on first run — and never overwrites your configuration — then builds, starts, and waits for the app to become ready. When it finishes you will see:
+Open **<http://localhost:8080>** when the installer finishes. It downloads, builds, and starts the complete app. The first build can take several minutes.
+
+**To update, paste the same command again.** Your settings and media are preserved.
+
+<details>
+<summary>Installation details, requirements, network access, and uninstall</summary>
+
+The installer downloads S6_cut into `~/s6_cut`, creates `.env` on first run, builds the containers, and waits for the app to become ready. Existing installations are updated in place, and your configuration and data are preserved. No GitHub account or API key is required.
+
+Git is optional: the installer uses your existing Git installation when available, or runs Git inside Docker automatically. Node.js, Python, FFmpeg, and the other application dependencies are installed inside the application containers.
+
+Requirements: a running Docker Engine or Docker Desktop with Compose v2 or newer, curl for the Linux/macOS download command, and enough storage for the application images, source media, models, and renders. 8 GB RAM is recommended. The installer does not install Docker.
+
+The default URLs are:
 
 ```text
-✓ S6_cut is running
-
 Frontend: http://localhost:8080
 Backend:  http://localhost:8001
 ```
 
-Open the **Frontend** URL in your browser. The engine's own port is bound to loopback and is never published to your network. That is not, however, an access control for the API: the web gateway proxies `/api/` — including the API docs at `/api/docs` — through to the engine, and S6_cut has no authentication. The API is therefore reachable from every interface the frontend is published on, which by default is all of them. Anyone who can reach the frontend can create, read and delete your projects and Library media. Set `S6_PORT` to bind it narrower — `S6_PORT=127.0.0.1:8080` restricts it to this machine, and `S6_PORT=<one-address>:8080` to a single interface — or keep it on a trusted network.
+The engine's own port is bound to loopback and is never published to your network. That is not, however, an access control for the API: the web gateway proxies `/api/` — including the API docs at `/api/docs` — through to the engine, and S6_cut has no authentication. The API is therefore reachable from every interface the frontend is published on, which by default is all of them. Anyone who can reach the frontend can create, read and delete your projects and Library media. Set `S6_PORT` to bind it narrower — `S6_PORT=127.0.0.1:8080` restricts it to this machine, and `S6_PORT=<one-address>:8080` to a single interface — or keep it on a trusted network.
 
-Requirements: Git, curl, Docker Engine with Compose v2, with 8 GB RAM recommended and enough storage for source media, the Whisper model, temporary renders, and outputs. The installer does not install Docker for you: on Linux, install Docker Engine; on macOS/Windows, install Docker Desktop.
+To uninstall while keeping your data:
 
-- **Update** — re-run the same command. Your `.env`, projects, Library, media, outputs, models, and persistent Docker state are preserved.
-- **Uninstall** (keeps your data) — run the one-command uninstaller:
+**Linux / macOS:**
 
-  **Linux / macOS:**
-  ```bash
-  bash ~/s6_cut/uninstall.sh
-  ```
+```bash
+bash ~/s6_cut/uninstall.sh
+```
 
-  **Windows:**
-  ```powershell
-  & $HOME\s6_cut\uninstall.ps1
-  ```
+**Windows:**
+
+```powershell
+& $HOME\s6_cut\uninstall.ps1
+```
+
+</details>
+
+## Local processing
 
 Auto uses the local Smart pipeline for transcription and captions, whether or not a provider is connected. The first caption-enabled job downloads the configured Faster-Whisper model into the mounted data path. Choose Fast to skip transcription and captions. Engine only keeps all AI text features local even when an API profile is connected.
 
