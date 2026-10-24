@@ -6,11 +6,7 @@
     then installs/updates using Docker Compose. Preserves existing .env, projects,
     Library, media, outputs, models, and persistent Docker state.
 
-    PRIVATE REPO (authenticated -- works now):
-      gh api -H "Accept: application/vnd.github.raw+json" repos/carmelo-schepis/S6_CUT/contents/Install-S6_CUT.ps1 | Invoke-Expression
-
-    PUBLIC REPO (anonymous -- works after repository is made public):
-      irm https://raw.githubusercontent.com/carmelo-schepis/S6_CUT/master/Install-S6_CUT.ps1 | iex
+      irm https://raw.githubusercontent.com/carmelo-schepis/S6_CUT/main/Install-S6_CUT.ps1 | iex
 .NOTES
     Installs into $HOME\s6_cut by default. Safe to run repeatedly.
 #>
@@ -23,7 +19,7 @@ param(
     [string]$RepoUrl = "https://github.com/carmelo-schepis/S6_CUT.git",
 
     [Parameter(Mandatory=$false)]
-    [string]$Branch = "master",
+    [string]$Branch = "main",
 
     [Parameter(Mandatory=$false)]
     [int]$StartTimeout = 300,
@@ -31,6 +27,9 @@ param(
     [Parameter(Mandatory=$false)]
     [switch]$ForceRecreate
 )
+
+$InstallDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($InstallDir)
+$GitImage = "alpine/git:2.54.0@sha256:4fac439ee3b9204bec99c712b8a15942999632458f716ae8149fbb97cb760cd4"
 
 # --- formatting ---------------------------------------------------------------
 
@@ -59,12 +58,6 @@ Write-Ok "Windows detected"
 # Check prerequisites
 $CurrentStep = "checking prerequisites"
 
-# Git
-if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-    Die "Git is not installed. Install it from https://git-scm.com/downloads, then re-run the install command."
-}
-Write-Ok "Git found"
-
 # Docker
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     Die "Docker is not installed. Install Docker Desktop from https://www.docker.com/products/docker-desktop/, then re-run the install command."
@@ -72,41 +65,53 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
 Write-Ok "Docker found"
 
 # Docker engine running
-try {
-    docker info > $null 2>&1
-    Write-Ok "Docker engine is running"
-}
-catch {
+docker info > $null 2>&1
+if ($LASTEXITCODE -ne 0) {
     Die "Docker is installed but its engine is not running or not reachable. Start Docker Desktop, wait until it is ready, then re-run the install command."
 }
+Write-Ok "Docker engine is running"
 
 # Docker Compose v2
-if (-not (docker compose version > $null 2>&1)) {
+docker compose version > $null 2>&1
+if ($LASTEXITCODE -ne 0) {
     Die "Docker Compose v2 is required but the 'docker compose' command is missing. Install Docker Compose v2 (https://docs.docker.com/compose/install/), then re-run the install command."
 }
 Write-Ok "Docker Compose found"
 
+$UseDockerGit = -not (Get-Command git -ErrorAction SilentlyContinue)
+if ($UseDockerGit) {
+    Write-Step "Using Git inside Docker (no separate Git installation needed)"
+}
+else {
+    Write-Ok "Git found"
+}
+
 # --- repository ----------------------------------------------------------------
+
+function Invoke-RepositoryGit {
+    if ($UseDockerGit) {
+        & docker run --rm --mount "type=bind,source=$InstallDir,target=/s6_cut" --workdir /s6_cut $GitImage -c safe.directory=/s6_cut @args
+    }
+    else {
+        & git @args
+    }
+}
 
 $CurrentStep = "preparing repository"
 $ComposeFile = "compose.yaml"
 
-if (-not (Test-Path $InstallDir)) {
-    Write-Step "Creating installation directory: $InstallDir"
-    New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
-    Write-Ok "Installation directory created"
-}
-elseif (Test-Path (Join-Path $InstallDir ".git")) {
+if (Test-Path (Join-Path $InstallDir ".git")) {
     Write-Ok "S6_cut repository found at $InstallDir"
     Write-Step "Updating repository..."
     Set-Location $InstallDir
-    try {
-        git fetch --quiet origin
-        if (-not (git pull --quiet --ff-only origin $Branch 2>$null)) {
+    Invoke-RepositoryGit fetch --quiet origin
+    if ($LASTEXITCODE -eq 0) {
+        Invoke-RepositoryGit pull --quiet --ff-only origin $Branch 2>$null
+        if ($LASTEXITCODE -ne 0) {
             Write-Warn "Could not fast-forward to the latest ${Branch} (local changes?). Keeping the current source."
         }
     }
-    catch {
+    else {
         Write-Warn "Could not reach the repository remote. Keeping the current source."
     }
     Write-Ok "Repository updated"
@@ -116,16 +121,20 @@ elseif (Test-Path (Join-Path $InstallDir $ComposeFile)) {
     Write-Ok "Repository ready"
     Set-Location $InstallDir
 }
-elseif ((Get-ChildItem $InstallDir -Force).Count -gt 0) {
+elseif ((Test-Path $InstallDir) -and (Get-ChildItem $InstallDir -Force)) {
     Die "$InstallDir already exists and is not an S6_cut installation. Move it aside, or use a different location."
 }
 else {
     Write-Step "Downloading S6_cut into $InstallDir..."
-    mkdir -p $InstallDir
-    git clone --quiet --depth 1 --branch $Branch $RepoUrl $InstallDir
+    New-Item -ItemType Directory -Path $InstallDir -Force -ErrorAction Stop | Out-Null
+    Set-Location $InstallDir -ErrorAction Stop
+    Invoke-RepositoryGit clone --quiet --depth 1 --branch $Branch $RepoUrl .
+    if ($LASTEXITCODE -ne 0) {
+        Die "Could not download S6_cut. Check your network connection and re-run the install command."
+    }
     Write-Ok "Repository downloaded"
-    Set-Location $InstallDir
 }
+Set-Location $InstallDir -ErrorAction Stop
 
 # --- configuration ------------------------------------------------------------
 
