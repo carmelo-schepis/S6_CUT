@@ -195,10 +195,20 @@ read_env() {
   printf '%s' "${value:-$default}"
 }
 
+web_host_port() {
+  local binding="$1" port
+  port="${binding##*:}"
+  if [[ ! "$port" =~ ^[0-9]{1,5}$ ]] || (( 10#$port < 1 || 10#$port > 65535 )); then
+    die "S6_PORT must be a numeric port or a binding ending in a valid published port (1–65535)."
+  fi
+  printf '%s' "$port"
+}
+
 wait_for_ready() {
   CURRENT_STEP="waiting for S6_cut to become ready"
-  local web_port url deadline
-  web_port="$(read_env S6_PORT 8080)"
+  local web_binding web_port url deadline
+  web_binding="$(read_env S6_PORT 8080)"
+  web_port="$(web_host_port "$web_binding")"
   url="http://127.0.0.1:${web_port}/api/health"
   step "Waiting for S6_cut to become ready (timeout ${START_TIMEOUT}s)..."
   deadline=$(( $(date +%s) + START_TIMEOUT ))
@@ -229,13 +239,14 @@ report_status() {
 }
 
 print_summary() {
-  local web_port engine_port
-  web_port="$(read_env S6_PORT 8080)"
+  local web_binding web_port engine_port
+  web_binding="$(read_env S6_PORT 8080)"
+  web_port="$(web_host_port "$web_binding")"
   engine_port="$(read_env S6_ENGINE_PORT 8001)"
   echo
   ok "S6_cut is running"
   echo
-  printf '  Frontend: http://localhost:%s\n' "$web_port"
+  printf '  Frontend: http://127.0.0.1:%s\n' "$web_port"
   printf '  Backend:  http://localhost:%s\n' "$engine_port"
   echo
   info "Next steps"
