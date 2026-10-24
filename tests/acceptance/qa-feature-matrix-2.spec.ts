@@ -107,20 +107,28 @@ test.describe("§6.4 Shorts Editor", () => {
 });
 
 test.describe("§6.6 Jobs", () => {
-  test("job cards carry a mode tag and only unsettled jobs show a progress bar", async ({ page }) => {
+  test("job cards omit clip mode tags and only unsettled jobs show a progress bar", async ({ page }) => {
     await boot(page);
     await rail(page, "Jobs");
-    await expect(page.locator(".job-card, article").first()).toBeVisible({ timeout: 30_000 });
-    const settled = await page.evaluate(() => {
-      const cards = [...document.querySelectorAll("#main-content article")];
-      return cards.map((c) => ({
-        text: (c.textContent || "").slice(0, 80),
+    await expect(page.locator("#main-content article.job-card").first()).toBeVisible({ timeout: 30_000 });
+    const jobs = await (await page.request.get("/api/v1/jobs")).json() as { id: string; mode: string }[];
+    const cards = await page.evaluate(() => {
+      const items = [...document.querySelectorAll("#main-content article.job-card")];
+      return items.map((c) => ({
+        id: c.getAttribute("data-job-id") || "",
+        status: c.querySelector(".status")?.textContent?.trim() || "",
         hasProgress: !!c.querySelector(".progress-wrap"),
+        modeTag: c.querySelector(".job-mode")?.textContent?.trim() || "",
       }));
     });
-    expect(settled.length, "the Jobs screen should list jobs").toBeGreaterThan(0);
-    const tagged = settled.filter((c) => /CLIP/i.test(c.text));
-    expect(tagged.length, "every remaining job card should carry a CLIP tag").toBe(settled.length);
+    expect(cards.length, "the Jobs screen should list jobs").toBeGreaterThan(0);
+    const jobsById = new Map(jobs.map((job) => [job.id, job]));
+    for (const card of cards) {
+      expect(card.modeTag, `mode badge for ${card.id}`).toBe(jobsById.get(card.id)?.mode === "clip" ? "" : "Legacy");
+      expect(card.status, "each job card should have a status").not.toBe("");
+      const isSettled = /^(complete|failed|cancelled kept)$/i.test(card.status);
+      expect(card.hasProgress, `progress visibility for ${card.status}`).toBe(!isSettled);
+    }
   });
 
   test("Open navigates to that project's Workspace", async ({ page }) => {
