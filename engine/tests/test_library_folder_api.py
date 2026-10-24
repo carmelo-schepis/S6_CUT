@@ -96,14 +96,24 @@ def test_remove_confirmation_soft_delete_redirect_and_relocation(api, tmp_path):
 def test_project_folder_and_asset_move_http(api):
     client, db = api
     old, new = create(client, "Old"), create(client, "New")
+    project_destination = create(client, "Project destination")
     project = Project(id="p", name="Project", mode="clip", style="educational", state="complete", source_name="source.mp4", source_kind="upload", requested_count=1, latest_job_id="j", library_folder_id=old["id"])
     job = Job(id="j", project_id="p", library_folder_id=old["id"], mode="clip", state="complete", stage="complete", stage_label="Ready", progress=100, style="educational")
     db.save_project(project); db.save_job(job)
     for ident in ("one", "two", "other"):
-        db.save_asset(Asset(id=ident, title=ident, media_type="image/png", filename=f"{ident}.png", content_hash=ident, folder_id=old["id"]))
+        db.save_asset(Asset(id=ident, title=ident, media_type="image/png", filename=f"{ident}.png", content_hash=ident, folder_id=old["id"], source_project_id="p" if ident != "other" else None))
     response = client.put("/api/v1/projects/p/folder", json={"folderId": new["id"]})
-    assert response.status_code == 200 and db.get_asset("one").folder_id == old["id"]
-    assert client.put("/api/v1/projects/p/folder", json={"folderId": old["id"], "moveExistingAssets": True}).status_code == 200
+    assert response.status_code == 200
+    assert response.json()["libraryFolderId"] == new["id"]
+    assert db.get_project("p").library_folder_id == new["id"]
+    assert all(db.get_asset(ident).folder_id == old["id"] for ident in ("one", "two", "other"))
+    assert db.get_job("j").library_folder_id == old["id"]
+    response = client.put("/api/v1/projects/p/folder", json={"folderId": project_destination["id"], "moveExistingAssets": True})
+    assert response.status_code == 200
+    assert response.json()["libraryFolderId"] == project_destination["id"]
+    assert db.get_project("p").library_folder_id == project_destination["id"]
+    assert all(db.get_asset(ident).folder_id == project_destination["id"] for ident in ("one", "two"))
+    assert db.get_asset("other").folder_id == old["id"]
     assert db.get_job("j").library_folder_id == old["id"]
     assert client.put("/api/v1/projects/missing/folder", json={"folderId": new["id"]}).status_code == 404
     before = db.get_project("p").library_folder_id
@@ -114,7 +124,8 @@ def test_project_folder_and_asset_move_http(api):
     assert db.get_project("p").library_folder_id == before
     moved = client.post("/api/v1/library/assets/move", json={"assetIds": ["one", "two"], "folderId": new["id"]})
     assert moved.status_code == 200 and moved.json() == {"moved": 2}
-    assert db.get_asset("one").folder_id == new["id"] and db.get_asset("other").folder_id == old["id"]
+    assert all(db.get_asset(ident).folder_id == new["id"] for ident in ("one", "two"))
+    assert db.get_asset("other").folder_id == old["id"]
     for payload in ({"assetIds": ["one", "absent"], "folderId": old["id"]}, {"assetIds": ["one"], "folderId": "missing"}, {"assetIds": [], "folderId": old["id"]}):
         snapshot = {item: db.get_asset(item).folder_id for item in ("one", "two", "other")}
         assert client.post("/api/v1/library/assets/move", json=payload).status_code == 422
