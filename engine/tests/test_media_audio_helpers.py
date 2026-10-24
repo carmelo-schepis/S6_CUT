@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -30,7 +29,10 @@ def test_validate_audio_track_decodes_full_file_and_forwards_cancellation(settin
     monkeypatch.setattr(media, "run", run)
     assert media.validate_audio_track(path, settings, cancellation_callback=callback) == metadata
     command, kwargs = seen[0]
-    assert command[command.index("-xerror")] == "-xerror"
+    assert command[0] == settings.ffmpeg
+    assert command[command.index("-i") + 1] == str(path)
+    assert not {"-ss", "-sseof", "-t", "-to", "-frames:a", "-aframes", "-shortest"}.intersection(command)
+    assert "-xerror" in command
     assert command[command.index("-err_detect") + 1] == "explode"
     assert command[command.index("-map") + 1] == "0:a:0"
     assert command[-3:] == ["-f", "null", "-"]
@@ -83,14 +85,15 @@ def test_download_audio_success_wiring_and_complete_progress(settings, tmp_path,
     target.write_bytes(b"old")
     events = []
     seen = {}
+    cancellation_callback = lambda: False
     monkeypatch.setattr(media, "validate_youtube_url", lambda url: seen.setdefault("url", "validated:" + url))
     def download(command, directory, actual_settings, **kwargs):
         seen.update(command=command, kwargs=kwargs, old_exists=target.exists())
         target.write_bytes(b"new audio")
     monkeypatch.setattr(media, "_run_ytdlp_download", download)
-    monkeypatch.setattr(media, "validate_audio_track", lambda path, st, **kwargs: seen.update(validation=(path, kwargs)))
+    monkeypatch.setattr(media, "validate_audio_track", lambda path, st, **kwargs: seen.update(validation=(path, st, kwargs)))
     result = media.download_youtube_audio("https://youtube.com/watch?v=x", target, settings,
-        progress_callback=events.append, cancellation_callback=lambda: False, max_seconds=15)
+        progress_callback=events.append, cancellation_callback=cancellation_callback, max_seconds=15)
     assert result == target and not seen["old_exists"]
     command = seen["command"]
     for flag in ("--format", "bestaudio/best", "--extract-audio", "--audio-format", "mp3", "--output", "--max-filesize", "--write-info-json"):
@@ -98,8 +101,8 @@ def test_download_audio_success_wiring_and_complete_progress(settings, tmp_path,
     assert "validated:https://youtube.com/watch?v=x" in command
     assert seen["kwargs"]["progress_callback"].__self__ is events
     assert seen["kwargs"]["progress_callback"].__name__ == "append"
-    assert seen["kwargs"]["cancellation_callback"]() is False
-    assert seen["validation"][1]["max_seconds"] == 15
+    assert seen["kwargs"]["cancellation_callback"] is cancellation_callback
+    assert seen["validation"] == (target, settings, {"max_seconds": 15, "cancellation_callback": cancellation_callback})
     assert events[-1]["phase"] == "complete" and events[-1]["downloaded_bytes"] == 9
 
 
