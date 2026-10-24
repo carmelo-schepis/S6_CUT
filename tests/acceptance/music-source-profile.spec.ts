@@ -135,7 +135,7 @@ test("Music mode uploads an MP3 background song with the selected slow speed", a
   expect(submittedForm).not.toContain('name="music_track_url"');
 });
 
-test("known-short sources show music duration infeasibility before submission", async ({ page }) => {
+test("known-short Music sources show a warning and remain creatable", async ({ page }) => {
   await page.route("**/api/v1/health", (route) => route.fulfill({ json: health }));
   await page.route("**/api/v1/profiles", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/library/folders", (route) => route.fulfill({ json: [folder] }));
@@ -148,9 +148,9 @@ test("known-short sources show music duration infeasibility before submission", 
   const requestedCount = page.locator(".count-control strong");
   await expect(requestedCount).toHaveText("5");
   await page.getByRole("button", { name: "Music / sung vocals" }).click();
-  await expect(page.getByRole("status").filter({ hasText: /source can fit at most/ })).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: /source may not contain enough distinct lyric windows/ })).toBeVisible();
   await expect(requestedCount).toHaveText("5");
-  await expect(page.getByRole("button", { name: /Create \d+ short clips?/ })).toBeDisabled();
+  await expect(page.getByRole("button", { name: /Create \d+ short clips?/ })).toBeEnabled();
 });
 
 test("completed music jobs meet the requested minimum and expose timed caption artifacts", async ({ page }) => {

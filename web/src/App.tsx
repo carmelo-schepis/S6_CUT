@@ -12,6 +12,7 @@ import { ShortsEditorView } from "./components/shorts-editor-view";
 import { HelpDialog } from "./components/help-dialog";
 import { PwaStatus } from "./components/pwa-status";
 import { hasLiveWork, jobPollInterval, workspaceActivity } from "./project-status";
+import { selectWorkspaceJob, type WorkspaceJobSelection } from "./workspace-job-selector";
 import { onLibraryChanged } from "./library-sync";
 import { usePoll } from "./use-poll";
 import { revealApp, revealWhenReady } from "./startup";
@@ -74,6 +75,11 @@ export function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [workspaceSelection, setWorkspaceSelection] = useState<WorkspaceJobSelection>(null);
+  const workspaceSelectionRef = useRef(workspaceSelection);
+  const [followWorkspace, setFollowWorkspace] = useState(true);
+  const followWorkspaceRef = useRef(followWorkspace);
+  const projectsRef = useRef(projects);
   const [selectedLibraryAssetId, setSelectedLibraryAssetId] = useState<string | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
   const [healthChecked, setHealthChecked] = useState(false);
@@ -119,9 +125,20 @@ export function App() {
   // finished project keep showing its creation-time badge while its progress
   // bar already read 100%.
   const pollJobs = useCallback(() => listJobs()
-    .then((value) => { latestJobsSnapshot.current = value; setJobs(value); })
+    .then((value) => {
+      latestJobsSnapshot.current = value;
+      setJobs(value);
+      if (!followWorkspaceRef.current) return;
+      const availableJobs = value.filter((job) => projectsRef.current.some((project) => project.id === job.projectId));
+      const current = workspaceSelectionRef.current;
+      const previous = current && projectsRef.current.some((project) => project.id === current.projectId) ? current : null;
+      const next = selectWorkspaceJob(availableJobs, previous);
+      workspaceSelectionRef.current = next;
+      setWorkspaceSelection(next);
+      if (next) setSelectedProjectId(next.projectId);
+    })
     .catch((cause) => setError(readableError(cause))), []);
-  const jobsPollingEnabled = !iosViewer && (page === "projects" || hasLiveWork(jobs));
+  const jobsPollingEnabled = !iosViewer && (page === "projects" || page === "workspace" || hasLiveWork(jobs));
   const runJobs = usePoll(pollJobs, jobsPollMs, jobsPollingEnabled);
 
   // Each read applies its own slice the moment it settles. Gating all four on a
@@ -133,6 +150,7 @@ export function App() {
     const projectsDone = listProjects().then(
       (value) => {
         if (revision !== refreshRevision.current) return;
+        projectsRef.current = value;
         setProjects(value);
         // Only *choose* a project when nothing is selected yet. A project can
         // legitimately leave this list while the customer is working in it —
@@ -144,6 +162,14 @@ export function App() {
         // shows its own "No project selected" state, and the choice re-resolves
         // by itself if the project comes back (Retry import makes it live again).
         setSelectedProjectId((current) => current || value[0]?.id || null);
+        const current = workspaceSelectionRef.current;
+        const previous = current && value.some((project) => project.id === current.projectId) ? current : null;
+        const next = followWorkspaceRef.current
+          ? selectWorkspaceJob(latestJobsSnapshot.current.filter((job) => value.some((project) => project.id === job.projectId)), previous)
+          : previous;
+        workspaceSelectionRef.current = next;
+        setWorkspaceSelection(next);
+        if (next) setSelectedProjectId(next.projectId);
       },
       () => undefined,
     );
@@ -195,8 +221,26 @@ export function App() {
     return () => { window.removeEventListener("scroll", sync); observer?.disconnect(); };
   }, [page]);
 
-  const openProject = (id: string) => {
+  const openProject = (id: string, jobId?: string) => {
+    followWorkspaceRef.current = false;
+    setFollowWorkspace(false);
     setSelectedProjectId(id);
+    const job = jobs.filter((item) => item.projectId === id && item.mode === "clip").sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt) || right.id.localeCompare(left.id))[0];
+    const selection = jobId ? { projectId: id, jobId } : job ? { projectId: id, jobId: job.id } : null;
+    workspaceSelectionRef.current = selection;
+    setWorkspaceSelection(selection);
+    setPage("workspace");
+  };
+  const resumeWorkspaceFollowing = () => {
+    followWorkspaceRef.current = true;
+    setFollowWorkspace(true);
+    const current = workspaceSelectionRef.current;
+    const previous = current && projectsRef.current.some((project) => project.id === current.projectId) ? current : null;
+    const selection = selectWorkspaceJob(latestJobsSnapshot.current.filter((job) => projectsRef.current.some((project) => project.id === job.projectId)), previous);
+    workspaceSelectionRef.current = selection;
+    setWorkspaceSelection(selection);
+    if (selection) setSelectedProjectId(selection.projectId);
+    void runJobs();
     setPage("workspace");
   };
   const openLibraryAsset = (id: string) => {
@@ -205,25 +249,41 @@ export function App() {
   };
 
   const onCreated = (project: Project) => {
-    // A refresh that started before creation can return a project list which
-    // does not contain this project. Letting that stale response win would
-    // replace the selection just set below with the first older project,
-    // stranding the customer in the wrong Workspace (and hiding live job
-    // controls such as YouTube import retry). Invalidate it before merging
-    // the authoritative create response.
+    // A refresh that started before creation can omit this project. Invalidate
+    // it before merging the authoritative create response.
     refreshRevision.current += 1;
-    setProjects((current) => [project, ...current.filter((item) => item.id !== project.id)]);
-    // The guarded poll picks up the job immediately without racing the shell's
-    // existing /jobs request. If that request began before creation and returns
-    // an older snapshot, one guarded follow-up closes the gap without ever
-    // putting two /jobs requests on the wire together.
+    const nextProjects = [project, ...projectsRef.current.filter((item) => item.id !== project.id)];
+    projectsRef.current = nextProjects;
+    setProjects(nextProjects);
+    // Preserve the current run synchronously before navigating. The newly
+    // created project may still be queued, while a /jobs poll already in flight
+    // still describes the clip the user should keep seeing.
+    const current = workspaceSelectionRef.current;
+    const previous = current && nextProjects.some((item) => item.id === current.projectId) ? current : null;
+    const selection = selectWorkspaceJob(
+      latestJobsSnapshot.current.filter((job) => nextProjects.some((item) => item.id === job.projectId)),
+      previous,
+    );
+    workspaceSelectionRef.current = selection;
+    setWorkspaceSelection(selection);
+    setSelectedProjectId(selection?.projectId ?? project.id);
+    followWorkspaceRef.current = true;
+    setFollowWorkspace(true);
+    setPage("workspace");
+
+    // The guarded poll picks up the new job without racing the shell's existing
+    // /jobs request. If that request began before creation, one guarded follow-up
+    // closes the gap without ever putting two /jobs requests on the wire together.
     void runJobs().then(() => {
       const createdJobIsLive = project.mode === "clip" && latestJobsSnapshot.current.some((job) => job.projectId === project.id && job.mode === "clip" && hasLiveWork([job]));
       if (!createdJobIsLive) void runJobs();
     });
-    openProject(project.id);
   };
-  const selected = projects.find((project) => project.id === selectedProjectId) || null;
+  const workspaceProjectId = followWorkspace && workspaceSelection ? workspaceSelection.projectId : selectedProjectId;
+  const selected = projects.find((project) => project.id === workspaceProjectId) || null;
+  const workspaceProject = selected && workspaceSelection?.projectId === selected.id
+    ? { ...selected, latestJobId: workspaceSelection.jobId }
+    : selected;
   const activity = workspaceActivity(projects, jobs);
   const activityDescription = activity
     ? `${activity.remainingClips} clip${activity.remainingClips === 1 ? "" : "s"} remaining across ${activity.liveJobCount} active job${activity.liveJobCount === 1 ? "" : "s"}`
@@ -254,9 +314,9 @@ export function App() {
         {nav.map((item) => {
           const Icon = item.icon;
           const workspace = item.id === "workspace";
-          return <button key={item.id} className={page === item.id ? "nav-item active" : "nav-item"} onClick={() => setPage(item.id)} aria-label={item.name} title={item.name} aria-current={page === item.id ? "page" : undefined} aria-describedby={workspace && activity ? "workspace-work-description" : undefined}>
+          return <button key={item.id} className={page === item.id ? "nav-item active" : "nav-item"} onClick={() => { if (workspace) resumeWorkspaceFollowing(); else setPage(item.id); }} aria-label={item.name} title={item.name} aria-current={page === item.id ? "page" : undefined} aria-describedby={workspace && activity ? "workspace-work-description" : undefined}>
             <span className="nav-icon-wrap">
-              <Icon className={workspace ? "nav-main-icon" : undefined} data-testid={workspace ? "workspace-nav-icon" : undefined} size={19} aria-hidden="true" />
+              <Icon className={workspace ? "nav-main-icon" : undefined} data-testid={workspace ? "workspace-nav-icon" : undefined} size={20} aria-hidden="true" />
               {workspace && activity ? <WorkspaceProgressIndicator
                 value={activity.remainingClips}
                 isProcessing={activity.isProcessing}
@@ -306,7 +366,7 @@ export function App() {
       <main id="main-content" tabIndex={-1}>
         {page === "projects" && <ProjectsView onReady={onProjectsReady} health={health} healthChecked={healthChecked} providersLoaded={profilesLoaded} hasSelectedProvider={hasSelectedProvider} selectedProfile={profiles.find((profile) => profile.selected) || null} onConfigureProviders={openProviders} onCreated={onCreated} onSelectLibraryAsset={openLibraryAsset} />}
         {page === "library" && <LibraryView selectedAssetId={selectedLibraryAssetId} />}
-        {page === "workspace" && <WorkspaceView key={selected?.id || "none"} project={selected} providersLoaded={profilesLoaded} hasSelectedProvider={hasSelectedProvider} onConfigureProviders={openProviders} onProjectUpdated={refresh} onGoProjects={() => setPage("projects")} />}
+        {page === "workspace" && <WorkspaceView key={`${workspaceProject?.id || "none"}:${workspaceProject?.latestJobId || "none"}`} project={workspaceProject} providersLoaded={profilesLoaded} hasSelectedProvider={hasSelectedProvider} onConfigureProviders={openProviders} onProjectUpdated={refresh} onGoProjects={() => setPage("projects")} />}
         {page === "shorts-editor" && <ShortsEditorView onJobCreated={refresh} />}
         {page === "jobs" && <JobsView jobs={jobs} onRefresh={runJobs} onOpenProject={openProject} />}
         {page === "settings" && <SettingsView health={health} onHealthRefresh={refresh} onProfilesChanged={setProfiles} onSkipSetup={() => setPage("projects")} />}

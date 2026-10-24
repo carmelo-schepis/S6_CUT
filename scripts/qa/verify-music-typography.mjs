@@ -43,13 +43,15 @@ await writeFile(join(artifacts, 'runtime.env'), `S6_TEST_TRANSCRIPT_JSON=${JSON.
 await writeFile(join(artifacts, 'song-ytdlp.py'), `#!/usr/bin/env python3
 import json,shutil,sys,time
 from pathlib import Path
-output=Path(sys.argv[sys.argv.index('--output')+1].replace('%(ext)s','mp3'))
+template=Path(sys.argv[sys.argv.index('--output')+1])
+output=Path(str(template).replace('%(id)s','music-fixture').replace('%(ext)s','mp4'))
 output.parent.mkdir(parents=True,exist_ok=True)
 print('download:downloading|100|1000|NA|100|9|10.0%',flush=True)
 time.sleep(.2)
-shutil.copyfile('/qa/short-song.mp3',output)
-output.with_suffix('.info.json').write_text(json.dumps({'title':'Controlled YouTube song'}))
+shutil.copyfile('/qa/with-audio.mp4',output)
+output.with_suffix('.info.json').write_text(json.dumps({'title':'Controlled Music source','channel':'Controlled Creator'}))
 print('download:finished|1000|1000|NA|200|0|100.0%',flush=True)
+print(output,flush=True)
 `);
 await chmod(join(artifacts, 'song-ytdlp.py'), 0o755);
 let provisioned = false;

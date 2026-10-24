@@ -4,61 +4,61 @@ S6_cut is a free, open-source, local-first video studio. Drop a long video or pa
 
 There is no S6_cut account, credit system, watermark, artificial usage limit, or mandatory hosted application backend. The web gateway and private media engine run on hardware you control.
 
-## Quick start (Docker)
+## One-paste install
 
-The repository is currently **private**. Authenticated GitHub CLI users can install now using the commands below. Once the repository is made public, the standard anonymous one-liners will work from any device. The commands below pin both the bootstrap script and the installer checkout to the current default branch (`main`).
+With Docker running (Compose v2 or newer), paste the command for your OS:
 
-### Linux / macOS (bash)
+### Linux / macOS
 
-**Private repo / authenticated (works now):**
 ```bash
-gh api -H "Accept: application/vnd.github.raw+json" repos/carmelo-schepis/S6_CUT/contents/install.sh?ref=main | S6_BRANCH=main bash
-```
-
-**Public repo / anonymous (works after repository visibility is changed to public):**
-```bash
-curl -fsSL https://raw.githubusercontent.com/carmelo-schepis/S6_CUT/main/install.sh | S6_BRANCH=main bash
+curl -fsSL https://raw.githubusercontent.com/carmelo-schepis/S6_CUT/main/install.sh | bash
 ```
 
 ### Windows (PowerShell)
 
-**Private repo / authenticated (works now):**
 ```powershell
-$script = (gh api -H "Accept: application/vnd.github.raw+json" repos/carmelo-schepis/S6_CUT/contents/Install-S6_CUT.ps1?ref=main) -join "`n"
-& ([scriptblock]::Create($script)) -Branch main
+irm https://raw.githubusercontent.com/carmelo-schepis/S6_CUT/main/Install-S6_CUT.ps1 | iex
 ```
 
-**Public repo / anonymous (works after repository visibility is changed to public):**
-```powershell
-$script = irm https://raw.githubusercontent.com/carmelo-schepis/S6_CUT/main/Install-S6_CUT.ps1
-& ([scriptblock]::Create($script)) -Branch main
-```
+Open **<http://localhost:8080>** when the installer finishes. It downloads, builds, and starts the complete app. The first build can take several minutes.
 
-The installer checks for Git, Docker, and Docker Compose v2, clones S6_cut into `~/s6_cut` (or updates an existing installation in place), creates `.env` from the template on first run — and never overwrites your configuration — then builds, starts, and waits for the app to become ready. When it finishes you will see:
+**To update, paste the same command again.** Your settings and media are preserved.
+
+<details>
+<summary>Installation details, requirements, network access, and uninstall</summary>
+
+The installer downloads S6_cut into `~/s6_cut`, creates `.env` on first run, builds the containers, and waits for the app to become ready. Existing installations are updated in place, and your configuration and data are preserved. No GitHub account or API key is required.
+
+Git is optional: the installer uses your existing Git installation when available, or runs Git inside Docker automatically. Node.js, Python, FFmpeg, and the other application dependencies are installed inside the application containers.
+
+Requirements: a running Docker Engine or Docker Desktop with Compose v2 or newer, curl for the Linux/macOS download command, and enough storage for the application images, source media, models, and renders. 8 GB RAM is recommended. The installer does not install Docker.
+
+The default URLs are:
 
 ```text
-✓ S6_cut is running
-
 Frontend: http://localhost:8080
 Backend:  http://localhost:8001
 ```
 
-Open the **Frontend** URL in your browser. The engine's own port is bound to loopback and is never published to your network. That is not, however, an access control for the API: the web gateway proxies `/api/` — including the API docs at `/api/docs` — through to the engine, and S6_cut has no authentication. The API is therefore reachable from every interface the frontend is published on, which by default is all of them. Anyone who can reach the frontend can create, read and delete your projects and Library media. Set `S6_PORT` to bind it narrower — `S6_PORT=127.0.0.1:8080` restricts it to this machine, and `S6_PORT=<one-address>:8080` to a single interface — or keep it on a trusted network.
+The engine's own port is bound to loopback and is never published to your network. That is not, however, an access control for the API: the web gateway proxies `/api/` — including the API docs at `/api/docs` — through to the engine, and S6_cut has no authentication. The API is therefore reachable from every interface the frontend is published on, which by default is all of them. Anyone who can reach the frontend can create, read and delete your projects and Library media. Set `S6_PORT` to bind it narrower — `S6_PORT=127.0.0.1:8080` restricts it to this machine, and `S6_PORT=<one-address>:8080` to a single interface — or keep it on a trusted network.
 
-Requirements: Git, curl, Docker Engine with Compose v2, with 8 GB RAM recommended and enough storage for source media, the Whisper model, temporary renders, and outputs. The installer does not install Docker for you: on Linux, install Docker Engine; on macOS/Windows, install Docker Desktop.
+To uninstall while keeping your data:
 
-- **Update** — re-run the same command. Your `.env`, projects, Library, media, outputs, models, and persistent Docker state are preserved.
-- **Uninstall** (keeps your data) — run the one-command uninstaller:
+**Linux / macOS:**
 
-  **Linux / macOS:**
-  ```bash
-  bash ~/s6_cut/uninstall.sh
-  ```
+```bash
+bash ~/s6_cut/uninstall.sh
+```
 
-  **Windows:**
-  ```powershell
-  & $HOME\s6_cut\uninstall.ps1
-  ```
+**Windows:**
+
+```powershell
+& $HOME\s6_cut\uninstall.ps1
+```
+
+</details>
+
+## Local processing
 
 Auto uses the local Smart pipeline for transcription and captions, whether or not a provider is connected. The first caption-enabled job downloads the configured Faster-Whisper model into the mounted data path. Choose Fast to skip transcription and captions. Engine only keeps all AI text features local even when an API profile is connected.
 
@@ -153,10 +153,14 @@ Smart-mode transcription runs locally with Faster-Whisper. The CPU-friendly defa
 - On an NVIDIA GPU, set `S6_WHISPER_DEVICE=cuda` with `S6_WHISPER_COMPUTE_TYPE=float16` for the fastest decode.
 - `S6_WHISPER_WORD_TIMESTAMPS=false` skips per-word alignment (faster) but disables word-timed captions; keep it `true` for captioned clips.
 
+New content and clips default to **English** transcription in Speech and Music,
+including short-form, long-form, and high-volume jobs. Generated captions, hooks,
+and metadata use that transcript. This does not translate or dub source audio.
 Music mode uses a separate local model (`S6_MUSIC_WHISPER_MODEL=small`, beam 5).
-For slow songs with quiet vocals or a long instrumental intro, choose **Lyrics
-language → English** (or the appropriate language) in Music creation. Automatic
-detection now considers up to three initial audio windows instead of relying only
+**Lyrics language** starts on **English**; choose another language or explicitly
+select **Detect automatically** for other songs. API clients can send
+`music_lyrics_language=auto` to request automatic detection. Automatic
+detection considers up to three initial audio windows instead of relying only
 on the intro. New Music transcripts use a separate cache identity for these
 settings. Existing completed videos need a new job or reviewed caption rerender
 to change their lyrics. Recognition can still make word/timing mistakes; see the

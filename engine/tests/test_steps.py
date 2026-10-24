@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import threading
 import time
+import zipfile
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -425,9 +427,12 @@ def test_openrouter_failure_records_local_planning_fallback(monkeypatch: pytest.
     assert steps["select"].status == "complete"
 
 
-def test_music_downloaded_source_rejects_impossible_count_after_probe(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_music_downloaded_source_still_requires_a_valid_lyric_window(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     test_db, test_manager = _cluster(tmp_path)
     monkeypatch.setattr("engine.jobs.probe", _fake_probe)
+    monkeypatch.setattr(media_module, "extract_audio_16k", _fake_extract)
+    monkeypatch.setattr(media_module, "transcribe", _fake_transcribe)
+    monkeypatch.setattr(media_module, "is_whisper_model_cached", lambda *_args, **_kwargs: True)
     source = tmp_path / "downloaded-music.mp4"
     source.write_bytes(b"downloaded-fixture")
     _clip_job(test_db, "music-feasible", "music-feasible-proj", mode="smart", source=source, count=11)
@@ -441,20 +446,24 @@ def test_music_downloaded_source_rejects_impossible_count_after_probe(monkeypatc
     result = test_db.get_job("music-feasible")
     assert result is not None
     assert result.state == "failed"
-    assert "at most 10" in (result.error or "")
+    assert "timed, non-overlapping line group" in (result.error or "")
     assert result.clips == []
 
 
-def test_music_smart_path_replaces_sparse_checkpoint_and_keeps_bounded_windows(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+@pytest.mark.parametrize(("requested_count", "expected_count"), [(13, 13), (3, 3)])
+def test_music_smart_path_repeats_shortfall_windows_deterministically(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, requested_count: int, expected_count: int,
+) -> None:
     test_db, test_manager = _cluster(tmp_path)
-    monkeypatch.setattr("engine.jobs.probe", lambda *_args, **_kwargs: {**_fake_probe(None, settings), "audio": False})
+    source_metadata = {**_fake_probe(None, settings), "duration": 256.9, "audio": False}
+    monkeypatch.setattr("engine.jobs.probe", lambda *_args, **_kwargs: source_metadata)
     prepared_song = tmp_path / "prepared-song.mp3"
     prepared_song.write_bytes(b"prepared-audio")
     (tmp_path / "selected-song.mp3").write_bytes(b"selected-audio")
     extracted_from: list[Path] = []
     monkeypatch.setattr(test_manager, "_music_track_source", lambda *_args: tmp_path / "selected-song.mp3")
     monkeypatch.setattr(media_module, "prepare_music_track", lambda source, _target, speed, _settings, **kwargs: (extracted_from.append(source), prepared_song)[1])
-    monkeypatch.setattr(media_module, "probe_audio", lambda *_args, **_kwargs: {"duration": 100.0, "audio_codec": "mp3"})
+    monkeypatch.setattr(media_module, "probe_audio", lambda *_args, **_kwargs: {"duration": 256.9, "audio_codec": "mp3"})
     monkeypatch.setattr(media_module, "extract_audio_16k", lambda source, _settings, **_kwargs: (extracted_from.append(source), tmp_path / "song-audio.wav")[1])
     asr_audio_calls: list[dict[str, Any]] = []
     def extract_music_audio(source, _settings, **kwargs):
@@ -466,26 +475,30 @@ def test_music_smart_path_replaces_sparse_checkpoint_and_keeps_bounded_windows(m
     monkeypatch.setattr("engine.jobs.render_clip", _fake_render_clip)
     source = tmp_path / "music-source.mp4"
     source.write_bytes(b"fixture")
-    _clip_job(test_db, "music-checkpoint", "music-checkpoint-proj", mode="smart", source=source, count=5)
+    _clip_job(test_db, "music-checkpoint", "music-checkpoint-proj", mode="smart", source=source, count=requested_count)
     job = test_db.get_job("music-checkpoint")
     private = test_db.get_job_private(job.id)
     job.source_profile = "music"
+    job.requested_count = requested_count
+    private["count"] = requested_count
+    private["min_duration"] = 20
+    private["max_duration"] = 60
     private["transcript"] = {"language": "en", "words": [{"text": "old", "start": 0, "end": 1}], "segments": []}
     private["transcript_cache_key"] = "transcript:v2:legacy"
     private["music_track_speed"] = 1.25
     test_db.save_job(job, private)
     calls: list[dict[str, Any]] = []
     lyric_words = []
-    for line in range(8):
-        start = float(line * 12)
-        lyric_words.extend([
-            {"text": f"Lyric{line}", "start": start, "end": start + 4, "confidence": .9},
-            {"text": "continues", "start": start + 4.2, "end": start + (20 if line == 7 else 9), "confidence": .9},
-        ])
+    for line in range(3):
+        start = float(line * 70)
+        lyric_words.extend(
+            {"text": f"Lyric{line}_{word}", "start": start + word * .5, "end": start + word * .5 + .4, "confidence": .9}
+            for word in range(42)
+        )
 
     def music_transcribe(_: Path, __: Settings, **kwargs: Any) -> dict[str, Any]:
         calls.append(kwargs)
-        return {"language": "en", "words": lyric_words, "segments": [{"start": 0, "end": 93, "text": "sung words"}]}
+        return {"language": "en", "words": lyric_words, "segments": [{"start": 0, "end": 161, "text": "sung words"}]}
 
     monkeypatch.setattr(media_module, "transcribe", music_transcribe)
     test_manager._process("music-checkpoint")
@@ -494,22 +507,82 @@ def test_music_smart_path_replaces_sparse_checkpoint_and_keeps_bounded_windows(m
     assert result.state == "complete"
     assert calls and calls[0]["profile"] == "music"
     assert saved["transcript_cache_key"].startswith("transcript:v4:")
-    assert saved["transcript"]["words"][0]["text"] == "Lyric0"
+    assert saved["transcript"]["words"][0]["text"] == "Lyric0_0"
+    source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+    assert saved["source_hash"] == source_hash
     assert extracted_from == [tmp_path / "selected-song.mp3", tmp_path / "selected-song.mp3"]
-    assert asr_audio_calls[0]["duration"] == 130.0
-    assert len(result.clips) == 4
-    assert any(
-        "continues beyond the source video" in warning
-        for clip in result.clips for warning in clip.caption_qa_warnings
-    )
-    assert all(clip.end <= 100 for clip in result.clips)
-    assert all(10 <= clip.duration <= 30 for clip in result.clips)
-    assert all(left.end <= right.start for left, right in zip(result.clips, result.clips[1:]))
-    assert any("instead of 5" in warning and "no clips were padded or duplicated" in warning for warning in result.warnings), result.warnings
+    assert asr_audio_calls[0]["duration"] == 286.9
+    assert len(result.clips) == expected_count
+    assert [clip.index for clip in result.clips] == list(range(1, expected_count + 1))
+    assert len({clip.id for clip in result.clips}) == expected_count
+    assert all(20 <= clip.duration <= 60 for clip in result.clips)
+    distinct_windows = {(clip.start, clip.end) for clip in result.clips}
+    assert distinct_windows == {(0.0, 20.9), (70.0, 90.9), (140.0, 160.9)}
+    assert all(clip.end <= source_metadata["duration"] for clip in result.clips)
+    assert all(clip.duration == clip.end - clip.start for clip in result.clips)
+    assert [(clip.start, clip.end) for clip in result.clips[:3]] == sorted(distinct_windows)
+    if requested_count > 3:
+        assert [(clip.start, clip.end) for clip in result.clips[3:]] == [
+            (result.clips[index % 3].start, result.clips[index % 3].end)
+            for index in range(3, expected_count)
+        ]
+        assert any(
+            "3 valid unique lyric windows" in warning and "10 window(s)" in warning and "13 requested clips" in warning
+            for warning in result.warnings
+        ), result.warnings
+        assert len({clip.output_name for clip in result.clips}) == expected_count
+        assert len({clip.library_asset_id for clip in result.clips}) == expected_count
+        assert len(test_db.list_assets(origin="generated-clip")) == expected_count
+        export = test_manager.build_export(result.id, [clip.id for clip in result.clips])
+        with zipfile.ZipFile(export) as archive:
+            manifest_name = next(name for name in archive.namelist() if name.endswith("/manifest.json"))
+            manifest = json.loads(archive.read(manifest_name))
+            output_names = [output["filename"] for output in manifest["outputs"]]
+            assert len(output_names) == expected_count
+            assert len(set(output_names)) == expected_count
+        clip_ids = [clip.id for clip in result.clips]
+        result.state = "recovered"
+        result.steps = [step.model_copy(update={"status": "pending", "completed_at": None}) if step.id == "ready" else step for step in result.steps]
+        project = test_db.get_project(result.project_id)
+        project.state = "recovered"
+        test_db.save_project(project)
+        test_db.save_job(result, saved)
+        test_manager._process(result.id)
+        recovered = test_db.get_job(result.id)
+        assert recovered.state == "complete"
+        assert [clip.id for clip in recovered.clips] == clip_ids
+        assert len(test_db.list_assets(origin="generated-clip")) == expected_count
+        assert test_db.get_job_private(result.id)["source_hash"] == source_hash
+        assert len([warning for warning in recovered.warnings if "valid unique lyric windows" in warning]) == 1
+    else:
+        assert not result.warnings, result.warnings
     transcription_step = next(step for step in result.steps if step.id == "transcribe")
     assert "lyric coverage is not guaranteed" in transcription_step.detail
     provider_step = next(step for step in result.steps if step.id == "openrouter")
     assert provider_step.detail == "Music profile stays local; provider planning skipped"
+
+
+def test_music_source_only_regeneration_keeps_duplicate_warning(tmp_path: Path) -> None:
+    test_db, test_manager = _cluster(tmp_path)
+    source = tmp_path / "music-source.mp4"
+    source.write_bytes(b"fixture")
+    _clip_job(test_db, "music-rerender", "music-rerender-proj", mode="smart", source=source, count=2)
+    job = test_db.get_job("music-rerender")
+    job.state = "complete"
+    job.source_profile = "music"
+    job.clips = [
+        Clip(id=f"music-clip-{index}", index=index, state="complete", start=0, end=20, duration=20, opening_line="Lyric")
+        for index in (1, 2)
+    ]
+    private = test_db.get_job_private(job.id)
+    test_db.save_job(job, private)
+
+    regenerated = test_manager.create_source_only_rerender(job, [clip.id for clip in job.clips])
+
+    assert len({(clip.start, clip.end) for clip in regenerated.clips}) == 1
+    assert len({clip.id for clip in regenerated.clips}) == 2
+    assert any("repeats 1 selected Music clip" in warning for warning in regenerated.warnings)
+    assert test_db.get_job(regenerated.id).warnings == regenerated.warnings
 
 
 def test_smart_transcription_reports_real_incremental_checkpoints(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

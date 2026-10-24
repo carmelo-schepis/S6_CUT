@@ -54,7 +54,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
   const [executionPolicy, setExecutionPolicy] = useState<"auto" | "engine_only">("auto");
   const [sourceProfile, setSourceProfile] = useState<SourceProfile>("speech");
   const [musicTheme, setMusicTheme] = useState<MusicTheme>("clean");
-  const [musicLyricsLanguage, setMusicLyricsLanguage] = useState("");
+  const [musicLyricsLanguage, setMusicLyricsLanguage] = useState("en");
   const [musicLyricAnimation, setMusicLyricAnimation] = useState<MusicLyricAnimation>("legacy");
   const [musicHookFormat, setMusicHookFormat] = useState<MusicHookTextFormat>("plain");
   const [musicTopText, setMusicTopText] = useState("");
@@ -156,7 +156,6 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
       if (sourceProfile === "music" && musicTrackFile && musicTrackUrl.trim()) return setError("Choose an MP3 upload or a YouTube song link, not both.");
       if (sourceProfile === "music" && musicTrackUrl.trim() && !isYouTubeUrl(musicTrackUrl.trim())) return setError("Only public HTTPS YouTube URLs are supported for the background song.");
       if (musicConfigurationMessage) return setError(musicConfigurationMessage);
-      if (musicFeasibilityMessage) return setError(musicFeasibilityMessage);
     setSubmitting(true);
     try {
       const result = await createClipJob({
@@ -225,7 +224,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
       : Math.min(500, Math.max(1, Number(rawActiveCount)))
     : count;
   const musicFeasibilityMessage = sourceProfile === "music" && knownSourceDuration !== null && Number.isFinite(minDuration) && minDuration > 0 && activeCount > Math.floor((knownSourceDuration + 1e-9) / minDuration)
-    ? `This ${knownSourceDuration.toFixed(1)}s source can fit at most ${Math.floor(knownSourceDuration / minDuration)} non-overlapping clips of at least ${minDuration}s. Reduce the count or minimum duration; the requested count will not be changed automatically.`
+    ? `This ${knownSourceDuration.toFixed(1)}s source may not contain enough distinct lyric windows for ${activeCount} clips of at least ${minDuration}s. Music will check lyric availability and repeat valid windows when possible.`
     : null;
   return <div className="page projects-page">
     {/* Every screen carries exactly one h1. The page introduction that used to
@@ -277,9 +276,9 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
 
           <>
             {sourceProfile === "music" && <FieldGroup title="Lyrics presentation" hint={MUSIC_PROFILE_NOTE}>
-              <Field label="Lyrics language" hint="For quiet vocals or a long instrumental intro, choose the song’s language to improve recognition.">
+              <Field label="Lyrics language" hint="English is the default. Choose another language or automatic detection for songs in other languages.">
                 <select aria-label="Lyrics language" value={musicLyricsLanguage} onChange={(event) => setMusicLyricsLanguage(event.target.value)}>
-                  <option value="">Detect automatically</option>
+                  <option value="auto">Detect automatically</option>
                   <option value="en">English</option><option value="es">Spanish</option><option value="fr">French</option>
                   <option value="de">German</option><option value="it">Italian</option><option value="pt">Portuguese</option>
                   <option value="ar">Arabic</option><option value="zh">Chinese</option><option value="hi">Hindi</option>
@@ -384,9 +383,10 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
           </div>}
 
           <div className="create-actions">
-            {(musicConfigurationMessage || musicFeasibilityMessage) && <p className="form-error" role="status">{musicConfigurationMessage || musicFeasibilityMessage}</p>}
+            {musicConfigurationMessage && <p className="form-error" role="status">{musicConfigurationMessage}</p>}
+            {!musicConfigurationMessage && musicFeasibilityMessage && <p className="form-hint" role="status">{musicFeasibilityMessage}</p>}
             {error && <p className="form-error" role="alert">{error}</p>}
-            <Button variant="primary" className="create-button" disabled={submitting || health?.ffmpeg === false || Boolean(musicConfigurationMessage || musicFeasibilityMessage)} onClick={submit}>{submitting ? "Creating…" : <><Plus size={16} /> {`Create ${activeCount} ${contentFormat === "long" ? "landscape clip" : "short clip"}${activeCount === 1 ? "" : "s"}`}</>}</Button>
+            <Button variant="primary" className="create-button" disabled={submitting || health?.ffmpeg === false || Boolean(musicConfigurationMessage)} onClick={submit}>{submitting ? "Creating…" : <><Plus size={16} /> {`Create ${activeCount} ${contentFormat === "long" ? "landscape clip" : "short clip"}${activeCount === 1 ? "" : "s"}`}</>}</Button>
           </div>
         </div>
 

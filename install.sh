@@ -4,11 +4,7 @@
 # ====================================
 # One-command install/update via Docker Compose.
 #
-# PRIVATE REPO (authenticated — works now):
-#   gh api -H "Accept: application/vnd.github.raw+json" repos/carmelo-schepis/S6_CUT/contents/install.sh | bash
-#
-# PUBLIC REPO (anonymous — works after repository is made public):
-#   curl -fsSL https://raw.githubusercontent.com/carmelo-schepis/S6_CUT/master/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/carmelo-schepis/S6_CUT/main/install.sh | bash
 #
 # Installs into ~/s6_cut by default. Safe to run repeatedly: an existing
 # installation is updated and rebuilt in place, and your .env, projects,
@@ -18,7 +14,7 @@
 # Environment overrides (set these before running the command):
 #   S6_INSTALL_DIR    installation directory      (default: ~/s6_cut)
 #   S6_REPO_URL       repository to clone/update  (default: https://github.com/carmelo-schepis/S6_CUT.git)
-#   S6_BRANCH         branch to track             (default: master)
+#   S6_BRANCH         branch to track             (default: main)
 #   S6_START_TIMEOUT  seconds to wait for startup (default: 300)
 #   S6_FORCE_RECREATE force recreate containers   (default: false)
 
@@ -26,11 +22,13 @@ set -euo pipefail
 
 INSTALL_DIR="${S6_INSTALL_DIR:-$HOME/s6_cut}"
 REPO_URL="${S6_REPO_URL:-https://github.com/carmelo-schepis/S6_CUT.git}"
-BRANCH="${S6_BRANCH:-master}"
+BRANCH="${S6_BRANCH:-main}"
 START_TIMEOUT="${S6_START_TIMEOUT:-300}"
 FORCE_RECREATE="${S6_FORCE_RECREATE:-false}"
 COMPOSE_FILE="compose.yaml"
 CURRENT_STEP="starting"
+GIT_VIA_DOCKER=false
+GIT_IMAGE="alpine/git:2.54.0@sha256:4fac439ee3b9204bec99c712b8a15942999632458f716ae8149fbb97cb760cd4"
 
 # --- formatting ---------------------------------------------------------------
 
@@ -75,9 +73,20 @@ check_os() {
 
 check_prerequisites() {
   CURRENT_STEP="checking prerequisites"
-  command -v git >/dev/null 2>&1 \
-    || die "Git is not installed. Install it first (https://git-scm.com/downloads), then re-run the install command."
-  ok "Git found"
+  # SSH and other non-login shells on macOS may omit Docker Desktop/Homebrew
+  # from PATH even when Docker is installed and running.
+  if ! command -v docker >/dev/null 2>&1 && [[ "$(uname -s)" == "Darwin" ]]; then
+    local docker_dir
+    for docker_dir in "$HOME/.docker/bin" \
+      "/Applications/Docker.app/Contents/Resources/bin" \
+      "$HOME/Applications/Docker.app/Contents/Resources/bin" \
+      /opt/homebrew/bin /usr/local/bin; do
+      if [[ -x "$docker_dir/docker" ]]; then
+        export PATH="$docker_dir:$PATH"
+        break
+      fi
+    done
+  fi
   command -v docker >/dev/null 2>&1 \
     || die "Docker is not installed. S6_cut runs in Docker: install Docker Engine on Linux (https://docs.docker.com/engine/install/) or Docker Desktop on macOS (https://docs.docker.com/desktop/), then re-run the install command."
   ok "Docker found"
@@ -91,16 +100,38 @@ check_prerequisites() {
   command -v curl >/dev/null 2>&1 \
     || die "curl is not installed. Install it (for example 'sudo apt install curl' on Debian/Ubuntu or 'brew install curl' on macOS), then re-run the install command."
   ok "curl found"
+  # Apple's git shim can open a developer-tools installation dialog. Docker
+  # supplies Git when it is missing, including Macs without Command Line Tools.
+  if ! command -v git >/dev/null 2>&1 || \
+    { [[ "$(uname -s)" == "Darwin" ]] && ! xcode-select -p >/dev/null 2>&1; }; then
+    GIT_VIA_DOCKER=true
+    step "Using Git inside Docker (no separate Git installation needed)"
+  else
+    ok "Git found"
+  fi
 }
 
 # --- repository ----------------------------------------------------------------
 
+repository_git() {
+  if [[ "$GIT_VIA_DOCKER" == "true" ]]; then
+    docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
+      --mount "type=bind,source=$INSTALL_DIR,target=/s6_cut" \
+      --workdir /s6_cut "$GIT_IMAGE" -c safe.directory=/s6_cut "$@"
+  else
+    git "$@"
+  fi
+}
+
 prepare_repository() {
   CURRENT_STEP="downloading S6_cut"
+  if [[ "$INSTALL_DIR" != /* ]]; then
+    INSTALL_DIR="$PWD/$INSTALL_DIR"
+  fi
   if [[ -d "$INSTALL_DIR/.git" ]]; then
     ok "S6_cut repository found at $INSTALL_DIR"
-    if (cd "$INSTALL_DIR" && git fetch --quiet origin); then
-      if ! (cd "$INSTALL_DIR" && git pull --quiet --ff-only origin "$BRANCH" 2>/dev/null); then
+    if (cd "$INSTALL_DIR" && repository_git fetch --quiet origin); then
+      if ! (cd "$INSTALL_DIR" && repository_git pull --quiet --ff-only origin "$BRANCH" 2>/dev/null); then
         warn "Could not fast-forward to the latest ${BRANCH} (local changes?). Keeping the current source."
       fi
     else
@@ -115,7 +146,7 @@ prepare_repository() {
   else
     step "Downloading S6_cut into $INSTALL_DIR..."
     mkdir -p "$INSTALL_DIR"
-    git clone --quiet --depth 1 --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR"
+    (cd "$INSTALL_DIR" && repository_git clone --quiet --depth 1 --branch "$BRANCH" "$REPO_URL" .)
     ok "Repository downloaded"
   fi
   cd "$INSTALL_DIR"
@@ -152,6 +183,12 @@ start_containers() {
 
 read_env() {
   local name="$1" default="$2" value=""
+  # Compose gives exported variables precedence over the .env file.
+  value="${!name:-}"
+  if [[ -n "$value" ]]; then
+    printf '%s' "$value"
+    return
+  fi
   if [[ -f .env ]]; then
     value="$(grep -E "^${name}=" .env 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d '"' | tr -d "'" || true)"
   fi

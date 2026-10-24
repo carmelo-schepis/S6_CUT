@@ -66,7 +66,13 @@ const responsiveJob: Job = {
 };
 
 // Stub EventSource for jsdom
-vi.stubGlobal("EventSource", class { close() {} });
+class TestEventSource {
+  static instances: TestEventSource[] = [];
+  onmessage: ((event: MessageEvent) => void) | null = null;
+  constructor() { TestEventSource.instances.push(this); }
+  close() {}
+}
+vi.stubGlobal("EventSource", TestEventSource);
 
 // ---------------------------------------------------------------
 function renderView(props: Partial<Parameters<typeof WorkspaceView>[0]> = {}) {
@@ -136,6 +142,21 @@ describe("WorkspaceView – stalled smart detection", () => {
     expect(screen.getAllByText(/processing will continue in the engine/i).length).toBeGreaterThan(0);
   });
 
+  it("ignores SSE updates for a different job or project", async () => {
+    TestEventSource.instances = [];
+    mockGetJob.mockResolvedValue(freshSmartJob);
+    renderView();
+    expect((await screen.findAllByText("Planning with provider")).length).toBeGreaterThan(0);
+    const eventSource = TestEventSource.instances.at(-1);
+    expect(eventSource).toBeDefined();
+    const unrelated = { ...freshSmartJob, id: "other-job", projectId: "other-project", stageLabel: "Wrong job", updatedAt: "2026-08-13T00:01:00Z" };
+    await act(async () => {
+      eventSource?.onmessage?.({ data: JSON.stringify(unrelated) } as MessageEvent);
+    });
+    expect(screen.queryByText("Wrong job")).not.toBeInTheDocument();
+    expect((await screen.findAllByText("Planning with provider")).length).toBeGreaterThan(0);
+  });
+
   it("does not show stalled callout for a fresh Smart job", async () => {
     mockGetJob.mockResolvedValue(freshSmartJob);
     renderView();
@@ -187,7 +208,7 @@ describe("WorkspaceView – stalled smart detection", () => {
   });
 
   it("offers a retry when a YouTube import is stopped before progress is recorded", async () => {
-    const youtubeProject = { ...project, id: "youtube-project", sourceKind: "youtube" as const };
+    const youtubeProject = { ...project, id: "youtube-project", latestJobId: "youtube-job", sourceKind: "youtube" as const };
     // canRetryImport is the engine's own answer (it holds the import url and the
     // job is stopped), which is what the Workspace now renders the control from.
     const stoppedJob = { ...freshSmartJob, id: "youtube-job", projectId: youtubeProject.id, state: "cancelled_kept" as const, stage: "cancelled", stageLabel: "Stopped; completed outputs kept", canRetryImport: true };

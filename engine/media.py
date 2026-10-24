@@ -169,7 +169,7 @@ def transcription_options(
     settings: Settings,
     *,
     profile: str = "speech",
-    language: str | None = None,
+    language: str | None = "en",
     device: str | None = None,
     compute_type: str | None = None,
     beam_size: int | None = None,
@@ -223,7 +223,7 @@ def transcription_cache_identity(
     settings: Settings,
     *,
     profile: str = "speech",
-    language: str | None = None,
+    language: str | None = "en",
     device: str | None = None,
     compute_type: str | None = None,
     beam_size: int | None = None,
@@ -257,7 +257,7 @@ def transcription_cache_key(
     settings: Settings,
     *,
     profile: str = "speech",
-    language: str | None = None,
+    language: str | None = "en",
     device: str | None = None,
     compute_type: str | None = None,
     beam_size: int | None = None,
@@ -879,7 +879,7 @@ def transcribe(
     beam_size: int | None = None,
     word_timestamps: bool | None = None,
     profile: str = "speech",
-    language: str | None = None,
+    language: str | None = "en",
     condition_on_previous_text: bool | None = None,
 ) -> dict[str, Any]:
     """Transcribe media with Faster-Whisper and return word-level timing.
@@ -913,7 +913,8 @@ def transcribe(
         the separate model/beam settings, disables speech VAD, and always
         requests word timestamps.
     language : str | None
-        Optional language hint forwarded to Faster-Whisper.
+        Language hint forwarded to Faster-Whisper; defaults to English.
+        Pass ``None`` explicitly to use automatic language detection.
 
     Returns
     -------
@@ -2346,7 +2347,7 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
             music_top_text, width=width, height=height, duration=duration, source_dimensions=music_source_dimensions,
             reserve_top=music_banner_reserve_top, end_time=hook_end_time,
         ) if music_hook_text_format == "white_banner" else []
-        events.extend(banner_events or [f"Dialogue: 20,0,{_ass_time(duration)},MusicTop,,0,0,0,,{_ass_escape(music_top_text)}"])
+        events.extend(banner_events or [f"Dialogue: 20,{_ass_time(0)},{_ass_time(duration)},MusicTop,,0,0,0,,{_ass_escape(music_top_text)}"])
     if hook_text:
         # A stepped top-edge ramp reaches at most 45% opacity and fades away
         # before the lower edge of the ~30% screen region.
@@ -2358,7 +2359,7 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
             opacity = .45 * (1 - index / scrim_steps)
             alpha = round(255 * (1 - opacity))
             polygon = f"m 0 {y0} l {width} {y0} {width} {y1} 0 {y1}"
-            events.append(f"Dialogue: 0,0,{_ass_time(duration)},HookScrim,,0,0,0,,{{\\p1\\an7\\pos(0,0)\\1c&H000000&\\1a&H{alpha:02X}&\\bord0\\shad0}}{polygon}{{\\p0}}")
+            events.append(f"Dialogue: 0,{_ass_time(0)},{_ass_time(duration)},HookScrim,,0,0,0,,{{\\p1\\an7\\pos(0,0)\\1c&H000000&\\1a&H{alpha:02X}&\\bord0\\shad0}}{polygon}{{\\p0}}")
         tokens = [{"text": word} for word in " ".join(remove_hook_em_dashes(hook_text).split()).split()]
         usable_hook_width = max(1, width - 2 * hook_margin_x - 2 * hook_outline)
         hook_font = str(Path(__file__).parent / "fonts" / "montserrat" / "Montserrat-Bold.ttf")
@@ -2386,7 +2387,7 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
             hook_lines = hook_wrap(hook_size)
         hook_body = r"\N".join(" ".join(_ass_escape(str(item["text"])) for item in line) for line in hook_lines)
         end_time = max(0, min(duration, duration if hook_end_time is None else hook_end_time))
-        events.append(f"Dialogue: 5,0,{_ass_time(end_time)},Hook,,0,0,0,,{{\\fs{hook_size}}}{hook_body}")
+        events.append(f"Dialogue: 5,{_ass_time(0)},{_ass_time(end_time)},Hook,,0,0,0,,{{\\fs{hook_size}}}{hook_body}")
     selected_words = caption_words_for_clip(words, offset, offset + duration)
     # Speech presentation intentionally suppresses recipe emoji and uses only
     # local text glyphs, so rendering remains deterministic and offline.
@@ -2469,7 +2470,7 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
         credit_end = min(duration, CREDIT_VISIBLE_SECONDS + CREDIT_FADE_SECONDS)
         fade_milliseconds = round(max(0.0, credit_end - CREDIT_VISIBLE_SECONDS) * 1000)
         fade_tag = f"{{\\fad(0,{fade_milliseconds})}}" if fade_milliseconds else ""
-        events.append(f"Dialogue: 2,0,{_ass_time(credit_end)},Credit,,0,0,0,,{fade_tag}{_ass_escape(credit_text)}")
+        events.append(f"Dialogue: 2,{_ass_time(0)},{_ass_time(credit_end)},Credit,,0,0,0,,{fade_tag}{_ass_escape(credit_text)}")
     path.write_text(header + "\n".join(events) + "\n", encoding="utf-8")
 
 

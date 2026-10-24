@@ -5,6 +5,8 @@ const mockGetHealth = vi.fn();
 const mockListProjects = vi.fn();
 const mockListJobs = vi.fn();
 const mockListProfiles = vi.fn();
+const mockGetJob = vi.fn();
+const mockControlJob = vi.fn();
 
 vi.mock("./api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./api")>();
@@ -13,6 +15,8 @@ vi.mock("./api", async (importOriginal) => {
     getHealth: (...args: unknown[]) => mockGetHealth(...args),
     listProjects: (...args: unknown[]) => mockListProjects(...args),
     listJobs: (...args: unknown[]) => mockListJobs(...args),
+    getJob: (...args: unknown[]) => mockGetJob(...args),
+    controlJob: (...args: unknown[]) => mockControlJob(...args),
     listProfiles: (...args: unknown[]) => mockListProfiles(...args),
     listRecentClips: vi.fn(async () => ({ items: [], page: 1, pageSize: 12, hasMore: false, total: 0 })),
     listFolders: vi.fn(async () => []),
@@ -59,12 +63,15 @@ function deferred<T>() {
 
 describe("App shell", () => {
   beforeEach(() => {
+    vi.stubGlobal("EventSource", class { close() {} });
     mockGetHealth.mockReset();
     mockListProjects.mockReset().mockResolvedValue([]);
     mockListJobs.mockReset().mockResolvedValue([]);
     mockListProfiles.mockReset().mockResolvedValue([profile]);
+    mockGetJob.mockReset();
+    mockControlJob.mockReset();
   });
-  afterEach(() => vi.useRealTimers());
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
   it("refreshes shared project state when a Library deletion changes persisted records", async () => {
     const deletedProject = {
@@ -336,6 +343,32 @@ describe("App shell", () => {
     expect(progress).toHaveAttribute("role", "img");
     expect(progress).toHaveAttribute("aria-label", "Loading progress: 4 clips remaining across 1 active job");
     expect(progress).toHaveAttribute("data-progress-value", "4");
+  });
+
+  it("opens the latest job identity for a project and sends Workspace controls to that job", async () => {
+    const TestEventSource = class { close() {} };
+    vi.stubGlobal("EventSource", TestEventSource);
+    Object.defineProperty(globalThis, "EventSource", { configurable: true, writable: true, value: TestEventSource });
+    const olderJob = { ...activityJob, id: "older-job", state: "complete" as const, stage: "complete", updatedAt: "2026-01-01" };
+    const latestJob = { ...activityJob, id: "latest-job", updatedAt: "2026-01-02" };
+    const project = { ...activityProject, latestJobId: latestJob.id };
+    mockGetHealth.mockResolvedValue(health);
+    mockListProjects.mockResolvedValue([project]);
+    mockListJobs.mockResolvedValue([olderJob, latestJob]);
+    mockGetJob.mockResolvedValue(latestJob);
+    mockControlJob.mockResolvedValue({ ...latestJob, state: "paused" });
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Jobs" }));
+    await screen.findByRole("heading", { name: "Jobs & recovery" });
+    await waitFor(() => expect(document.querySelector(`.job-card[data-job-id="${latestJob.id}"]`)).toBeTruthy());
+    const latestCard = document.querySelector(`.job-card[data-job-id="${latestJob.id}"]`);
+    expect(latestCard).toBeTruthy();
+    fireEvent.click(within(latestCard as HTMLElement).getByRole("button", { name: "Open" }));
+    await waitFor(() => expect(mockGetJob).toHaveBeenCalledWith(latestJob.id));
+    await screen.findByRole("heading", { name: project.name });
+    fireEvent.click(await screen.findByRole("button", { name: "Pause" }));
+    await waitFor(() => expect(mockControlJob).toHaveBeenCalledWith(latestJob.id, "pause"));
   });
 
   it("does not render an activity badge when no work is live", async () => {

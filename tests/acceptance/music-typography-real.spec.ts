@@ -21,6 +21,9 @@ type Words = { text: string; start: number; end: number }[];
 function rgbFrame(filename: string, seconds: number): Buffer {
   return execFileSync('docker', ['exec', container!, 'ffmpeg', '-v', 'error', '-ss', String(seconds), '-i', `/qa/${filename}`, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { maxBuffer: 64 * 1024 * 1024 });
 }
+function pngFrame(filename: string, seconds: number): Buffer {
+  return execFileSync('docker', ['exec', container!, 'ffmpeg', '-v', 'error', '-ss', String(seconds), '-i', `/qa/${filename}`, '-frames:v', '1', '-f', 'image2pipe', '-vcodec', 'png', '-'], { maxBuffer: 16 * 1024 * 1024 });
+}
 const pixel = (frame: Buffer, x: number, y: number) => { const offset = (y * WIDTH + x) * 3; return [frame[offset], frame[offset + 1], frame[offset + 2]]; };
 const isWhite = (rgb: number[]) => rgb.every(channel => channel > 240);
 /** Pixels in the lyric band that differ from the navy fixture footage (0,0,128). */
@@ -37,6 +40,18 @@ function stripRows(frame: Buffer) {
   let top = FOOTAGE_TOP - 1;
   while (top > 0 && isWhite(pixel(frame, 3, top - 1))) top--;
   return { top, bottom: FOOTAGE_TOP };
+}
+function verifyBanner(filename: string, seconds: number) {
+  const sample = rgbFrame(filename, seconds);
+  const strip = stripRows(sample);
+  expect(strip, `white banner at ${seconds}s`).not.toBeNull();
+  expect(strip!.bottom - strip!.top).toBeGreaterThanOrEqual(80);
+  expect(isWhite(pixel(sample, WIDTH - 4, strip!.top + 5))).toBe(true);
+  expect(pixel(sample, 3, Math.max(0, strip!.top - 5))[0]).toBeLessThan(30);
+  const text = darkTextBounds(sample, strip!.top, strip!.bottom);
+  expect(text.count).toBeGreaterThan(400);
+  expect(Math.abs((text.minX + text.maxX) / 2 - WIDTH / 2)).toBeLessThan(WIDTH * .06);
+  return sample;
 }
 function darkTextBounds(frame: Buffer, top: number, bottom: number) {
   let minX = WIDTH, maxX = 0, minY = HEIGHT, maxY = 0, count = 0;
@@ -61,7 +76,7 @@ function verifySongTone(filename: string, frequency: number) {
 }
 const sha256 = (buffer: Buffer) => crypto.createHash('sha256').update(buffer).digest('hex');
 
-test('real Music job keeps condensed lettering, word-build motion, the white banner and audio through restart, caption edit and export', async ({ page, request }, testInfo) => {
+test('real attributed Music job keeps typography, banner, audio and saved captions through restart, repair rerender and export', async ({ page, request }, testInfo) => {
   test.skip(!fixtures || !container, 'Use the isolated verification harness (scripts/qa/verify-music-typography.mjs)');
   test.skip(testInfo.project.name.startsWith('iPhone') || testInfo.project.name.startsWith('iPad'), 'iOS provides a read-only status view');
   test.setTimeout(900_000);
@@ -69,7 +84,8 @@ test('real Music job keeps condensed lettering, word-build motion, the white ban
   const name = `Typography ${Date.now()}`;
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Create a project' })).toBeVisible();
-  await page.getByLabel('Choose video file').setInputFiles(path.join(fixtures!, 'silent.mp4'));
+  await page.getByRole('tab', { name: 'YouTube' }).click();
+  await page.getByLabel('YouTube URL').fill('https://www.youtube.com/watch?v=dQw4w9WgXcQ');
   await page.getByRole('button', { name: 'Music / sung vocals' }).click();
   while (Number(await page.locator('.count-control strong').textContent()) > 1) await page.getByRole('button', { name: 'Fewer clips' }).click();
   await page.getByLabel('Background song MP3').setInputFiles({ name: 'song.mp3', mimeType: 'audio/mpeg', buffer: await fs.readFile(path.join(fixtures!, 'short-song.mp3')) });
@@ -100,6 +116,12 @@ test('real Music job keeps condensed lettering, word-build motion, the white ban
   let finished = await readJob();
   expect(finished.clips).toHaveLength(1);
   expect(finished.musicPresentation).toEqual(queued.musicPresentation);
+  expect(finished.clips[0].creatorCredit).toBe('Source: Controlled Creator');
+  const project = await (await request.get(`/api/v1/projects/${queued.projectId}`)).json();
+  expect(project.sourceTitle).toBe('Controlled Music source');
+  expect(project.sourceCreator).toBe('Controlled Creator');
+  const attribution = JSON.parse(execFileSync('docker', ['exec', container!, 'python', '-c', 'from engine.app import db; import json,sys; p=db.get_job_private(sys.argv[1]); print(json.dumps({k:p.get(k) for k in ("url","youtube_title","youtube_creator")}))', queued.id]).toString());
+  expect(attribution).toMatchObject({ url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', youtube_title: 'Controlled Music source', youtube_creator: 'Controlled Creator' });
   await expect(page.locator('.clip-tile.complete')).toHaveCount(1);
   await page.locator('.clip-tile.complete').getByRole('button', { name: 'Preview', exact: true }).click();
   checkPlayback(await assertPlayback(page), name);
@@ -112,16 +134,19 @@ test('real Music job keeps condensed lettering, word-build motion, the white ban
   await fs.writeFile(path.join(fixtures!, 'typography.mp4'), originalBytes);
   const first = words.find(word => word.end > clip.start)!;
   const onset = Math.max(0, first.start - clip.start);
-  const probe = rgbFrame('typography.mp4', 1.0);
-  const strip = stripRows(probe);
-  expect(strip, 'white banner strip directly above the footage').not.toBeNull();
-  expect(strip!.bottom - strip!.top).toBeGreaterThanOrEqual(80);
-  expect(isWhite(pixel(probe, WIDTH - 4, strip!.top + 5))).toBe(true);
-  expect(pixel(probe, 3, Math.max(0, strip!.top - 5))[0]).toBeLessThan(30);
-  const text = darkTextBounds(probe, strip!.top, strip!.bottom);
+  const sampleMoments = [1.0, ...(clip.duration > 9.2 ? [9.2] : []), ...(clip.duration > 12 ? [12.0] : []), ...(clip.duration > 20.2 ? [20.0] : [])];
+  const probe = verifyBanner('typography.mp4', 1.0);
+  for (const moment of sampleMoments.slice(1)) verifyBanner('typography.mp4', moment);
+  for (const moment of sampleMoments) {
+    const png = pngFrame('typography.mp4', moment);
+    await fs.writeFile(path.join(fixtures!, `banner-${moment}s.png`), png);
+    await testInfo.attach(`banner-${moment}s`, { body: png, contentType: 'image/png' });
+  }
+  const initialStrip = stripRows(probe)!;
+  const text = darkTextBounds(probe, initialStrip.top, initialStrip.bottom);
   expect(text.count).toBeGreaterThan(400);
-  expect(text.minY - strip!.top).toBeGreaterThanOrEqual(4);
-  expect(strip!.bottom - 1 - text.maxY).toBeGreaterThanOrEqual(4);
+  expect(text.minY - initialStrip.top).toBeGreaterThanOrEqual(4);
+  expect(initialStrip.bottom - 1 - text.maxY).toBeGreaterThanOrEqual(4);
   expect(Math.abs((text.minX + text.maxX) / 2 - WIDTH / 2)).toBeLessThan(WIDTH * .06);
   // Word build: nothing before the first word, then a growing set of words.
   if (onset > .15) expect(textPixels(rgbFrame('typography.mp4', onset - .1))).toBe(0);
@@ -132,38 +157,41 @@ test('real Music job keeps condensed lettering, word-build motion, the white ban
   verifySongTone('typography.mp4', 660);
   await fs.writeFile(path.join(fixtures!, 'typography-frame-original.rgb'), rgbFrame('typography.mp4', onset + 1.6));
 
-  // --- retention + restart, then a real caption edit with the persisted options ---
+  // --- retention + restart, then rerender the exact saved captions and options ---
   execFileSync('docker', ['exec', container!, 'python', '-c', 'import shutil,sys; shutil.rmtree("/app/data/jobs/"+sys.argv[1])', queued.id]);
   execFileSync('docker', ['restart', '--timeout=1', container!]);
   await expect.poll(async () => { try { return (await request.get('/api/v1/health')).status(); } catch { return 0; } }, { timeout: 300_000 }).toBe(200);
-  const edited = await request.put(`/api/v1/jobs/${queued.id}/clips/${clip.id}/captions`, { data: { revision: clip.captionRevision, cues: [{ id: 'review', start: 0.2, end: 2.6, text: 'Reviewed typography stays condensed' }] } });
+  const savedCues = clip.captionCues;
+  expect(savedCues.length).toBeGreaterThan(0);
+  const edited = await request.put(`/api/v1/jobs/${queued.id}/clips/${clip.id}/captions`, { data: { revision: clip.captionRevision, cues: savedCues } });
   expect(edited.ok(), await edited.text()).toBeTruthy();
-  const revision = (await edited.json()).clips[0].captionRevision;
+  const editedJob = await edited.json();
+  const revision = editedJob.clips.find((value: { id: string }) => value.id === clip.id).captionRevision;
   const render = await request.post(`/api/v1/jobs/${queued.id}/clips/${clip.id}/captions/rerender?revision=${revision}`);
   expect(render.ok(), await render.text()).toBeTruthy();
   await expect.poll(async () => {
     const latest = await readJob();
-    return latest.state === 'complete' && terminalSteps(latest) && latest.clips[0].blobId !== clip.blobId;
+    const latestClip = latest.clips.find((value: { id: string }) => value.id === clip.id);
+    return latest.state === 'complete' && terminalSteps(latest) && latestClip.captionRevision === revision
+      && latestClip.creatorCredit === 'Source: Controlled Creator';
   }, { timeout: 300_000, intervals: [500, 1000] }).toBe(true);
   finished = await readJob();
   expect(finished.warnings.some((warning: string) => warning.includes('Caption rerender failed'))).toBe(false);
   expect(finished.musicPresentation).toEqual(queued.musicPresentation);
   expect(finished.clips[0].libraryAssetId).toBe(clip.libraryAssetId);
+  expect(finished.clips[0].captionCues).toEqual(savedCues);
   clip = finished.clips[0];
   const revised = Buffer.from(await (await request.get(clip.downloadUrl)).body());
   await fs.writeFile(path.join(fixtures!, 'typography-reviewed.mp4'), revised);
-  const revisedProbe = rgbFrame('typography-reviewed.mp4', 1.0);
-  const revisedStrip = stripRows(revisedProbe);
-  expect(revisedStrip, 'banner survives the edit').not.toBeNull();
-  expect(darkTextBounds(revisedProbe, revisedStrip!.top, revisedStrip!.bottom).count).toBeGreaterThan(400);
+  for (const moment of sampleMoments) verifyBanner('typography-reviewed.mp4', moment);
   expect(textPixels(rgbFrame('typography-reviewed.mp4', 1.6))).toBeGreaterThan(150);
   verifySongTone('typography-reviewed.mp4', 660);
   const sidecar = (name: string) => clip.captionDownloads.find((value: { format: string }) => value.format === name);
   const ass = await (await request.get(sidecar('ass').url)).text();
   expect(ass).toContain('Style: Caption,Oswald,');
   expect(ass).toMatch(/\\t\(\d+,\d+,\\1a&H00&/);
-  expect(ass).toContain('Reviewed');
-  expect(await (await request.get(sidecar('srt').url)).text()).toContain('Reviewed typography stays condensed');
+  expect(ass).toContain(savedCues[0].text);
+  expect(await (await request.get(sidecar('srt').url)).text()).toContain(savedCues[0].text);
 
   // --- ZIP: same published MP4, additive metadata ---
   await page.reload();
@@ -178,5 +206,8 @@ test('real Music job keeps condensed lettering, word-build motion, the white ban
   expect(manifest.outputs[0].music_top_text).toBe(HOOK);
   const zippedMp4 = execFileSync('python3', ['-I', '-c', 'import hashlib,sys,zipfile\nz=zipfile.ZipFile(sys.argv[1])\nprint(",".join(hashlib.sha256(z.read(n)).hexdigest() for n in z.namelist() if n.endswith(".mp4")))', archive]).toString().trim().split(',');
   expect(zippedMp4).toContain(sha256(revised));
+  const zippedBytes = execFileSync('python3', ['-I', '-c', 'import sys,zipfile\nz=zipfile.ZipFile(sys.argv[1]); n=next(n for n in z.namelist() if n.endswith(".mp4")); sys.stdout.buffer.write(z.read(n))', archive], { maxBuffer: 256 * 1024 * 1024 });
+  await fs.writeFile(path.join(fixtures!, 'typography-zipped.mp4'), zippedBytes);
+  for (const moment of sampleMoments) verifyBanner('typography-zipped.mp4', moment);
   await testInfo.attach('persisted-job', { body: JSON.stringify(finished, null, 2), contentType: 'application/json' });
 });

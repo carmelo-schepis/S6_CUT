@@ -1623,7 +1623,7 @@ class JobManager:
 
     def _transcribe_with_stages(self, job: Job, audio: Path, duration: float, private: dict[str, Any]) -> dict[str, Any]:
         profile = job.source_profile
-        language = private.get("transcription_language")
+        language = private.get("transcription_language", "en")
         # Keep the legacy speech call shape for injected/test adapters; the
         # music branch must explicitly consult its separate selected model.
         cached = media_module.is_whisper_model_cached(self.settings, profile=profile) if profile == "music" else media_module.is_whisper_model_cached(self.settings)
@@ -2224,15 +2224,18 @@ class JobManager:
         new_private.pop("caption_rerender_error", None)
         fast = job_uses_fast_pipeline(job, new_private)
         steps = self._fast_steps() if fast else self._smart_steps(False, job.source_profile, include_hook_text=False)
+        warnings = ["New source-only versions are rendering from the saved original source. Previous outputs are preserved."]
+        if job.source_profile == "music":
+            repeated = len(clips) - len({(clip.start, clip.end) for clip in clips})
+            if repeated:
+                warnings.append(f"This regeneration repeats {repeated} selected Music clip(s) because their lyric windows were duplicated.")
         new_job = job.model_copy(deep=True, update={
             "id": new_id, "source_blob_id": job.source_blob_id or (self.db.get_project(job.project_id).source_blob_id if self.db.get_project(job.project_id) else None), "state": "queued",
             "stage": "queued", "stage_label": "Source-only regeneration queued", "progress": 0,
             "current_item": 0, "total_items": len(clips), "planned_count": len(clips),
             "successful_count": 0, "execution_policy": "engine_only", "library_overlays_enabled": False,
             "hook_text_enabled": False, "youtube_metadata_enabled": False,
-            "clips": clips, "steps": steps, "error": None, "warnings": [
-                "New source-only versions are rendering from the saved original source. Previous outputs are preserved."
-            ],
+            "clips": clips, "steps": steps, "error": None, "warnings": warnings,
         })
         self.db.save_job(new_job, new_private)
         project = self.db.get_project(job.project_id)
@@ -2287,21 +2290,18 @@ class JobManager:
         speed = float(private.get("music_track_speed", 1.0)) if music_track_source is not None else 1.0
         planning_duration = source_duration
         target = self._resolve_batch_target(job, private, planning_duration)
-        if profile == "music":
-            feasible_count = math.floor((planning_duration + 1e-9) / float(private["min_duration"]))
-            if feasible_count < int(private["count"]):
-                raise MediaError(f"Cannot create {private['count']} non-overlapping music clips of at least {float(private['min_duration']):g}s from the {planning_duration:.1f}s available music timeline; at most {feasible_count} can fit without padding or duplication.")
         if music_track_source is not None:
-            source_hash = _media_fn("music_transcription_source_hash")(
+            transcription_source_hash = _media_fn("music_transcription_source_hash")(
                 sha256_file(music_track_source), speed, transcript_duration,
             )
         else:
             source_hash = str(private.get("source_hash") or sha256_file(source))
             private["source_hash"] = source_hash
-        language = private.get("transcription_language")
+            transcription_source_hash = source_hash
+        language = private.get("transcription_language", "en")
         beam = self.settings.music_whisper_beam_size if profile == "music" else self.settings.whisper_beam_size
         cache_key = transcription_cache_key(
-            source_hash,
+            transcription_source_hash,
             self.settings,
             profile=profile,
             language=language,
@@ -2382,6 +2382,18 @@ class JobManager:
                 if profile == "music":
                     raise MediaError("The lyric transcript did not contain a timed, non-overlapping line group inside the requested duration range")
                 raise MediaError("The transcript did not contain a valid complete moment inside the requested duration range")
+            if profile == "music" and candidates:
+                requested_count = int(private["count"])
+                unique_candidates = list(candidates)
+                duplicate_count = max(0, requested_count - len(unique_candidates))
+                if duplicate_count:
+                    candidates = [unique_candidates[index % len(unique_candidates)] for index in range(requested_count)]
+                    warning = (
+                        f"Music found {len(unique_candidates)} valid unique lyric windows and repeated "
+                        f"{duplicate_count} window(s) to fill {requested_count} requested clips."
+                    )
+                    if warning not in job.warnings:
+                        job.warnings.insert(0, warning)
             if len(candidates) < target and private.get("batch_mode", job.batch_mode) == "high_volume":
                 requested_count = int(private.get("count", target))
                 final_target, reason = _high_volume_shortfall(requested_count, len(candidates), source_duration, "timed-transcript")
@@ -2399,7 +2411,7 @@ class JobManager:
                 self._save(job, private)
             elif len(candidates) < int(private["count"]):
                 if profile == "music":
-                    job.warnings.append(f"Found {len(candidates)} duration-bounded lyric windows instead of {private['count']}; no clips were padded or duplicated, and sparse or unclear vocals may reduce the count.")
+                    job.warnings.append(f"Found {len(candidates)} valid unique lyric windows instead of {private['count']}; repeated valid windows to fill the requested count.")
                 else:
                     job.warnings.append(f"Found {len(candidates)} valid clips instead of {private['count']}; complete boundaries were prioritised over filler.")
             # select_candidates falls back to chunking the transcript when no
@@ -2435,7 +2447,8 @@ class JobManager:
             self.complete_step(job, "select", detail=f"{len(clips)} moments selected", private=private)
             self.start_step(job, "boundaries", detail="Verifying clip boundaries against the source timeline", label="Verifying clip boundaries", progress=36, private=private)
             for clip in clips:
-                if clip.start < 0 or clip.end > metadata["duration"] or clip.end <= clip.start:
+                clip_timeline_duration = planning_duration if profile == "music" else float(metadata["duration"])
+                if clip.start < 0 or clip.end > clip_timeline_duration + 1e-6 or clip.end <= clip.start:
                     raise MediaError(f"Clip {clip.index} falls outside the source timeline")
             self.complete_step(job, "boundaries", detail=f"{len(clips)} boundaries verified", private=private)
         self._generate_youtube_metadata(job, private, words if isinstance(private.get("transcript"), dict) else [])
@@ -2445,20 +2458,21 @@ class JobManager:
             minimum = float(private["min_duration"])
             maximum = float(private["max_duration"])
             ordered = sorted(job.clips, key=lambda item: (item.start, item.end, item.index))
+            distinct_windows = sorted({(float(item.start), float(item.end)) for item in ordered})
             previous_end = 0.0
-            for clip in ordered:
-                duration = float(clip.end) - float(clip.start)
+            for start, end in distinct_windows:
+                duration = end - start
                 if (
-                    clip.start < -1e-6
-                    or clip.end > source_duration + 1e-6
+                    start < -1e-6
+                    or end > planning_duration + 1e-6
                     or duration < minimum - 1e-6
                     or duration > maximum + 1e-6
-                    or clip.start < previous_end - 1e-6
+                    or start < previous_end - 1e-6
                 ):
                     raise MediaError(
-                        f"Music clip {clip.index} does not meet the requested {minimum:g}–{maximum:g}s non-overlapping bounds; no invalid output was published."
+                        f"Music clips do not meet the requested {minimum:g}–{maximum:g}s non-overlapping bounds inside the available music timeline; no invalid output was published."
                     )
-                previous_end = clip.end
+                previous_end = end
         self._snapshot_video_overlays(job, private, words)
         if music_track_source is not None:
             music_track = _media_fn("prepare_music_track")(
@@ -2574,10 +2588,11 @@ class JobManager:
         """Transcribe only one selected window; returned timings are clip-relative."""
         source_hash = str(private.get("source_hash") or sha256_file(source))
         private["source_hash"] = source_hash
+        language = private.get("transcription_language", "en")
         cache_key = (
-            f"fast-transcript:v1:{source_hash}:{clip.start:.6f}:{clip.end:.6f}:"
+            f"fast-transcript:v2:{source_hash}:{clip.start:.6f}:{clip.end:.6f}:"
             f"{self.settings.whisper_model}:{self.settings.whisper_device}:"
-            f"{self.settings.whisper_compute_type}:beam{self.settings.whisper_beam_size}:words1"
+            f"{self.settings.whisper_compute_type}:beam{self.settings.whisper_beam_size}:words1:language={language}"
         )
         transcripts = private.setdefault("fast_transcripts", {})
         cached = self.db.cache_get(cache_key)
@@ -2605,6 +2620,7 @@ class JobManager:
             progress_callback=lambda fraction, _: self._fast_transcription_progress(job, private, fraction),
             cancellation_callback=lambda: not self._cooperate(job),
             word_timestamps=True,
+            language=language,
         )
         words = [
             word
