@@ -30,7 +30,7 @@ export function groupByDay(jobs: Job[], now = new Date()): [string, Job[]][] {
   return [...groups];
 }
 
-export function JobsView({ onOpenProject, jobs, onRefresh }: { onOpenProject: (id: string) => void; jobs: Job[]; onRefresh: () => Promise<void> }) {
+export function JobsView({ onOpenProject, jobs, onRefresh }: { onOpenProject: (id: string, jobId: string) => void; jobs: Job[]; onRefresh: () => Promise<void> }) {
   const [error, setError] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
   // Jobs are shell state. Keeping the refresh here would create a second
@@ -55,7 +55,7 @@ export function JobsView({ onOpenProject, jobs, onRefresh }: { onOpenProject: (i
           {!settled && <Progress value={facts.percent} indeterminate={facts.indeterminate} label={facts.stage} />}
           {notes.length > 0 && <small className="job-note">{notes[0].scope ? `${notes[0].scope}: ` : ""}{notes[0].message}{notes.length > 1 ? ` (+${notes.length - 1} more)` : ""}</small>}
         </>;
-      })()}</div><div className="job-actions"><Button onClick={() => onOpenProject(job.projectId)}><ExternalLink size={14} /> Open</Button>{job.mode === "clip" && ["active", "queued", "recovered"].includes(job.state) && <Button aria-label="Pause job" title="Pause job" onClick={() => action(job, "pause")}><Pause size={14} /></Button>}{job.mode === "clip" && job.state === "paused" && <Button aria-label="Resume job" title="Resume job" onClick={() => action(job, "resume")}><Play size={14} /></Button>}{job.mode === "clip" && job.clips.some((clip) => clip.state === "failed") && <Button aria-label="Retry failed clips" title="Retry failed clips" onClick={() => action(job, "retry-failed")}><RefreshCw size={14} /></Button>}{job.mode === "clip" && job.downloadProgress && ["failed", "stalled", "cancelled_kept"].includes(job.state) && <Button onClick={() => action(job, "retry-import")}><RefreshCw size={14} /> Retry import</Button>}</div></article>)}</div></section>)}
+      })()}</div><div className="job-actions"><Button onClick={() => onOpenProject(job.projectId, job.id)}><ExternalLink size={14} /> Open</Button>{job.mode === "clip" && ["active", "queued", "recovered"].includes(job.state) && <Button aria-label="Pause job" title="Pause job" onClick={() => action(job, "pause")}><Pause size={14} /></Button>}{job.mode === "clip" && job.state === "paused" && <Button aria-label="Resume job" title="Resume job" onClick={() => action(job, "resume")}><Play size={14} /></Button>}{job.mode === "clip" && job.clips.some((clip) => clip.state === "failed") && <Button aria-label="Retry failed clips" title="Retry failed clips" onClick={() => action(job, "retry-failed")}><RefreshCw size={14} /></Button>}{job.mode === "clip" && job.downloadProgress && ["failed", "stalled", "cancelled_kept"].includes(job.state) && <Button onClick={() => action(job, "retry-import")}><RefreshCw size={14} /> Retry import</Button>}</div></article>)}</div></section>)}
       {jobs.length > JOB_LIMIT && <button className="show-all-projects" onClick={() => setShowAll(!showAll)} aria-expanded={showAll}>{showAll ? `Show recent ${JOB_LIMIT}` : `Show all ${jobs.length} jobs`}</button>}</>
       : <EmptyState icon={<BriefcaseBusiness size={30} />} title="No jobs yet">Create a Clip project. Live stages, partial results, recovery, and scoped retry will appear here.</EmptyState>}
   </div>;
