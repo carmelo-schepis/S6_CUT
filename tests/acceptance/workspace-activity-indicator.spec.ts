@@ -51,8 +51,9 @@ test("keeps the Workspace activity indicator live for a real YouTube import", as
     expect(progressStyle.height).toBe(28);
     expect(progressBox!.width).toBe(28);
     expect(progressBox!.height).toBe(28);
-    expect(progressBox!.x).toBeGreaterThan(iconBox!.x + iconBox!.width);
-    expect(progressBox!.x - (iconBox!.x + iconBox!.width)).toBeLessThanOrEqual(5);
+    // The folded rail is the default here: the ring stands in for the icon, centred on it.
+    expect(Math.abs((progressBox!.x + progressBox!.width / 2) - (iconBox!.x + iconBox!.width / 2))).toBeLessThanOrEqual(1);
+    expect(Math.abs((progressBox!.y + progressBox!.height / 2) - (iconBox!.y + iconBox!.height / 2))).toBeLessThanOrEqual(1);
     expect(Math.abs((progressBox!.x + progressBox!.width / 2) - (valueBox!.x + valueBox!.width / 2))).toBeLessThanOrEqual(1);
     expect(Math.abs((progressBox!.y + progressBox!.height / 2) - (valueBox!.y + valueBox!.height / 2))).toBeLessThanOrEqual(1);
     expect(progressBox!.x).toBeGreaterThanOrEqual(buttonBox!.x);

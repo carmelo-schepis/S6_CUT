@@ -422,21 +422,29 @@ select { line-height: var(--type-text-line); }
 .brand-button { display: flex; align-items: center; gap: var(--space-2); width: 100%; height: var(--control-height-large); margin: 0 0 var(--space-4); padding: 0 var(--space-2); border: 0; background: transparent; font-size: var(--type-heading-size); font-weight: var(--type-heading-weight); line-height: var(--type-heading-line); letter-spacing: var(--type-heading-tracking); }
 .brand-button img { flex: 0 0 24px; width: 24px; height: 24px; border-radius: var(--radius-md); object-fit: cover; display: block; }
 .app-rail nav { display: grid; gap: 2px; min-width: 0; }
-.nav-item { position: relative; display: flex; align-items: center; justify-content: flex-start; gap: 10px; min-height: 36px; min-width: 0; width: 100%; padding: 0 var(--space-2); border: 0; border-radius: var(--radius-md); background: transparent; color: var(--text-primary); transition: background-color .12s ease; }
+.nav-item { position: relative; display: flex; align-items: center; justify-content: flex-start; gap: 14px; min-height: 36px; min-width: 0; width: 100%; padding: 0 var(--space-2); border: 0; border-radius: var(--radius-md); background: transparent; color: var(--text-primary); transition: background-color .12s ease; }
 .nav-item span { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.nav-item .nav-icon-wrap { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-1); min-width: 0; max-width: none; overflow: visible; white-space: normal; }
-.nav-item .nav-main-icon { width: 19px; height: 19px; flex: 0 0 19px; }
+/* The icon and the Workspace ring share one cell the size of an icon, so the
+   ring never widens the row or pushes the icon off its column. */
+.nav-item { --nav-icon-size: 20px; }
+.nav-item .nav-icon-wrap { display: inline-grid; place-items: center; flex: 0 0 auto; min-width: 0; max-width: none; overflow: visible; white-space: normal; }
+.nav-item .nav-icon-wrap > * { grid-area: 1 / 1; }
+.nav-item .nav-main-icon { width: var(--nav-icon-size); height: var(--nav-icon-size); flex: 0 0 var(--nav-icon-size); }
 .nav-item .nav-work-progress {
   position: relative;
   display: inline-grid;
   place-items: center;
-  flex: 0 0 var(--workspace-progress-size);
   width: var(--workspace-progress-size);
   height: var(--workspace-progress-size);
   max-width: none;
+  margin: calc((var(--nav-icon-size) - var(--workspace-progress-size)) / 2);
   overflow: visible;
   color: var(--success);
 }
+/* While the Workspace is working the ring is the whole button face: it stands
+   in for the icon in every rail state, centred where the icon sits, so the
+   caption and the other rows keep their alignment. */
+.nav-item .nav-icon-wrap:has(.nav-work-progress) .nav-main-icon { visibility: hidden; }
 .nav-item .nav-work-progress-ring {
   position: absolute;
   inset: 0;
@@ -461,19 +469,26 @@ select { line-height: var(--type-text-line); }
 }
 .nav-item .nav-work-progress-value {
   position: relative;
-  display: grid;
-  place-items: center;
+  display: block;
   width: 100%;
   height: 100%;
   color: var(--text);
-  font-size: calc(var(--type-text-size) - 2px);
-  font-weight: var(--type-emphasis-weight);
-  line-height: 1;
-  letter-spacing: -0.2px;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
   pointer-events: none;
 }
+.nav-item .nav-work-progress-value svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.nav-item .nav-work-progress-value text {
+  fill: currentColor;
+  font-size: calc(var(--type-text-size) - 2px);
+  font-weight: var(--type-emphasis-weight);
+  /* No tracking and proportional figures: trailing letter-spacing and a
+     tabular "1" both add space on one side only. The component places the
+     digits by their measured ink (see centreInk). */
+  letter-spacing: 0;
+  font-variant-numeric: proportional-nums;
+  white-space: pre;
+}
+/* Three digits need a step down to stay inside the ring. */
+.nav-item .nav-work-progress[data-digits="3"] .nav-work-progress-value text { font-size: calc(var(--type-text-size) - 3px); }
 @keyframes workspace-nav-progress-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
   .nav-item .nav-work-progress.is-processing .nav-work-progress-ring { animation: none; }
@@ -514,7 +529,8 @@ select { line-height: var(--type-text-line); }
 .nav-item:hover { color: var(--text); background: var(--surface-2); }
 .nav-item.active { color: var(--text); background: var(--surface-3); font-weight: var(--type-emphasis-weight); }
 .rail-foot { margin-top: auto; display: grid; justify-items: center; gap: 6px; text-align: center; color: var(--text-primary); }
-.help-launcher { margin-top: auto; min-height: 36px; display: flex; align-items: center; justify-content: flex-start; gap: 10px; padding: 0 var(--space-2); border: 0; border-radius: var(--radius-md); background: transparent; color: var(--text-primary); transition: background-color .12s ease; }
+/* The nav rows' 14px gap plus their icon's extra 2px, so Help's caption stays in their column. */
+.help-launcher { margin-top: auto; min-height: 36px; display: flex; align-items: center; justify-content: flex-start; gap: 16px; padding: 0 var(--space-2); border: 0; border-radius: var(--radius-md); background: transparent; color: var(--text-primary); transition: background-color .12s ease; }
 .help-launcher:hover { background: var(--surface-2); color: var(--text); }
 .help-backdrop { position: fixed; z-index: 1000; inset: 0; display: grid; place-items: center; padding: var(--page-inset); background: rgba(0,0,0,.72); }
 .help-dialog { width: min(1080px, 100%); height: min(820px, 92vh); display: grid; grid-template-rows: auto minmax(0,1fr); overflow: hidden; border: 1px solid var(--border-strong); border-radius: var(--radius-xl); background: var(--surface-1); box-shadow: 0 24px 90px rgba(0,0,0,.65); }
@@ -1491,12 +1507,9 @@ main { min-width: 0; }
   .nav-item { gap: 0; }
   .nav-item span { display: none; }
   .nav-item .nav-label { display: none; }
-  .nav-item .nav-icon-wrap { display: inline-flex; width: auto; min-width: 0; max-width: none; overflow: visible; gap: 4px; }
-  .nav-item .nav-main-icon { width: 22px; height: 22px; flex-basis: 22px; }
-  .nav-item .nav-work-spinner { display: inline-block; width: 11px; height: 11px; flex-basis: 11px; }
-  .nav-item .nav-work-count { top: 1px; right: 2px; display: inline-grid; }
+  .nav-item { --nav-icon-size: 22px; }
+  .nav-item .nav-icon-wrap { width: auto; }
   .nav-item svg { width: 22px; height: 22px; }
-  .nav-item .nav-work-spinner { width: 11px; height: 11px; }
 }
 
 @media (max-width: 700px) { .shorts-trim-grid { grid-template-columns: 1fr; } }

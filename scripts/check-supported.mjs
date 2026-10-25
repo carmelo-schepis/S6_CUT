@@ -80,7 +80,8 @@ try {
   await run("npm", ["run", "typecheck"]);
   await run("npm", ["test"]);
   await run("docker", [...compose, "config"]);
-  await run("docker", [...compose, "run", "--rm", "--no-deps", "--build", "engine", "sh", "-c", "python -m pip install --no-cache-dir --target /tmp/s6-cut-pytest pytest==9.1.1 && PYTHONPATH=/tmp/s6-cut-pytest python -m pytest engine/tests -q -p no:cacheprovider"]);
+  // Reuse the image's runtime packages and install the dev lock in a temporary venv.
+  await run("docker", [...compose, "run", "--rm", "--no-deps", "--build", "engine", "sh", "-c", "python -m venv --system-site-packages /tmp/s6-cut-pytest && /tmp/s6-cut-pytest/bin/python -m pip install --no-cache-dir -r engine/requirements-dev.lock && /tmp/s6-cut-pytest/bin/python -m pytest engine/tests -q -p no:cacheprovider"]);
   await run("npm", ["run", "build"]);
   exitCode = 0;
 } catch (error) {
