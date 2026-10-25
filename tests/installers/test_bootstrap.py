@@ -112,7 +112,7 @@ if sys.argv[1:2] == ['run']:
         requests = [c["args"] for c in self.calls() if c["tool"] == "curl"]
         self.assertTrue(requests)
         self.assertTrue(all("http://127.0.0.1:18080/api/health" in args for args in requests))
-        self.assertIn("Frontend: http://localhost:18080", result.stdout)
+        self.assertIn("Frontend: http://127.0.0.1:18080", result.stdout)
         self.assertIn("Backend:  http://localhost:18001", result.stdout)
 
     def test_missing_git_downloads_and_updates_using_docker(self):
