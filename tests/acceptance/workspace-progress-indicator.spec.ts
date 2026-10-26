@@ -122,7 +122,7 @@ test("renders a stable centered Workspace progress ring at desktop and mobile si
     await page.emulateMedia({ reducedMotion: "reduce" });
     // The production CSP forbids injected stylesheets, so hide the arc through the CSSOM instead.
     const hideArc = () => page.evaluate(() => document.querySelectorAll<SVGElement>(".nav-work-progress-ring").forEach((ring) => { ring.style.visibility = "hidden"; }));
-    for (const value of [7, 42, 100]) {
+    for (const value of [7, 10, 42, 100]) {
       remaining = value;
       await page.reload({ waitUntil: "domcontentloaded" });
       await expect(page.getByTestId("workspace-work-count")).toHaveText(String(value));
@@ -162,7 +162,7 @@ test("renders a stable centered Workspace progress ring at desktop and mobile si
     }
     await page.emulateMedia({ reducedMotion: "no-preference" });
 
-    for (const value of [7, 42, 100]) {
+    for (const value of [7, 10, 42, 100]) {
       remaining = value;
       await page.reload({ waitUntil: "domcontentloaded" });
       await expect(page.getByTestId("workspace-work-count")).toHaveText(String(value));

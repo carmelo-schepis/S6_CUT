@@ -480,11 +480,10 @@ select { line-height: var(--type-text-line); }
   fill: currentColor;
   font-size: calc(var(--type-text-size) - 2px);
   font-weight: var(--type-emphasis-weight);
-  /* No tracking and proportional figures: trailing letter-spacing and a
-     tabular "1" both add space on one side only. The component places the
-     digits by their measured ink (see centreInk). */
+  /* Match Canvas measureText's default numeric glyphs. Requesting proportional
+     figures here measures different glyph widths on fonts such as SF Pro. */
   letter-spacing: 0;
-  font-variant-numeric: proportional-nums;
+  font-variant-numeric: normal;
   white-space: pre;
 }
 /* Three digits need a step down to stay inside the ring. */
