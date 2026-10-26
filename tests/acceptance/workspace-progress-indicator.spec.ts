@@ -1,5 +1,9 @@
 import { expect, test } from "@playwright/test";
 
+// This test reloads between mock progress values. A controlling service worker
+// bypasses Playwright's route mocks on later navigations, leaving stale counts.
+test.use({ serviceWorkers: "block" });
+
 const health = {
   status: "ready", version: "test", database: true, ffmpeg: true, ffprobe: true,
   whisper: true, ytdlp: true, localTts: false, dataPath: "/app/data", freeBytes: 1,
