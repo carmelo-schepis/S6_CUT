@@ -2561,11 +2561,13 @@ input[type="range"] { accent-color: var(--brand-primary); }
   .app-shell[data-rail="collapsed"] { --rail: 68px; }
   .app-shell[data-rail="collapsed"] .app-rail:not([data-peek="open"]):not(:has(:focus-visible)) :is(.nav-label, .brand-button > span, .help-launcher > span) { display: none; }
   .app-shell[data-rail="collapsed"] .app-rail:not([data-peek="open"]):not(:has(:focus-visible)) :is(.nav-item, .help-launcher, .brand-button) { justify-content: center; padding: 0; }
+  .app-shell[data-rail="collapsed"] .app-rail:not([data-peek="open"]):not(:has(:focus-visible)) .nav-item { aspect-ratio: 1; }
   .app-shell[data-rail="collapsed"] .app-rail:is([data-peek="open"], :has(:focus-visible)) { width: 224px; box-shadow: 24px 0 48px rgba(0, 0, 0, 0.6); }
 }
 /* At tablet widths the rail is icon-only by default and peeks the same way. */
 @media (min-width: 821px) and (max-width: 1180px) {
   .rail-toggle { display: none; }
+  .app-rail:not([data-peek="open"]):not(:has(:focus-visible)) .nav-item { aspect-ratio: 1; }
   .app-rail:is([data-peek="open"], :has(:focus-visible)) { width: 224px; box-shadow: 24px 0 48px rgba(0, 0, 0, 0.6); }
   .app-rail:is([data-peek="open"], :has(:focus-visible)) :is(.nav-item, .help-launcher, .brand-button) { justify-content: flex-start; padding: 0 var(--space-2); }
   .app-rail:is([data-peek="open"], :has(:focus-visible)) :is(.nav-item .nav-label, .brand-button > span, .help-launcher > span) { display: inline; }
