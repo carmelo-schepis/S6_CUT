@@ -2680,7 +2680,7 @@ def _music_layout_geometry(width: int, height: int, source_dimensions: tuple[int
 
 def _music_source_layout_filter(width: int, height: int, source_dimensions: tuple[int, int], grayscale: bool) -> str:
     band_height, _scaled_height, pad_y = _music_layout_geometry(width, height, source_dimensions)
-    treatment = ",format=gray,format=yuv420p" if grayscale else ""
+    treatment = ",hue=s=0" if grayscale else ""
     return (
         f"scale={width}:{band_height}:force_original_aspect_ratio=decrease:flags=lanczos,"
         f"pad={width}:{height}:(ow-iw)/2:{pad_y}:color=black{treatment},setsar=1[base]"

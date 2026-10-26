@@ -87,7 +87,7 @@ test('real attributed Music job keeps typography, banner, audio and saved captio
   await page.getByRole('tab', { name: 'YouTube' }).click();
   await page.getByLabel('YouTube URL').fill('https://www.youtube.com/watch?v=dQw4w9WgXcQ');
   await page.getByRole('button', { name: 'Music / sung vocals' }).click();
-  while (Number(await page.locator('.count-control strong').textContent()) > 1) await page.getByRole('button', { name: 'Fewer clips' }).click();
+  while (Number(await page.locator('.count-control strong').textContent()) > 2) await page.getByRole('button', { name: 'Fewer clips' }).click();
   await page.getByLabel('Background song MP3').setInputFiles({ name: 'song.mp3', mimeType: 'audio/mpeg', buffer: await fs.readFile(path.join(fixtures!, 'short-song.mp3')) });
   await page.getByRole('group', { name: 'Lyrics subtitle theme' }).getByRole('button', { name: 'Condensed white', exact: true }).click();
   await page.getByRole('group', { name: 'Lyric animation' }).getByRole('button', { name: 'Word build', exact: true }).click();
@@ -99,7 +99,7 @@ test('real attributed Music job keeps typography, banner, audio and saved captio
   await page.getByLabel('Maximum seconds').fill('10');
   await page.getByLabel('Project name').fill(name);
   const creation = page.waitForResponse(response => response.url().endsWith('/api/v1/jobs/clip') && response.request().method() === 'POST');
-  await page.getByRole('button', { name: 'Create 1 short clip', exact: true }).click();
+  await page.getByRole('button', { name: 'Create 2 short clips', exact: true }).click();
   const created = await creation;
   expect(created.status(), await created.text()).toBe(202);
   const { job: queued } = await created.json();
@@ -114,7 +114,8 @@ test('real attributed Music job keeps typography, banner, audio and saved captio
     return latest.state === 'complete' && terminalSteps(latest);
   }, { timeout: 300_000, intervals: [500, 1000] }).toBe(true);
   let finished = await readJob();
-  expect(finished.clips).toHaveLength(1);
+  expect(finished.clips).toHaveLength(2);
+  expect(finished.clips.map((value: { musicTreatment: string }) => value.musicTreatment).sort()).toEqual(["color", "grayscale"]);
   expect(finished.musicPresentation).toEqual(queued.musicPresentation);
   expect(finished.clips[0].creatorCredit).toBe('Source: Controlled Creator');
   const project = await (await request.get(`/api/v1/projects/${queued.projectId}`)).json();
@@ -122,16 +123,32 @@ test('real attributed Music job keeps typography, banner, audio and saved captio
   expect(project.sourceCreator).toBe('Controlled Creator');
   const attribution = JSON.parse(execFileSync('docker', ['exec', container!, 'python', '-c', 'from engine.app import db; import json,sys; p=db.get_job_private(sys.argv[1]); print(json.dumps({k:p.get(k) for k in ("url","youtube_title","youtube_creator")}))', queued.id]).toString());
   expect(attribution).toMatchObject({ url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', youtube_title: 'Controlled Music source', youtube_creator: 'Controlled Creator' });
-  await expect(page.locator('.clip-tile.complete')).toHaveCount(1);
-  await page.locator('.clip-tile.complete').getByRole('button', { name: 'Preview', exact: true }).click();
+  await expect(page.locator('.clip-tile.complete')).toHaveCount(2);
+  await page.locator('.clip-tile.complete').first().getByRole('button', { name: 'Preview', exact: true }).click();
   checkPlayback(await assertPlayback(page), name);
 
   // --- rendered pixels: banner strip, then word-by-word build ---
-  let clip = finished.clips[0];
+  let clip = finished.clips.find((value: { musicTreatment: string }) => value.musicTreatment === 'color')!;
   const original = (await request.get(clip.downloadUrl));
   expect(original.ok()).toBeTruthy();
   const originalBytes = await original.body();
   await fs.writeFile(path.join(fixtures!, 'typography.mp4'), originalBytes);
+  // Inspect encoded downloads from both balanced treatments. These edge pixels
+  // sit in the top and bottom black padding, clear of centered titles and lyrics.
+  const blackPaddingPoints = [[4, 30], [1076, 30], [4, 100], [1076, 100], [4, 1400], [1076, 1400], [4, 1800], [1076, 1800]];
+  for (const treatmentClip of finished.clips) {
+    const treatment = treatmentClip.musicTreatment as "color" | "grayscale";
+    const filename = `typography-${treatment}.mp4`;
+    const downloaded = treatmentClip.id === clip.id ? originalBytes : Buffer.from(await (await request.get(treatmentClip.downloadUrl)).body());
+    await fs.writeFile(path.join(fixtures!, filename), downloaded);
+    const times = [...new Set([1.0, Math.min(treatmentClip.duration - 0.5, treatmentClip.duration / 2)])];
+    for (const time of times) {
+      const frame = rgbFrame(filename, time);
+      const observed = blackPaddingPoints.map(([x, y]) => ({ point: [x, y], rgb: pixel(frame, x, y) }));
+      console.log(`letterbox black pixels treatment=${treatment} time=${time}s ${JSON.stringify(observed)}`);
+      for (const sample of observed) expect(Math.max(...sample.rgb), `${treatment} letterbox ${sample.point.join(",")} at ${time}s RGB ${sample.rgb}`).toBeLessThanOrEqual(4);
+    }
+  }
   const first = words.find(word => word.end > clip.start)!;
   const onset = Math.max(0, first.start - clip.start);
   const sampleMoments = [1.0, ...(clip.duration > 9.2 ? [9.2] : []), ...(clip.duration > 12 ? [12.0] : []), ...(clip.duration > 20.2 ? [20.0] : [])];
@@ -178,9 +195,9 @@ test('real attributed Music job keeps typography, banner, audio and saved captio
   finished = await readJob();
   expect(finished.warnings.some((warning: string) => warning.includes('Caption rerender failed'))).toBe(false);
   expect(finished.musicPresentation).toEqual(queued.musicPresentation);
-  expect(finished.clips[0].libraryAssetId).toBe(clip.libraryAssetId);
-  expect(finished.clips[0].captionCues).toEqual(savedCues);
-  clip = finished.clips[0];
+  expect(finished.clips.find((value: { id: string }) => value.id === clip.id).libraryAssetId).toBe(clip.libraryAssetId);
+  expect(finished.clips.find((value: { id: string }) => value.id === clip.id).captionCues).toEqual(savedCues);
+  clip = finished.clips.find((value: { id: string }) => value.id === clip.id)!;
   const revised = Buffer.from(await (await request.get(clip.downloadUrl)).body());
   await fs.writeFile(path.join(fixtures!, 'typography-reviewed.mp4'), revised);
   for (const moment of sampleMoments) verifyBanner('typography-reviewed.mp4', moment);

@@ -435,9 +435,38 @@ def test_music_layout_uses_raised_black_picture_band_and_source_only_grayscale()
     assert "scale=1080:810:force_original_aspect_ratio=decrease:flags=lanczos" in default
     assert "pad=1080:1920:(ow-iw)/2:570:color=black" in default
     assert "format=gray" not in default
-    assert "format=gray" in gray
+    assert "hue=s=0" not in default
+    assert "hue=s=0" in gray
+    assert "format=yuv420p" not in gray
     assert "setsar=1[base]" in gray
     assert "scale=1080:1920" not in default
+
+
+def test_music_grayscale_render_keeps_black_padding_black() -> None:
+    from engine.config import Settings
+    from engine.media import _music_source_layout_filter
+
+    runtime = Settings.from_env()
+    if not shutil.which(runtime.ffmpeg):
+        pytest.skip("music layout render regression requires FFmpeg")
+
+    width, height = 1080, 1920
+    layout = _music_source_layout_filter(width, height, (1920, 1080), True)
+    rendered = subprocess.run([
+        runtime.ffmpeg, "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+        "color=c=red:s=1920x1080:d=1", "-filter_complex", f"[0:v]{layout}",
+        "-map", "[base]", "-frames:v", "1", "-pix_fmt", "rgb24", "-f", "rawvideo", "pipe:1",
+    ], check=True, capture_output=True).stdout
+    assert len(rendered) == width * height * 3
+
+    def pixel(x: int, y: int) -> tuple[int, int, int]:
+        offset = (y * width + x) * 3
+        return tuple(rendered[offset:offset + 3])
+
+    source_pixel = pixel(width // 2, 800)
+    assert source_pixel[0] == source_pixel[1] == source_pixel[2]
+    assert source_pixel[0] > 0
+    assert pixel(0, 0) == (0, 0, 0)
 
 
 def test_music_gray_assignments_are_exact_balanced_and_stable_by_clip_identity() -> None:
