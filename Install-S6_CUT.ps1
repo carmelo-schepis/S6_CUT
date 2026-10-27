@@ -39,6 +39,48 @@ function Write-Ok   { param([string]$Message) Write-Host "  [OK] $Message" -Fore
 function Write-Warn { param([string]$Message) Write-Host "  [!] $Message" -ForegroundColor Yellow }
 function Write-Fail { param([string]$Message) Write-Host "  [FAIL] $Message" -ForegroundColor Red }
 
+function Get-ConfigValue {
+    param([string]$Name, [string]$Default)
+    $Value = [Environment]::GetEnvironmentVariable($Name)
+    if (-not [string]::IsNullOrWhiteSpace($Value)) { return $Value }
+    if (Test-Path ".env") {
+        foreach ($Line in Get-Content ".env") {
+            if ($Line -match "^\s*$([regex]::Escape($Name))=(.*)$") {
+                $Value = $Matches[1].Trim().Trim('"', "'")
+            }
+        }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($Value)) { return $Value }
+    return $Default
+}
+
+function Get-PublishedPort {
+    param([string]$Binding, [string]$Name)
+    $HostAddress = "127.0.0.1"
+    if ($Binding -match '^(?<port>\d{1,5})$') {
+        $PortText = $Matches.port
+    }
+    elseif ($Binding -match '^(?<host>(?:\d{1,3}\.){3}\d{1,3}):(?<port>\d{1,5})$') {
+        $ParsedAddress = $null
+        if (-not [Net.IPAddress]::TryParse($Matches.host, [ref]$ParsedAddress) -or
+            $ParsedAddress.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork) {
+            Die "$Name must use a valid IPv4 address and port."
+        }
+        $HostAddress = $ParsedAddress.ToString()
+        $PortText = $Matches.port
+    }
+    else {
+        Die "$Name must be a port or an IPv4 address and port (for example, 127.0.0.1:8080)."
+    }
+
+    $Port = 0
+    if (-not [int]::TryParse($PortText, [ref]$Port) -or $Port -lt 1 -or $Port -gt 65535) {
+        Die "$Name must end with a valid port (1–65535)."
+    }
+    if ($HostAddress -eq "0.0.0.0") { $HostAddress = "127.0.0.1" }
+    return @{ Host = $HostAddress; Port = $Port }
+}
+
 function Die {
     param([string]$Message)
     Write-Fail $Message
@@ -151,6 +193,15 @@ else {
     Write-Ok "Configuration ready (defaults)"
 }
 
+# --- configuration ------------------------------------------------------------
+
+$WebBinding = Get-ConfigValue "S6_PORT" "8080"
+$WebPortInfo = Get-PublishedPort $WebBinding "S6_PORT"
+$EngineBinding = Get-ConfigValue "S6_ENGINE_PORT" "8001"
+if ($EngineBinding -notmatch '^\d{1,5}$') { Die "S6_ENGINE_PORT must be a numeric port." }
+$EnginePortInfo = Get-PublishedPort $EngineBinding "S6_ENGINE_PORT"
+$WebUrlHost = if ($WebPortInfo.Host -eq "127.0.0.1") { "localhost" } else { $WebPortInfo.Host }
+
 # --- containers ---------------------------------------------------------------
 
 $CurrentStep = "building and starting the containers"
@@ -169,13 +220,7 @@ Write-Ok "Containers started"
 # --- wait for ready -----------------------------------------------------------
 
 $CurrentStep = "waiting for S6_cut to become ready"
-$WebPort = 8080
-if (Test-Path ".env") {
-    $EnvLine = Get-Content ".env" | Where-Object { $_ -match '^S6_PORT=' } | Select-Object -First 1
-    if ($EnvLine) { $WebPort = ($EnvLine -split '=')[1].Trim('"', "'") }
-}
-
-$Url = "http://127.0.0.1:$WebPort/api/health"
+$Url = "http://$($WebPortInfo.Host):$($WebPortInfo.Port)/api/health"
 Write-Step "Waiting for S6_cut to become ready (timeout ${StartTimeout}s)..."
 
 $Deadline = [DateTime]::Now.AddSeconds($StartTimeout)
@@ -214,17 +259,11 @@ Write-Host ""
 Write-Info "Services"
 docker compose ps
 
-$EnginePort = 8001
-if (Test-Path ".env") {
-    $EnvLine = Get-Content ".env" | Where-Object { $_ -match '^S6_ENGINE_PORT=' } | Select-Object -First 1
-    if ($EnvLine) { $EnginePort = ($EnvLine -split '=')[1].Trim('"', "'") }
-}
-
 Write-Host ""
 Write-Ok "S6_cut is running"
 Write-Host ""
-Write-Host "  Frontend: http://localhost:$WebPort"
-Write-Host "  Backend:  http://localhost:$EnginePort"
+Write-Host "  Frontend: http://${WebUrlHost}:$($WebPortInfo.Port)"
+Write-Host "  Backend:  http://localhost:$($EnginePortInfo.Port)"
 Write-Host ""
 Write-Info "Next steps"
 Write-Host "  * Open the Frontend URL in your browser to start creating projects."
