@@ -18,7 +18,7 @@ import {
 } from "./support/workspace";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const artifacts = path.join(root, "test-artifacts/content-authenticity");
+const artifacts = path.join(process.env.S6_PLAYWRIGHT_ARTIFACTS || path.join(root, "test-artifacts"), "content-authenticity");
 const fixture = process.env.S6_AUTHENTICITY_FIXTURE
   || path.join(artifacts, "fixture/s6cut-authenticity-source.mp4");
 const writeManifest = (name: string, payload: unknown) => writeManifestTo(artifacts, name, payload);
