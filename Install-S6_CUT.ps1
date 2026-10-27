@@ -209,10 +209,10 @@ function Get-ResolvedComposePort {
 
 # Ask Compose to resolve .env syntax, interpolation, defaults, and process-env
 # overrides exactly as it will for `compose up`. `--format json` is supported by
-# current Compose v2 releases and ConvertFrom-Json is available in PowerShell 5.1.
+# Compose v2.3+ supports JSON output and ConvertFrom-Json is available in PS 5.1.
 $ComposeConfigOutput = @(docker compose config --format json)
 if ($LASTEXITCODE -ne 0) {
-    Die "Could not resolve Docker Compose configuration and port bindings. Ensure Docker Compose v2 supports 'docker compose config --format json' and that compose.yaml and .env are valid."
+    Die "Could not resolve Docker Compose configuration and port bindings. Ensure Docker Compose 2.3 or newer is installed and that compose.yaml and .env are valid."
 }
 try {
     $ComposeConfig = ($ComposeConfigOutput -join [Environment]::NewLine) | ConvertFrom-Json -ErrorAction Stop
