@@ -71,8 +71,8 @@ function docker {
         $EnginePort = "8001"
         if (Test-Path -LiteralPath ".env") {
             foreach ($Line in Get-Content -LiteralPath ".env") {
-                if ($Line -match '^\s*S6_PORT\s*[:=]\s*(.*?)\s*$') { $WebBinding = $Matches[1].Trim('"').Trim("'") }
-                if ($Line -match '^\s*S6_ENGINE_PORT\s*[:=]\s*(.*?)\s*$') { $EnginePort = $Matches[1].Trim('"').Trim("'") }
+                if ($Line -cmatch '^\s*S6_PORT\s*[:=]\s*(.*?)\s*$') { $WebBinding = $Matches[1].Trim('"').Trim("'") }
+                if ($Line -cmatch '^\s*S6_ENGINE_PORT\s*[:=]\s*(.*?)\s*$') { $EnginePort = $Matches[1].Trim('"').Trim("'") }
             }
         }
         if ($WebBinding -match '^\$\{WEB_PORT:-(?<fallback>\d+)\}$') {
