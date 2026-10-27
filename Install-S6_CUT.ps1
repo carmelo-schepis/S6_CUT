@@ -41,13 +41,17 @@ function Write-Fail { param([string]$Message) Write-Host "  [FAIL] $Message" -Fo
 
 function Get-ConfigValue {
     param([string]$Name, [string]$Default)
-    $Value = [Environment]::GetEnvironmentVariable($Name)
-    if (-not [string]::IsNullOrWhiteSpace($Value)) { return $Value }
+    $ProcessValue = [Environment]::GetEnvironmentVariable($Name)
+    if ($null -ne $ProcessValue) {
+        if ($ProcessValue.Length -eq 0) { return $Default }
+        return $ProcessValue
+    }
     if (Test-Path ".env") {
         foreach ($Line in Get-Content ".env") {
-            if ($Line -match "^\s*$([regex]::Escape($Name))=(.*)$") {
+            if ($Line -match "^\s*$([regex]::Escape($Name))\s*(?:=|:)\s*(.*)$") {
                 $RawValue = $Matches[1].Trim()
-                if ($RawValue -match '^"([^"]*)"(?:\s+#.*)?$' -or $RawValue -match "^'([^']*)'(?:\s+#.*)?$") {
+                if ($RawValue -match '^#') { $Value = "" }
+                elseif ($RawValue -match '^"([^"]*)"(?:\s+#.*)?$' -or $RawValue -match "^'([^']*)'(?:\s+#.*)?$") {
                     $Value = $Matches[1]
                 }
                 else { $Value = ($RawValue -replace '\s+#.*$', '').Trim() }

@@ -37,6 +37,9 @@ try {
     Set-Content .env "S6_PORT=18080 # frontend`nS6_ENGINE_PORT=18001 # backend" -Encoding ASCII
     Assert-Equal 18080 (Get-PublishedPort (Get-ConfigValue "S6_PORT" "8080") "S6_PORT").Port "custom numeric frontend port"
     Assert-Equal 18001 (Get-PublishedPort (Get-ConfigValue "S6_ENGINE_PORT" "8001") "S6_ENGINE_PORT").Port "custom backend port"
+    Set-Content .env "S6_PORT : 18082`nS6_ENGINE_PORT = 18003" -Encoding ASCII
+    Assert-Equal 18082 (Get-PublishedPort (Get-ConfigValue "S6_PORT" "8080") "S6_PORT").Port "colon frontend setting"
+    Assert-Equal 18003 (Get-PublishedPort (Get-ConfigValue "S6_ENGINE_PORT" "8001") "S6_ENGINE_PORT").Port "spaced backend setting"
     Set-Content .env 'S6_PORT="127.0.0.1:18080" # loopback binding' -Encoding ASCII
     $Web = Get-PublishedPort (Get-ConfigValue "S6_PORT" "8080") "S6_PORT"
     Assert-Equal "127.0.0.1" $Web.Host "IPv4 readiness host"
@@ -48,6 +51,14 @@ try {
     Assert-Equal 18081 (Get-PublishedPort (Get-ConfigValue "S6_PORT" "8080") "S6_PORT").Port "exported frontend port precedence"
     Assert-Equal 18002 (Get-PublishedPort (Get-ConfigValue "S6_ENGINE_PORT" "8001") "S6_ENGINE_PORT").Port "exported backend port precedence"
 
+    Set-Content .env "S6_PORT=18080`nS6_ENGINE_PORT=18001" -Encoding ASCII
+    [Environment]::SetEnvironmentVariable("S6_PORT", "")
+    [Environment]::SetEnvironmentVariable("S6_ENGINE_PORT", "")
+    Assert-Equal 8080 (Get-PublishedPort (Get-ConfigValue "S6_PORT" "8080") "S6_PORT").Port "empty exported frontend default"
+    Assert-Equal 8001 (Get-PublishedPort (Get-ConfigValue "S6_ENGINE_PORT" "8001") "S6_ENGINE_PORT").Port "empty exported backend default"
+
+    [Environment]::SetEnvironmentVariable("S6_PORT", $null)
+    [Environment]::SetEnvironmentVariable("S6_ENGINE_PORT", $null)
     $AnyAddress = Get-PublishedPort "0.0.0.0:8082" "S6_PORT"
     Assert-Equal "127.0.0.1" $AnyAddress.Host "wildcard readiness host"
     Assert-Equal 8082 $AnyAddress.Port "wildcard published port"
