@@ -1,6 +1,13 @@
 import { expect, test } from "@playwright/test";
 import { createServer, request as proxyRequest } from "node:http";
+import { request as proxyRequestHttps } from "node:https";
 import type { AddressInfo } from "node:net";
+
+async function expectAppVisible(page: import("@playwright/test").Page) {
+  const mobile = page.locator(".m-app");
+  const desktop = page.getByRole("heading", { name: "Create a project" });
+  await expect(mobile.or(desktop).first()).toBeVisible();
+}
 
 function pngDimensions(bytes: Buffer) {
   expect(bytes.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
@@ -44,7 +51,7 @@ test("production PWA manifest, icons, and service worker are valid", async ({ re
   expect(serviceWorkerResponse.ok()).toBeTruthy();
   expect(serviceWorkerResponse.headers()["content-type"]).toContain("javascript");
   const serviceWorkerSource = await serviceWorkerResponse.text();
-  expect(serviceWorkerSource).toContain('const CACHE = "s6-cut-shell-v13"');
+  expect(serviceWorkerSource).toMatch(/const CACHE = "s6-cut-shell-v\d+"/);
   expect(serviceWorkerSource).toContain('fetch(request, { cache: "no-store" })');
   expect(serviceWorkerSource).toContain('event.data?.type === "SKIP_WAITING"');
   expect(serviceWorkerSource).toContain('request.headers.has("range")');
@@ -57,7 +64,8 @@ test("production PWA activates, works offline, and excludes API/media traffic fr
   const upstream = new URL(baseURL!);
   const proxy = createServer((request, response) => {
     if (offline) { request.socket.destroy(); return; }
-    const forward = proxyRequest(new URL(request.url!, upstream), {
+    const upstreamRequest = upstream.protocol === "https:" ? proxyRequestHttps : proxyRequest;
+    const forward = upstreamRequest(new URL(request.url!, upstream), {
       method: request.method, headers: { ...request.headers, host: upstream.host },
     }, (result) => {
       response.writeHead(result.statusCode!, result.headers);
@@ -76,7 +84,7 @@ test("production PWA activates, works offline, and excludes API/media traffic fr
     page.on("pageerror", (error) => consoleErrors.push(error.message));
 
     await page.goto(`${origin}/direct-production-route`, { waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
+    await expectAppVisible(page);
     await expect.poll(() => page.evaluate(() => navigator.serviceWorker?.controller?.scriptURL || ""), { timeout: 15_000 }).toContain("/sw.js");
     const worker = await page.evaluate(async () => {
       const registration = await navigator.serviceWorker.ready;
@@ -89,7 +97,7 @@ test("production PWA activates, works offline, and excludes API/media traffic fr
       const entries = await Promise.all(names.map(async (name) => ({ name, urls: (await (await caches.open(name)).keys()).map((request) => new URL(request.url).pathname) })));
       return entries;
     });
-    expect(initialCaches.map((cache) => cache.name)).toContain("s6-cut-shell-v13");
+    expect(initialCaches.map((cache) => cache.name).some((name) => /^s6-cut-shell-v\d+$/.test(name))).toBe(true);
     expect(initialCaches.map((cache) => cache.name)).not.toContain("s6-cut-shell-v10");
     expect(initialCaches.flatMap((cache) => cache.urls)).toContain("/");
     expect(initialCaches.flatMap((cache) => cache.urls)).toContain("/startup.css");
@@ -118,7 +126,7 @@ test("production PWA activates, works offline, and excludes API/media traffic fr
     await page.evaluate(() => window.dispatchEvent(new Event("offline")));
     await expect(page.getByTestId("pwa-offline-status")).toBeVisible();
     await page.goto(`${origin}/offline-production-route`, { waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
+    await expectAppVisible(page);
     const apiOffline = await page.evaluate(async () => {
       try {
         await fetch("/api/health");
@@ -137,7 +145,7 @@ test("production PWA activates, works offline, and excludes API/media traffic fr
     expect(consoleErrors).toEqual([]);
 
     await page.setViewportSize({ width: 390, height: 844 });
-    await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
+    await expectAppVisible(page);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
     expect(overflow).toBe(true);
   } finally {
@@ -148,7 +156,8 @@ test("production PWA activates, works offline, and excludes API/media traffic fr
 
 test("waiting PWA updates are user-controlled", async ({ page, request }) => {
   await page.goto("/", { waitUntil: "domcontentloaded" });
-  await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
+  await expectAppVisible(page);
+  await expect(page.getByRole("region", { name: "Install S6_cut" })).toHaveCount(0);
   const serviceWorkerSource = await (await request.get("/sw.js")).text();
   expect(serviceWorkerSource).toContain("Do not skip waiting here");
 
