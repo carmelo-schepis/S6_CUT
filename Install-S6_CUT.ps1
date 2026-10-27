@@ -151,6 +151,55 @@ else {
     Write-Ok "Configuration ready (defaults)"
 }
 
+function Get-ComposeSetting {
+    param([string]$Name, [string]$Default)
+
+    $Value = [Environment]::GetEnvironmentVariable($Name, "Process")
+    if ([string]::IsNullOrEmpty($Value) -and (Test-Path ".env")) {
+        $Pattern = '^\s*' + [regex]::Escape($Name) + '\s*=\s*(.*?)\s*$'
+        foreach ($Line in Get-Content ".env") {
+            if ($Line -match $Pattern) {
+                $Value = $Matches[1] -replace '\s+#.*$', ''
+            }
+        }
+    }
+    if ([string]::IsNullOrEmpty($Value)) { $Value = $Default }
+    return $Value.Trim().Trim('"').Trim("'")
+}
+
+function Resolve-WebBinding {
+    param([string]$Binding)
+
+    $Address = $null
+    $PortText = $Binding
+    if ($Binding -match '^(?<address>(?:\d{1,3}\.){3}\d{1,3}):(?<port>\d{1,5})$') {
+        $Address = $Matches.address
+        $PortText = $Matches.port
+        $ParsedAddress = $null
+        if (-not [System.Net.IPAddress]::TryParse($Address, [ref]$ParsedAddress) -or
+            $ParsedAddress.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork) {
+            Die "S6_PORT must be a numeric port or an IPv4 binding such as 127.0.0.1:8080."
+        }
+        $Address = $ParsedAddress.ToString()
+    }
+    elseif ($Binding -notmatch '^\d{1,5}$') {
+        Die "S6_PORT must be a numeric port or an IPv4 binding such as 127.0.0.1:8080."
+    }
+
+    $Port = 0
+    if (-not [int]::TryParse($PortText, [ref]$Port) -or $Port -lt 1 -or $Port -gt 65535) {
+        Die "S6_PORT must use a published port from 1 through 65535."
+    }
+
+    $UrlHost = if (-not $Address -or $Address -eq "0.0.0.0") { "localhost" } else { $Address }
+    $HealthHost = if (-not $Address -or $Address -eq "0.0.0.0") { "127.0.0.1" } else { $Address }
+    return [PSCustomObject]@{ Port = $Port; UrlHost = $UrlHost; HealthHost = $HealthHost }
+}
+
+$WebBinding = Get-ComposeSetting -Name "S6_PORT" -Default "8080"
+$Web = Resolve-WebBinding -Binding $WebBinding
+$EnginePort = Get-ComposeSetting -Name "S6_ENGINE_PORT" -Default "8001"
+
 # --- containers ---------------------------------------------------------------
 
 $CurrentStep = "building and starting the containers"
@@ -169,13 +218,7 @@ Write-Ok "Containers started"
 # --- wait for ready -----------------------------------------------------------
 
 $CurrentStep = "waiting for S6_cut to become ready"
-$WebPort = 8080
-if (Test-Path ".env") {
-    $EnvLine = Get-Content ".env" | Where-Object { $_ -match '^S6_PORT=' } | Select-Object -First 1
-    if ($EnvLine) { $WebPort = ($EnvLine -split '=')[1].Trim('"', "'") }
-}
-
-$Url = "http://127.0.0.1:$WebPort/api/health"
+$Url = "http://$($Web.HealthHost):$($Web.Port)/api/health"
 Write-Step "Waiting for S6_cut to become ready (timeout ${StartTimeout}s)..."
 
 $Deadline = [DateTime]::Now.AddSeconds($StartTimeout)
@@ -214,16 +257,10 @@ Write-Host ""
 Write-Info "Services"
 docker compose ps
 
-$EnginePort = 8001
-if (Test-Path ".env") {
-    $EnvLine = Get-Content ".env" | Where-Object { $_ -match '^S6_ENGINE_PORT=' } | Select-Object -First 1
-    if ($EnvLine) { $EnginePort = ($EnvLine -split '=')[1].Trim('"', "'") }
-}
-
 Write-Host ""
 Write-Ok "S6_cut is running"
 Write-Host ""
-Write-Host "  Frontend: http://localhost:$WebPort"
+Write-Host "  Frontend: http://$($Web.UrlHost):$($Web.Port)"
 Write-Host "  Backend:  http://localhost:$EnginePort"
 Write-Host ""
 Write-Info "Next steps"
