@@ -71,10 +71,10 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Ok "Docker engine is running"
 
-# Docker Compose v2
+# Docker Compose 2.3+
 docker compose version > $null 2>&1
 if ($LASTEXITCODE -ne 0) {
-    Die "Docker Compose v2 is required but the 'docker compose' command is missing. Install Docker Compose v2 (https://docs.docker.com/compose/install/), then re-run the install command."
+    Die "Docker Compose 2.3 or newer is required but the 'docker compose' command is missing. Install Docker Compose 2.3 or newer (https://docs.docker.com/compose/install/), then re-run the install command."
 }
 Write-Ok "Docker Compose found"
 

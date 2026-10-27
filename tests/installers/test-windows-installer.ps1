@@ -240,7 +240,7 @@ try {
     $NoDocker = Invoke-MockedInstall -Name "missing docker" -Target $DefaultPath -NoDocker $true
     Assert-True ($NoDocker.Error -match 'Docker is not installed') "Missing Docker diagnostic changed: $($NoDocker.Error)"
     $NoCompose = Invoke-MockedInstall -Name "missing Compose" -Target $DefaultPath -Scenario "ComposeMissing"
-    Assert-True ($NoCompose.Error -match "Docker Compose v2 is required") "Missing Compose diagnostic changed: $($NoCompose.Error)"
+    Assert-True ($NoCompose.Error -match "Docker Compose 2.3 or newer is required") "Missing Compose diagnostic changed: $($NoCompose.Error)"
     $NoEngine = Invoke-MockedInstall -Name "unreachable Docker" -Target $DefaultPath -Scenario "DockerUnavailable"
     Assert-True ($NoEngine.Error -match "Docker is installed but its engine is not running") "Unreachable Docker diagnostic changed: $($NoEngine.Error)"
     $NoReady = Invoke-MockedInstall -Name "readiness failure" -Target $DefaultPath -Scenario "ReadinessFailure" -Timeout 4
