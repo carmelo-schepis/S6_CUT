@@ -69,7 +69,8 @@ if sys.argv[1:3] == ['compose', 'up']:
 if sys.argv[1:3] == ['compose', 'version']:
     if os.environ.get('S6_TEST_COMPOSE_MISSING'):
         sys.exit(1)
-    print(os.environ.get('S6_TEST_COMPOSE_VERSION', 'Docker Compose version v2.26.0'))
+    version = os.environ.get('S6_TEST_COMPOSE_VERSION', '2.26.0')
+    print('Docker Compose version v' + version)
 if sys.argv[1:2] == ['run']:
     args = sys.argv[1:]
     mount = args[args.index('--mount') + 1]
@@ -118,6 +119,21 @@ if sys.argv[1:2] == ['run']:
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Docker Compose 2.3 or newer is required but the 'docker compose' command is missing",
                       result.stdout + result.stderr)
+
+    def test_compose_2_2_3_is_rejected_with_detected_and_minimum_versions(self):
+        self.env["S6_TEST_COMPOSE_VERSION"] = "2.2.3"
+        result = subprocess.run(["/bin/bash"], input=(ROOT / "install.sh").read_text(),
+                                text=True, capture_output=True, env=self.env,
+                                cwd=self.home, timeout=30)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Docker Compose 2.2.3 is installed, but version 2.3 or newer is required",
+                      result.stdout + result.stderr)
+
+    def test_compose_2_3_and_2_25_are_accepted(self):
+        for version in ["2.3", "2.25.0"]:
+            with self.subTest(version=version):
+                self.env["S6_TEST_COMPOSE_VERSION"] = version
+                self.install()
 
     def test_compose_225_is_accepted(self):
         self.env["S6_TEST_COMPOSE_VERSION"] = "Docker Compose version v2.25.0"

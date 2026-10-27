@@ -93,10 +93,21 @@ check_prerequisites() {
   docker info >/dev/null 2>&1 \
     || die "Docker is installed but its engine is not running or not reachable. Start Docker (for example Docker Desktop), wait until it is ready, then re-run the install command."
   ok "Docker engine is running"
-  if ! docker compose version >/dev/null 2>&1; then
+  local compose_version_output compose_major compose_minor compose_patch
+  if ! compose_version_output=$(docker compose version 2>&1); then
     die "Docker Compose 2.3 or newer is required but the 'docker compose' command is missing. Install Docker Compose 2.3 or newer (https://docs.docker.com/compose/install/), then re-run the install command."
   fi
-  ok "Docker Compose found"
+  if [[ "$compose_version_output" =~ ([0-9]+)\.([0-9]+)(\.[0-9]+)? ]]; then
+    compose_major="${BASH_REMATCH[1]}"
+    compose_minor="${BASH_REMATCH[2]}"
+    compose_patch="${BASH_REMATCH[3]}"
+  else
+    die "Could not determine the Docker Compose version from: $compose_version_output. Docker Compose 2.3 or newer is required."
+  fi
+  if (( compose_major < 2 || (compose_major == 2 && compose_minor < 3) )); then
+    die "Docker Compose $compose_major.$compose_minor$compose_patch is installed, but version 2.3 or newer is required. Update Docker Compose (https://docs.docker.com/compose/install/), then re-run the install command."
+  fi
+  ok "Docker Compose $compose_major.$compose_minor$compose_patch found"
   command -v curl >/dev/null 2>&1 \
     || die "curl is not installed. Install it (for example 'sudo apt install curl' on Debian/Ubuntu or 'brew install curl' on macOS), then re-run the install command."
   ok "curl found"
