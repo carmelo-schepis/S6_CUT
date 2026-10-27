@@ -655,6 +655,14 @@ main { min-width: 0; }
 .pwa-update-button { margin-left: auto; flex: 0 0 auto; min-height: var(--control-height-small); padding: 3px var(--space-2); border: 1px solid var(--control-border); border-radius: var(--radius-control); background: transparent; color: var(--text-primary); cursor: pointer; font: inherit; }
 .pwa-update-button:hover { background: var(--surface-4); }
 .pwa-update-button:disabled { cursor: wait; opacity: .7; }
+.pwa-install-offer { flex-wrap: wrap; background: var(--surface-2); border-bottom: 1px solid var(--brand-border-soft); }
+.pwa-install-offer > svg { color: var(--copper-light); }
+.pwa-install-copy { display: grid; gap: 2px; flex: 1 1 180px; }
+.pwa-install-copy > span, .pwa-install-instructions { color: var(--text-muted); }
+.pwa-install-actions { display: flex; align-items: center; gap: var(--space-2); margin-left: auto; }
+.pwa-install-dismiss { min-height: var(--control-height-small); padding: 3px var(--space-2); border: 0; background: transparent; color: var(--text-muted); cursor: pointer; font: inherit; }
+.pwa-install-dismiss:hover { color: var(--text-primary); }
+.pwa-install-instructions { flex: 1 1 100%; margin: 0 0 0 calc(17px + var(--space-2)); }
 
 /* Compact controls keep their label on one line: touch and click targets grow
    through padding and min-height, never by wrapping or resizing the type.

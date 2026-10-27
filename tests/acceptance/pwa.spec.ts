@@ -1,6 +1,13 @@
 import { expect, test } from "@playwright/test";
 import { createServer, request as proxyRequest } from "node:http";
+import { request as proxyRequestHttps } from "node:https";
 import type { AddressInfo } from "node:net";
+
+async function expectAppVisible(page: import("@playwright/test").Page) {
+  const mobile = page.locator(".m-app");
+  const desktop = page.getByRole("heading", { name: "Create a project" });
+  await expect(mobile.or(desktop).first()).toBeVisible();
+}
 
 function pngDimensions(bytes: Buffer) {
   expect(bytes.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
@@ -57,7 +64,8 @@ test("production PWA activates, works offline, and excludes API/media traffic fr
   const upstream = new URL(baseURL!);
   const proxy = createServer((request, response) => {
     if (offline) { request.socket.destroy(); return; }
-    const forward = proxyRequest(new URL(request.url!, upstream), {
+    const upstreamRequest = upstream.protocol === "https:" ? proxyRequestHttps : proxyRequest;
+    const forward = upstreamRequest(new URL(request.url!, upstream), {
       method: request.method, headers: { ...request.headers, host: upstream.host },
     }, (result) => {
       response.writeHead(result.statusCode!, result.headers);
@@ -76,7 +84,7 @@ test("production PWA activates, works offline, and excludes API/media traffic fr
     page.on("pageerror", (error) => consoleErrors.push(error.message));
 
     await page.goto(`${origin}/direct-production-route`, { waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
+    await expectAppVisible(page);
     await expect.poll(() => page.evaluate(() => navigator.serviceWorker?.controller?.scriptURL || ""), { timeout: 15_000 }).toContain("/sw.js");
     const worker = await page.evaluate(async () => {
       const registration = await navigator.serviceWorker.ready;
@@ -94,6 +102,7 @@ test("production PWA activates, works offline, and excludes API/media traffic fr
     expect(initialCaches.flatMap((cache) => cache.urls)).toContain("/");
     expect(initialCaches.flatMap((cache) => cache.urls)).toContain("/startup.css");
     expect(initialCaches.flatMap((cache) => cache.urls).some((url) => url.startsWith("/assets/"))).toBe(true);
+    expect(initialCaches.flatMap((cache) => cache.urls).some((url) => /\/assets\/mobile-app-[^/]+\.js$/.test(url))).toBe(true);
 
     const apiOnline = await page.evaluate(async () => (await fetch("/api/health")).ok);
     expect(apiOnline).toBe(true);
@@ -118,7 +127,7 @@ test("production PWA activates, works offline, and excludes API/media traffic fr
     await page.evaluate(() => window.dispatchEvent(new Event("offline")));
     await expect(page.getByTestId("pwa-offline-status")).toBeVisible();
     await page.goto(`${origin}/offline-production-route`, { waitUntil: "domcontentloaded" });
-    await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
+    await expectAppVisible(page);
     const apiOffline = await page.evaluate(async () => {
       try {
         await fetch("/api/health");
@@ -137,7 +146,7 @@ test("production PWA activates, works offline, and excludes API/media traffic fr
     expect(consoleErrors).toEqual([]);
 
     await page.setViewportSize({ width: 390, height: 844 });
-    await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
+    await expectAppVisible(page);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
     expect(overflow).toBe(true);
   } finally {
@@ -148,7 +157,7 @@ test("production PWA activates, works offline, and excludes API/media traffic fr
 
 test("waiting PWA updates are user-controlled", async ({ page, request }) => {
   await page.goto("/", { waitUntil: "domcontentloaded" });
-  await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
+  await expectAppVisible(page);
   const serviceWorkerSource = await (await request.get("/sw.js")).text();
   expect(serviceWorkerSource).toContain("Do not skip waiting here");
 

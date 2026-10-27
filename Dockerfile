@@ -1,5 +1,6 @@
 FROM node:24.13.0-alpine AS build
 WORKDIR /app
+ENV VITE_PWA_ENABLED=true
 COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts
 COPY web ./web

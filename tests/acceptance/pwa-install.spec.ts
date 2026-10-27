@@ -51,6 +51,77 @@ test("install prompt captured before React mounts is invoked once and reports ac
   expect(await page.evaluate(() => (window as unknown as Window & { __pwaPromptCalls: number }).__pwaPromptCalls)).toBe(1);
 });
 
+test("pending install prompt cannot be triggered twice and a rejected prompt recovers", async ({ page, browserName }) => {
+  skipUnlessChromium(browserName);
+  await page.addInitScript(() => {
+    const originalAddEventListener = window.addEventListener.bind(window);
+    const testWindow = window as unknown as Window & {
+      __pwaPromptCalls: number;
+      __resolvePwaPrompt: (() => void) | null;
+      __resolvePwaChoice: ((choice: { outcome: "dismissed"; platform: string }) => void) | null;
+    };
+    testWindow.__pwaPromptCalls = 0;
+    window.addEventListener = ((type: string, listener: EventListenerOrEventListenerObject | null, options?: boolean | AddEventListenerOptions) => {
+      if (type === "beforeinstallprompt" && listener) {
+        const event = new Event(type, { cancelable: true }) as Event & {
+          prompt: () => Promise<void>;
+          userChoice: Promise<{ outcome: "dismissed"; platform: string }>;
+        };
+        event.prompt = () => {
+          testWindow.__pwaPromptCalls += 1;
+          return new Promise((resolve) => { testWindow.__resolvePwaPrompt = resolve; });
+        };
+        event.userChoice = new Promise((resolve) => { testWindow.__resolvePwaChoice = resolve; });
+        if (typeof listener === "function") listener.call(window, event);
+        else listener.handleEvent(event);
+      }
+      return originalAddEventListener(type, listener as EventListener, options);
+    }) as typeof window.addEventListener;
+  });
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  const offer = page.getByTestId("pwa-install-offer");
+  const button = offer.getByRole("button", { name: "Install" });
+  await button.click();
+  await expect(button).toBeDisabled();
+  expect(await page.evaluate(() => (window as unknown as Window & { __pwaPromptCalls: number }).__pwaPromptCalls)).toBe(1);
+  await page.evaluate(() => {
+    const testWindow = window as unknown as Window & {
+      __resolvePwaPrompt: (() => void) | null;
+      __resolvePwaChoice: ((choice: { outcome: "dismissed"; platform: string }) => void) | null;
+    };
+    testWindow.__resolvePwaPrompt?.();
+    testWindow.__resolvePwaChoice?.({ outcome: "dismissed", platform: "test" });
+  });
+  await expect(page.getByText("Installation was cancelled. You can try again from your browser menu.")).toBeVisible();
+  await expect(offer.getByRole("button", { name: "How to install" })).toBeEnabled();
+  expect(await page.evaluate(() => (window as unknown as Window & { __pwaPromptCalls: number }).__pwaPromptCalls)).toBe(1);
+});
+
+test("a rejected install prompt falls back to browser guidance", async ({ page, browserName }) => {
+  skipUnlessChromium(browserName);
+  await page.addInitScript(() => {
+    const originalAddEventListener = window.addEventListener.bind(window);
+    window.addEventListener = ((type: string, listener: EventListenerOrEventListenerObject | null, options?: boolean | AddEventListenerOptions) => {
+      if (type === "beforeinstallprompt" && listener) {
+        const event = new Event(type, { cancelable: true }) as Event & {
+          prompt: () => Promise<void>;
+          userChoice: Promise<{ outcome: "accepted"; platform: string }>;
+        };
+        event.prompt = async () => { throw new Error("prompt rejected"); };
+        event.userChoice = Promise.resolve({ outcome: "accepted", platform: "test" });
+        if (typeof listener === "function") listener.call(window, event);
+        else listener.handleEvent(event);
+      }
+      return originalAddEventListener(type, listener as EventListener, options);
+    }) as typeof window.addEventListener;
+  });
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  const offer = page.getByTestId("pwa-install-offer");
+  await offer.getByRole("button", { name: "Install" }).click();
+  await expect(page.getByText("The install prompt could not open. Use your browser menu to install S6_cut.")).toBeVisible();
+  await expect(page.getByText("In your browser menu, choose Install S6_cut or Add to Home screen.")).toBeVisible();
+});
+
 test("a dismissed prompt offers browser menu instructions and does not prompt again", async ({ page, browserName }) => {
   skipUnlessChromium(browserName);
   await injectBeforeInstallPrompt(page, "dismissed");
@@ -131,14 +202,18 @@ test("standalone display mode suppresses the install invitation", async ({ page,
   await expect(page.getByTestId("pwa-install-offer")).toHaveCount(0);
 });
 
-test("iPhone Safari gets the compact Share then Add to Home Screen instructions", async ({ page, browserName, isMobile }) => {
+test("iPhone and iPad Safari get compact Share then Add to Home Screen instructions", async ({ page, browserName, isMobile }, testInfo) => {
   test.skip(browserName !== "webkit" || !isMobile, "This interface is specific to the iPhone WebKit project.");
+  if (testInfo.project.name === "iPad WebKit desktop mode") {
+    await page.addInitScript(() => Object.defineProperty(navigator, "maxTouchPoints", { get: () => 5 }));
+  }
   await page.goto("/", { waitUntil: "domcontentloaded" });
   const offer = page.getByTestId("pwa-install-offer");
   await expect(offer).toBeVisible();
-  await expect(offer).toHaveClass(/pwa-install-offer-mobile/);
+  if (await page.locator(".m-app").count()) await expect(offer).toHaveClass(/pwa-install-offer-mobile/);
   await offer.getByRole("button", { name: "How to add" }).click();
   await expect(page.getByText("In Safari, tap Share, then Add to Home Screen.")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
 test("ordinary Vite build omits manifest, service worker, and invitation", async ({ page, request, browserName }) => {
@@ -148,6 +223,9 @@ test("ordinary Vite build omits manifest, service worker, and invitation", async
   await page.goto(origin, { waitUntil: "domcontentloaded" });
   const html = await page.locator("html").evaluate((element) => element.outerHTML);
   expect(html).not.toContain('rel="manifest"');
+  expect(html).not.toContain("apple-mobile-web-app-capable");
+  expect(html).not.toContain('rel="apple-touch-icon"');
+  expect((await page.evaluate(async () => (await navigator.serviceWorker.getRegistrations()).map((registration) => registration.scope)))).toEqual([]);
   expect((await request.get(new URL("/manifest.webmanifest", origin).toString())).status()).toBe(404);
   expect((await request.get(new URL("/sw.js", origin).toString())).status()).toBe(404);
   await expect(page.getByTestId("pwa-install-offer")).toHaveCount(0);
