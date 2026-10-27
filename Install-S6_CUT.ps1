@@ -78,7 +78,7 @@ function Get-PublishedPort {
     else { Die "$Name must be a port or an IPv4 address and port (for example, 127.0.0.1:8080)." }
     $Port = 0
     if (-not [int]::TryParse($PortText, [ref]$Port) -or $Port -lt 1 -or $Port -gt 65535) {
-        Die "$Name must end with a valid port (1–65535)."
+        Die "$Name must end with a valid port (1-65535)."
     }
     if ($HostAddress -eq "0.0.0.0") { $HostAddress = "127.0.0.1" }
     return @{ Host = $HostAddress; Port = $Port }

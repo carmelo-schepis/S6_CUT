@@ -51,7 +51,15 @@ $Engine = Get-PublishedPort (Get-ComposePort $CustomConfig "engine" 8001 "S6_ENG
 Assert-Equal 18001 $Engine.Port "custom backend port"
 Assert-Equal "127.0.0.1" (Get-PublishedPort "0.0.0.0:8082" "S6_PORT").Host "wildcard readiness host"
 
-foreach ($Binding in @("invalid", "999.0.0.1:8080", "0", "65536", "100000", "[::1]:8080")) {
-    Assert-InvalidPort $Binding "valid port (1–65535)"
+$InvalidCases = @(
+    @("invalid", "port or an IPv4 address and port"),
+    @("999.0.0.1:8080", "valid IPv4 address and port"),
+    @("0", "valid port (1-65535)"),
+    @("65536", "valid port (1-65535)"),
+    @("100000", "valid port (1-65535)"),
+    @("[::1]:8080", "port or an IPv4 address and port")
+)
+foreach ($Case in $InvalidCases) {
+    Assert-InvalidPort $Case[0] $Case[1]
 }
 Write-Host "Windows installer port tests passed."
