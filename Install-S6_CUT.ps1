@@ -39,23 +39,29 @@ function Write-Ok   { param([string]$Message) Write-Host "  [OK] $Message" -Fore
 function Write-Warn { param([string]$Message) Write-Host "  [!] $Message" -ForegroundColor Yellow }
 function Write-Fail { param([string]$Message) Write-Host "  [FAIL] $Message" -ForegroundColor Red }
 
+function Get-ComposeValue {
+    param([string[]]$Environment, [string]$Name, [string]$Default)
+    $Line = $Environment | Where-Object { $_ -match "^$([regex]::Escape($Name))=" } | Select-Object -Last 1
+    if ($null -eq $Line) { return $Default }
+    $Value = $Line.Substring($Name.Length + 1)
+    if ($Value.Length -eq 0) { return $Default }
+    return $Value
+}
+
 function Get-PublishedPort {
-    param([object]$Mapping, [string]$Name)
-    $Binding = @($Mapping | Where-Object { $_ -match '^\s*(?:\d{1,3}\.){3}\d{1,3}:\d{1,5}\s*$' } | Select-Object -First 1)
-    if (-not $Binding) {
-        Die "$Name published port could not be read from Docker Compose."
-    }
-    if ($Binding[0] -match '^\s*(?<host>(?:\d{1,3}\.){3}\d{1,3}):(?<port>\d{1,5})\s*$') {
-        $HostText = $Matches.host
+    param([string]$Binding, [string]$Name)
+    $HostAddress = "127.0.0.1"
+    if ($Binding -match '^(?<port>\d{1,5})$') { $PortText = $Matches.port }
+    elseif ($Binding -match '^(?<host>(?:\d{1,3}\.){3}\d{1,3}):(?<port>\d{1,5})$') {
+        $ParsedAddress = $null
+        if (-not [Net.IPAddress]::TryParse($Matches.host, [ref]$ParsedAddress) -or
+            $ParsedAddress.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork) {
+            Die "$Name must use a valid IPv4 address and port."
+        }
+        $HostAddress = $ParsedAddress.ToString()
         $PortText = $Matches.port
     }
-    else { Die "$Name published port could not be read from Docker Compose." }
-    $ParsedAddress = $null
-    if (-not [Net.IPAddress]::TryParse($HostText, [ref]$ParsedAddress) -or
-        $ParsedAddress.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork) {
-        Die "$Name must use a valid IPv4 address."
-    }
-    $HostAddress = $ParsedAddress.ToString()
+    else { Die "$Name must be a port or an IPv4 address and port (for example, 127.0.0.1:8080)." }
     $Port = 0
     if (-not [int]::TryParse($PortText, [ref]$Port) -or $Port -lt 1 -or $Port -gt 65535) {
         Die "$Name must end with a valid port (1–65535)."
@@ -176,6 +182,16 @@ else {
     Write-Ok "Configuration ready (defaults)"
 }
 
+# --- validate published ports -------------------------------------------------
+
+$ComposeEnvironment = docker compose config --environment
+if ($LASTEXITCODE -ne 0) { Die "Docker Compose could not resolve the configured ports. Review the diagnostics above." }
+$WebPortInfo = Get-PublishedPort (Get-ComposeValue $ComposeEnvironment "S6_PORT" "8080") "S6_PORT"
+$EngineBinding = Get-ComposeValue $ComposeEnvironment "S6_ENGINE_PORT" "8001"
+if ($EngineBinding -notmatch '^\d{1,5}$') { Die "S6_ENGINE_PORT must be a numeric port." }
+$EnginePortInfo = Get-PublishedPort $EngineBinding "S6_ENGINE_PORT"
+$WebUrlHost = if ($WebPortInfo.Host -eq "127.0.0.1") { "localhost" } else { $WebPortInfo.Host }
+
 # --- containers ---------------------------------------------------------------
 
 $CurrentStep = "building and starting the containers"
@@ -190,16 +206,6 @@ if ($LASTEXITCODE -ne 0) {
     Die "Docker Compose failed to start. Run 'docker compose logs' for details."
 }
 Write-Ok "Containers started"
-
-# --- published ports ----------------------------------------------------------
-
-$WebPortText = docker compose port web 8080
-if ($LASTEXITCODE -ne 0) { Die "Could not read the S6_PORT mapping from Docker Compose." }
-$WebPortInfo = Get-PublishedPort $WebPortText "S6_PORT"
-$EnginePortText = docker compose port engine 8001
-if ($LASTEXITCODE -ne 0) { Die "Could not read the S6_ENGINE_PORT mapping from Docker Compose." }
-$EnginePortInfo = Get-PublishedPort $EnginePortText "S6_ENGINE_PORT"
-$WebUrlHost = if ($WebPortInfo.Host -eq "127.0.0.1") { "localhost" } else { $WebPortInfo.Host }
 
 # --- wait for ready -----------------------------------------------------------
 
