@@ -39,54 +39,34 @@ function Write-Ok   { param([string]$Message) Write-Host "  [OK] $Message" -Fore
 function Write-Warn { param([string]$Message) Write-Host "  [!] $Message" -ForegroundColor Yellow }
 function Write-Fail { param([string]$Message) Write-Host "  [FAIL] $Message" -ForegroundColor Red }
 
-function Get-ConfigValue {
-    param([string]$Name, [string]$Default)
-    $ProcessValue = [Environment]::GetEnvironmentVariable($Name)
-    if ($null -ne $ProcessValue) {
-        if ($ProcessValue.Length -eq 0) { return $Default }
-        return $ProcessValue
-    }
-    if (Test-Path ".env") {
-        foreach ($Line in Get-Content ".env") {
-            if ($Line -match "^\s*$([regex]::Escape($Name))\s*(?:=|:)\s*(.*)$") {
-                $RawValue = $Matches[1].Trim()
-                if ($RawValue -match '^#') { $Value = "" }
-                elseif ($RawValue -match '^"([^"]*)"(?:\s+#.*)?$' -or $RawValue -match "^'([^']*)'(?:\s+#.*)?$") {
-                    $Value = $Matches[1]
-                }
-                else { $Value = ($RawValue -replace '\s+#.*$', '').Trim() }
-            }
-        }
-    }
-    if (-not [string]::IsNullOrWhiteSpace($Value)) { return $Value }
-    return $Default
-}
-
 function Get-PublishedPort {
-    param([string]$Binding, [string]$Name)
-    $HostAddress = "127.0.0.1"
-    if ($Binding -match '^(?<port>\d{1,5})$') {
-        $PortText = $Matches.port
-    }
-    elseif ($Binding -match '^(?<host>(?:\d{1,3}\.){3}\d{1,3}):(?<port>\d{1,5})$') {
+    param([object]$Binding, [string]$Name)
+    $HostAddress = [string]$Binding.host_ip
+    if ([string]::IsNullOrEmpty($HostAddress)) { $HostAddress = "127.0.0.1" }
+    else {
         $ParsedAddress = $null
-        if (-not [Net.IPAddress]::TryParse($Matches.host, [ref]$ParsedAddress) -or
+        if (-not [Net.IPAddress]::TryParse($HostAddress, [ref]$ParsedAddress) -or
             $ParsedAddress.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork) {
-            Die "$Name must use a valid IPv4 address and port."
+            Die "$Name must use a valid IPv4 address."
         }
         $HostAddress = $ParsedAddress.ToString()
-        $PortText = $Matches.port
     }
-    else {
-        Die "$Name must be a port or an IPv4 address and port (for example, 127.0.0.1:8080)."
-    }
-
     $Port = 0
-    if (-not [int]::TryParse($PortText, [ref]$Port) -or $Port -lt 1 -or $Port -gt 65535) {
+    if (-not [int]::TryParse([string]$Binding.published, [ref]$Port) -or $Port -lt 1 -or $Port -gt 65535) {
         Die "$Name must end with a valid port (1–65535)."
     }
     if ($HostAddress -eq "0.0.0.0") { $HostAddress = "127.0.0.1" }
     return @{ Host = $HostAddress; Port = $Port }
+}
+
+function Get-ResolvedPort {
+    param([object]$Config, [string]$Service, [int]$Target)
+    $ServiceConfig = $Config.services.PSObject.Properties[$Service].Value
+    $Bindings = @($ServiceConfig.ports | Where-Object { $_.target -eq $Target })
+    if (-not $ServiceConfig -or $Bindings.Count -ne 1) {
+        Die "Could not resolve one published port for the $Service service."
+    }
+    return Get-PublishedPort $Bindings[0] "$Service port $Target"
 }
 
 function Die {
@@ -203,11 +183,12 @@ else {
 
 # --- configuration ------------------------------------------------------------
 
-$WebBinding = Get-ConfigValue "S6_PORT" "8080"
-$WebPortInfo = Get-PublishedPort $WebBinding "S6_PORT"
-$EngineBinding = Get-ConfigValue "S6_ENGINE_PORT" "8001"
-if ($EngineBinding -notmatch '^\d{1,5}$') { Die "S6_ENGINE_PORT must be a numeric port." }
-$EnginePortInfo = Get-PublishedPort $EngineBinding "S6_ENGINE_PORT"
+$ComposeConfigText = docker compose config --format json
+if ($LASTEXITCODE -ne 0) { Die "Docker Compose could not resolve the configured ports. Review the diagnostics above." }
+try { $ComposeConfig = ($ComposeConfigText -join [Environment]::NewLine) | ConvertFrom-Json -ErrorAction Stop }
+catch { Die "Docker Compose returned an invalid configuration. Review the diagnostics above." }
+$WebPortInfo = Get-ResolvedPort $ComposeConfig "web" 8080
+$EnginePortInfo = Get-ResolvedPort $ComposeConfig "engine" 8001
 $WebUrlHost = if ($WebPortInfo.Host -eq "127.0.0.1") { "localhost" } else { $WebPortInfo.Host }
 
 # --- containers ---------------------------------------------------------------

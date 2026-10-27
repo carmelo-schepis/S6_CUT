@@ -6,7 +6,7 @@ $Ast = [System.Management.Automation.Language.Parser]::ParseFile($Installer, [re
 if ($ParseErrors.Count) { throw ($ParseErrors -join "`n") }
 
 function Die { param([string]$Message) throw $Message }
-foreach ($Name in @("Get-ConfigValue", "Get-PublishedPort")) {
+foreach ($Name in @("Get-PublishedPort", "Get-ResolvedPort")) {
     $Definition = $Ast.Find({ param($Node) $Node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $Node.Name -eq $Name }, $true)
     if (-not $Definition) { throw "Installer function not found: $Name" }
     . ([scriptblock]::Create($Definition.Extent.Text))
@@ -17,59 +17,37 @@ function Assert-Equal {
     if ($Expected -ne $Actual) { throw "$Label`: expected '$Expected', got '$Actual'" }
 }
 function Assert-InvalidPort {
-    param([string]$Binding)
-    try { Get-PublishedPort $Binding "S6_PORT" | Out-Null }
+    param($Binding)
+    try { Get-PublishedPort $Binding "test port" | Out-Null }
     catch { return }
-    throw "Expected invalid S6_PORT to fail: $Binding"
+    throw "Expected invalid published port to fail: $($Binding.published)"
 }
 
-$OriginalWebPort = [Environment]::GetEnvironmentVariable("S6_PORT")
-$OriginalEnginePort = [Environment]::GetEnvironmentVariable("S6_ENGINE_PORT")
-$Temp = Join-Path ([IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
-New-Item -ItemType Directory -Path $Temp | Out-Null
-try {
-    Push-Location $Temp
-    [Environment]::SetEnvironmentVariable("S6_PORT", $null)
-    [Environment]::SetEnvironmentVariable("S6_ENGINE_PORT", $null)
+$Web = [pscustomobject]@{ published = "8080"; host_ip = $null; target = 8080 }
+$Engine = [pscustomobject]@{ published = "8001"; host_ip = "127.0.0.1"; target = 8001 }
+$Config = [pscustomobject]@{ services = [pscustomobject]@{
+    web = [pscustomobject]@{ ports = @($Web) }
+    engine = [pscustomobject]@{ ports = @($Engine) }
+} }
 
-    Assert-Equal 8080 (Get-PublishedPort (Get-ConfigValue "S6_PORT" "8080") "S6_PORT").Port "default frontend port"
-    Assert-Equal 8001 (Get-PublishedPort (Get-ConfigValue "S6_ENGINE_PORT" "8001") "S6_ENGINE_PORT").Port "default backend port"
-    Set-Content .env "S6_PORT=18080 # frontend`nS6_ENGINE_PORT=18001 # backend" -Encoding ASCII
-    Assert-Equal 18080 (Get-PublishedPort (Get-ConfigValue "S6_PORT" "8080") "S6_PORT").Port "custom numeric frontend port"
-    Assert-Equal 18001 (Get-PublishedPort (Get-ConfigValue "S6_ENGINE_PORT" "8001") "S6_ENGINE_PORT").Port "custom backend port"
-    Set-Content .env "S6_PORT : 18082`nS6_ENGINE_PORT = 18003" -Encoding ASCII
-    Assert-Equal 18082 (Get-PublishedPort (Get-ConfigValue "S6_PORT" "8080") "S6_PORT").Port "colon frontend setting"
-    Assert-Equal 18003 (Get-PublishedPort (Get-ConfigValue "S6_ENGINE_PORT" "8001") "S6_ENGINE_PORT").Port "spaced backend setting"
-    Set-Content .env 'S6_PORT="127.0.0.1:18080" # loopback binding' -Encoding ASCII
-    $Web = Get-PublishedPort (Get-ConfigValue "S6_PORT" "8080") "S6_PORT"
-    Assert-Equal "127.0.0.1" $Web.Host "IPv4 readiness host"
-    Assert-Equal 18080 $Web.Port "IPv4 published port"
+$WebPort = Get-ResolvedPort $Config "web" 8080
+Assert-Equal "127.0.0.1" $WebPort.Host "default readiness host"
+Assert-Equal 8080 $WebPort.Port "default frontend port"
+Assert-Equal 8001 (Get-ResolvedPort $Config "engine" 8001).Port "backend port"
 
-    Set-Content .env "S6_PORT=8080`nS6_ENGINE_PORT=8001" -Encoding ASCII
-    [Environment]::SetEnvironmentVariable("S6_PORT", "18081")
-    [Environment]::SetEnvironmentVariable("S6_ENGINE_PORT", "18002")
-    Assert-Equal 18081 (Get-PublishedPort (Get-ConfigValue "S6_PORT" "8080") "S6_PORT").Port "exported frontend port precedence"
-    Assert-Equal 18002 (Get-PublishedPort (Get-ConfigValue "S6_ENGINE_PORT" "8001") "S6_ENGINE_PORT").Port "exported backend port precedence"
+$Web = [pscustomobject]@{ published = "18080"; host_ip = "192.168.1.20"; target = 8080 }
+$Config.services.web.ports = @($Web)
+$WebPort = Get-ResolvedPort $Config "web" 8080
+Assert-Equal "192.168.1.20" $WebPort.Host "IPv4 readiness host"
+Assert-Equal 18080 $WebPort.Port "custom frontend port"
 
-    Set-Content .env "S6_PORT=18080`nS6_ENGINE_PORT=18001" -Encoding ASCII
-    [Environment]::SetEnvironmentVariable("S6_PORT", "")
-    [Environment]::SetEnvironmentVariable("S6_ENGINE_PORT", "")
-    Assert-Equal 8080 (Get-PublishedPort (Get-ConfigValue "S6_PORT" "8080") "S6_PORT").Port "empty exported frontend default"
-    Assert-Equal 8001 (Get-PublishedPort (Get-ConfigValue "S6_ENGINE_PORT" "8001") "S6_ENGINE_PORT").Port "empty exported backend default"
-
-    [Environment]::SetEnvironmentVariable("S6_PORT", $null)
-    [Environment]::SetEnvironmentVariable("S6_ENGINE_PORT", $null)
-    $AnyAddress = Get-PublishedPort "0.0.0.0:8082" "S6_PORT"
-    Assert-Equal "127.0.0.1" $AnyAddress.Host "wildcard readiness host"
-    Assert-Equal 8082 $AnyAddress.Port "wildcard published port"
-    Set-Content .env 'S6_PORT="8080 # this is part of the value"' -Encoding ASCII
-    Assert-InvalidPort (Get-ConfigValue "S6_PORT" "8080")
-    foreach ($Binding in @("0", "65536", "99999", "localhost:8080", "999.0.0.1:8080")) { Assert-InvalidPort $Binding }
-    Write-Host "Windows installer configuration tests passed."
-}
-finally {
-    Pop-Location
-    Remove-Item -Path $Temp -Recurse -Force
-    [Environment]::SetEnvironmentVariable("S6_PORT", $OriginalWebPort)
-    [Environment]::SetEnvironmentVariable("S6_ENGINE_PORT", $OriginalEnginePort)
-}
+$Web.host_ip = "0.0.0.0"
+Assert-Equal "127.0.0.1" (Get-ResolvedPort $Config "web" 8080).Host "wildcard readiness host"
+foreach ($Binding in @(
+    [pscustomobject]@{ published = "0"; host_ip = $null },
+    [pscustomobject]@{ published = "65536"; host_ip = $null },
+    [pscustomobject]@{ published = "8080-8081"; host_ip = $null },
+    [pscustomobject]@{ published = "8080"; host_ip = "999.0.0.1" },
+    [pscustomobject]@{ published = "8080"; host_ip = "::1" }
+)) { Assert-InvalidPort $Binding }
+Write-Host "Windows installer configuration tests passed."
