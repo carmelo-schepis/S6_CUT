@@ -29,17 +29,18 @@ $Temp = Join-Path ([IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
 New-Item -ItemType Directory -Path $Temp | Out-Null
 try {
     Push-Location $Temp
-    Set-Content .env 'S6_PORT="127.0.0.1:18080"' -Encoding ASCII
     [Environment]::SetEnvironmentVariable("S6_PORT", $null)
     [Environment]::SetEnvironmentVariable("S6_ENGINE_PORT", $null)
 
     Assert-Equal 8080 (Get-PublishedPort (Get-ConfigValue "S6_PORT" "8080") "S6_PORT").Port "default frontend port"
+    Assert-Equal 8001 (Get-PublishedPort (Get-ConfigValue "S6_ENGINE_PORT" "8001") "S6_ENGINE_PORT").Port "default backend port"
     Set-Content .env "S6_PORT=18080`nS6_ENGINE_PORT=18001" -Encoding ASCII
     Assert-Equal 18080 (Get-PublishedPort (Get-ConfigValue "S6_PORT" "8080") "S6_PORT").Port "custom numeric frontend port"
+    Assert-Equal 18001 (Get-PublishedPort (Get-ConfigValue "S6_ENGINE_PORT" "8001") "S6_ENGINE_PORT").Port "custom backend port"
+    Set-Content .env 'S6_PORT="127.0.0.1:18080"' -Encoding ASCII
     $Web = Get-PublishedPort (Get-ConfigValue "S6_PORT" "8080") "S6_PORT"
     Assert-Equal "127.0.0.1" $Web.Host "IPv4 readiness host"
     Assert-Equal 18080 $Web.Port "IPv4 published port"
-    Assert-Equal 8001 (Get-PublishedPort (Get-ConfigValue "S6_ENGINE_PORT" "8001") "S6_ENGINE_PORT").Port "default backend port"
 
     Set-Content .env "S6_PORT=8080`nS6_ENGINE_PORT=8001" -Encoding ASCII
     [Environment]::SetEnvironmentVariable("S6_PORT", "18081")
