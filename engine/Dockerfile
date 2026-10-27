@@ -1,5 +1,7 @@
 FROM python:3.12.12-slim-bookworm
 
+ARG TARGETARCH
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -8,10 +10,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg ca-certificates tini curl unzip \
     && rm -rf /var/lib/apt/lists/* \
-    && curl -fsSL -o /tmp/deno.zip https://github.com/denoland/deno/releases/download/v2.3.0/deno-x86_64-unknown-linux-gnu.zip \
-    && unzip -q /tmp/deno.zip -d /usr/local/bin \
+    && case "${TARGETARCH}" in amd64) deno_arch=x86_64 ;; arm64) deno_arch=aarch64 ;; *) echo "Unsupported Deno target architecture: ${TARGETARCH}" >&2; exit 1 ;; esac \
+    && deno_archive="deno-${deno_arch}-unknown-linux-gnu.zip" \
+    && deno_base="https://github.com/denoland/deno/releases/download/v2.3.1" \
+    && curl -fsSL -o "/tmp/${deno_archive}" "${deno_base}/${deno_archive}" \
+    && curl -fsSL -o "/tmp/${deno_archive}.sha256sum" "${deno_base}/${deno_archive}.sha256sum" \
+    && (cd /tmp && sha256sum -c "${deno_archive}.sha256sum") \
+    && unzip -q "/tmp/${deno_archive}" -d /usr/local/bin \
     && chmod +x /usr/local/bin/deno \
-    && rm /tmp/deno.zip \
+    && rm -f "/tmp/${deno_archive}" "/tmp/${deno_archive}.sha256sum" \
     && groupadd --system --gid 10001 s6cut \
     && useradd --system --uid 10001 --gid 10001 --home-dir /app --shell /usr/sbin/nologin s6cut
 
@@ -27,6 +34,7 @@ RUN python -m pip install --upgrade pip==26.0.1 \
 COPY engine/fonts /usr/share/fonts/truetype/s6cut
 RUN fc-cache -f
 COPY engine /app/engine
+COPY third_party_provenance.json /app/third_party_provenance.json
 RUN mkdir -p /app/data && chown -R s6cut:s6cut /app
 
 USER s6cut:s6cut

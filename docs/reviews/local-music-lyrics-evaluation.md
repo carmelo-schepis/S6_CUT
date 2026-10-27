@@ -58,4 +58,4 @@ The cgroup memory figure reflects the containing cgroup's recorded peak, which
 may include earlier work; use a fresh evaluation container for comparable memory
 measurements. The evaluator itself does not establish that an ASR change is
 better: use performance-matched human references, development/held-out splits,
-and the gates in the [general implementation plan](general-music-lyric-accuracy-plan.md).
+and predeclared acceptance gates.

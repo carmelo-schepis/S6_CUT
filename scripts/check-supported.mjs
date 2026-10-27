@@ -8,12 +8,13 @@ const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const dataPath = await mkdtemp(join(tmpdir(), "s6-cut-check-"));
 await chmod(dataPath, 0o777);
 const overrideFile = join(dataPath, "compose.override.yaml");
+const envFile = join(dataPath, "compose.env");
 const project = `s6-cut-check-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const checkNetwork = `${project}-private`;
-const compose = ["compose", "-p", project, "-f", join(root, "compose.yaml"), "-f", overrideFile];
+const compose = ["compose", "-p", project, "--env-file", envFile, "-f", join(root, "compose.yaml"), "-f", overrideFile];
 const testUid = process.getuid?.() ?? 1000;
 const testGid = process.getgid?.() ?? 1000;
-const environment = { ...process.env, S6_DATA_PATH: dataPath };
+const environment = { ...process.env, S6_DATA_PATH: dataPath, OPENROUTER_API_KEY: "" };
 let cleanupPromise;
 
 async function run(command, args, options = {}) {
@@ -73,15 +74,46 @@ process.once("SIGTERM", () => stopOnSignal("SIGTERM"));
 
 let exitCode = 1;
 try {
+  await writeFile(envFile, "");
+  await chmod(envFile, 0o600);
   await createCheckNetwork();
-  await writeFile(overrideFile, `services:\n  engine:\n    user: "${testUid}:${testGid}"\n    volumes:\n      - type: bind\n        source: ${JSON.stringify(dataPath)}\n        target: /app/data\n      - type: bind\n        source: ${JSON.stringify(join(root, "tests"))}\n        target: /app/tests\n        read_only: true\n      - type: bind\n        source: ${JSON.stringify(join(root, "scripts"))}\n        target: /app/scripts\n        read_only: true\nnetworks:\n  private:\n    external: true\n    name: ${checkNetwork}\n`);
+  await writeFile(overrideFile, `services:
+  engine:
+    user: "${testUid}:${testGid}"
+    environment:
+      OPENROUTER_API_KEY: ""
+    volumes:
+      - type: bind
+        source: ${JSON.stringify(dataPath)}
+        target: /app/data
+      - type: bind
+        source: ${JSON.stringify(join(root, "tests"))}
+        target: /app/tests
+        read_only: true
+      - type: bind
+        source: ${JSON.stringify(join(root, "scripts"))}
+        target: /app/scripts
+        read_only: true
+      - type: bind
+        source: ${JSON.stringify(join(root, "third_party_provenance.json"))}
+        target: /app/third_party_provenance.json
+        read_only: true
+      - type: bind
+        source: ${JSON.stringify(join(root, "web", "public", "fonts"))}
+        target: /app/web/public/fonts
+        read_only: true
+networks:
+  private:
+    external: true
+    name: ${checkNetwork}
+`);
   console.log("Supported check: frontend checks/build run on the host; backend tests run in a freshly built Docker engine image.");
   await run("npm", ["run", "lint"]);
   await run("npm", ["run", "typecheck"]);
   await run("npm", ["test"]);
   await run("docker", [...compose, "config"]);
   // Reuse the image's runtime packages and install the dev lock in a temporary venv.
-  await run("docker", [...compose, "run", "--rm", "--no-deps", "--build", "engine", "sh", "-c", "python -m venv --system-site-packages /tmp/s6-cut-pytest && /tmp/s6-cut-pytest/bin/python -m pip install --no-cache-dir -r engine/requirements-dev.lock && /tmp/s6-cut-pytest/bin/python -m pytest engine/tests -q -p no:cacheprovider"]);
+  await run("docker", [...compose, "run", "--rm", "--no-deps", "--build", "engine", "sh", "-c", "python -m venv --system-site-packages /tmp/s6-cut-pytest && /tmp/s6-cut-pytest/bin/python -m pip install --no-cache-dir -r engine/requirements-dev.lock && /tmp/s6-cut-pytest/bin/python -m pytest engine/tests -q -p no:cacheprovider"], { timeoutMs: 90 * 60_000 });
   await run("npm", ["run", "build"]);
   exitCode = 0;
 } catch (error) {

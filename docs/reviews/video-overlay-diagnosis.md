@@ -2,7 +2,7 @@
 
 Follow-up: [independent reverification and updated solution map](video-refraction-solution-map.md), including Shorts Editor exposure, fresh decoded frames, and the observed deployment compatibility blocker.
 
-Inspected on linuxpc, 2026-10-20. Baseline: `eeb1669` (`origin/main`). Investigation branch: `diagnose/video-frame-overlay-20261020`, worktree `/home/linuxpc/git_branches/S6_CUT-video-frame-overlay`.
+Inspected read-only on 2026-10-20 against a main-branch snapshot in an isolated worktree.
 
 ## Diagnosis: completed outputs feed back into automatic overlays
 
@@ -19,14 +19,13 @@ The failure chain is:
 
 This explains both the few-second duration and the recursive appearance. Changing the crop, clearing browser cache, reducing caption duration, or changing LLM models would leave this path intact.
 
-## Direct production evidence (read only)
+## Historical read-only evidence
 
-Job `4934a355-4c91-41e0-9ed5-845ad29aeed6` is a Music / Smart / Short project with top text matching the screenshots. Its footage URL is `QbsoUNb5tEg`; its separate song URL is `GhQxrCrVSyw`. The newly supplied diagnosis video is a different source, tested separately below.
+A historical Music / Smart / Short job matching the screenshots showed the behavior. Source and soundtrack identifiers are omitted. The separately supplied diagnosis video was tested independently.
 
 - Clip 1 has no personal-Library overlay.
-- Clips 2–6 reference generated clip 1: asset `d2ec906b-34b4-4019-82dc-00a24458ac73`, title “I would never fall in love again”, hash `a160a4db00d384ce91b39b5ea426d088f9da2e2f8d30216506fbff6591d13d0b`.
-- Clips 7–13 reference asset `26c71438-082f-4b23-ae99-466fc770f42f`, title “I fall into. I was lost within the darkness”, hash `b0c77cea60b96826fda4641806ec2adc1afdca3ebdf66312aed41b5609bf523e`. This asset is also a generated output of the same job and already includes an overlay.
-- **12 of 13 outputs** carry personal-Library overlay provenance. Extracted output 13 at 1.5 seconds visually reproduces the screenshot.
+- Clips 2–6 reference generated clip 1. Clips 7–13 reference another generated output that already includes an overlay. Asset identifiers and fingerprints are omitted.
+- Multiple outputs carry Library overlay provenance. A visually inspected output at 1.5 seconds reproduces the screenshot.
 - Replaying the saved lyric query against the current inventory selects the second generated asset at score **20**, despite its neutral policy and empty triggers/tags.
 - The explanation “Neutral policy; reserved eligible placement” is misleading here: the match is a title substring, not required-policy reservation. `explain()` only includes triggers/tags in its explanation hit list.
 
@@ -57,7 +56,7 @@ Caption rerenders can delegate to `render_clip` for presentation, but explicitly
 
 ## Verification with the requested YouTube video
 
-Downloaded [The Wolf of Wall Street (2013): TOP 3 BEST SCENES — Binge Society](https://www.youtube.com/watch?v=LwG6aia2vn0) through the existing constrained importer into isolated scratch storage. FFprobe: 1087.661 seconds, 1920×1080, AV1 video, Opus audio, 23.976 fps.
+A controlled public video source was imported through the existing constrained importer into isolated scratch storage. FFprobe: 1087.661 seconds, 1920×1080, AV1 video, Opus audio, 23.976 fps.
 
 Five actual 4-second FFmpeg renders use source time 30–34 seconds:
 
@@ -73,7 +72,7 @@ Compared decoded frames at 0.3, 1.5, and 3.6 seconds, before/during/after the sc
 
 Production engine hashes for jobs.py, library.py, and media.py match the inspected worktree. Existing focused tests: **77 passed, 4 skipped** (`test_library.py`, `test_fast_mode.py`, `test_long_form.py`, `test_high_volume_batches.py`). Skips reflect unavailable host FFmpeg/FFprobe; the five real renders used the engine container's binaries. Passing current tests does not establish the missing overlay exclusion: they do not enforce it.
 
-Evidence JSON: [video-overlay-evidence.json](video-overlay-evidence.json). Raw downloaded source, five sample MP4s, frames, and the investigation driver are retained under the worktree's ignored `.qa/overlay-diagnosis/`. These are investigation artifacts, not published Library records. Browser automation could not start because the local T3 host is missing browser libraries, so no browser playback acceptance is claimed.
+Evidence JSON: [video-overlay-evidence.json](video-overlay-evidence.json). Raw downloaded source, five sample MP4s, frames, and the investigation driver are retained in private ignored investigation artifacts. These are investigation artifacts, not published Library records. Browser automation could not start because the local test environment lacked browser libraries, so no browser playback acceptance is claimed.
 
 ## Planned solution map
 
@@ -115,13 +114,6 @@ Run affected engine/frontend tests and the repository's required checks. Do not 
 Provide an explicit non-destructive source-only regeneration action for affected clips/projects. List potentially affected records using personal-Library provenance joined by content hash to generated/project-source assets; missing historical provenance needs separate inspection. Read the saved original source and saved words/settings; never use the contaminated output as the new source. Preserve originals and historical outputs. Publish repaired versions through the existing validated atomic render and transactional clip/asset publication flow; do not overwrite referenced blobs or delete Library records to suppress matching. Recompute provenance to describe actual rendered layers.
 
 Fetch latest main, reconcile concurrent work, rerun affected checks, and merge the implementation branch. Deployment/rebuild is a separate step; verify the deployed revision and repeat one contaminated-Library acceptance case. Existing bad MP4s remain bad until explicitly regenerated.
-
-## Four bounded prompts for GPT Luna
-
-1. **Composition policy and stop:** Read this diagnosis and DO-NOT-CHANGE/AGENTS.md. Implement Stage 1 across API, persisted Job/private snapshot, frontend schema, and Smart/Music/High-volume routes. Default new jobs to no implicit Library media. Specify legacy/retry behavior. Preserve other render effects and publication. Add resolver-spy route tests. Commit and report checks.
-2. **Curated eligibility and stable composition:** Implement Stage 2 with an additive eligibility field, purpose-aware filtering, manual opt-in, and job candidate/composition snapshots. Preserve all Library records and deterministic scoring. Fix misleading explanations. Test generated/title/required matches and inter-clip publication/restart. Commit and report checks.
-3. **Safe repair:** Implement an explicit source-based new-version workflow for affected outputs using existing atomic/transactional publication APIs. Keep historical artifacts, settings, audio/captions, and lineage; update actual-layer provenance. Test missing originals, partial failures, retries, and caption revisions. Commit and report checks.
-4. **Acceptance and integration:** Execute Stage 3 on isolated storage/ports using the supplied video and a contaminated fixture Library. Capture decoded before/during/after frames and mode results. Run required checks, update documentation, fetch and integrate concurrent changes, merge the completed implementation to main. Report deployment separately and do not claim historical outputs are repaired before regeneration.
 
 ## Delivery scope
 

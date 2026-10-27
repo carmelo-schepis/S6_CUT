@@ -9,13 +9,14 @@ import { assertPlayback, checkPlayback, openProjects, waitForProjectReady } from
  * SEO titles acceptance. Runs ONLY against a disposable isolated stack whose
  * engine has S6_TEST_MODE=1 and S6_TEST_OPENROUTER_BASE_URL pointing at
  * tests/fixtures/mock-openrouter. Required environment:
- *   S6_RUN_SEO_TITLES=1, S6_ACCEPTANCE_URL, S6_DATA_PATH, S6_SEO_ENGINE_CONTAINER
+ *   S6_RUN_SEO_TITLES=1, S6_ACCEPTANCE_URL, S6_DATA_PATH, S6_OWNER_DATA_PATH, S6_SEO_ENGINE_CONTAINER
  * Optional: S6_SEO_MOCK_URL (mock call log), S6_SEO_TITLES_YOUTUBE_URL.
  */
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const enabled = process.env.S6_RUN_SEO_TITLES === "1";
 const gateway = (process.env.S6_ACCEPTANCE_URL || "").replace(/\/$/, "");
 const dataPath = process.env.S6_DATA_PATH || "";
+const protectedDataPath = process.env.S6_OWNER_DATA_PATH || "";
 const engineContainer = process.env.S6_SEO_ENGINE_CONTAINER || "";
 const mockUrl = process.env.S6_SEO_MOCK_URL || "";
 // BuzzFeedVideo, "Americans Try Vietnamese Street Food", 2:44, speech-heavy.
@@ -24,13 +25,19 @@ const uploadFixture = path.join(root, "tests/fixtures/youtube-credit-known.mp4")
 const MOCK_KEY = `sk-or-v1-mock${"0".repeat(52)}`;
 const CUT_NUMBER = /\bcut\s*\d+\b/i;
 
+function isWithinPath(parent: string, candidate: string) {
+  const relative = path.relative(parent, candidate);
+  return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+}
+
 function guardIsolatedStack() {
   expect(gateway, "S6_ACCEPTANCE_URL must point at the isolated stack").toBeTruthy();
   expect(gateway, "never run against the owner stack").not.toMatch(/:8080$/);
   expect(dataPath, "S6_DATA_PATH must be the isolated stack's data directory").toBeTruthy();
+  expect(protectedDataPath, "S6_OWNER_DATA_PATH must identify protected owner data").toBeTruthy();
   const resolved = path.resolve(dataPath);
-  expect(resolved, "never use the shared checkout data").not.toBe(path.resolve("/home/linuxpc/Git_projects/S6_CUT/data"));
-  expect(resolved).not.toBe(path.resolve(root, "data"));
+  expect(isWithinPath(path.resolve(root, "data"), resolved), "never use the shared checkout data").toBe(false);
+  expect(isWithinPath(path.resolve(protectedDataPath), resolved), "never use protected owner data").toBe(false);
   expect(engineContainer, "S6_SEO_ENGINE_CONTAINER must name the isolated engine").toMatch(/seo-titles-test/);
 }
 

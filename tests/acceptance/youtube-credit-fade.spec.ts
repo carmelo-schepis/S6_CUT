@@ -19,16 +19,23 @@ const approvedUrls = [
 ];
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
 const artifacts = path.join(root, "test-artifacts/youtube-credit-fade");
-const ownerDataRoot = "/home/linuxpc/Git_projects/S6_CUT/data";
 const dataRoot = process.env.S6_DATA_PATH ? path.resolve(process.env.S6_DATA_PATH) : "";
+const protectedDataRoot = process.env.S6_OWNER_DATA_PATH ? path.resolve(process.env.S6_OWNER_DATA_PATH) : "";
+
+function isWithinPath(parent: string, candidate: string) {
+  const relative = path.relative(parent, candidate);
+  return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+}
 
 // This spec creates real projects and reads the engine's data directory, so it
-// must only ever run against an explicitly named, isolated stack.
+// must only ever run against an explicitly named, isolated stack, with owner data
+// identified separately so this disposable data path can be rejected.
 function isolatedStackProblem() {
   const url = process.env.S6_ACCEPTANCE_URL;
-  if (!url || !dataRoot) return "set S6_ACCEPTANCE_URL and S6_DATA_PATH to an isolated stack";
+  if (!url || !dataRoot || !protectedDataRoot) return "set S6_ACCEPTANCE_URL, S6_DATA_PATH, and S6_OWNER_DATA_PATH";
   if (new URL(url).port === "8080") return "refusing to run against the owner stack on port 8080";
-  if (dataRoot === ownerDataRoot || dataRoot === path.join(root, "data")) return "refusing to use a shared checkout data directory";
+  if (isWithinPath(path.resolve(root, "data"), dataRoot)) return "refusing to use a shared checkout data directory";
+  if (isWithinPath(protectedDataRoot, dataRoot)) return "refusing to use protected owner data";
   return null;
 }
 const deadlineMs = 30 * 60_000;

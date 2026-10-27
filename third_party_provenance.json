@@ -155,10 +155,11 @@
       "version": "Google Fonts BodoniModa[opsz,wght] at repository commit 7085eb89a950e85db5b166b7a58d414544b4140c",
       "licence": "SIL Open Font License 1.1",
       "source": "https://github.com/google/fonts/tree/7085eb89a950e85db5b166b7a58d414544b4140c/ofl/bodonimoda",
+      "licenceSource": "https://github.com/indestructible-type/Bodoni/blob/30ce6cdc354ef179a3b72ba0f0e71826e599348c/OFL.txt",
       "sha256": "550f5e34ee0a828d7941b1fe9bc58b34e5260d3f33a61532e6d0a0114e79a5cf",
       "use": "Selected visual-fit candidate for the reference white serif preset, not a claim to recover the screenshot's source font; bundled variable face default axes (opsz 14, wght 400) were confirmed by production libass selecting BodoniModa-Regular",
       "vendoredAt": "engine/fonts/bodoni_moda/BodoniModa-Variable.ttf; web/public/fonts/bodoni_moda/BodoniModa-Variable.ttf",
-      "licenceFile": "engine/fonts/bodoni_moda/OFL.txt"
+      "licenceFile": "engine/fonts/bodoni_moda/OFL.txt; web/public/fonts/bodoni_moda/OFL.txt (exact upstream notice)"
     },
     {
       "name": "Oswald Regular",
@@ -179,6 +180,58 @@
       "use": "Music handwritten stack lyric theme (visual-fit candidate for the rounded handwritten reference, not a claim to recover the creator's font). The engine file is the unmodified upstream asset; the web preview file is a Latin subset of it (sha256 a5f589c5fcb8fa3beb9bd28e05ce0b03b988bc2965b751be99fb1596bd929a10).",
       "vendoredAt": "engine/fonts/gaegu/Gaegu-Bold.ttf; web/public/fonts/gaegu/Gaegu-Bold.ttf",
       "licenceFile": "engine/fonts/gaegu/OFL.txt"
+    }
+  ],
+  "unverifiedAssets": [
+    {
+      "path": "web/public/projects-wallpaper.jpg",
+      "status": "unverified",
+      "reason": "The repository does not record a source, creator, or licence; no ownership or licence claim is made."
+    },
+    {
+      "path": "web/public/mobile-wallpaper.jpg",
+      "status": "unverified",
+      "reason": "The repository does not record a source, creator, or licence; no ownership or licence claim is made."
+    },
+    {
+      "path": "web/public/favicon.png",
+      "status": "unverified",
+      "reason": "The repository does not record a source, creator, or licence; no ownership or licence claim is made."
+    },
+    {
+      "path": "web/public/icons/",
+      "status": "unverified",
+      "reason": "The repository does not record a source, creator, or licence for the app icon files; no ownership or licence claim is made."
+    },
+    {
+      "path": "web/public/help/",
+      "status": "unverified",
+      "reason": "The repository does not record source, creator, or licence information for the bundled help images and video clips; no ownership or licence claim is made."
+    },
+    {
+      "path": "tests/fixtures/youtube-credit.mp4",
+      "status": "unverified",
+      "reason": "The repository does not record source, creator, or licence information; retained as an existing required acceptance fixture without a rights claim."
+    },
+    {
+      "path": "tests/fixtures/youtube-credit-known.mp4",
+      "status": "unverified",
+      "reason": "The repository does not record source, creator, or licence information; retained as an existing required acceptance fixture without a rights claim."
+    },
+    {
+      "path": "tests/fixtures/youtube-credit-export.zip",
+      "status": "unverified",
+      "reason": "The repository does not record the provenance or licence of its bundled media; retained as an existing acceptance fixture without a rights claim."
+    },
+    {
+      "path": "tests/fixtures/background-song.mp3",
+      "status": "unverified",
+      "reason": "The repository does not record source, creator, or licence information; retained as an existing required acceptance fixture without a rights claim."
+    },
+    {
+      "path": "test-video.mp4",
+      "status": "unverified",
+      "reason": "The repository does not record source, creator, or licence information; retained as an existing acceptance fixture without a rights claim."
     }
   ]
 }

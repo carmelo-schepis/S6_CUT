@@ -14,7 +14,7 @@ Date: 2026-10-19. Inspected origin/main at 8a01de1. This document records the or
 
 ## Host evidence and immediate workaround
 
-Read-only checks on linuxpc: production /api/v1/health returned ready with Whisper, FFmpeg and FFprobe present. In s6-cut-engine-1, configured speech model base and music model small were both cached. This is not a missing-model diagnosis. No fresh transcription/render was run and the exact live frontend revision was not verified.
+Historical read-only checks reported the engine ready with Whisper, FFmpeg, FFprobe, and the configured speech and music models available. No fresh transcription/render was run, and the frontend revision from that check was not verified.
 
 Current workaround: with no provider connected, explicitly select Smart and enable Burn in subtitles. This invokes the existing local transcription path. Hook text has no equivalent local workaround today. Smart with a connected provider can use that provider.
 
@@ -29,26 +29,6 @@ In Auto, use the API for supported text planning, hook and metadata tasks when c
 Engine only must disable every job-scoped external AI request, including planning, hooks, metadata and model discovery. Do not disconnect or mutate shared provider profiles. Recheck the persisted policy at each call site, not only in the UI. Other concurrent jobs may legitimately use the provider.
 
 For true offline use, use local uploads and installed models. YouTube source/song imports still require network. Expose model readiness and an explicit preparation/download action; require cached/local model loading during offline execution rather than allowing an implicit model download. Describe the distinction between local processing and offline source acquisition in the UI.
-
-## Apply in four bounded prompts (suitable for Luna)
-
-### Prompt 1: execution contract and routing
-
-Read this report and inspect current code before editing. Add a typed execution policy (auto/local) to frontend types and createClipJob, the clip API Form contract, Job persistence and durable private checkpoint state. Default legacy jobs compatibly so their prior behavior is retained. Resolve new Auto jobs to Smart when captions/hooks require transcription; do not use provider connectivity as local transcription capability. Centralize provider permission and guard all job planning/hook/metadata/model-list calls. Preserve music/high-volume/long-form rules unless explicitly changed. Add tests proving local mode never calls a provider even with connected credentials and after restart/retry. Run focused engine/API tests and frontend typecheck. Commit this stage.
-
-### Prompt 2: local hooks and text fallback
-
-Implement a deterministic transcript-grounded local hook generator in engine/hook_text.py. Select a concise, meaningful phrase/sentence from the clip transcript, normalize and validate it with existing rendering constraints, and record local provenance. Do not invent facts or promise language-model quality. Handle empty/too-short transcripts explicitly; render successfully with a visible explanation when no useful hook is possible. In Auto prefer valid provider output, but generate local replacements for failed/missing/invalid hooks. Remove provider-presence eligibility checks while retaining unrelated format restrictions. Reuse existing hook rendering and timed disappearance. Add local SEO title/description fallback for eligible jobs so the engine-only setting does not silently disable another enabled text feature. Include cache/provenance keys and retry behavior. Test provider timeout, malformed responses, partial results, silence and rendering sanitization. Commit this stage.
-
-A bundled local LLM is optional future work, not required for initial local hooks; it needs separate model selection, installation, resource measurement and lifecycle design.
-
-### Prompt 3: user controls and readiness
-
-Add the always-visible Auto / Engine only selector to project creation. Keep captions and Hook text available without an API in eligible Smart jobs. Show whether hooks/planning will use local processing or API with fallback. Ensure checked options are sent faithfully and switching to/from Fast has explicit behavior. Show missing local model readiness separately from provider connectivity and implement preparation plus cached-only execution for offline operation. Update Help and README and remove stale provider-required copy. Test provider loading/disconnection, local override with connected API, checkbox submission, preference persistence and music/high-volume/long-form exclusions. Commit this stage.
-
-### Prompt 4: verification and integration
-
-Use isolated test data and ports, never production job storage. Run npm run check and applicable acceptance tests. Render a real short spoken fixture in (a) no-provider Auto, (b) Engine only with a configured provider whose calls fail the test if attempted, (c) connected Auto, and (d) Auto with provider failure. Verify actual burned caption and hook pixels, word timing, output audio/video validity and persisted execution/provenance after retry/restart. Test missing models and silent footage for honest outcomes. Keep explicit Fast tests asserting no Whisper calls. Record exact evidence and limitations. Fetch latest main, inspect concurrent changes, integrate and rerun affected checks before merging; do not overwrite other agents changes. Deployment/rebuild is separate from merge.
 
 ## Completion criteria
 

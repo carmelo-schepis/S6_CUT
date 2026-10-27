@@ -5,9 +5,7 @@
     "media.py": "43da0f600fd987fd6a1f040eb04540a2437b1953d02211f0cef74f003f5ac0a2"
   },
   "source": {
-    "url": "https://www.youtube.com/watch?v=LwG6aia2vn0",
-    "title": "The Wolf of Wall Street (2013): TOP 3 BEST SCENES",
-    "channel": "Binge Society",
+    "title": null,
     "metadata": {
       "duration": 1087.661,
       "width": 1920,
@@ -28,17 +26,17 @@
       "sample_aspect_ratio": 1.0
     }
   },
-  "affected_job": "4934a355-4c91-41e0-9ed5-845ad29aeed6",
-  "affected_clip_count": 12,
+  "affected_job": null,
+  "multiple_affected_clips": true,
   "matched_asset": {
-    "id": "26c71438-082f-4b23-ae99-466fc770f42f",
+    "id": null,
     "origin": "generated-clip",
-    "source_job_id": "4934a355-4c91-41e0-9ed5-845ad29aeed6",
-    "title": "I fall into. I was lost within the darkness",
+    "source_job_id": null,
+    "title": null,
     "score": 0.2,
     "reason": "Neutral policy; reserved eligible placement"
   },
-  "query": "Once again you fell, I caught ya I'll never lie you go again Like I did all you used to say I would never fall in love again Until I found her I said I would never fall unless it's you I fall into I was lost within the darkness But then I found her I found you",
+  "query": null,
   "overlay_interval": [
     0.65,
     3.4
@@ -788,7 +786,7 @@
         "sample_aspect_ratio": 1.0
       },
       "elapsed_seconds": 6.84,
-      "sha256": "cbf54f87528bd3758fc0c6b07f84ad9c292b4386ce1a763bb2daa3baa3b10c6d"
+      "sha256": null
     },
     {
       "name": "speech-smart-current",
@@ -812,7 +810,7 @@
         "sample_aspect_ratio": 1.0
       },
       "elapsed_seconds": 8.16,
-      "sha256": "878d1867cbb859bafa60f49f70c42bfbe177732038a0309e5c3c3b56ae113ea0"
+      "sha256": null
     },
     {
       "name": "music-current",
@@ -836,7 +834,7 @@
         "sample_aspect_ratio": 1.0
       },
       "elapsed_seconds": 3.7,
-      "sha256": "876a042c0666d4716eb4dff227c52d5eea1d7d5be689042937cbd302692e21d7"
+      "sha256": null
     },
     {
       "name": "music-source-only-control",
@@ -860,7 +858,7 @@
         "sample_aspect_ratio": 1.0
       },
       "elapsed_seconds": 3.43,
-      "sha256": "66353e4bde7931ef24f56c2aae2be8d282bd27b44a50c2556b1a5244e9a25a10"
+      "sha256": null
     },
     {
       "name": "landscape-fast",
@@ -884,7 +882,7 @@
         "sample_aspect_ratio": 1.0
       },
       "elapsed_seconds": 3.26,
-      "sha256": "2c64b8d282cbd70eb3af386263854b33c1ad019928d7b19f9cfe6c1599d2ca56"
+      "sha256": null
     }
   ],
   "limitations": [

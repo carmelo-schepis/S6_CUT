@@ -1,8 +1,16 @@
 .git
+.env
+.env.*
+!.env.example
+.claude
+.codex
+.t3
+.pi
 node_modules
 web/dist
 .venv
 data
+.qa
 test-artifacts
 __pycache__
 .pytest_cache

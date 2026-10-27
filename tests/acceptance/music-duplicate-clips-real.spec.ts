@@ -104,7 +104,7 @@ test("Music repeats valid windows through completion, Library and export", async
   });
   try {
     const statusPage = await mobile.newPage();
-    await statusPage.goto(process.env.S6_ACCEPTANCE_URL || "http://100.99.111.109:8187");
+    await statusPage.goto(new URL("/", page.url()).toString());
     await expect(statusPage.getByRole("heading", { name: "Nothing running" })).toBeVisible();
     await expect(statusPage.getByRole("heading", { name: "Recent runs" })).toBeVisible();
     await expect(statusPage.getByRole("button", { name: /Music duplicate-window review complete/ }).first()).toBeVisible();

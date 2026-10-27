@@ -83,9 +83,9 @@ accuracy or guarantee future YouTube availability. A separate live YouTube check
 on 2026-10-19 successfully downloaded and fully decoded a 230,550-byte MP3 using
 the production downloader.
 
-Evidence, including failed-run traces and output MP4s/ZIPs, remains in the
-worktree's ignored `.qa/s6-music-check-*` directories. The runner removes its own
-containers, network and data volume afterward.
+Evidence, including failed-run traces and output MP4s/ZIPs, remains in a private,
+ignored test-output directory. The runner removes its own containers, network
+and data volume afterward.
 
 ## Integration checks
 
@@ -105,12 +105,12 @@ read-only status view and is covered by the separate iOS status acceptance test.
   API, worker, database, FFmpeg and browser. It covered upload at 1× and 1.5×,
   YouTube Music at 0.75×, no-song original audio, playback, restart recovery,
   caption rerender, and ZIP export. Evidence is in
-  `.qa/s6-music-check-1792380020327-1806340/playwright`.
+  a private ignored artifact directory.
 - Original-audio mix gate on 2026-10-20: 9 passed in 3.4 minutes in isolated
   containers. It verified all five song speeds, both source/song tones and their
   25% level ratio, preserving source audio after song removal, the silent-video
   mix case, restart recovery, caption rerender, and ZIP composition metadata.
-  Evidence is in `.qa/s6-music-check-1792444906330-879872/playwright`.
+  Evidence is in a private ignored artifact directory.
 - An additional real API/worker/FFmpeg check on the integrated backend used
   silent footage, Engine only and a matching `song.mp3` title at 1.5×. All 12
   steps completed, nine caption cues were saved, and decoded audio measured
@@ -139,4 +139,4 @@ its one-hour-old fixture is yesterday. All 11 mobile tests pass with
 
 All 9 real browser/API/worker/FFmpeg soundtrack cases passed, including the
 10% mix and its restart/caption rerender/export checks. Evidence:
-`.qa/s6-music-check-1792455895921-1057342/playwright`.
+the private ignored artifact directory.

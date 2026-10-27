@@ -23,7 +23,7 @@ The independent acceptance review's source findings were checked against the cur
 
 The OpenRouter Gemini 2.5 Flash Lite model page reports $0.10/M input and $0.40/M output. `OPENROUTER_API_KEY` is not available and the isolated review deployment has no configured provider profile, so no real credential test, provider request, or live generation has passed. The Playwright provider spec is therefore blocked/skipped, not a passing acceptance result. No secret is added to the repository or review deployment.
 
-An isolated Docker review stack is running at **http://100.81.131.14:18880/** (Tailscale-only host binding). It uses Compose project `s6-cut-youtube-metadata-review-20261013`, its own `10.249.217.0/24` Docker network, and data root `/home/linuxpc/.local/share/s6-cut-youtube-metadata-review-20261013/data`. `/healthz` and `/api/v1/health` were checked ready; the browser UI loaded. Do not attach another stack to its network or change/delete this project/data when cleaning up unrelated test stacks.
+An isolated Docker review stack was running at the time of this review. Its private host binding, Compose project, network, and data path are omitted from this public record. Do not alter an existing review stack while cleaning up unrelated test stacks.
 
 ## Verification performed
 
