@@ -46,7 +46,11 @@ function Get-ConfigValue {
     if (Test-Path ".env") {
         foreach ($Line in Get-Content ".env") {
             if ($Line -match "^\s*$([regex]::Escape($Name))=(.*)$") {
-                $Value = $Matches[1].Trim().Trim('"', "'")
+                $RawValue = $Matches[1].Trim()
+                if ($RawValue -match '^"([^"]*)"(?:\s+#.*)?$' -or $RawValue -match "^'([^']*)'(?:\s+#.*)?$") {
+                    $Value = $Matches[1]
+                }
+                else { $Value = ($RawValue -replace '\s+#.*$', '').Trim() }
             }
         }
     }

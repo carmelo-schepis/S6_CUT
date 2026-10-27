@@ -34,10 +34,10 @@ try {
 
     Assert-Equal 8080 (Get-PublishedPort (Get-ConfigValue "S6_PORT" "8080") "S6_PORT").Port "default frontend port"
     Assert-Equal 8001 (Get-PublishedPort (Get-ConfigValue "S6_ENGINE_PORT" "8001") "S6_ENGINE_PORT").Port "default backend port"
-    Set-Content .env "S6_PORT=18080`nS6_ENGINE_PORT=18001" -Encoding ASCII
+    Set-Content .env "S6_PORT=18080 # frontend`nS6_ENGINE_PORT=18001 # backend" -Encoding ASCII
     Assert-Equal 18080 (Get-PublishedPort (Get-ConfigValue "S6_PORT" "8080") "S6_PORT").Port "custom numeric frontend port"
     Assert-Equal 18001 (Get-PublishedPort (Get-ConfigValue "S6_ENGINE_PORT" "8001") "S6_ENGINE_PORT").Port "custom backend port"
-    Set-Content .env 'S6_PORT="127.0.0.1:18080"' -Encoding ASCII
+    Set-Content .env 'S6_PORT="127.0.0.1:18080" # loopback binding' -Encoding ASCII
     $Web = Get-PublishedPort (Get-ConfigValue "S6_PORT" "8080") "S6_PORT"
     Assert-Equal "127.0.0.1" $Web.Host "IPv4 readiness host"
     Assert-Equal 18080 $Web.Port "IPv4 published port"
@@ -51,6 +51,8 @@ try {
     $AnyAddress = Get-PublishedPort "0.0.0.0:8082" "S6_PORT"
     Assert-Equal "127.0.0.1" $AnyAddress.Host "wildcard readiness host"
     Assert-Equal 8082 $AnyAddress.Port "wildcard published port"
+    Set-Content .env 'S6_PORT="8080 # this is part of the value"' -Encoding ASCII
+    Assert-InvalidPort (Get-ConfigValue "S6_PORT" "8080")
     foreach ($Binding in @("0", "65536", "99999", "localhost:8080", "999.0.0.1:8080")) { Assert-InvalidPort $Binding }
     Write-Host "Windows installer configuration tests passed."
 }
