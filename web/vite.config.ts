@@ -1,10 +1,11 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
 
 const repoRoot = resolve(process.cwd());
 const webRoot = resolve(repoRoot, "web");
+const pwaEnabled = process.env.VITE_PWA_ENABLED === "true";
 
 function brandAssets(): Plugin {
   const assets: Record<string, string> = {
@@ -30,9 +31,25 @@ function brandAssets(): Plugin {
   };
 }
 
+function pwaBuildAssets(): Plugin {
+  return {
+    name: "s6-pwa-build-assets",
+    transformIndexHtml(html) {
+      return html.replace(/<!-- pwa-only:start -->([\s\S]*?)<!-- pwa-only:end -->/, (_block, content: string) => pwaEnabled ? content : "");
+    },
+    writeBundle() {
+      if (!pwaEnabled) {
+        rmSync(resolve(webRoot, "dist/manifest.webmanifest"), { force: true });
+        rmSync(resolve(webRoot, "dist/sw.js"), { force: true });
+      }
+    },
+  };
+}
+
 export default defineConfig({
   root: webRoot,
-  plugins: [react(), brandAssets()],
+  define: { __S6_PWA_ENABLED__: JSON.stringify(pwaEnabled) },
+  plugins: [react(), brandAssets(), pwaBuildAssets()],
   server: {
     host: "127.0.0.1",
     port: 5173,

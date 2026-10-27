@@ -259,3 +259,5 @@
   .m-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 22px 18px; }
   .m-badge { position: static; margin-left: auto; }
 }
+
+.m-app .pwa-install-offer-mobile { padding-inline: calc(var(--page-inset) + env(safe-area-inset-left)) calc(var(--page-inset) + env(safe-area-inset-right)); }
