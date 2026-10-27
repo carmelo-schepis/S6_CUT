@@ -151,26 +151,6 @@ else {
     Write-Ok "Configuration ready (defaults)"
 }
 
-function Get-ComposeSetting {
-    param([string]$Name, [string]$Default)
-
-    $Value = [Environment]::GetEnvironmentVariable($Name, "Process")
-    if ($null -ne $Value) {
-        if ([string]::IsNullOrEmpty($Value)) { return $Default }
-        return $Value.Trim().Trim('"').Trim("'")
-    }
-    if (Test-Path ".env") {
-        $Pattern = '^\s*' + [regex]::Escape($Name) + '\s*=\s*(.*?)\s*$'
-        foreach ($Line in Get-Content ".env") {
-            if ($Line -cmatch $Pattern) {
-                $Value = $Matches[1] -replace '\s+#.*$', ''
-            }
-        }
-    }
-    if ([string]::IsNullOrEmpty($Value)) { $Value = $Default }
-    return $Value.Trim().Trim('"').Trim("'")
-}
-
 function Get-NumericPort {
     param([string]$Value, [string]$Name)
 
@@ -208,10 +188,47 @@ function Resolve-WebBinding {
     return [PSCustomObject]@{ Port = $Port; UrlHost = $UrlHost; HealthHost = $HealthHost }
 }
 
-$WebBinding = Get-ComposeSetting -Name "S6_PORT" -Default "8080"
+function Get-ResolvedComposePort {
+    param([object]$ComposeConfig, [string]$ServiceName, [int]$TargetPort, [string]$SettingName)
+
+    $ServiceProperty = $ComposeConfig.services.PSObject.Properties[$ServiceName]
+    if ($null -eq $ServiceProperty) {
+        Die "Docker Compose configuration is missing the '$ServiceName' service."
+    }
+    $Mappings = @($ServiceProperty.Value.ports | Where-Object { [int]$_.target -eq $TargetPort })
+    if ($Mappings.Count -ne 1) {
+        Die "Docker Compose configuration must publish exactly one $SettingName mapping to container port $TargetPort."
+    }
+    $Mapping = $Mappings[0]
+    $Published = [string]$Mapping.published
+    if ([string]::IsNullOrEmpty($Published)) {
+        Die "Docker Compose did not resolve $SettingName to a published host port."
+    }
+    return [PSCustomObject]@{ HostIp = [string]$Mapping.host_ip; Published = $Published }
+}
+
+# Ask Compose to resolve .env syntax, interpolation, defaults, and process-env
+# overrides exactly as it will for `compose up`. `--format json` is supported by
+# current Compose v2 releases and ConvertFrom-Json is available in PowerShell 5.1.
+$ComposeConfigOutput = @(docker compose config --format json)
+if ($LASTEXITCODE -ne 0) {
+    Die "Could not resolve Docker Compose configuration and port bindings. Ensure Docker Compose v2 supports 'docker compose config --format json' and that compose.yaml and .env are valid."
+}
+try {
+    $ComposeConfig = ($ComposeConfigOutput -join [Environment]::NewLine) | ConvertFrom-Json -ErrorAction Stop
+}
+catch {
+    Die "Docker Compose returned invalid JSON while resolving port bindings."
+}
+
+$WebMapping = Get-ResolvedComposePort -ComposeConfig $ComposeConfig -ServiceName "web" -TargetPort 8080 -SettingName "S6_PORT"
+$WebBinding = if ($WebMapping.HostIp) { "$($WebMapping.HostIp):$($WebMapping.Published)" } else { $WebMapping.Published }
 $Web = Resolve-WebBinding -Binding $WebBinding
-$EnginePortSetting = Get-ComposeSetting -Name "S6_ENGINE_PORT" -Default "8001"
-$EnginePort = Get-NumericPort -Value $EnginePortSetting -Name "S6_ENGINE_PORT"
+$EngineMapping = Get-ResolvedComposePort -ComposeConfig $ComposeConfig -ServiceName "engine" -TargetPort 8001 -SettingName "S6_ENGINE_PORT"
+if ($EngineMapping.HostIp -ne "127.0.0.1") {
+    Die "S6_ENGINE_PORT must remain published on 127.0.0.1 only."
+}
+$EnginePort = Get-NumericPort -Value $EngineMapping.Published -Name "S6_ENGINE_PORT"
 
 # --- containers ---------------------------------------------------------------
 

@@ -65,6 +65,39 @@ function docker {
         $global:LASTEXITCODE = 1
         return
     }
+    if ($Call -eq "compose config --format json") {
+        # Mocked Compose resolution for this harness; this is not live install evidence.
+        $WebBinding = "8080"
+        $EnginePort = "8001"
+        if (Test-Path -LiteralPath ".env") {
+            foreach ($Line in Get-Content -LiteralPath ".env") {
+                if ($Line -match '^\s*S6_PORT\s*[:=]\s*(.*?)\s*$') { $WebBinding = $Matches[1].Trim('"').Trim("'") }
+                if ($Line -match '^\s*S6_ENGINE_PORT\s*[:=]\s*(.*?)\s*$') { $EnginePort = $Matches[1].Trim('"').Trim("'") }
+            }
+        }
+        if ($WebBinding -match '^\$\{WEB_PORT:-(?<fallback>\d+)\}$') {
+            $WebPortOverride = [Environment]::GetEnvironmentVariable("WEB_PORT", "Process")
+            $WebBinding = if ($WebPortOverride) { $WebPortOverride } else { $Matches.fallback }
+        }
+        $ProcessWeb = [Environment]::GetEnvironmentVariable("S6_PORT", "Process")
+        $ProcessEngine = [Environment]::GetEnvironmentVariable("S6_ENGINE_PORT", "Process")
+        if ($null -ne $ProcessWeb -and $ProcessWeb -ne "") { $WebBinding = $ProcessWeb }
+        if ($null -ne $ProcessEngine -and $ProcessEngine -ne "") { $EnginePort = $ProcessEngine }
+
+        $WebHost = ""
+        $WebPort = $WebBinding
+        if ($WebBinding -match '^(?<host>(?:\d{1,3}\.){3}\d{1,3}):(?<port>\d+)$') {
+            $WebHost = $Matches.host
+            $WebPort = $Matches.port
+        }
+        $Resolved = [PSCustomObject]@{
+            services = [PSCustomObject]@{
+                web = [PSCustomObject]@{ ports = @([PSCustomObject]@{ target = 8080; published = $WebPort; host_ip = $WebHost }) }
+                engine = [PSCustomObject]@{ ports = @([PSCustomObject]@{ target = 8001; published = $EnginePort; host_ip = "127.0.0.1" }) }
+            }
+        }
+        return ($Resolved | ConvertTo-Json -Depth 8 -Compress)
+    }
     if ($Call.StartsWith("compose up ") -and (Test-Path -LiteralPath ".env") -eq $false) {
         $global:LASTEXITCODE = 1
         throw "Compose was called before .env was available."
@@ -155,6 +188,17 @@ try {
     $EnvFile = Invoke-MockedInstall -Name "custom env file values" -Target $DefaultPath
     Assert-Equal "http://127.0.0.1:18086/api/health" $EnvFile.HealthUrls[0] "Custom .env frontend port should control readiness when no process override exists."
     Assert-True ($EnvFile.Output -match 'Backend:\s+http://localhost:18087') "Custom .env engine port was not reported correctly."
+
+    Set-Content -LiteralPath (Join-Path $DefaultPath ".env") -Value @("S6_PORT: 18090", "S6_ENGINE_PORT: 18091") -Encoding Ascii
+    $ColonEnv = Invoke-MockedInstall -Name "colon Compose env syntax" -Target $DefaultPath
+    Assert-Equal "http://127.0.0.1:18090/api/health" $ColonEnv.HealthUrls[0] "Colon-assigned Compose web port should control readiness."
+    Assert-True ($ColonEnv.Output -match 'Backend:\s+http://localhost:18091') "Colon-assigned Compose engine port was not reported correctly."
+
+    Set-Content -LiteralPath (Join-Path $DefaultPath ".env") -Value @('S6_PORT=${WEB_PORT:-18092}', "S6_ENGINE_PORT: 18093") -Encoding Ascii
+    $InterpolatedEnv = Invoke-MockedInstall -Name "interpolated Compose env value" -Target $DefaultPath
+    Assert-Equal "http://127.0.0.1:18092/api/health" $InterpolatedEnv.HealthUrls[0] "Compose interpolation fallback should control readiness."
+    Assert-True ($InterpolatedEnv.Output -match 'Backend:\s+http://localhost:18093') "Interpolated case engine port was not reported correctly."
+
     $FallbackPath = Join-Path $TestRoot "docker git fallback install"
     $Fallback = Invoke-MockedInstall -Name "fallback" -Target $FallbackPath -NoGit $true
     Assert-Equal $null $Fallback.Error "Docker Git fallback should install from the local repository."
