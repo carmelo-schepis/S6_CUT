@@ -155,16 +155,31 @@ function Get-ComposeSetting {
     param([string]$Name, [string]$Default)
 
     $Value = [Environment]::GetEnvironmentVariable($Name, "Process")
-    if ([string]::IsNullOrEmpty($Value) -and (Test-Path ".env")) {
+    if ($null -ne $Value) {
+        if ([string]::IsNullOrEmpty($Value)) { return $Default }
+        return $Value.Trim().Trim('"').Trim("'")
+    }
+    if (Test-Path ".env") {
         $Pattern = '^\s*' + [regex]::Escape($Name) + '\s*=\s*(.*?)\s*$'
         foreach ($Line in Get-Content ".env") {
-            if ($Line -match $Pattern) {
+            if ($Line -cmatch $Pattern) {
                 $Value = $Matches[1] -replace '\s+#.*$', ''
             }
         }
     }
     if ([string]::IsNullOrEmpty($Value)) { $Value = $Default }
     return $Value.Trim().Trim('"').Trim("'")
+}
+
+function Get-NumericPort {
+    param([string]$Value, [string]$Name)
+
+    $Port = 0
+    if ($Value -notmatch '^\d{1,5}$' -or
+        -not [int]::TryParse($Value, [ref]$Port) -or $Port -lt 1 -or $Port -gt 65535) {
+        Die "$Name must be a numeric port from 1 through 65535."
+    }
+    return $Port
 }
 
 function Resolve-WebBinding {
@@ -186,10 +201,7 @@ function Resolve-WebBinding {
         Die "S6_PORT must be a numeric port or an IPv4 binding such as 127.0.0.1:8080."
     }
 
-    $Port = 0
-    if (-not [int]::TryParse($PortText, [ref]$Port) -or $Port -lt 1 -or $Port -gt 65535) {
-        Die "S6_PORT must use a published port from 1 through 65535."
-    }
+    $Port = Get-NumericPort -Value $PortText -Name "S6_PORT"
 
     $UrlHost = if (-not $Address -or $Address -eq "0.0.0.0") { "localhost" } else { $Address }
     $HealthHost = if (-not $Address -or $Address -eq "0.0.0.0") { "127.0.0.1" } else { $Address }
@@ -198,7 +210,8 @@ function Resolve-WebBinding {
 
 $WebBinding = Get-ComposeSetting -Name "S6_PORT" -Default "8080"
 $Web = Resolve-WebBinding -Binding $WebBinding
-$EnginePort = Get-ComposeSetting -Name "S6_ENGINE_PORT" -Default "8001"
+$EnginePortSetting = Get-ComposeSetting -Name "S6_ENGINE_PORT" -Default "8001"
+$EnginePort = Get-NumericPort -Value $EnginePortSetting -Name "S6_ENGINE_PORT"
 
 # --- containers ---------------------------------------------------------------
 

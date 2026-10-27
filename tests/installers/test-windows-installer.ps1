@@ -150,6 +150,11 @@ try {
 
     [Environment]::SetEnvironmentVariable("S6_PORT", $null, "Process")
     [Environment]::SetEnvironmentVariable("S6_ENGINE_PORT", $null, "Process")
+
+    Set-Content -LiteralPath (Join-Path $DefaultPath ".env") -Value @("S6_PORT=18086", "S6_ENGINE_PORT=18087") -Encoding Ascii
+    $EnvFile = Invoke-MockedInstall -Name "custom env file values" -Target $DefaultPath
+    Assert-Equal "http://127.0.0.1:18086/api/health" $EnvFile.HealthUrls[0] "Custom .env frontend port should control readiness when no process override exists."
+    Assert-True ($EnvFile.Output -match 'Backend:\s+http://localhost:18087') "Custom .env engine port was not reported correctly."
     $FallbackPath = Join-Path $TestRoot "docker git fallback install"
     $Fallback = Invoke-MockedInstall -Name "fallback" -Target $FallbackPath -NoGit $true
     Assert-Equal $null $Fallback.Error "Docker Git fallback should install from the local repository."
@@ -161,7 +166,7 @@ try {
     Copy-Item -LiteralPath (Join-Path $SourceRepo ".env.example") -Destination $InvalidPath
     Set-Content -LiteralPath (Join-Path $InvalidPath ".env.example") -Value "S6_PORT=65536" -Encoding Ascii
     $Invalid = Invoke-MockedInstall -Name "invalid" -Target $InvalidPath
-    Assert-True ($Invalid.Error -match 'S6_PORT must use a published port from 1 through 65535') "Invalid port must fail clearly before Compose starts; got: $($Invalid.Error)"
+    Assert-True ($Invalid.Error -match 'S6_PORT must be a numeric port from 1 through 65535') "Invalid port must fail clearly before Compose starts; got: $($Invalid.Error)"
     Assert-True (-not ($Invalid.DockerCalls | Where-Object { $_.StartsWith("compose up ") })) "Invalid port reached docker compose up."
 
     $MalformedPath = Join-Path $TestRoot "malformed port install"
@@ -172,6 +177,21 @@ try {
     $Malformed = Invoke-MockedInstall -Name "malformed" -Target $MalformedPath
     Assert-True ($Malformed.Error -match 'S6_PORT must be a numeric port or an IPv4 binding') "Malformed binding must be rejected clearly; got: $($Malformed.Error)"
     Assert-True (-not ($Malformed.DockerCalls | Where-Object { $_.StartsWith("compose up ") })) "Malformed binding reached docker compose up."
+
+    $EngineInvalidPath = Join-Path $TestRoot "invalid engine port install"
+    New-Item -ItemType Directory -Path $EngineInvalidPath -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $SourceRepo "compose.yaml") -Destination $EngineInvalidPath
+    Set-Content -LiteralPath (Join-Path $EngineInvalidPath ".env") -Value "S6_ENGINE_PORT=65536" -Encoding Ascii
+    $EngineInvalid = Invoke-MockedInstall -Name "invalid engine port" -Target $EngineInvalidPath
+    Assert-True ($EngineInvalid.Error -match 'S6_ENGINE_PORT must be a numeric port from 1 through 65535') "Invalid engine port must fail clearly; got: $($EngineInvalid.Error)"
+    Assert-True (-not ($EngineInvalid.DockerCalls | Where-Object { $_.StartsWith("compose up ") })) "Invalid engine port reached docker compose up."
+
+    $CasePath = Join-Path $TestRoot "case-sensitive env install"
+    New-Item -ItemType Directory -Path $CasePath -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $SourceRepo "compose.yaml") -Destination $CasePath
+    Set-Content -LiteralPath (Join-Path $CasePath ".env") -Value "s6_port=18088" -Encoding Ascii
+    $CaseSensitive = Invoke-MockedInstall -Name "case-sensitive env" -Target $CasePath
+    Assert-Equal "http://127.0.0.1:8080/api/health" $CaseSensitive.HealthUrls[0] "A lowercase .env key must not override the documented uppercase Compose variable."
 
     $NoDocker = Invoke-MockedInstall -Name "missing docker" -Target $DefaultPath -NoDocker $true
     Assert-True ($NoDocker.Error -match 'Docker is not installed') "Missing Docker diagnostic changed: $($NoDocker.Error)"
