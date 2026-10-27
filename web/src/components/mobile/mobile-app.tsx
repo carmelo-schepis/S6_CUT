@@ -5,7 +5,6 @@ import { revealApp, revealWhenReady } from "../../startup";
 import type { MobileOverview } from "../../types";
 import { usePoll } from "../../use-poll";
 import { Button, StatusBadge } from "../common";
-import { PwaStatus } from "../pwa-status";
 import { VideoPreviewDialog } from "../video-preview-dialog";
 import { MobileHome } from "./mobile-home";
 import { MobileJobs } from "./mobile-jobs";
@@ -173,7 +172,6 @@ export function MobileApp() {
 
       {!overview && !error && <div className="m-banner" role="status"><LoaderCircle size={15} className="spin" aria-hidden="true" /> Connecting to the local engine…</div>}
       {error && <div className="m-banner m-banner-error" role="alert"><span><strong>Engine unavailable.</strong> {error}</span> <Button onClick={() => void runRefresh()}>Retry</Button></div>}
-      <PwaStatus mobile />
 
       <main id="m-content" className="m-content" tabIndex={-1}>
         <div className="m-tab-panel" hidden={tab !== "home"}>

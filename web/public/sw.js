@@ -1,4 +1,4 @@
-const CACHE = "s6-cut-shell-v15";
+const CACHE = "s6-cut-shell-v14";
 const CACHE_PREFIX = "s6-cut-shell-";
 const SHELL = [
   "/",
@@ -25,11 +25,7 @@ async function precacheShell() {
   if (!response.ok) return;
   const html = await response.text();
   const assets = [...html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map((match) => match[1]);
-  const lazyAssets = (await Promise.all(assets.filter((asset) => asset.endsWith(".js")).map(async (asset) => {
-    const source = await fetch(asset, { cache: "no-store" }).then((result) => result.text());
-    return [...source.matchAll(/["']((?:\.\/)?assets\/[^"']+\.(?:js|css))["']/g)].map((match) => `/${match[1].replace(/^\.\//, "")}`);
-  }))).flat();
-  await Promise.all([...new Set([...assets, ...lazyAssets])].map(async (asset) => {
+  await Promise.all(assets.map(async (asset) => {
     const assetResponse = await fetch(asset, { cache: "no-store" });
     if (assetResponse.ok) await cache.put(asset, assetResponse);
   }));

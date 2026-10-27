@@ -17,7 +17,7 @@ createRoot(root).render(
   </StrictMode>,
 );
 
-if (__S6_PWA_ENABLED__ && "serviceWorker" in navigator && import.meta.env.PROD) {
+if ("serviceWorker" in navigator && import.meta.env.PROD) {
   window.addEventListener("load", () => {
     void registerServiceWorker().catch((error: unknown) => {
       // A browser without usable service-worker storage should still get the full
