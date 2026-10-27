@@ -40,33 +40,28 @@ function Write-Warn { param([string]$Message) Write-Host "  [!] $Message" -Foreg
 function Write-Fail { param([string]$Message) Write-Host "  [FAIL] $Message" -ForegroundColor Red }
 
 function Get-PublishedPort {
-    param([object]$Binding, [string]$Name)
-    $HostAddress = [string]$Binding.host_ip
-    if ([string]::IsNullOrEmpty($HostAddress)) { $HostAddress = "127.0.0.1" }
-    else {
-        $ParsedAddress = $null
-        if (-not [Net.IPAddress]::TryParse($HostAddress, [ref]$ParsedAddress) -or
-            $ParsedAddress.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork) {
-            Die "$Name must use a valid IPv4 address."
-        }
-        $HostAddress = $ParsedAddress.ToString()
+    param([object]$Mapping, [string]$Name)
+    $Binding = @($Mapping | Where-Object { $_ -match '^\s*(?:\d{1,3}\.){3}\d{1,3}:\d{1,5}\s*$' } | Select-Object -First 1)
+    if (-not $Binding) {
+        Die "$Name published port could not be read from Docker Compose."
     }
+    if ($Binding[0] -match '^\s*(?<host>(?:\d{1,3}\.){3}\d{1,3}):(?<port>\d{1,5})\s*$') {
+        $HostText = $Matches.host
+        $PortText = $Matches.port
+    }
+    else { Die "$Name published port could not be read from Docker Compose." }
+    $ParsedAddress = $null
+    if (-not [Net.IPAddress]::TryParse($HostText, [ref]$ParsedAddress) -or
+        $ParsedAddress.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork) {
+        Die "$Name must use a valid IPv4 address."
+    }
+    $HostAddress = $ParsedAddress.ToString()
     $Port = 0
-    if (-not [int]::TryParse([string]$Binding.published, [ref]$Port) -or $Port -lt 1 -or $Port -gt 65535) {
+    if (-not [int]::TryParse($PortText, [ref]$Port) -or $Port -lt 1 -or $Port -gt 65535) {
         Die "$Name must end with a valid port (1–65535)."
     }
     if ($HostAddress -eq "0.0.0.0") { $HostAddress = "127.0.0.1" }
     return @{ Host = $HostAddress; Port = $Port }
-}
-
-function Get-ResolvedPort {
-    param([object]$Config, [string]$Service, [int]$Target)
-    $ServiceConfig = $Config.services.PSObject.Properties[$Service].Value
-    $Bindings = @($ServiceConfig.ports | Where-Object { $_.target -eq $Target })
-    if (-not $ServiceConfig -or $Bindings.Count -ne 1) {
-        Die "Could not resolve one published port for the $Service service."
-    }
-    return Get-PublishedPort $Bindings[0] "$Service port $Target"
 }
 
 function Die {
@@ -181,16 +176,6 @@ else {
     Write-Ok "Configuration ready (defaults)"
 }
 
-# --- configuration ------------------------------------------------------------
-
-$ComposeConfigText = docker compose config --format json
-if ($LASTEXITCODE -ne 0) { Die "Docker Compose could not resolve the configured ports. Review the diagnostics above." }
-try { $ComposeConfig = ($ComposeConfigText -join [Environment]::NewLine) | ConvertFrom-Json -ErrorAction Stop }
-catch { Die "Docker Compose returned an invalid configuration. Review the diagnostics above." }
-$WebPortInfo = Get-ResolvedPort $ComposeConfig "web" 8080
-$EnginePortInfo = Get-ResolvedPort $ComposeConfig "engine" 8001
-$WebUrlHost = if ($WebPortInfo.Host -eq "127.0.0.1") { "localhost" } else { $WebPortInfo.Host }
-
 # --- containers ---------------------------------------------------------------
 
 $CurrentStep = "building and starting the containers"
@@ -205,6 +190,16 @@ if ($LASTEXITCODE -ne 0) {
     Die "Docker Compose failed to start. Run 'docker compose logs' for details."
 }
 Write-Ok "Containers started"
+
+# --- published ports ----------------------------------------------------------
+
+$WebPortText = docker compose port web 8080
+if ($LASTEXITCODE -ne 0) { Die "Could not read the S6_PORT mapping from Docker Compose." }
+$WebPortInfo = Get-PublishedPort $WebPortText "S6_PORT"
+$EnginePortText = docker compose port engine 8001
+if ($LASTEXITCODE -ne 0) { Die "Could not read the S6_ENGINE_PORT mapping from Docker Compose." }
+$EnginePortInfo = Get-PublishedPort $EnginePortText "S6_ENGINE_PORT"
+$WebUrlHost = if ($WebPortInfo.Host -eq "127.0.0.1") { "localhost" } else { $WebPortInfo.Host }
 
 # --- wait for ready -----------------------------------------------------------
 
