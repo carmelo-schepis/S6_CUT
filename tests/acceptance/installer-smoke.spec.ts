@@ -48,7 +48,7 @@ test("installed gateway creates, plays, downloads and preserves a Fast clip", as
   } else {
     name = `Windows installer smoke ${Date.now()}`;
     await createClipProject(page, {
-      name, count: 1, mode: "Fast", aspect: "16:9", min: 4, max: 6, captions: false,
+      name, count: 1, mode: "Fast", aspect: "16:9", min: 8, max: 10, captions: false,
       source: { kind: "file", path: path.resolve("tests/fixtures/openrouter-fallback.mp4") },
     });
     await waitForProjectReady(page, new Set<string>());
