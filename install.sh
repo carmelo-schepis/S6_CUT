@@ -94,7 +94,7 @@ check_prerequisites() {
     || die "Docker is installed but its engine is not running or not reachable. Start Docker (for example Docker Desktop), wait until it is ready, then re-run the install command."
   ok "Docker engine is running"
   if ! docker compose version >/dev/null 2>&1; then
-    die "Docker Compose v2 is required but the 'docker compose' command is missing. Install Docker Compose v2 (https://docs.docker.com/compose/install/), then re-run the install command."
+    die "Docker Compose 2.3 or newer is required but the 'docker compose' command is missing. Install Docker Compose 2.3 or newer (https://docs.docker.com/compose/install/), then re-run the install command."
   fi
   ok "Docker Compose found"
   command -v curl >/dev/null 2>&1 \
