@@ -15,13 +15,15 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const run = promisify(execFile);
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const artifactDir = process.argv[2];
 const base = process.env.S6_ACCEPTANCE_URL || "http://127.0.0.1:8080";
 const compose = (...args) => run("docker", ["compose", ...args], {
-  cwd: "/Users/dummy/Documents/S6_CUT",
-  env: { ...process.env, DOCKER_HOST: `unix://${process.env.HOME}/.docker/run/docker.sock`, PATH: `/usr/local/bin:${process.env.PATH}` },
+  cwd: repoRoot,
+  env: { ...process.env, PATH: `/usr/local/bin:${process.env.PATH || ""}` },
   maxBuffer: 10 * 1024 * 1024,
 });
 

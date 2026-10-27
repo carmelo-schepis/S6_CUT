@@ -3030,3 +3030,10 @@ input[type="checkbox"]:checked::before {
 .library-page .asset-card-details-content > span:not(.origin-badge):not(.status) {
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
 }
+
+@media (max-width: 375px) {
+  .workspace-grid .viewer-panel { grid-template-rows: auto minmax(0, 1fr) 40px; }
+  .workspace-grid .viewer-toolbar { flex-wrap: wrap; justify-content: flex-start; gap: 4px; padding-block: 4px; }
+  .workspace-grid .viewer-toolbar > div { order: 1; margin-left: auto; }
+  .workspace-grid .viewer-toolbar > .button { order: 2; white-space: normal; }
+}

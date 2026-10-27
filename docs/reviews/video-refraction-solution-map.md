@@ -1,16 +1,18 @@
 # Video refraction: verified cause and solution map
 
-Reverified on **linuxpc, 2026-10-20**, against main `5332c55`, in isolated branch `diagnose/video-refraction-map-20261020`, worktree `/home/linuxpc/git_branches/S6_CUT-video-refraction-map`. This is a diagnosis and implementation handoff; no application rendering behavior or production records were changed.
+Reverified on 2026-10-20 against a main-branch snapshot in an isolated
+worktree. This is a diagnosis and implementation handoff; no application
+rendering behavior or production records were changed.
 
 ## Finding
 
 **Completed videos are automatically reused as Library overlays on later videos.** The smaller video already includes captions, top text, credits, and sometimes an earlier overlay, so the result contains several nested generations. The overlay is scheduled at **0.65–3.4 seconds** (shorter for clips under 3.6 seconds), which explains why the problem clears after a few seconds.
 
-The existing production job matching the screenshots (`4934a355-4c91-41e0-9ed5-845ad29aeed6`, Music/Smart) has **12 of 13 clips** with personal-Library overlay provenance. The selected generated asset belongs to that same job. Its hash and origin match the prior investigation. This confirms the earlier [detailed diagnosis](video-overlay-diagnosis.md).
+A historical Music/Smart job matching the screenshots had multiple clips with generated-Library overlay provenance. The selected generated asset belonged to that same job. This confirms the earlier [detailed diagnosis](video-overlay-diagnosis.md).
 
 ### Evidence using the supplied video
 
-Used the retained genuine download of [The Wolf of Wall Street (2013): TOP 3 BEST SCENES](https://www.youtube.com/watch?v=LwG6aia2vn0), ID `LwG6aia2vn0`, SHA-256 `ae1ebeef6361eb280ce8ffbb4cf951631ce50027fb9ff7f73d8f1af6c472fc3c`. Fresh renders use source seconds 30–34.
+Used an authorized diagnostic video source retained in isolated scratch storage. Fresh renders use a bounded source interval.
 
 | Current renderer with matched generated overlay | Same renderer with `overlays=[]` |
 | --- | --- |
@@ -62,18 +64,22 @@ Music Long and Music High-volume are rejected combinations. Fast and source-only
 
 The Shorts Editor exposure is an addition to the original mode map: [`_queue_shorts_job`](../../engine/app.py#L689) selects Smart when `burn_subtitles` **or** `embed_subtitles` is enabled. Its public upload/URL form and authorized Library-source route both reach that helper.
 
-## Separate current deployment blocker
+## Historical deployment compatibility note
 
-At approximately **03:41 UTC on 2026-10-20**, local read-only HTTP checks returned:
+A read-only check of a historical local deployment found the engine health check
+available while Library reads failed because stored asset data and deployed
+model code were incompatible. This is a deployment-version mismatch, distinct
+from the original encoded-video problem. The investigation did not establish
+which component introduced the unsupported metadata. It made no database or
+media changes.
 
-- `GET /api/v1/health`: **200**.
-- `GET /api/v1/library/assets?limit=1`: **500**.
+Resolve this by coordinating compatible application and data versions, then
+verify health, Library and job reads. Do not delete assets, strip saved fields
+from production data, or relax model validation as a workaround.
 
-The running engine's strict `Asset` model rejects the saved `videoOverlayEligible` field. Container logs confirm `ValidationError: Asset / videoOverlayEligible / Extra inputs are not permitted`; 176 asset payloads contained the field at investigation time. Running `jobs.py`, `library.py`, `media.py`, and `models.py` hashes match the inspected main baseline. The unmerged implementation branch adds that field to its model.
-
-This is a **persisted-data/deployed-code compatibility mismatch**, distinct from the original encoded-video problem. The investigation did not establish who wrote the field. Restore a coordinated compatible engine/frontend/database deployment and verify real Library/job endpoints. Do not delete assets, strip fields from production, or relax all model validation as a workaround. Health alone is not a sufficient deployment acceptance check.
-
-For the fresh baseline experiment only, the driver removed this one unknown field from an **in-memory copy** of read-only asset payloads so the original deployed matching behavior could be evaluated. It did not write to SQLite or repair the live endpoint. This projection is recorded in the evidence.
+The renderer experiment used an in-memory projection of read-only asset payloads
+to match the inspected baseline model. It did not write to SQLite or repair the
+historical deployment. This projection is recorded in the evidence.
 
 ## Implementation status and remaining deployment work
 
@@ -83,11 +89,11 @@ The fix is implemented on the integration branch and ready to merge:
 - Automatic B-roll requires an explicit manual-asset eligibility flag. Generated clips and project sources remain in the Library but are ineligible. The Library policy score remains unchanged; matching explanations now call title matches by name instead of saying they were reserved.
 - Eligible choices are resolved and persisted for every clip before output publication starts, with the asset/blob identity, query, attribution, and reason. Rendering and caption revisions load only that snapshot, so retries, process recovery, and later Library additions cannot silently change composition.
 - The new source-only version action creates a new job from the original source and saved clip ranges, keeps previous output references intact, and carries user-reviewed caption cues to the new clip IDs. Captions, Music treatment/audio, hook/top text, creator credit, and other saved render options remain on the new job.
-- The additive database migration defaults old assets to ineligible and preserves any already stored opt-in. Read-only validation against the current database parsed 186 assets and 115 jobs with the new models. A database copy upgraded through migration 12 kept all 186 assets ineligible by default; the live database was not modified.
+- The additive database migration defaults old assets to ineligible and preserves any already stored opt-in. Read-only validation confirmed the new models parse existing database records. A database copy upgraded through migration 12 kept assets ineligible by default; the live database was not modified.
 
 | Phase | Status | Remaining gate |
 | --- | --- | --- |
-| 0. Coordinate deployment | **Pending deployment** | Rebuild/restart the local service with this code; verify health, Library reads, and job reads. Current running baseline returns health 200 and Library 500 because its strict model rejects `videoOverlayEligible`. |
+| 0. Coordinate deployment | **Pending deployment** | Rebuild/restart a compatible service version; verify health, Library reads, and job reads against isolated acceptance data. |
 | 1. Stop implicit overlays | **Implemented** | After deployment, verify every default-off entry point, including Music, High-volume landscape, Shorts Editor, and retries. |
 | 2. Make optional B-roll explicit and stable | **Implemented** | Acceptance-check explicitly eligible manual still/video assets and exclusions with a contaminated Library. |
 | 3. Repair old outputs safely | **Implemented** | Exercise the queued new-version flow through a real render and publication, including edited caption cues and Music settings. Existing exports remain unchanged until the user creates versions. |
@@ -98,7 +104,7 @@ The fix is implemented on the integration branch and ready to merge:
 - Frontend: **426 passed** across 33 test files; lint, provider check, and typecheck passed. Production build passed.
 - Targeted engine checks after the latest caption preservation change: **62 passed** across API, Library rules, eligibility migration, snapshot replay, and source-only version behavior. A further Fast-render check confirmed the clean branch remains green after the caption replay path was added.
 - Full engine suite: **759 passed, 114 skipped**. The host's default fontconfig did not see the repository's vendored Montserrat face, so the suite was rerun with a temporary fontconfig file that points at the existing `engine/fonts` files. No font or application test was changed. Skips are existing media/tool gates.
-- Fresh render comparisons using the requested YouTube source are recorded above. Current deployment compatibility was also verified using read-only copies and the new models; no production jobs or assets were altered.
+- Fresh render comparisons using the diagnostic video are recorded above. Current deployment compatibility was also verified using read-only copies and the new models; no production jobs or assets were altered.
 
 ## Planned deployment, acceptance, and integration
 
@@ -110,19 +116,10 @@ The fix is implemented on the integration branch and ready to merge:
 | 3. Repair old outputs safely | Add an explicit source-only new-job/version action using original source, exact saved trim, edited captions/timing, treatment, text, audio settings, and lineage. Preserve old outputs. Publish new validated files through existing transactional clip/asset APIs. Recompute actual-layer provenance. | Original bytes and old references remain intact. New outputs contain the authorized composition and remain downloadable/exportable. |
 | 4. Verify and integrate | Exercise every exposed route against a contaminated isolated Library, plus deliberate manual B-roll opt-in. Test inter-clip publication, cross-job recursion, legacy/retry/restart, unavailable blobs, caption revisions, and regeneration failure/retry. Decode frames before/during/after the interval; check A/V sync, text/effects, dimensions, MP4, preview, and ZIP. Run repository gates, integrate latest main, then deploy compatible services. | Real decoded pixels contain no unrequested old content; actual Library/job endpoints and playback work after deploy. Existing bad outputs are only claimed repaired after regeneration. |
 
-### Remaining GPT Luna acceptance tasks
-
-The implementation was based on the isolated branch **`fix/explicit-library-video-overlays-20261020`** and integrated in a clean worktree. Its original worktree was left untouched. Use the [original handoff](video-overlay-diagnosis.md#four-bounded-prompts-for-gpt-luna) for the detailed acceptance matrix, with these remaining tasks:
-
-1. Verify default-off behavior on both Shorts Editor endpoints and the embedded-captions-only case, then exercise Smart retries and recovery.
-2. Acceptance-check persisted choice replay, ineligible asset exclusion, truthful title-match explanations, and missing-blob behavior.
-3. Run a real source-only render with edited caption cues, per-clip Music treatment/gains, top/hook text, source trim, and requested effects; verify atomic publication while old outputs remain accessible.
-4. Deploy the merged code, verify health and Library/job reads, then complete contaminated-Library API/media acceptance and preview/MP4/ZIP playback checks. Do not use production storage for test jobs.
-
 ## Verification and retained artifacts
 
 Focused tests run from this isolated branch: **113 passed, 10 skipped** across `test_library.py`, `test_fast_mode.py`, `test_long_form.py`, `test_high_volume_batches.py`, `test_shorts_source.py`, and `test_video_downloads.py`. Skips are existing media-tool gates on the host; fresh FFmpeg experiments ran inside the existing engine container with outputs only in `/tmp`. Passing baseline tests does not establish the missing exclusion rule.
 
-Fresh machine-readable evidence: [video-refraction-reverification.json](video-refraction-reverification.json). Fresh sample frames are linked above. The read-only driver, three MP4s, all before/during/after frames, evidence, and focused test log are retained under this branch worktree's ignored `.qa/refraction-reverification/`. The initial source download remains in the prior investigation's scratch directory. No production job was queued or published by this investigation.
+Fresh machine-readable evidence: [video-refraction-reverification.json](video-refraction-reverification.json). Fresh sample frames are linked above. The read-only driver, three MP4s, all before/during/after frames, evidence, and focused test log are retained in private ignored investigation artifacts. The initial source download remains in private scratch storage. No production job was queued or published by this investigation.
 
 Browser playback acceptance was not performed: T3 preview startup reported missing host libraries (`libnspr4.so`, `libnss3.so`, `libnssutil3.so`, `libasound.so.2`). Decoded-media checks establish the rendering defect independently of browser playback.

@@ -1,9 +1,6 @@
 # Slow-song lyric accuracy: diagnosis and local-first plan
 
-Date: 2026-10-22. Target: Cigarettes After Sex, especially quiet/slow vocals.
-Repository: `/home/linuxpc/Git_projects/S6_CUT`. Investigation branch:
-`fix/slow-song-lyric-accuracy-20261022`, checked out at
-`/home/linuxpc/git_branches/S6_CUT-slow-song-lyric-accuracy`.
+Date: 2026-10-22. Target: the tested music source, especially quiet/slow vocals.
 
 ## Finding and immediate fix
 
@@ -11,8 +8,8 @@ There are two separate problems: recognizing the words and aligning their timing
 Changing ASS styling or asking an LLM to rewrite captions cannot establish what
 the singer actually sang.
 
-The saved **Bubblegum – Cigarettes After Sex** job
-`f5521fbb-ce99-4c97-b1c7-7f449735d7d9` exposes a concrete recognition failure:
+An isolated test of a slow-vocal music source exposed a concrete recognition
+failure:
 
 - The first vocal starts around 32.6 seconds, after Whisper's usual first
   30-second language-detection window.
@@ -23,15 +20,15 @@ The saved **Bubblegum – Cigarettes After Sex** job
   0.368. Windows at 30–60 and 60–90 seconds pick English at 0.880 and 0.843.
 - The API previously offered no way to select a lyrics language, although the
   worker, supervisor, and cache already supported a private `transcription_language`.
-- A separate saved CAS Tiny Desk Concert job already reports English. Thus
-  language selection explains this Bubblegum failure, not every CAS error.
+- A separate test source already reports English, so this language-detection fix addresses this
+  failure mode but does not explain all transcription errors.
 
 The immediate implementation makes Music consider up to three initial windows
 with a language-detection confidence threshold of 0.8. Faster-Whisper can stop
 early when a window exceeds that threshold; this is not a guarantee that all
 three windows are examined. The default remains automatic and multilingual.
 The Music form now also offers **Lyrics language → English**, which bypasses
-guessing for CAS songs. Omit `music_lyrics_language` for automatic detection;
+guessing for the tested source songs. Omit `music_lyrics_language` for automatic detection;
 the multipart API accepts the pinned tokenizer's supported language codes.
 
 Detection options participate in the Music transcript cache identity, so a new
@@ -41,21 +38,14 @@ Model/beam defaults remain `small`/5, speech VAD stays off for Music, and word
 timestamps stay on. Completed videos are not rewritten by changing the decoder;
 create a new job or manually review/rerender their captions.
 
-Deployment requires rebuilding **both engine and web** from the main checkout,
-using its existing Compose project, `.env` and data bind mount. This investigation
-does not restart the running services. Once active jobs have finished, the normal
-rollout command from `/home/linuxpc/Git_projects/S6_CUT` is
-`docker compose up -d --build engine web`. Do not run it from this branch with a
-fresh/default data directory. Create a new Music job with English selected to
-verify the deployed behavior. No database migration or new model download is
+Deployment requires rebuilding both engine and web together, then verifying the deployed behavior with a new Music job. Use the documented deployment workflow and its configured data root. No database migration or new model download is
 required for this fix.
 
 ## Real-audio evidence and limits
 
-Source: the existing job's `transcription/audio-16k.wav`, SHA-256
-`b6faca4d620ea7fb11f8dc029b31e8edaf419ca1327a971683ebe592e024df0f`.
-Raw transcripts and screenshots are private, ignored artifacts under the branch's
-`test-artifacts/lyric-diagnosis/`; they are not committed.
+Source: private local audio derived from the tested music source. Its fingerprint and raw audio
+are omitted from this public report.
+Raw transcripts and screenshots are private, ignored local artifacts; they are not committed.
 
 An isolated run of the **modified production `media.transcribe` function**, using
 the production engine image with cached `small`, CPU/int8, beam 5 and automatic
@@ -81,11 +71,11 @@ the regression, and neither setting is changed by this fix.
 
 ### 1. Establish a small, honest accuracy benchmark
 
-Use three to five authorized CAS recordings: Bubblegum, two other slow studio
-tracks, a live performance and one slowed version. Keep full songs or enough
-context to include instrumental gaps and repeated choruses. Store media and
-reference lyrics outside Git; commit only fixture IDs, hashes, evaluation code
-and aggregate metrics.
+Use three to five authorized source recordings: the slow-vocal example, two
+other slow studio tracks, a live performance and one slowed version. Keep full
+songs or enough context to include instrumental gaps and repeated choruses.
+Store media and reference lyrics outside Git; commit only fixture IDs, hashes,
+evaluation code and aggregate metrics.
 
 Have a listener correct the lyrics against each actual recording, preserving
 repeats, ad-libs and omitted verses. A published studio lyric is not automatically
@@ -95,7 +85,7 @@ in known instrumental spans, and manually marked word onsets/ends. Specify
 punctuation/case normalization before comparing variants. Treat Whisper confidence
 as a review signal, not a calibrated correctness score.
 
-Acceptance: the Bubblegum language regression stays fixed; each variant reports
+Acceptance: the slow-vocal language regression stays fixed; each variant reports
 per-track results, maximum RSS and runtime, with no hidden substitutions of
 synthetic speech or renderer-only fixtures for sung-audio evidence.
 
@@ -109,12 +99,12 @@ Use selected lyrics as the text reference, then align the sung words to the
 for review. Do not silently replace the whole transcript based on a fuzzy title.
 
 Evaluate a local aligner such as WhisperX's alignment component against the
-existing Faster-Whisper timing. This is a candidate, not verified CAS performance:
-speech phoneme alignment must be tested on sustained vowels, reverb, missing
-verses and repeats. Avoid introducing a speech VAD stage into Music that cuts
-away singing. Reject or flag unaligned phrases; never spread all words uniformly
-across a song, stretch a last word over an instrumental, or claim line-level LRC
-timestamps are word timings.
+existing Faster-Whisper timing. This candidate has not been verified on this
+source. Speech phoneme alignment must be tested on sustained vowels, reverb,
+missing verses and repeats. Avoid introducing a speech VAD stage into Music that
+cuts away singing. Reject or flag unaligned phrases; never spread all words
+uniformly across a song, stretch a last word over an instrumental, or claim
+line-level LRC timestamps are word timings.
 
 Keep transcription/alignment in supervised child processes with real progress,
 cancellation, bounded memory and deterministic cache keys incorporating lyric
@@ -150,8 +140,8 @@ fallback behavior. Keep the language fix even if an acoustic experiment fails.
 
 ### 4. Optional recognition and online lyric lookup
 
-Use existing soundtrack title/artist metadata first: this Bubblegum job already
-has the correct title, so recognizing its identity is unnecessary. For known
+Use existing soundtrack title/artist metadata first: this test case already has the correct
+title, so recognizing its identity is unnecessary. For known
 local files, a local catalog can reuse confirmed lyrics and recording identities.
 Chromaprint can generate fingerprints locally, but recognizing an unknown song
 requires a matching database. A local catalog only recognizes what it contains;
@@ -169,31 +159,6 @@ its public service also has application-key and usage requirements. LRCLIB's
 metadata lookup considers track duration, which can differ for slowed, live or
 edited recordings. Retrieved text still requires alignment to the actual audio.
 Network identification plus lyric lookup does not by itself solve timing.
-
-## Small implementation briefs for follow-up work
-
-Apply one brief per isolated branch under `/home/linuxpc/git_branches`; inspect
-the current main and guardrails each time. Do not implement all stages in one
-unreviewable prompt.
-
-1. **Benchmark:** “Read this diagnosis and build a local-only evaluation command
-   for authorized sung-audio fixtures and human-corrected references. Report word
-   errors, instrumental insertions, timing error where annotations exist, RSS and
-   elapsed time. Keep media/full lyrics out of Git. Do not change production
-   decoding. Prove it runs on the saved Bubblegum audio.”
-2. **Reference alignment:** “Using the benchmark, implement optional local
-   TXT/LRC/pasted lyrics, version confirmation and supervised local word alignment.
-   Preserve audible soundtrack timing, repeats and immutable sources. Add review
-   for unaligned spans. Keep automatic ASR as a fallback and all network lookup
-   off. Validate restart, cache isolation, speed changes and exports.”
-3. **Acoustics:** “Benchmark one local model or vocal-separation change at a time
-   against the reviewed sung fixtures. Report per-track accuracy and resource
-   limits. Promote only a measured improvement; preserve local operation and
-   existing speech behavior.”
-4. **Optional lookup:** “Add explicitly opted-in metadata/fingerprint recognition
-   and LRCLIB retrieval with timeouts, responsible rate limits, local caching and
-   version confirmation. Reuse the reference-alignment path. No HTML scraping or
-   default network dependency.”
 
 ## Validation
 

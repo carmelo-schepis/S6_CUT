@@ -2,6 +2,13 @@
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+: "${S6_MUSIC_MODEL_CACHE:=$repo_root/data/models}"
+model_cache="$(realpath -m "$S6_MUSIC_MODEL_CACHE")"
+if [ ! -d "$model_cache" ]; then
+  echo "Music model cache directory does not exist: $model_cache" >&2
+  exit 2
+fi
+model_cache_yaml="$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$model_cache")"
 : "${S6_MUSIC_VIDEO_URL:?Set an authorized YouTube visual source URL}"
 : "${S6_MUSIC_SONG_URL:?Set an authorized YouTube song URL}"
 : "${S6_PRIVATE_LYRIC_REFERENCE:?Set a private word-timed JSON reference outside Git}"
@@ -33,7 +40,7 @@ services:
   engine:
     volumes:
       - type: bind
-        source: /home/linuxpc/Git_projects/S6_CUT/data/models
+        source: $model_cache_yaml
         target: /app/data/models
         read_only: true
     environment:

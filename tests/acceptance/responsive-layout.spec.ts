@@ -49,7 +49,14 @@ test.describe("responsive layout regressions", () => {
 
       const items = nav.locator(".nav-item");
       for (const index of [0, 5]) {
-        await items.nth(index).focus();
+        // Enter keyboard modality through the real tab order so :focus-visible
+        // is evaluated the same way a keyboard user encounters this control.
+        let tabStops = 0;
+        while (!(await items.nth(index).evaluate((item) => document.activeElement === item)) && tabStops < 30) {
+          await page.keyboard.press("Tab");
+          tabStops += 1;
+        }
+        expect(await items.nth(index).evaluate((item) => document.activeElement === item), `${width}px keyboard focus target`).toBe(true);
         const focusStyle = await items.nth(index).evaluate((item) => {
           const style = getComputedStyle(item);
           const rect = item.getBoundingClientRect();
@@ -181,7 +188,8 @@ test.describe("responsive layout regressions", () => {
       await page.goto("/", { waitUntil: "domcontentloaded" });
       // The folded rail peeks open under a resting pointer; keep it over the page.
       await page.mouse.move(width - 1, height / 2);
-      await page.getByRole("button").filter({ hasText: "Responsive Workspace fixture" }).click();
+      await page.getByRole("button", { name: "Workspace", exact: true }).click();
+      await expect(page.locator(".workspace-project-name")).toHaveText("Responsive Workspace fixture");
       await expect(page.locator(".clip-board")).toBeVisible();
       const measurement = await page.locator(".clip-board").evaluate((board) => {
         const boardRect = board.getBoundingClientRect();
@@ -192,12 +200,15 @@ test.describe("responsive layout regressions", () => {
         });
         return {
           document: { scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth },
+          overflowing: [...document.querySelectorAll<HTMLElement>("body *")]
+            .map((element) => ({ tag: element.tagName, className: typeof element.className === "string" ? element.className : "", left: element.getBoundingClientRect().left, right: element.getBoundingClientRect().right }))
+            .filter((element) => element.right > innerWidth + 0.5 || element.left < -0.5).slice(-12),
           board: { left: boardRect.left, right: boardRect.right, scrollWidth: board.scrollWidth, clientWidth: board.clientWidth, display: getComputedStyle(board).display },
           tiles: tileRects,
           actionsVisible: tiles.every((tile) => Boolean(tile.querySelector<HTMLElement>(".clip-actions")?.getBoundingClientRect().height)),
         };
       });
-      expect(measurement.document.scrollWidth, `${width}px document overflow`).toBeLessThanOrEqual(measurement.document.clientWidth);
+      expect(measurement.document.scrollWidth, `${width}px document overflow: ${JSON.stringify(measurement.overflowing)}`).toBeLessThanOrEqual(measurement.document.clientWidth);
       expect(measurement.board.right, `${width}px board right edge`).toBeLessThanOrEqual(width + 0.5);
       expect(measurement.actionsVisible, `${width}px clip actions`).toBe(true);
       expect(measurement.tiles.every((tile) => tile.scrollWidth <= tile.clientWidth), `${width}px card content containment`).toBe(true);

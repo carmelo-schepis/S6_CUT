@@ -1,15 +1,11 @@
 {
   "date": "2026-10-20",
   "compatibility_projection": {
-    "field": "videoOverlayEligible",
-    "asset_count": 176,
-    "note": "Removed only from in-memory read-only baseline fixture because deployed strict model rejects field; database unchanged."
+    "attribute": "unsupported optional asset eligibility metadata",
+    "note": "Omitted only from an in-memory read-only baseline fixture to match the inspected model; database unchanged."
   },
   "source": {
-    "url": "https://www.youtube.com/watch?v=LwG6aia2vn0",
-    "id": "LwG6aia2vn0",
-    "title": "The Wolf of Wall Street (2013): TOP 3 BEST SCENES",
-    "sha256": "ae1ebeef6361eb280ce8ffbb4cf951631ce50027fb9ff7f73d8f1af6c472fc3c",
+    "title": null,
     "metadata": {
       "duration": 1087.661,
       "width": 1920,
@@ -36,15 +32,13 @@
     "media.py": "43da0f600fd987fd6a1f040eb04540a2437b1953d02211f0cef74f003f5ac0a2"
   },
   "production_job": {
-    "id": "4934a355-4c91-41e0-9ed5-845ad29aeed6",
-    "clips": 13,
-    "personal_library_overlay_clips": 12
+    "id": null,
+    "multiple_clips_with_generated_overlay": true
   },
   "selected_asset": {
-    "id": "26c71438-082f-4b23-ae99-466fc770f42f",
+    "id": null,
     "origin": "generated-clip",
-    "source_job_id": "4934a355-4c91-41e0-9ed5-845ad29aeed6",
-    "hash": "b0c77cea60b96826fda4641806ec2adc1afdca3ebdf66312aed41b5609bf523e",
+    "source_job_id": null,
     "reason": "Neutral policy; reserved eligible placement"
   },
   "overlay_interval": [
@@ -704,7 +698,7 @@
   "renders": [
     {
       "name": "music-implicit-generated-overlay",
-      "sha256": "876a042c0666d4716eb4dff227c52d5eea1d7d5be689042937cbd302692e21d7",
+      "sha256": null,
       "metadata": {
         "duration": 4.004,
         "width": 1080,
@@ -727,7 +721,7 @@
     },
     {
       "name": "music-source-only",
-      "sha256": "66353e4bde7931ef24f56c2aae2be8d282bd27b44a50c2556b1a5244e9a25a10",
+      "sha256": null,
       "metadata": {
         "duration": 4.004,
         "width": 1080,
@@ -750,7 +744,7 @@
     },
     {
       "name": "speech-fast-square",
-      "sha256": "4cb0e2de0b166cd8cf46f09387dbb3229dadff18919ec367050e434b79c6bd61",
+      "sha256": null,
       "metadata": {
         "duration": 4.004,
         "width": 1080,
