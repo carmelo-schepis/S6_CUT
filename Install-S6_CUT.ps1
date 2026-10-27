@@ -39,20 +39,34 @@ function Write-Ok   { param([string]$Message) Write-Host "  [OK] $Message" -Fore
 function Write-Warn { param([string]$Message) Write-Host "  [!] $Message" -ForegroundColor Yellow }
 function Write-Fail { param([string]$Message) Write-Host "  [FAIL] $Message" -ForegroundColor Red }
 
-function Get-ComposeValue {
-    param([string[]]$Environment, [string]$Name, [string]$Default)
-    $Line = $Environment | Where-Object { $_ -match "^$([regex]::Escape($Name))=" } | Select-Object -Last 1
-    if ($null -eq $Line) { return $Default }
-    $Value = $Line.Substring($Name.Length + 1)
-    if ($Value.Length -eq 0) { return $Default }
-    return $Value
+function Get-ComposePort {
+    param([string[]]$Config, [string]$Service, [int]$TargetPort, [string]$Name)
+    $ServicePattern = "(?ms)^  $([regex]::Escape($Service)):\r?\n(?<body>.*?)(?=^  [^\s][^:\r\n]*:\s*$|\z)"
+    $ServiceMatch = [regex]::Match(($Config -join "`n"), $ServicePattern)
+    if (-not $ServiceMatch.Success) { Die "Docker Compose could not resolve the $Name mapping." }
+    $PortsMatch = [regex]::Match($ServiceMatch.Groups["body"].Value, '(?ms)^    ports:[ \t]*\r?\n(?<ports>.*?)(?=^    [^ \t\r\n][^:\r\n]*:[ \t]*$|\z)')
+    if (-not $PortsMatch.Success) { Die "Docker Compose could not resolve the $Name mapping." }
+    $Entries = [regex]::Matches($PortsMatch.Groups["ports"].Value, '(?ms)^      -(?<entry>.*?)(?=^      -|\z)')
+    foreach ($Entry in $Entries) {
+        $Text = $Entry.Groups["entry"].Value
+        if ($Text -match '(?m)^        target:[ \t]*["'']?(?<target>\d+)["'']?[ \t]*$' -and [int]$Matches.target -eq $TargetPort) {
+            if ($Text -notmatch '(?m)^        published:[ \t]*["'']?(?<port>\d+)["'']?[ \t]*$') {
+                Die "$Name published port could not be read from Docker Compose."
+            }
+            $PublishedPort = $Matches.port
+            $HostAddress = "127.0.0.1"
+            if ($Text -match '(?m)^        host_ip:[ \t]*["'']?(?<host>[^"''\s]+)["'']?[ \t]*$') { $HostAddress = $Matches.host }
+            return "${HostAddress}:$PublishedPort"
+        }
+    }
+    Die "Docker Compose could not resolve the $Name mapping."
 }
 
 function Get-PublishedPort {
     param([string]$Binding, [string]$Name)
     $HostAddress = "127.0.0.1"
-    if ($Binding -match '^(?<port>\d{1,5})$') { $PortText = $Matches.port }
-    elseif ($Binding -match '^(?<host>(?:\d{1,3}\.){3}\d{1,3}):(?<port>\d{1,5})$') {
+    if ($Binding -match '^(?<port>\d+)$') { $PortText = $Matches.port }
+    elseif ($Binding -match '^(?<host>(?:\d{1,3}\.){3}\d{1,3}):(?<port>\d+)$') {
         $ParsedAddress = $null
         if (-not [Net.IPAddress]::TryParse($Matches.host, [ref]$ParsedAddress) -or
             $ParsedAddress.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork) {
@@ -184,12 +198,10 @@ else {
 
 # --- validate published ports -------------------------------------------------
 
-$ComposeEnvironment = docker compose config --environment
+$ComposeConfig = docker compose config
 if ($LASTEXITCODE -ne 0) { Die "Docker Compose could not resolve the configured ports. Review the diagnostics above." }
-$WebPortInfo = Get-PublishedPort (Get-ComposeValue $ComposeEnvironment "S6_PORT" "8080") "S6_PORT"
-$EngineBinding = Get-ComposeValue $ComposeEnvironment "S6_ENGINE_PORT" "8001"
-if ($EngineBinding -notmatch '^\d{1,5}$') { Die "S6_ENGINE_PORT must be a numeric port." }
-$EnginePortInfo = Get-PublishedPort $EngineBinding "S6_ENGINE_PORT"
+$WebPortInfo = Get-PublishedPort (Get-ComposePort $ComposeConfig "web" 8080 "S6_PORT") "S6_PORT"
+$EnginePortInfo = Get-PublishedPort (Get-ComposePort $ComposeConfig "engine" 8001 "S6_ENGINE_PORT") "S6_ENGINE_PORT"
 $WebUrlHost = if ($WebPortInfo.Host -eq "127.0.0.1") { "localhost" } else { $WebPortInfo.Host }
 
 # --- containers ---------------------------------------------------------------

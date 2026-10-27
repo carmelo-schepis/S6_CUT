@@ -6,7 +6,7 @@ $Ast = [System.Management.Automation.Language.Parser]::ParseFile($Installer, [re
 if ($ParseErrors.Count) { throw ($ParseErrors -join "`n") }
 
 function Die { param([string]$Message) throw $Message }
-foreach ($Name in @("Get-ComposeValue", "Get-PublishedPort")) {
+foreach ($Name in @("Get-ComposePort", "Get-PublishedPort")) {
     $Definition = $Ast.Find({ param($Node) $Node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $Node.Name -eq $Name }, $true)
     if (-not $Definition) { throw "Installer function not found: $Name" }
     . ([scriptblock]::Create($Definition.Extent.Text))
@@ -17,31 +17,41 @@ function Assert-Equal {
     if ($Expected -ne $Actual) { throw "$Label`: expected '$Expected', got '$Actual'" }
 }
 function Assert-InvalidPort {
-    param([string]$Binding)
+    param([string]$Binding, [string]$ExpectedMessage)
     try { Get-PublishedPort $Binding "test port" | Out-Null }
-    catch { return }
+    catch {
+        if ($_.Exception.Message -notlike "*$ExpectedMessage*") { throw }
+        return
+    }
     throw "Expected invalid port to fail: $Binding"
 }
 
-$Defaults = @("S6_PORT=8080", "S6_ENGINE_PORT=8001")
-Assert-Equal "8080" (Get-ComposeValue $Defaults "S6_PORT" "8080") "default frontend port"
-Assert-Equal 8080 (Get-PublishedPort (Get-ComposeValue $Defaults "S6_PORT" "8080") "S6_PORT").Port "parsed default frontend port"
-Assert-Equal "8001" (Get-ComposeValue $Defaults "S6_ENGINE_PORT" "8001") "default backend port"
+$DefaultConfig = @(
+    "services:", "  engine:", "    ports:", "      - mode: ingress", "        target: 8001",
+    '        published: "8001"', "        host_ip: 127.0.0.1", "        protocol: tcp",
+    "  web:", "    ports:", "      - mode: ingress", "        target: 8080",
+    '        published: "8080"', "        protocol: tcp"
+)
+$Web = Get-PublishedPort (Get-ComposePort $DefaultConfig "web" 8080 "S6_PORT") "S6_PORT"
+Assert-Equal "127.0.0.1" $Web.Host "default readiness host"
+Assert-Equal 8080 $Web.Port "default frontend port"
+$Engine = Get-PublishedPort (Get-ComposePort $DefaultConfig "engine" 8001 "S6_ENGINE_PORT") "S6_ENGINE_PORT"
+Assert-Equal 8001 $Engine.Port "default backend port"
 
-$Resolved = @("S6_PORT=127.0.0.1:18080", "S6_ENGINE_PORT=18001")
-$Web = Get-PublishedPort (Get-ComposeValue $Resolved "S6_PORT" "8080") "S6_PORT"
-Assert-Equal "127.0.0.1" $Web.Host "IPv4 readiness host"
+$CustomConfig = @(
+    "services:", "  web:", "    ports:", "      - mode: ingress", "        target: 8080",
+    '        published: "18080"', "        host_ip: 192.168.1.20", "        protocol: tcp",
+    "  engine:", "    ports:", "      - mode: ingress", "        target: 8001",
+    '        published: "18001"', "        host_ip: 127.0.0.1", "        protocol: tcp"
+)
+$Web = Get-PublishedPort (Get-ComposePort $CustomConfig "web" 8080 "S6_PORT") "S6_PORT"
+Assert-Equal "192.168.1.20" $Web.Host "IPv4 bind address"
 Assert-Equal 18080 $Web.Port "custom frontend port"
-Assert-Equal 18001 (Get-PublishedPort (Get-ComposeValue $Resolved "S6_ENGINE_PORT" "8001") "S6_ENGINE_PORT").Port "custom backend port"
-
-$Expanded = @("WEB_PORT=18082", "S6_PORT=18082", "S6_ENGINE_PORT=18003")
-Assert-Equal 18082 (Get-PublishedPort (Get-ComposeValue $Expanded "S6_PORT" "8080") "S6_PORT").Port "interpolated port"
-$Empty = @("S6_PORT=", "S6_ENGINE_PORT=")
-Assert-Equal 8080 (Get-PublishedPort (Get-ComposeValue $Empty "S6_PORT" "8080") "S6_PORT").Port "empty-value default"
-Assert-Equal 8001 (Get-PublishedPort (Get-ComposeValue $Empty "S6_ENGINE_PORT" "8001") "S6_ENGINE_PORT").Port "empty backend default"
+$Engine = Get-PublishedPort (Get-ComposePort $CustomConfig "engine" 8001 "S6_ENGINE_PORT") "S6_ENGINE_PORT"
+Assert-Equal 18001 $Engine.Port "custom backend port"
 Assert-Equal "127.0.0.1" (Get-PublishedPort "0.0.0.0:8082" "S6_PORT").Host "wildcard readiness host"
 
-foreach ($Binding in @("invalid", "999.0.0.1:8080", "0", "65536", "99999", "[::1]:8080")) {
-    Assert-InvalidPort $Binding
+foreach ($Binding in @("invalid", "999.0.0.1:8080", "0", "65536", "100000", "[::1]:8080")) {
+    Assert-InvalidPort $Binding "valid port (1–65535)"
 }
 Write-Host "Windows installer port tests passed."
