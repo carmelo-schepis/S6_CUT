@@ -93,8 +93,18 @@ check_prerequisites() {
   docker info >/dev/null 2>&1 \
     || die "Docker is installed but its engine is not running or not reachable. Start Docker (for example Docker Desktop), wait until it is ready, then re-run the install command."
   ok "Docker engine is running"
-  if ! docker compose version >/dev/null 2>&1; then
-    die "Docker Compose 2.3 or newer is required but the 'docker compose' command is missing. Install Docker Compose 2.3 or newer (https://docs.docker.com/compose/install/), then re-run the install command."
+  local compose_version_output compose_major compose_minor
+  if ! compose_version_output="$(docker compose version 2>&1)"; then
+    die "Docker Compose 2.26 or newer is required but the 'docker compose' command is missing or unavailable. Install Docker Compose 2.26 or newer (https://docs.docker.com/compose/install/), then re-run the install command."
+  fi
+  if [[ "$compose_version_output" =~ v?([0-9]+)\.([0-9]+) ]]; then
+    compose_major=${BASH_REMATCH[1]}
+    compose_minor=${BASH_REMATCH[2]}
+    if (( compose_major < 2 || (compose_major == 2 && compose_minor < 26) )); then
+      die "Docker Compose 2.26 or newer is required; found ${compose_version_output}. Upgrade Docker Compose (https://docs.docker.com/compose/install/), then re-run the install command."
+    fi
+  else
+    die "Could not determine the Docker Compose version from '${compose_version_output}'. Install Docker Compose 2.26 or newer (https://docs.docker.com/compose/install/), then re-run the install command."
   fi
   ok "Docker Compose found"
   command -v curl >/dev/null 2>&1 \

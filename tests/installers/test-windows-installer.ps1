@@ -65,6 +65,12 @@ function docker {
         $global:LASTEXITCODE = 1
         return
     }
+    if ($Call -eq "compose version" -and $script:MockScenario -eq "ComposeOld") {
+        return "Docker Compose version v2.25.0"
+    }
+    if ($Call -eq "compose version") {
+        return "Docker Compose version v2.26.0"
+    }
     if ($Call -eq "compose config --format json") {
         # Mocked Compose resolution for this harness; this is not live install evidence.
         $WebBinding = "8080"
@@ -240,7 +246,9 @@ try {
     $NoDocker = Invoke-MockedInstall -Name "missing docker" -Target $DefaultPath -NoDocker $true
     Assert-True ($NoDocker.Error -match 'Docker is not installed') "Missing Docker diagnostic changed: $($NoDocker.Error)"
     $NoCompose = Invoke-MockedInstall -Name "missing Compose" -Target $DefaultPath -Scenario "ComposeMissing"
-    Assert-True ($NoCompose.Error -match "Docker Compose 2.3 or newer is required") "Missing Compose diagnostic changed: $($NoCompose.Error)"
+    Assert-True ($NoCompose.Error -match "Docker Compose 2.26 or newer is required") "Missing Compose diagnostic changed: $($NoCompose.Error)"
+    $OldCompose = Invoke-MockedInstall -Name "old Compose" -Target $DefaultPath -Scenario "ComposeOld"
+    Assert-True ($OldCompose.Error -match "Docker Compose 2.26 or newer is required; found Docker Compose version v2.25.0") "Old Compose diagnostic must identify the detected version and required minimum: $($OldCompose.Error)"
     $NoEngine = Invoke-MockedInstall -Name "unreachable Docker" -Target $DefaultPath -Scenario "DockerUnavailable"
     Assert-True ($NoEngine.Error -match "Docker is installed but its engine is not running") "Unreachable Docker diagnostic changed: $($NoEngine.Error)"
     $NoReady = Invoke-MockedInstall -Name "readiness failure" -Target $DefaultPath -Scenario "ReadinessFailure" -Timeout 4

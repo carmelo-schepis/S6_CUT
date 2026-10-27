@@ -66,8 +66,10 @@ with open(os.environ['S6_TEST_LOG'], 'a') as log:
 if sys.argv[1:3] == ['compose', 'up']:
     assert pathlib.Path('compose.yaml').exists()
     assert pathlib.Path('.env').exists()
-if sys.argv[1:3] == ['compose', 'version'] and os.environ.get('S6_TEST_COMPOSE_MISSING'):
-    sys.exit(1)
+if sys.argv[1:3] == ['compose', 'version']:
+    if os.environ.get('S6_TEST_COMPOSE_MISSING'):
+        sys.exit(1)
+    print(os.environ.get('S6_TEST_COMPOSE_VERSION', 'Docker Compose version v2.26.0'))
 if sys.argv[1:2] == ['run']:
     args = sys.argv[1:]
     mount = args[args.index('--mount') + 1]
@@ -114,7 +116,16 @@ if sys.argv[1:2] == ['run']:
                                 text=True, capture_output=True, env=self.env,
                                 cwd=self.home, timeout=30)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Docker Compose 2.3 or newer is required", result.stdout + result.stderr)
+        self.assertIn("Docker Compose 2.26 or newer is required", result.stdout + result.stderr)
+
+    def test_old_compose_version_reports_detected_version_and_minimum(self):
+        self.env["S6_TEST_COMPOSE_VERSION"] = "Docker Compose version v2.25.0"
+        result = subprocess.run(["/bin/bash"], input=(ROOT / "install.sh").read_text(),
+                                text=True, capture_output=True, env=self.env,
+                                cwd=self.home, timeout=30)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Docker Compose 2.26 or newer is required; found Docker Compose version v2.25.0",
+                      result.stdout + result.stderr)
 
     def test_exported_compose_ports_control_readiness_and_summary(self):
         self.env.update(S6_PORT="18080", S6_ENGINE_PORT="18001")

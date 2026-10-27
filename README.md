@@ -6,7 +6,7 @@ There is no S6_cut account, credit system, watermark, artificial usage limit, or
 
 ## One-paste install
 
-With Docker running (Compose v2.3 or newer), paste the command for your OS:
+With Docker running (Compose v2.26 or newer), paste the command for your OS:
 
 ### Linux / macOS
 
@@ -31,7 +31,7 @@ The installer downloads S6_cut into `~/s6_cut`, creates `.env` on first run, bui
 
 Git is optional: the installer uses your existing Git installation when available, or runs Git inside Docker automatically. Node.js, Python, FFmpeg, and the other application dependencies are installed inside the application containers.
 
-Requirements: a running Docker Engine or Docker Desktop with Compose v2.3 or newer, curl for the Linux/macOS download command, and enough storage for the application images, source media, models, and renders. 8 GB RAM is recommended. The installer does not install Docker.
+Requirements: a running Docker Engine or Docker Desktop with Compose v2.26 or newer, curl for the Linux/macOS download command, and enough storage for the application images, source media, models, and renders. 8 GB RAM is recommended. The installer does not install Docker.
 
 The default URLs are:
 

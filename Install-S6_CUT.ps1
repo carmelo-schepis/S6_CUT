@@ -71,10 +71,20 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Ok "Docker engine is running"
 
-# Docker Compose 2.3+
-docker compose version > $null 2>&1
+# Docker Compose 2.26+
+$ComposeVersionOutput = @(docker compose version 2>&1) -join [Environment]::NewLine
 if ($LASTEXITCODE -ne 0) {
-    Die "Docker Compose 2.3 or newer is required but the 'docker compose' command is missing. Install Docker Compose 2.3 or newer (https://docs.docker.com/compose/install/), then re-run the install command."
+    Die "Docker Compose 2.26 or newer is required but the 'docker compose' command is missing or unavailable. Install Docker Compose 2.26 or newer (https://docs.docker.com/compose/install/), then re-run the install command."
+}
+if ($ComposeVersionOutput -match 'v?(\d+)\.(\d+)') {
+    $ComposeMajor = [int]$Matches[1]
+    $ComposeMinor = [int]$Matches[2]
+    if ($ComposeMajor -lt 2 -or ($ComposeMajor -eq 2 -and $ComposeMinor -lt 26)) {
+        Die "Docker Compose 2.26 or newer is required; found $ComposeVersionOutput. Upgrade Docker Compose (https://docs.docker.com/compose/install/), then re-run the install command."
+    }
+}
+else {
+    Die "Could not determine the Docker Compose version from '$ComposeVersionOutput'. Install Docker Compose 2.26 or newer (https://docs.docker.com/compose/install/), then re-run the install command."
 }
 Write-Ok "Docker Compose found"
 
@@ -208,11 +218,12 @@ function Get-ResolvedComposePort {
 }
 
 # Ask Compose to resolve .env syntax, interpolation, defaults, and process-env
-# overrides exactly as it will for `compose up`. `--format json` is supported by
-# Compose v2.3+; ConvertFrom-Json is available in PowerShell 5.1.
+# overrides exactly as it will for `compose up`. Compose v2.26+ returns JSON
+# with `--format json` when interpolation is enabled; ConvertFrom-Json is
+# available in PowerShell 5.1.
 $ComposeConfigOutput = @(docker compose config --format json)
 if ($LASTEXITCODE -ne 0) {
-    Die "Could not resolve Docker Compose configuration and port bindings. Ensure Docker Compose 2.3 or newer is installed and that compose.yaml and .env are valid."
+    Die "Could not resolve Docker Compose configuration and port bindings. Ensure Docker Compose 2.26 or newer is installed and that compose.yaml and .env are valid."
 }
 try {
     $ComposeConfig = ($ComposeConfigOutput -join [Environment]::NewLine) | ConvertFrom-Json -ErrorAction Stop
