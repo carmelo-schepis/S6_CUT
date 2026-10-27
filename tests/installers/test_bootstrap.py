@@ -110,22 +110,18 @@ if sys.argv[1:2] == ['run']:
         self.assertIn("path-docker", tools)
         self.assertNotIn("discovered-docker", tools)
 
-    def test_missing_compose_reports_minimum_version(self):
+    def test_missing_compose_reports_v2_requirement(self):
         self.env["S6_TEST_COMPOSE_MISSING"] = "1"
         result = subprocess.run(["/bin/bash"], input=(ROOT / "install.sh").read_text(),
                                 text=True, capture_output=True, env=self.env,
                                 cwd=self.home, timeout=30)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Docker Compose 2.26 or newer is required", result.stdout + result.stderr)
-
-    def test_old_compose_version_reports_detected_version_and_minimum(self):
-        self.env["S6_TEST_COMPOSE_VERSION"] = "Docker Compose version v2.25.0"
-        result = subprocess.run(["/bin/bash"], input=(ROOT / "install.sh").read_text(),
-                                text=True, capture_output=True, env=self.env,
-                                cwd=self.home, timeout=30)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Docker Compose 2.26 or newer is required; found Docker Compose version v2.25.0",
+        self.assertIn("Docker Compose 2.3 or newer is required but the 'docker compose' command is missing",
                       result.stdout + result.stderr)
+
+    def test_compose_225_is_accepted(self):
+        self.env["S6_TEST_COMPOSE_VERSION"] = "Docker Compose version v2.25.0"
+        self.install()
 
     def test_exported_compose_ports_control_readiness_and_summary(self):
         self.env.update(S6_PORT="18080", S6_ENGINE_PORT="18001")
