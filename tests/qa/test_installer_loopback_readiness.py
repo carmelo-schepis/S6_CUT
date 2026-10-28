@@ -4,6 +4,7 @@ The curl stub only records its URL. This unit test supplements two real Docker
 reproductions; it is never counted as installation or media acceptance evidence.
 """
 from pathlib import Path
+import os
 import re
 import subprocess
 import tempfile
@@ -11,6 +12,26 @@ import unittest
 
 
 class InstallerReadinessTests(unittest.TestCase):
+    def test_legacy_host_port_binding_splits_for_compose(self):
+        source = (Path(__file__).resolve().parents[2] / "install.sh").read_text()
+        definitions = []
+        for name in ("read_env", "web_host_port", "normalize_web_binding"):
+            match = re.search(r"^" + name + r"\(\)\s*\{.*?^\}", source, re.M | re.S)
+            self.assertIsNotNone(match, "installer binding interface changed")
+            definitions.append(match[0])
+        for binding in ("127.0.0.1:54321", "192.168.1.5:54321"):
+            with self.subTest(binding=binding):
+                shell = "\n".join([
+                    "set -eu", "die() { echo \"$*\" >&2; exit 1; }",
+                    *definitions, "normalize_web_binding",
+                    'printf "%s|%s" "$S6_HOST_IP" "$S6_PORT"',
+                ])
+                env = {**os.environ, "S6_PORT": binding}
+                env.pop("S6_HOST_IP", None)
+                result = subprocess.run(["bash", "-c", shell], env=env, text=True,
+                                        capture_output=True, check=True, timeout=5)
+                self.assertEqual(result.stdout, binding.replace(":", "|", 1))
+
     def test_numeric_and_loopback_bind_use_a_valid_health_url(self):
         source = (Path(__file__).resolve().parents[2] / "install.sh").read_text()
         definitions = []
@@ -29,7 +50,6 @@ class InstallerReadinessTests(unittest.TestCase):
                         "die() { exit 1; }; docker() { :; }",
                         'curl() { for arg in "$@"; do :; done; printf "%s" "$arg" > "$CAPTURE"; return 0; }',
                         *definitions, "wait_for_ready"])
-                    import os
                     env = {**os.environ, "S6_PORT": binding, "CAPTURE": str(capture)}
                     proc = subprocess.run(["bash", "-c", shell], cwd=tmp, env=env,
                                           capture_output=True, text=True, timeout=5)
@@ -70,7 +90,6 @@ class InstallerReadinessTests(unittest.TestCase):
                         "die() { exit 1; }",
                         'curl() { printf "%s" "${!#}" > "$CAPTURE"; return 0; }',
                         *definitions, "wait_for_ready"])
-                    import os
                     env = {**os.environ, "S6_PORT": binding, "CAPTURE": str(capture)}
                     proc = subprocess.run(["bash", "-c", shell], cwd=tmp, env=env,
                                           capture_output=True, timeout=5)

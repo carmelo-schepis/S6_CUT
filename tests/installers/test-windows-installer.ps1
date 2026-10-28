@@ -12,12 +12,15 @@ $Installer = [scriptblock]::Create($SourceText)
 $GitPath = (Microsoft.PowerShell.Core\Get-Command git -ErrorAction Stop).Source
 $OriginalLocation = Get-Location
 $OriginalPort = [Environment]::GetEnvironmentVariable("S6_PORT", "Process")
+$OriginalHostIp = [Environment]::GetEnvironmentVariable("S6_HOST_IP", "Process")
 $OriginalEnginePort = [Environment]::GetEnvironmentVariable("S6_ENGINE_PORT", "Process")
 $TestRoot = Join-Path ([IO.Path]::GetTempPath()) ("S6 installer tests " + [guid]::NewGuid().ToString("N"))
 $SourceRepo = Join-Path $TestRoot "source with spaces"
 $script:MockScenario = "Success"
 $script:MockHealthUrls = @()
 $script:MockDockerCalls = @()
+$script:MockWebHostIp = $null
+$script:MockWebPort = $null
 $script:HideGit = $false
 $script:HideDocker = $false
 
@@ -90,12 +93,16 @@ function docker {
         if ($null -ne $ProcessWeb -and $ProcessWeb -ne "") { $WebBinding = $ProcessWeb }
         if ($null -ne $ProcessEngine -and $ProcessEngine -ne "") { $EnginePort = $ProcessEngine }
 
-        $WebHost = ""
+        $WebHost = "0.0.0.0"
         $WebPort = $WebBinding
         if ($WebBinding -match '^(?<host>(?:\d{1,3}\.){3}\d{1,3}):(?<port>\d+)$') {
             $WebHost = $Matches.host
             $WebPort = $Matches.port
         }
+        $ProcessHostIp = [Environment]::GetEnvironmentVariable("S6_HOST_IP", "Process")
+        if ($ProcessHostIp) { $WebHost = $ProcessHostIp }
+        $script:MockWebHostIp = $WebHost
+        $script:MockWebPort = $WebPort
         $Resolved = [PSCustomObject]@{
             services = [PSCustomObject]@{
                 web = [PSCustomObject]@{ ports = @([PSCustomObject]@{ target = 8080; published = $WebPort; host_ip = $WebHost }) }
@@ -134,6 +141,10 @@ function Invoke-MockedInstall {
     $script:HideDocker = $NoDocker
     $script:MockHealthUrls = @()
     $script:MockDockerCalls = @()
+    $script:MockWebHostIp = $null
+    $script:MockWebPort = $null
+    $InitialPort = [Environment]::GetEnvironmentVariable("S6_PORT", "Process")
+    $InitialHostIp = [Environment]::GetEnvironmentVariable("S6_HOST_IP", "Process")
     Push-Location $OriginalLocation
     try {
         $Captured = @(& $Installer -InstallDir $Target -RepoUrl $SourceRepo -Branch "main" -StartTimeout $Timeout 6>&1)
@@ -142,7 +153,11 @@ function Invoke-MockedInstall {
     catch {
         return [PSCustomObject]@{ Error = $_.Exception.Message; HealthUrls = @($script:MockHealthUrls); DockerCalls = @($script:MockDockerCalls); Output = "" }
     }
-    finally { Set-Location $OriginalLocation }
+    finally {
+        [Environment]::SetEnvironmentVariable("S6_PORT", $InitialPort, "Process")
+        [Environment]::SetEnvironmentVariable("S6_HOST_IP", $InitialHostIp, "Process")
+        Set-Location $OriginalLocation
+    }
 }
 
 try {
@@ -177,6 +192,8 @@ try {
     [Environment]::SetEnvironmentVariable("S6_ENGINE_PORT", "18003", "Process")
     $Bound = Invoke-MockedInstall -Name "bound" -Target $DefaultPath
     Assert-Equal "http://127.0.0.1:18082/api/health" $Bound.HealthUrls[0] "IPv4 binding should be split before readiness URL construction."
+    Assert-Equal "127.0.0.1" $script:MockWebHostIp "IPv4 binding should be passed to Compose as a separate host IP."
+    Assert-Equal "18082" $script:MockWebPort "Compose should receive a numeric published port after normalization."
     Assert-True ($Bound.Output -match 'Frontend: http://127\.0\.0\.1:18082') "IPv4 frontend URL was not reported correctly."
     Assert-True ($Bound.Output -match 'Backend:\s+http://localhost:18003') "IPv4 case backend URL was not reported correctly."
 
@@ -186,6 +203,15 @@ try {
     Assert-Equal "http://127.0.0.1:18084/api/health" $Wildcard.HealthUrls[0] "Wildcard bind should be health-checked through loopback."
     Assert-True ($Wildcard.Output -match 'Frontend: http://localhost:18084') "Wildcard frontend should report a usable local URL."
     Assert-True ($Wildcard.Output -match 'Backend:\s+http://localhost:18005') "Wildcard case backend URL was not reported correctly."
+
+    [Environment]::SetEnvironmentVariable("S6_PORT", $null, "Process")
+    [Environment]::SetEnvironmentVariable("S6_HOST_IP", $null, "Process")
+    Set-Content -LiteralPath (Join-Path $DefaultPath ".env") -Value @("S6_PORT=127.0.0.1:18082", "S6_ENGINE_PORT=18003", "CUSTOM=keep") -Encoding Ascii
+    $LegacyEnvBinding = Invoke-MockedInstall -Name "legacy loopback env binding" -Target $DefaultPath
+    Assert-Equal $null $LegacyEnvBinding.Error "A legacy .env IP:port binding should succeed."
+    Assert-Equal "127.0.0.1" $script:MockWebHostIp "A legacy .env binding should be split into Compose host_ip."
+    Assert-Equal "18082" $script:MockWebPort "A legacy .env binding should be split into a numeric Compose port."
+    Assert-Equal "127.0.0.1:18082" ((Get-Content -LiteralPath (Join-Path $DefaultPath ".env") | Where-Object { $_ -like "S6_PORT=*" }) -replace '^S6_PORT=', '') "The installer should preserve the legacy .env value."
 
     [Environment]::SetEnvironmentVariable("S6_PORT", $null, "Process")
     [Environment]::SetEnvironmentVariable("S6_ENGINE_PORT", $null, "Process")
@@ -259,6 +285,7 @@ try {
 }
 finally {
     [Environment]::SetEnvironmentVariable("S6_PORT", $OriginalPort, "Process")
+    [Environment]::SetEnvironmentVariable("S6_HOST_IP", $OriginalHostIp, "Process")
     [Environment]::SetEnvironmentVariable("S6_ENGINE_PORT", $OriginalEnginePort, "Process")
     Set-Location $OriginalLocation
     if (Test-Path -LiteralPath $TestRoot) { Remove-Item -LiteralPath $TestRoot -Recurse -Force }

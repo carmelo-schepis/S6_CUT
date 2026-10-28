@@ -215,6 +215,17 @@ web_host_port() {
   printf '%s' "$port"
 }
 
+normalize_web_binding() {
+  local binding address port
+  binding="$(read_env S6_PORT 8080)"
+  if [[ "$binding" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}:[0-9]{1,5}$ ]]; then
+    address="${binding%:*}"
+    port="$(web_host_port "$binding")"
+    export S6_HOST_IP="$address"
+    export S6_PORT="$port"
+  fi
+}
+
 wait_for_ready() {
   CURRENT_STEP="waiting for S6_cut to become ready"
   local web_binding web_port url deadline
@@ -276,6 +287,7 @@ main() {
   check_prerequisites
   prepare_repository
   prepare_environment
+  normalize_web_binding
   start_containers
   wait_for_ready
   report_status
