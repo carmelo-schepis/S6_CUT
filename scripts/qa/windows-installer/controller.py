@@ -276,8 +276,13 @@ def read_investigation(data):
         if result.get('classification') in {'BLOCKED', 'INCONCLUSIVE'}:
             data['status'] = result['classification']
     if not data.get('confirmed'):
-        data['status'] = 'INCONCLUSIVE'
-        data['action'] = 'Reproduce the suspected failure before creating an installer-defect PR'
+        if data.get('investigation', {}).get('classification') == 'BLOCKED':
+            data['status'] = 'BLOCKED'
+        else:
+            data['status'] = 'INCONCLUSIVE'
+            data['action'] = 'Reproduce the suspected failure before creating an installer-defect PR'
+    elif not data.get('pr_urls'):
+        data['action'] = 'Confirmed installer defect has no validated PR; review retained investigation evidence'
     data['investigation_finished'] = True
     save(data)
 

@@ -178,6 +178,17 @@ class OutcomesTests(unittest.TestCase):
             self.assertEqual(data['status'], 'INCONCLUSIVE')
             self.assertTrue(data['investigation_finished'])
 
+    def test_infrastructure_investigation_remains_blocked_without_defect_pr(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            contract.write_json(root / 'runs' / RUN / 'investigation.json', {'confirmed': False, 'classification': 'BLOCKED', 'action': 'Restore Docker daemon', 'pr_urls': []})
+            data = {'run_id': RUN, 'status': 'PRODUCT_FAILURE', 'defect_fingerprint': 'known'}
+            with mock.patch.object(controller, 'CONTROL', root):
+                controller.read_investigation(data)
+            self.assertEqual(data['status'], 'BLOCKED')
+            self.assertEqual(data['action'], 'Restore Docker daemon')
+            self.assertEqual(data.get('pr_urls', []), [])
+
     def test_monitor_retries_terminal_cleanup_before_admitting_new_run(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
