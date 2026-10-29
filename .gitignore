@@ -20,12 +20,6 @@
 .n8n/
 .ollama/
 .pi/
-# Keep the project-local Browserbase Pi extension source and lockfiles versioned.
-!.pi/
-.pi/*
-!.pi/extensions/
-!.pi/extensions/browserbase/
-!.pi/extensions/browserbase/**
 .pipedocker_engine/
 .poshssh/
 .pytest_cache/

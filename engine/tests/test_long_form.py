@@ -21,7 +21,7 @@ def _require_ffmpeg(settings: Settings) -> None:
     """Skip a test whose fixture is built with the real FFmpeg tools.
 
     These are the FFmpeg-gated smoke tests described in
-    DO-NOT-CHANGE/AGENTS.md section 9: on a host without ffmpeg/ffprobe they
+    DO-NOT-CHANGE/INVARIANTS.md section 9: on a host without ffmpeg/ffprobe they
     must skip cleanly rather than fail with a bare FileNotFoundError. The
     planner tests in this module use no external tools and keep running.
     """

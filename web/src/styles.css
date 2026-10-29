@@ -5,7 +5,7 @@
 @font-face { font-family: "Reference Bodoni Moda"; src: url("/fonts/bodoni_moda/BodoniModa-Variable.ttf") format("truetype"); font-weight: 100 900; font-display: swap; }
 @font-face { font-family: "Music Oswald"; src: url("/fonts/oswald/Oswald-Regular.ttf") format("truetype"); font-weight: 400; font-display: swap; }
 @font-face { font-family: "Music Gaegu"; src: url("/fonts/gaegu/Gaegu-Bold.ttf") format("truetype"); font-weight: 700; font-display: swap; }
-/* DO-NOT-CHANGE: see DO-NOT-CHANGE/AGENTS.md — design tokens; extend them, don't bypass */
+/* DO-NOT-CHANGE: see DO-NOT-CHANGE/INVARIANTS.md — design tokens; extend them, don't bypass */
 :root {
   color-scheme: dark;
   /* ---------------------------------------------------------------------
@@ -1716,7 +1716,7 @@ main { min-width: 0; }
    ---------------------------------------------------------------------------
    Additive layer. Nothing above is deleted or rewritten; every rule here
    resolves through the existing token surface (--space-*, --surface-*,
-   --border*, --selector-highlight) exactly as DO-NOT-CHANGE/AGENTS.md requires.
+   --border*, --selector-highlight) exactly as DO-NOT-CHANGE/INVARIANTS.md requires.
 
    What this pass fixes, in the order a reader notices it:
 

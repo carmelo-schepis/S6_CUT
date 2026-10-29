@@ -4,8 +4,8 @@ import { createServer } from "node:net";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// Isolated, serial fixture-assisted media acceptance. Coordinator owns invoking
-// this script; it intentionally builds and runs Compose only when explicitly run.
+// Isolated, serial fixture-assisted media acceptance. Run this script explicitly;
+// it builds and runs Compose.
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const runId = `${Date.now()}-${process.pid}`;
 const project = `s6-reaction-policy-${runId}`.toLowerCase();

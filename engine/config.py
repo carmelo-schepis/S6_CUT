@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-# DO-NOT-CHANGE: see DO-NOT-CHANGE/AGENTS.md — env var defaults must match compose.yaml
+# DO-NOT-CHANGE: see DO-NOT-CHANGE/INVARIANTS.md — env var defaults must match compose.yaml
 # Changing a default or unit (bytes vs MB, seconds vs minutes) silently breaks deployments
 
 

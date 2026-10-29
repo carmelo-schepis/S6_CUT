@@ -30,7 +30,7 @@ class ResolvedVisual:
     asset_path: Path | None = None
 
 
-# DO-NOT-CHANGE: see DO-NOT-CHANGE/AGENTS.md
+# DO-NOT-CHANGE: see DO-NOT-CHANGE/INVARIANTS.md
 # deterministic matching (explain/resolve) and content-addressed blob store are contracts
 class LibraryRules:
     def __init__(self, db: Database, library_root: Path):

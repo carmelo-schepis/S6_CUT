@@ -563,7 +563,7 @@ def _media_fn(name: str):
     return fn
 
 
-# DO-NOT-CHANGE: see DO-NOT-CHANGE/AGENTS.md
+# DO-NOT-CHANGE: see DO-NOT-CHANGE/INVARIANTS.md
 # job state machine, staged publication, immutable sources, and the outer
 # failure guard that preserves already-published clips are hard invariants
 

@@ -1,4 +1,4 @@
-// DO-NOT-CHANGE: see DO-NOT-CHANGE/AGENTS.md
+// DO-NOT-CHANGE: see DO-NOT-CHANGE/INVARIANTS.md
 // zod schemas must mirror engine/models.py camelCase fields exactly
 // A parse failure on any view is a hard error — add fields on both sides together
 

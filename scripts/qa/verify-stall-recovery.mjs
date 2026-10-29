@@ -1,6 +1,6 @@
 import { chromium } from "@playwright/test";
 const BASE = "http://127.0.0.1:8080";
-const TARGET = "Codex Final Browser Retest 20260826T062538111Z";
+const TARGET = "Final Browser Retest 20260826T062538111Z";
 const b = await chromium.launch();
 const ctx = await b.newContext({ viewport: { width: 1440, height: 900 } });
 const page = await ctx.newPage();

@@ -45,7 +45,7 @@ from .title_backfill import TitleApplyRequest, TitleApplyResponse, TitleBackfill
 from .video_downloads import VideoDownloadInput, VideoDownloadManager, VideoDownloadTask
 
 
-# DO-NOT-CHANGE: see DO-NOT-CHANGE/AGENTS.md
+# DO-NOT-CHANGE: see DO-NOT-CHANGE/INVARIANTS.md
 # signed URLs, confined paths, rate-limited creation, camelCase API contract with frontend
 
 
