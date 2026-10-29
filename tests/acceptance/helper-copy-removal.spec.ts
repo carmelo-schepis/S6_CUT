@@ -42,7 +42,17 @@ async function openClips(page: Page) {
   await expect(page.getByRole("complementary", { name: "Clips and editing assistant" })).toBeVisible();
 }
 
+async function pinSidebar(page: Page) {
+  await expect(page.locator("#startup-screen")).toHaveCount(0, { timeout: 30_000 });
+  const expand = page.getByRole("button", { name: "Expand sidebar" });
+  if (await expand.count()) {
+    await expand.click();
+    await expect(page.getByRole("button", { name: "Collapse sidebar" })).toBeVisible();
+  }
+}
+
 async function navigate(page: Page, label: string) {
+  await pinSidebar(page);
   await page.getByRole("button", { name: label, exact: true }).click();
   await expect(page.locator("#main-content")).toBeVisible();
 }
@@ -76,6 +86,7 @@ async function expectRemovedCopyAbsent(page: Page) {
 }
 
 async function checkProcessingModes(page: Page) {
+  await pinSidebar(page);
   for (const mode of ["Auto", "Fast", "Smart"]) {
     const button = page.getByRole("button", { name: mode, exact: true });
     await button.click();
@@ -109,6 +120,10 @@ test.describe("removed helper copy", () => {
 
     profilesPayload = [disconnectedProfile];
     releaseProfiles();
+    // The app may still be starting its profile request when the deferred
+    // response is released. Reload once the fixture is ready so the next
+    // request receives the disconnected state deterministically.
+    await page.reload({ waitUntil: "domcontentloaded" });
     await expect(page.getByText("Add optional AI providers")).toBeVisible();
     await checkProcessingModes(page);
     await capture(page, testInfo, "providers-disconnected");
