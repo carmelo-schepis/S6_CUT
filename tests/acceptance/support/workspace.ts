@@ -236,20 +236,31 @@ export async function extractZip(zipPath: string, destination: string) {
 }
 
 /** Read clip boundaries from the job record; the workspace does not show them. */
+type JsonResponse = {
+  ok: boolean | (() => boolean);
+  status: number | (() => number);
+  json(): Promise<unknown>;
+};
+
+async function responseJson(response: JsonResponse, label: string): Promise<unknown> {
+  const ok = typeof response.ok === "function" ? response.ok() : response.ok;
+  const status = typeof response.status === "function" ? response.status() : response.status;
+  if (!ok) throw new Error(`${label} failed (${status})`);
+  return response.json();
+}
+
 export async function jobBoundaries(projectName: string, page?: Page) {
   const projectsResponse = page
     ? await page.request.get(`${gateway}/api/v1/projects`)
     : await fetch(`${gateway}/api/v1/projects`);
-  if (!projectsResponse.ok) throw new Error(`project lookup failed (${projectsResponse.status})`);
-  const projects: unknown = await projectsResponse.json();
+  const projects: unknown = await responseJson(projectsResponse, "project lookup");
   if (!Array.isArray(projects)) throw new Error("project lookup returned an invalid response");
   const project = projects.find((item: { name: string }) => item.name === projectName);
   if (!project) throw new Error(`project ${projectName} not found in the engine record`);
   const jobsResponse = page
     ? await page.request.get(`${gateway}/api/v1/jobs`)
     : await fetch(`${gateway}/api/v1/jobs`);
-  if (!jobsResponse.ok) throw new Error(`job lookup failed (${jobsResponse.status})`);
-  const jobs: unknown = await jobsResponse.json();
+  const jobs: unknown = await responseJson(jobsResponse, "job lookup");
   if (!Array.isArray(jobs)) throw new Error("job lookup returned an invalid response");
   const job = jobs.find((item: { projectId: string }) => item.projectId === project.id);
   if (!job) throw new Error(`job for ${projectName} not found`);

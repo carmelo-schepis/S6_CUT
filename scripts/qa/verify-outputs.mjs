@@ -230,7 +230,14 @@ async function verifyClip(clip, context) {
 async function verifyManifest(name, options) {
   const manifestPath = join(root, "reports", `${name}.json`);
   let manifest;
-  try { manifest = JSON.parse(await readFile(manifestPath, "utf8")); } catch { return null; }
+  try {
+    manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  } catch (error) {
+    throw new Error(`Required ${name} manifest is missing or invalid at ${manifestPath}: ${error.message}`);
+  }
+  if (!manifest || typeof manifest !== "object" || !Array.isArray(manifest.clips) || manifest.clips.length === 0) {
+    throw new Error(`Required ${name} manifest contains no clips: ${manifestPath}`);
+  }
   const sourceInfo = await probe(fixturePath);
   const fixtureSha = sha256(await readFile(fixturePath));
   const context = {
