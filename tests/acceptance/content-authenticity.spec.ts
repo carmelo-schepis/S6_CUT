@@ -12,7 +12,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  OVERALL_DEADLINE_MS, assertPlayback, capturePlaybackStills, checkPlayback, collectClips,
+  OVERALL_DEADLINE_MS, assertPlayback, checkPlayback, collectClips,
   createClipProject, gateway, openWorkspaceForProject, waitForProjectReady,
   writeManifest as writeManifestTo,
 } from "./support/workspace";
@@ -34,7 +34,9 @@ test.describe("S6_cut generates real playable video", () => {
     const observed = new Set<string>();
 
     await page.goto("/", { waitUntil: "domcontentloaded" });
-    await expect(page.getByText("Local engine ready")).toBeVisible({ timeout: 90_000 });
+    // The engine-health badge reads "Local engine" in both the desktop top bar
+    // and the mobile shell, so this works before any shell-specific copy.
+    await expect(page.locator(".status-local").filter({ hasText: "Local engine" })).toBeVisible({ timeout: 90_000 });
 
     await createClipProject(page, { name: projectName, count: 2, mode: "Smart", aspect: "9:16", min: 8, max: 20, captions: true, source: { kind: "file", path: fixture } });
     await waitForProjectReady(page, observed);
@@ -93,7 +95,8 @@ test.describe("S6_cut generates real playable video", () => {
       { id: string; title: string; blobId: string }[];
 
     await page.getByRole("button", { name: "Library", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "Library" })).toBeVisible({ timeout: 30_000 });
+    // exact:true so the loading "Opening your Library" empty state doesn't match.
+    await expect(page.getByRole("heading", { name: "Library", exact: true })).toBeVisible({ timeout: 30_000 });
     await page.getByLabel("Asset origin").selectOption("generated-clip");
     await expect(page.locator(".asset-card").first()).toBeVisible({ timeout: 30_000 });
 
@@ -166,7 +169,7 @@ test.describe("S6_cut generates real playable video", () => {
     const observed = new Set<string>();
 
     await page.goto("/", { waitUntil: "domcontentloaded" });
-    await expect(page.getByText("Local engine ready")).toBeVisible({ timeout: 90_000 });
+    await expect(page.locator(".status-local").filter({ hasText: "Local engine" })).toBeVisible({ timeout: 90_000 });
 
     await createClipProject(page, { name: projectName, count: 2, mode: "Fast", aspect: "9:16", min: 8, max: 20, captions: false, source: { kind: "file", path: fixture } });
     await waitForProjectReady(page, observed);
@@ -234,7 +237,7 @@ test.describe("S6_cut generates real playable video", () => {
     expect((await fetch(`${gateway}/api/v1/profiles/${profile.id}/test`, { method: "POST" })).ok).toBeTruthy();
 
     await page.goto("/", { waitUntil: "domcontentloaded" });
-    await expect(page.getByText("Local engine ready")).toBeVisible({ timeout: 90_000 });
+    await expect(page.locator(".status-local").filter({ hasText: "Local engine" })).toBeVisible({ timeout: 90_000 });
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await expect(page.getByRole("article").filter({ hasText: "Authenticity OpenRouter failure" }).first())
       .toContainText(/Connected/, { timeout: 30_000 });
