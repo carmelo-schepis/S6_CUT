@@ -1,4 +1,4 @@
-// DO-NOT-CHANGE: see DO-NOT-CHANGE/AGENTS.md
+// DO-NOT-CHANGE: see DO-NOT-CHANGE/INVARIANTS.md
 // API paths (/api/v1/...), signed URLs from server only, never construct file paths client-side
 
 import {

@@ -13,7 +13,7 @@ console.log("CTA name:", JSON.stringify(await page.getByRole("button", { name: /
 console.log("CTA aria:", JSON.stringify(await page.getByRole("button", { name: /^Create/ }).evaluate((e) => e.textContent)));
 
 // (3) project search for the terminal-gaps target
-const target = "Codex Final Browser Retest 20260826T062538111Z";
+const target = "Final Browser Retest 20260826T062538111Z";
 const search = page.getByLabel("Search projects");
 console.log("search box present:", await search.count());
 await search.fill(target);

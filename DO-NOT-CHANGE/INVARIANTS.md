@@ -1,7 +1,7 @@
 # DO-NOT-CHANGE — S6_cut engine & UI invariants
 
-This file is a guardrail for AI agents that modify the S6_cut codebase. **Read this
-file before changing anything in `engine/`, `web/`, `docker/`, `compose.yaml`, or the
+This document records invariants for changes to the S6_cut codebase. **Read it
+before changing anything in `engine/`, `web/`, `docker/`, `compose.yaml`, or the
 root scripts.** Everything below is a load-bearing contract. Breaking any of it
 silently corrupts data, invalidates security, or breaks the deterministic engine —
 often in ways that only appear later (lost Library assets, broken signed links,

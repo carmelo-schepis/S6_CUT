@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 from .models import Asset, Clip, Job, LibraryFolder, Project, ProviderProfile, UNSORTED_LIBRARY_FOLDER_ID, now_iso
 
-# DO-NOT-CHANGE: see DO-NOT-CHANGE/AGENTS.md
+# DO-NOT-CHANGE: see DO-NOT-CHANGE/INVARIANTS.md
 # Invariants: additive-only migrations, idempotent publication
 # bidirectional clip<->asset link, content-addressed blob refs, folder redirects
 UNSORTED_FOLDER_ID = UNSORTED_LIBRARY_FOLDER_ID

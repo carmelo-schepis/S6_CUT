@@ -21,7 +21,7 @@ YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", 
 YOUTUBE_VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
 
 
-# DO-NOT-CHANGE: see DO-NOT-CHANGE/AGENTS.md — HMAC payload format, key files, and
+# DO-NOT-CHANGE: see DO-NOT-CHANGE/INVARIANTS.md — HMAC payload format, key files, and
 # confinement are security invariants; changing them breaks every existing signed URL
 
 

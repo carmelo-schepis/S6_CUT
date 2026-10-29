@@ -1,4 +1,4 @@
-// DO-NOT-CHANGE: see DO-NOT-CHANGE/AGENTS.md
+// DO-NOT-CHANGE: see DO-NOT-CHANGE/INVARIANTS.md
 // debounce semantics keep Library <-> Workspace consistent; keep the bounded revalidation
 
 /**
