@@ -6,7 +6,6 @@ for (const width of [390, 1024, 1440]) {
   test(`header stays solid at the scroll boundary at ${width}px`, async ({ page, browserName, isMobile }) => {
     await page.setViewportSize({ width, height: 900 });
     await page.goto("/", { waitUntil: "domcontentloaded" });
-    await page.mouse.move(width - 5, 400);
     await expect(page.getByRole("heading", { name: "Create a project", exact: true })).toBeVisible();
 
     const header = page.locator(".topbar");
@@ -28,6 +27,11 @@ for (const width of [390, 1024, 1440]) {
     });
     await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
     await page.waitForTimeout(300);
+    if (!(browserName === "webkit" && isMobile)) {
+      const headerBox = await header.boundingBox();
+      expect(headerBox).not.toBeNull();
+      await page.mouse.move(headerBox!.x + headerBox!.width / 2, headerBox!.y + headerBox!.height / 2);
+    }
     for (let i = 0; i < 4; i++) {
       // Playwright cannot send wheel input to mobile WebKit. Exercise its
       // scroll boundary directly; desktop browsers use actual wheel input.

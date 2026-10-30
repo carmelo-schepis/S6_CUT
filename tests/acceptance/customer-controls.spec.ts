@@ -119,7 +119,7 @@ test.describe("customer controls", () => {
     await expect(page.getByRole("heading", { name: "Recent projects" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: `Preview source video for ${project.name}` })).toHaveCount(0);
     await page.getByRole("button", { name: "Library", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "Library" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "Library", exact: true })).toBeVisible();
   });
 
   test("the jobs queue is bounded with the total kept visible", async ({ page }) => {

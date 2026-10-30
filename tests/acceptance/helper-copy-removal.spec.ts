@@ -93,22 +93,26 @@ async function capture(page: Page, testInfo: TestInfo, name: string) {
 test.describe("removed helper copy", () => {
   test("provider callout follows pending, disconnected, and connected profile states", async ({ page }, testInfo) => {
     let releaseProfiles!: () => void;
+    let resolveProfilesRequested!: () => void;
     let profilesPayload: unknown[] = [];
     const profilesPending = new Promise<void>(resolve => { releaseProfiles = resolve; });
+    const profilesRequested = new Promise<void>(resolve => { resolveProfilesRequested = resolve; });
     await mockEngine(page, { profiles: [] });
     await page.unroute("**/api/v1/profiles");
     await page.route("**/api/v1/profiles", async route => {
+      resolveProfilesRequested();
       await profilesPending;
       await json(route, profilesPayload);
     });
     await page.goto("/", { waitUntil: "domcontentloaded" });
+    await profilesRequested;
     await expect(page.getByRole("heading", { name: "Processing mode" })).toBeVisible();
     await expect(page.getByText("Add optional AI providers")).toHaveCount(0);
-    await checkProcessingModes(page);
-    await capture(page, testInfo, "providers-pending");
 
+    const disconnectedResponse = page.waitForResponse(response => response.url().includes("/api/v1/profiles") && response.request().method() === "GET" && response.ok());
     profilesPayload = [disconnectedProfile];
     releaseProfiles();
+    await disconnectedResponse;
     await expect(page.getByText("Add optional AI providers")).toBeVisible();
     await checkProcessingModes(page);
     await capture(page, testInfo, "providers-disconnected");

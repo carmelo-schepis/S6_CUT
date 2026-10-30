@@ -111,7 +111,7 @@ test("Library deletion preserves Library behavior without restoring Projects lis
   await expect(page.locator(".project-card, .project-pagination")).toHaveCount(0);
 
   await page.getByRole("button", { name: "Library", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Library" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Library", exact: true })).toBeVisible();
   for (const name of importedNames) {
     await page.getByRole("button", { name: "Import asset" }).click();
     const importPanel = page.locator(".import-panel");
