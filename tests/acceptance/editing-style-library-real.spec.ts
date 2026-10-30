@@ -771,8 +771,15 @@ test("Speech: real YouTube import renders the selected subtitle style, filter, h
         const labels = JSON.parse(execFileSync("docker", ["inspect", "--format", "{{json .Config.Labels}}", engineContainer], { encoding: "utf8" })) as Record<string, string>;
         expect(labels["com.docker.compose.project"], "restart target belongs to the isolated project").toBe(composeProject);
         expect(composeProject).not.toBe("s6-cut");
-        execFileSync("docker", ["restart", engineContainer], { stdio: "ignore" });
-        await expect.poll(async () => { try { return (await fetch(new URL("/healthz", gateway))).ok && (await fetch(new URL("/api/health", gateway))).ok; } catch { return false; } }, { timeout: 240_000, intervals: [2_000] }).toBe(true);
+        // Allow only the deliberate outage window: the still-open Workspace logs
+        // transient gateway errors while the engine restarts. Scope it to the
+        // restart and the health poll so unrelated errors after the engine is
+        // healthy (including the reload below) still fail acceptance.
+        expectErrors = true;
+        try {
+          execFileSync("docker", ["restart", engineContainer], { stdio: "ignore" });
+          await expect.poll(async () => { try { return (await fetch(new URL("/healthz", gateway))).ok && (await fetch(new URL("/api/health", gateway))).ok; } catch { return false; } }, { timeout: 240_000, intervals: [2_000] }).toBe(true);
+        } finally { expectErrors = false; }
         const afterRestart = await refreshJob(job.id);
         expect(normalizeKeys(afterRestart.editingPresentation), "presentation survives an engine restart").toEqual(normalizeKeys(requestPresentation));
         expect(afterRestart.state).toBe("complete");
