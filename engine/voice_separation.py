@@ -37,6 +37,24 @@ MODEL_DIRNAME = MODEL_ID
 MODEL_SAMPLE_RATE = 44_100
 CHUNK_SECONDS = 12
 CONTEXT_SECONDS = 1
+
+
+def _settings_identity(
+    *, model_id: str = MODEL_ID, sample_rate: int = MODEL_SAMPLE_RATE,
+    chunk_seconds: int = CHUNK_SECONDS, context_seconds: int = CONTEXT_SECONDS,
+) -> str:
+    settings = {
+        "model_id": model_id,
+        "sample_rate": sample_rate,
+        "chunk_seconds": chunk_seconds,
+        "context_seconds": context_seconds,
+        "output_format": "pcm_s16le",
+    }
+    encoded = json.dumps(settings, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+SEPARATION_SETTINGS_ID = _settings_identity()
 _READ_FRAMES = 65_536
 _CACHE_LOCK = threading.Lock()
 _MODEL_LOCK = threading.Lock()

@@ -1534,12 +1534,12 @@ class JobManager:
     def _music_voice_stem(self, job: Job, private: dict[str, Any], source: Path, metadata: dict[str, Any]) -> Path:
         if not metadata.get("audio"):
             raise MediaError("Keep voice, replace background music requires an audio track in the source video")
-        from .voice_separation import MODEL_ID, VoiceSeparationCancelled, separate_voice, validate_voice_stem
+        from .voice_separation import MODEL_ID, SEPARATION_SETTINGS_ID, VoiceSeparationCancelled, separate_voice, validate_voice_stem
 
         source_hash = str(private.get("source_hash") or sha256_file(source))
         private["source_hash"] = source_hash
         target = self.settings.data_path / "jobs" / job.id / "transcription" / (
-            f"voice-{source_hash[:24]}-{hashlib.sha256(MODEL_ID.encode()).hexdigest()[:12]}.wav"
+            f"voice-{source_hash[:24]}-{SEPARATION_SETTINGS_ID[:12]}.wav"
         )
         state = private.get("music_voice_stem")
         if isinstance(state, dict):
@@ -1547,6 +1547,7 @@ class JobManager:
             if (
                 state.get("source_hash") == source_hash
                 and state.get("model_identity") == MODEL_ID
+                and state.get("settings_identity") == SEPARATION_SETTINGS_ID
                 and path == target and path.is_file()
                 and state.get("stem_hash") == sha256_file(path)
                 and validate_voice_stem(path, float(metadata["duration"]), self.settings)
@@ -1575,7 +1576,8 @@ class JobManager:
                 raise MediaError("Voice separation returned an empty or invalid narration stem")
             private["music_voice_stem"] = {
                 "path": str(target), "source_hash": source_hash,
-                "model_identity": MODEL_ID, "stem_hash": sha256_file(result),
+                "model_identity": MODEL_ID, "settings_identity": SEPARATION_SETTINGS_ID,
+                "stem_hash": sha256_file(result),
             }
             self._save(job, private)
             return target
