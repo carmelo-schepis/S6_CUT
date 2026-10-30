@@ -33,7 +33,7 @@ export function ProcessingState({ job, waitingForEngine = false }: { job: Job; w
       : job.state === "recovered" ? "Recovering checkpointed work"
         : job.downloadProgress?.phase === "stalled" ? "Download stalled"
           : job.stageLabel;
-  const hasItems = job.currentItem > 0 && job.totalItems > 0;
+  const hasItems = job.currentItem > 0 && job.totalItems > 0 && job.currentItem <= job.totalItems;
   // The item count stays visible while reconnecting: the disconnect notice is
   // carried by the workspace strip, not by replacing real progress data.
   const stageDetail = hasItems ? `${job.currentItem} of ${job.totalItems} items` : null;

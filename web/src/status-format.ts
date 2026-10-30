@@ -112,7 +112,8 @@ export function statesCount(text: string | null | undefined, current: number | n
 export function jobFacts(job: Pick<Job, "downloadProgress" | "stageLabel" | "currentItem" | "totalItems" | "progress">): JobFacts {
   const download = activeDownload(job);
   const facts = download ? downloadFacts(download) : null;
-  const items = job.currentItem > 0 && job.totalItems > 0 ? `${job.currentItem} of ${job.totalItems}` : null;
+  // A count only means something when the current item sits inside the total.
+  const items = job.currentItem > 0 && job.totalItems > 0 && job.currentItem <= job.totalItems ? `${job.currentItem} of ${job.totalItems}` : null;
   return {
     stage: facts ? facts.phase : job.stageLabel,
     detail: facts ? facts.transferred : items,

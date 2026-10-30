@@ -48,7 +48,7 @@ const BAND_GAP = 24;
 /** `--box-gap`: the space between two boxed sections, and between panes. */
 const BOX_GAP = 16;
 /** The sections drawn as boxes (see "Workspace boxes" in styles.css). */
-const BOXED = ["notice-panel", "checklist-panel", "workspace-grid", "board-panel"];
+const BOXED = ["stalled-callout", "job-strip", "notice-panel", "checklist-panel", "workspace-grid", "board-panel"];
 /** `--box-gap` again: the gutter between two boxed panes. */
 const PANE_GUTTER = BOX_GAP;
 /** `--box-radius`: the corner of every boxed section. */

@@ -12,6 +12,9 @@ vi.mock("../api", () => ({
 }));
 import { createClipJob } from "../api";
 
+/** Opens every collapsed option row, as a customer would to reach its controls. */
+const openOptions = () => screen.queryAllByRole("button").filter((button) => button.classList.contains("create-option-toggle") && button.getAttribute("aria-expanded") === "false").forEach((button) => fireEvent.click(button));
+
 const health: Health = {
   status: "ready", version: "test", database: true, ffmpeg: true, ffprobe: true, whisper: true,
   ytdlp: true, dataPath: "Local mounted data directory", freeBytes: 1_000_000,
@@ -38,6 +41,7 @@ afterEach(() => vi.useRealTimers());
 describe("regular subtitle styles", () => {
   it("shows the twelve cards under the unchanged editorial intents and submits nothing by default", async () => {
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    openOptions();
     const cards = group("Subtitle style").getAllByRole("button");
     expect(cards.map((card) => card.getAttribute("aria-label"))).toEqual(CAPTION_PRESETS.map((item) => item.label));
     expect(cards).toHaveLength(12);
@@ -54,6 +58,7 @@ describe("regular subtitle styles", () => {
 
   it("keeps the editorial intent separate from the visual preset and sends only the changed choices", async () => {
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    openOptions();
     fireEvent.click(screen.getByRole("button", { name: /^Hype/ }));
     for (const card of CAPTION_PRESETS) {
       fireEvent.click(pressed("Subtitle style", card.label));
@@ -71,6 +76,7 @@ describe("regular subtitle styles", () => {
 
   it("matches Editorial default phrase size and emphasis to the selected intent", () => {
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    openOptions();
     const selectedSample = () => document.querySelector(".speech-frame-caption .caption-sample")!;
 
     fireEvent.click(screen.getByRole("button", { name: /^Serious/ }));
@@ -91,6 +97,7 @@ describe("regular subtitle styles", () => {
     window.matchMedia = ((query: string) => ({ matches: query.includes("reduce"), media: query, addEventListener: vi.fn(), removeEventListener: vi.fn() })) as unknown as typeof window.matchMedia;
     try {
       render(<ProjectsView health={health} onCreated={vi.fn()} />);
+      openOptions();
       const sample = () => document.querySelector(".speech-frame-caption .caption-sample")!;
       expect(screen.getByRole("button", { name: "Play sample" })).toBeVisible();
       expect(sample()).toHaveAttribute("data-play", "false");
@@ -107,6 +114,7 @@ describe("regular subtitle styles", () => {
 
   it("reflects the heading, filter and sparse emoji in the sample without enabling the heading", async () => {
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    openOptions();
     const hook = screen.getByRole("checkbox", { name: "Hook text" });
     fireEvent.click(pressed("Heading appearance", "Dark box"));
     expect(hook).not.toBeChecked();
@@ -126,6 +134,7 @@ describe("regular subtitle styles", () => {
 
   it("disables captions and emoji in Fast and with subtitles off but keeps the picture filter", async () => {
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    openOptions();
     fireEvent.click(pressed("Subtitle style", "Karaoke line"));
     fireEvent.click(pressed("Video filter", "Vintage"));
     fireEvent.click(screen.getByRole("button", { name: "Fast" }));
@@ -151,7 +160,9 @@ describe("regular subtitle styles", () => {
 describe("Music additions and mode isolation", () => {
   it("adds three themes to the existing grid and keeps theme, animation and filter independent", async () => {
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    openOptions();
     fireEvent.click(mode("Music"));
+    openOptions();
     expect(screen.queryByRole("group", { name: "Subtitle style" })).toBeNull();
     expect(screen.queryByRole("group", { name: "Heading appearance" })).toBeNull();
     expect(screen.queryByRole("group", { name: "Emoji reactions" })).toBeNull();
@@ -169,16 +180,19 @@ describe("Music additions and mode isolation", () => {
 
   it("never submits hidden settings from the other mode", async () => {
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    openOptions();
     fireEvent.click(pressed("Subtitle style", "Bold outline"));
     fireEvent.click(pressed("Video filter", "Warm"));
     fireEvent.click(pressed("Emoji reactions", "Off"));
     fireEvent.click(mode("Music"));
+    openOptions();
     fireEvent.click(pressed("Lyrics subtitle theme", "Soft glow"));
     chooseFile();
     const music = await submit();
     expect(music.editingPresentation).toBeUndefined();
     expect(music.musicPresentation).toMatchObject({ subtitleTheme: "soft_glow" });
     fireEvent.click(mode("Clip"));
+    openOptions();
     fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
     await waitFor(() => expect(createClipJob).toHaveBeenCalledTimes(2));
     const speech = vi.mocked(createClipJob).mock.calls[1][0];
@@ -194,5 +208,29 @@ describe("editing presentation payload builders", () => {
     expect(speechEditingPresentation({ ...base, captionPreset: "yellow_focus", emojiMode: "sparse", headingStyle: "white_banner", videoFilter: "vibrant", captionsAvailable: false, headingAvailable: false })).toEqual({ version: 1, videoFilter: "vibrant" });
     expect(musicEditingPresentation("existing")).toBeUndefined();
     expect(musicEditingPresentation("black_white")).toEqual({ version: 1, videoFilter: "black_white" });
+  });
+});
+
+describe("option rows", () => {
+  it("starts every row closed and shows each current value on its line", () => {
+    render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    const subtitle = screen.getByRole("button", { name: "Subtitle style", exact: true });
+    expect(subtitle).toHaveAttribute("aria-expanded", "false");
+    expect(subtitle).toHaveAccessibleDescription("Editorial default");
+    expect(screen.getByRole("button", { name: "Advanced controls", exact: true })).toHaveAccessibleDescription("9:16 · 20–60 s");
+    expect(screen.queryByRole("group", { name: "Subtitle style" })).not.toBeInTheDocument();
+  });
+
+  it("keeps a choice made in a row after the row is collapsed, and still submits it", async () => {
+    render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    const subtitle = screen.getByRole("button", { name: "Subtitle style", exact: true });
+    fireEvent.click(subtitle);
+    fireEvent.click(pressed("Subtitle style", "Word pop"));
+    fireEvent.click(subtitle);
+    expect(subtitle).toHaveAttribute("aria-expanded", "false");
+    expect(subtitle).toHaveAccessibleDescription("Word pop");
+    chooseFile();
+    const payload = await submit();
+    expect(payload.editingPresentation).toEqual({ version: 1, captionPreset: "word_pop" });
   });
 });
