@@ -69,6 +69,22 @@ describe("regular subtitle styles", () => {
     expect(payload.editingPresentation).toEqual({ version: 1, captionPreset: "word_pop", videoFilter: "warm" });
   });
 
+  it("matches Editorial default phrase size and emphasis to the selected intent", () => {
+    render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    const selectedSample = () => document.querySelector(".speech-frame-caption .caption-sample")!;
+
+    fireEvent.click(screen.getByRole("button", { name: /^Serious/ }));
+    expect(selectedSample()).toHaveAttribute("data-editorial", "serious");
+    expect(selectedSample()).toHaveAttribute("data-editorial-emphasis", "none");
+    expect(selectedSample().querySelectorAll(".cap-phrase .cap-word")).toHaveLength(6);
+    expect(screen.getByText("None; stable colour", { selector: "dd" })).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Educational/ }));
+    expect(selectedSample()).toHaveAttribute("data-editorial", "educational");
+    expect(selectedSample().querySelectorAll(".cap-phrase .cap-word")).toHaveLength(4);
+    expect(screen.getByText("Lower third, 4-word phrases", { selector: "dd" })).toBeVisible();
+  });
+
   it("plays the selected sample, replays it, and starts still under reduced motion", () => {
     vi.useFakeTimers();
     const matchMedia = window.matchMedia;

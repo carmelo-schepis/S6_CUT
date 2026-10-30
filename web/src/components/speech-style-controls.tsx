@@ -13,11 +13,19 @@ function prefersReducedMotion(): boolean {
 }
 
 /** Splits the phrase holding `active` into rows; a bounded stack uses `lines`. */
-function phraseOf(preset: CaptionPresetDefinition, active: number) {
+function sampleGroup(preset: CaptionPresetDefinition, editorialStyle: Style): number {
+  if (preset.id !== "editorial_default") return preset.group;
+  // Keep this sample aligned with the smart_speech_v2 renderer's intent-specific
+  // phrase sizes. Serious uses a stable six-word phrase without colour emphasis.
+  return { serious: 6, educational: 4, funny: 3, hype: 3 }[editorialStyle];
+}
+
+function phraseOf(preset: CaptionPresetDefinition, active: number, editorialStyle: Style) {
   const count = SAMPLE_SENTENCE.length;
-  const phrase = Math.floor(Math.min(active, count - 1) / preset.group);
-  const first = phrase * preset.group;
-  const indexes = Array.from({ length: Math.min(preset.group, count - first) }, (_, offset) => first + offset);
+  const group = sampleGroup(preset, editorialStyle);
+  const phrase = Math.floor(Math.min(active, count - 1) / group);
+  const first = phrase * group;
+  const indexes = Array.from({ length: Math.min(group, count - first) }, (_, offset) => first + offset);
   if (!preset.lines) return { phrase, rows: [indexes] };
   const rows: number[][] = [];
   let cursor = 0;
@@ -29,8 +37,9 @@ function phraseOf(preset: CaptionPresetDefinition, active: number) {
 export function CaptionSample({ preset, active, editorialStyle, playing = false, className = "" }: {
   preset: CaptionPresetDefinition; active: number; editorialStyle: Style; playing?: boolean; className?: string;
 }) {
-  const { phrase, rows } = phraseOf(preset, active);
-  return <span className={`caption-sample caption-${preset.family} ${className}`} data-editorial={editorialStyle} data-play={playing ? "true" : "false"} data-motion={preset.motion}>
+  const { phrase, rows } = phraseOf(preset, active, editorialStyle);
+  const editorialEmphasis = preset.id === "editorial_default" && editorialStyle === "serious" ? "none" : preset.emphasis;
+  return <span className={`caption-sample caption-${preset.family} ${className}`} data-editorial={editorialStyle} data-editorial-emphasis={editorialEmphasis} data-play={playing ? "true" : "false"} data-motion={preset.motion}>
     <span className="cap-phrase" key={phrase}>
       {rows.map((row, rowIndex) => <span className="cap-row" key={rowIndex}>
         {row.map((index) => <Fragment key={index}>{index !== row[0] && " "}<span className="cap-word" data-state={index < active ? "past" : index === active ? "active" : "future"}>{SAMPLE_SENTENCE[index]}</span></Fragment>)}
@@ -115,8 +124,8 @@ export function SpeechSubtitleStyleControls({ value, onChange, editorialStyle, v
         <dl className="info-list">
           <dt>Font</dt><dd>{font}</dd>
           <dt>Outline / background</dt><dd>{selected.backing}</dd>
-          <dt>Emphasis</dt><dd>{selected.emphasis}</dd>
-          <dt>Placement</dt><dd>{selected.placement}</dd>
+          <dt>Emphasis</dt><dd>{selected.id === "editorial_default" && editorialStyle === "serious" ? "None; stable colour" : selected.emphasis}</dd>
+          <dt>Placement</dt><dd>{selected.id === "editorial_default" ? `Lower third, ${sampleGroup(selected, editorialStyle)}-word phrases` : selected.placement}</dd>
         </dl>
         <button type="button" className="button button-quiet" onClick={() => setSample({ id: selected.id, step: 0, run: run + 1 })}>{step === null ? "Play sample" : "Replay sample"}</button>
         <small className="form-hint">Style sample: “{SAMPLE_SENTENCE.join(" ")}” This is an illustration, not a render of your video. Editorial style still decides which moments are chosen.</small>
