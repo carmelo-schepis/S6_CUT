@@ -17,6 +17,7 @@ const THEME_PREVIEW_CLASS: Record<MusicTheme, string> = {
   clean: "theme-clean", warm: "theme-warm", serif: "theme-serif",
   reference_white_sans: "theme-reference-white-sans", reference_yellow_sans: "theme-reference-yellow-sans", reference_white_serif: "theme-reference-white-serif",
   condensed_black: "theme-condensed-black", condensed_white: "theme-condensed-white", handwritten_stack: "theme-handwritten-stack",
+  karaoke_focus: "theme-karaoke-focus", soft_glow: "theme-soft-glow", lyric_plate: "theme-lyric-plate",
 };
 
 const FIRST_LINE = ["do", "you", "think"];
@@ -77,6 +78,7 @@ export const MUSIC_THEME_LABELS: Record<MusicTheme, string> = {
   clean: "Clean sans", warm: "Warm highlight", serif: "Soft serif",
   reference_white_sans: "Reference white sans", reference_yellow_sans: "Reference yellow sans", reference_white_serif: "Reference white serif",
   condensed_black: "Condensed black", condensed_white: "Condensed white", handwritten_stack: "Handwritten stack",
+  karaoke_focus: "Karaoke focus", soft_glow: "Soft glow", lyric_plate: "Lyric plate",
 };
 
 /** Read-only, resolved choices for a saved Music job. Omitted options resolve to Original / Plain. */

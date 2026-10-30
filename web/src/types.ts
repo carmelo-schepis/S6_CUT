@@ -29,7 +29,7 @@ export const batchModeSchema = z.enum(["standard", "high_volume"]);
 export type BatchMode = z.infer<typeof batchModeSchema>;
 export const sourceProfileSchema = z.enum(["speech", "music"]);
 export type SourceProfile = z.infer<typeof sourceProfileSchema>;
-export const musicThemeSchema = z.enum(["clean", "warm", "serif", "reference_white_sans", "reference_yellow_sans", "reference_white_serif", "condensed_black", "condensed_white", "handwritten_stack"]);
+export const musicThemeSchema = z.enum(["clean", "warm", "serif", "reference_white_sans", "reference_yellow_sans", "reference_white_serif", "condensed_black", "condensed_white", "handwritten_stack", "karaoke_focus", "soft_glow", "lyric_plate"]);
 export type MusicTheme = z.infer<typeof musicThemeSchema>;
 export const musicLyricAnimationSchema = z.enum(["legacy", "slow_fade", "line_crossfade", "word_build"]);
 export type MusicLyricAnimation = z.infer<typeof musicLyricAnimationSchema>;
@@ -42,6 +42,23 @@ export const musicPresentationSchema = z.object({
   hookTextFormat: musicHookTextFormatSchema.nullable().optional(),
 });
 export type MusicPresentationConfig = z.infer<typeof musicPresentationSchema>;
+/** Mirrors engine EditingPresentationConfig; every selection is optional and omitted resolves to the existing behaviour. */
+export const captionPresetSchema = z.enum(["editorial_default", "clean_sentence", "bold_outline", "yellow_focus", "word_pop", "active_word_box", "dark_caption_plate", "light_caption_plate", "word_build", "cinematic_serif", "condensed_stack", "karaoke_line"]);
+export type CaptionPreset = z.infer<typeof captionPresetSchema>;
+export const videoFilterSchema = z.enum(["existing", "original", "warm", "cool", "vibrant", "black_white", "vintage"]);
+export type VideoFilter = z.infer<typeof videoFilterSchema>;
+export const headingStyleSchema = z.enum(["plain", "dark_box", "white_banner"]);
+export type HeadingStyle = z.infer<typeof headingStyleSchema>;
+export const emojiModeSchema = z.enum(["existing", "off", "sparse"]);
+export type EmojiMode = z.infer<typeof emojiModeSchema>;
+export const editingPresentationSchema = z.object({
+  version: z.literal(1),
+  captionPreset: captionPresetSchema.nullable().optional(),
+  videoFilter: videoFilterSchema.nullable().optional(),
+  headingStyle: headingStyleSchema.nullable().optional(),
+  emojiMode: emojiModeSchema.nullable().optional(),
+});
+export type EditingPresentationConfig = z.infer<typeof editingPresentationSchema>;
 export const musicTrackSchema = z.object({ assetId: z.string().nullable().optional(), title: z.string(), source: z.enum(["upload", "youtube"]), speed: z.union([z.literal(.75), z.literal(.85), z.literal(1), z.literal(1.25), z.literal(1.5)]) });
 export type MusicTrack = z.infer<typeof musicTrackSchema>;
 
@@ -252,6 +269,7 @@ export const jobSchema = z.object({
   plannedCount: z.number().int().min(0).max(500).optional(),
   successfulCount: z.number().int().min(0).max(500).optional(),
   musicPresentation: musicPresentationSchema.nullable().optional(),
+  editingPresentation: editingPresentationSchema.nullable().optional(),
   musicTopText: z.string().max(100).nullable().optional(),
   musicTrack: musicTrackSchema.nullable().optional(),
   musicAudioMode: z.enum(["song_only", "mix_original"]).optional(),

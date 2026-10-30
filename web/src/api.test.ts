@@ -90,6 +90,23 @@ describe("engine API boundary", () => {
     expect(body?.get("music_song_gain")).toBe("0");
   });
 
+  it("sends editing_presentation only when a selection was made", async () => {
+    const bodies: FormData[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      bodies.push(init?.body as FormData);
+      return new Response(JSON.stringify({
+        project: { schemaVersion: 1, id: "p", name: "P", mode: "clip", style: "serious", state: "queued", sourceName: "s", sourceKind: "upload", requestedCount: 1, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" },
+        job: { schemaVersion: 1, id: "j", projectId: "p", mode: "clip", state: "queued", stage: "q", stageLabel: "Q", progress: 0, style: "serious", warnings: [], clips: [], beats: [], createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z", editingPresentation: { version: 1, captionPreset: "word_pop", videoFilter: "warm" } },
+      }), { status: 202, headers: { "Content-Type": "application/json" } });
+    }));
+    const input = { style: "serious" as const, count: 1, minDuration: 8, maxDuration: 20, aspectRatio: "9:16" };
+    await createClipJob(input);
+    const result = await createClipJob({ ...input, editingPresentation: { version: 1, captionPreset: "word_pop", videoFilter: "warm" } });
+    expect(bodies[0].has("editing_presentation")).toBe(false);
+    expect(JSON.parse(String(bodies[1].get("editing_presentation")))).toEqual({ version: 1, captionPreset: "word_pop", videoFilter: "warm" });
+    expect(result.job.editingPresentation).toEqual({ version: 1, captionPreset: "word_pop", videoFilter: "warm" });
+  });
+
   it("sends hook_text only for an explicit opt-in", async () => {
     const bodies: FormData[] = [];
     vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {

@@ -99,9 +99,49 @@ class CaptionCue(ApiModel):
 MusicSubtitleTheme = Literal[
     "clean", "warm", "serif", "reference_white_sans", "reference_yellow_sans", "reference_white_serif",
     "condensed_black", "condensed_white", "handwritten_stack",
+    "karaoke_focus", "soft_glow", "lyric_plate",
 ]
 MusicLyricAnimation = Literal["legacy", "slow_fade", "line_crossfade", "word_build"]
 MusicHookTextFormat = Literal["plain", "white_banner"]
+
+# Regular-clip editing styles. IDs are shared with the frontend and engine.editing_presets.
+EditingCaptionPreset = Literal[
+    "editorial_default", "clean_sentence", "bold_outline", "yellow_focus", "word_pop", "active_word_box",
+    "dark_caption_plate", "light_caption_plate", "word_build", "cinematic_serif", "condensed_stack", "karaoke_line",
+]
+EditingVideoFilter = Literal["existing", "original", "warm", "cool", "vibrant", "black_white", "vintage"]
+EditingHeadingStyle = Literal["plain", "dark_box", "white_banner"]
+EditingEmojiMode = Literal["existing", "off", "sparse"]
+
+
+class EditingPresentationConfig(ApiModel):
+    """Optional, versioned look chosen at creation and snapshotted on the Job.
+
+    Speech clips may use every field. Music clips may only choose ``video_filter``;
+    the API rejects explicitly supplied speech-only fields for Music.
+    """
+
+    version: Literal[1] = 1
+    caption_preset: EditingCaptionPreset | None = None
+    video_filter: EditingVideoFilter | None = None
+    heading_style: EditingHeadingStyle | None = None
+    emoji_mode: EditingEmojiMode | None = None
+
+    @model_serializer(mode="wrap")
+    def _omit_unset_presentation_choices(self, handler):
+        data = handler(self)
+        # Preserve the creation snapshot's exact selections. Omitted fields
+        # resolve through editing_presets at render time, and Music therefore
+        # exposes only its common picture-filter choice.
+        aliases = {
+            "caption_preset": "captionPreset", "video_filter": "videoFilter",
+            "heading_style": "headingStyle", "emoji_mode": "emojiMode",
+        }
+        for name, alias in aliases.items():
+            if name not in self.model_fields_set:
+                data.pop(name, None)
+                data.pop(alias, None)
+        return data
 
 
 class MusicPresentationConfig(ApiModel):
@@ -290,6 +330,9 @@ class Job(ApiModel):
     planned_count: int = Field(default=0, ge=0, le=500)
     successful_count: int = Field(default=0, ge=0, le=500)
     music_presentation: MusicPresentationConfig | None = None
+    # Snapshot of the optional editing-style choice; None means nothing was chosen
+    # (legacy and default-created jobs), which renders exactly as before.
+    editing_presentation: EditingPresentationConfig | None = None
     music_top_text: str | None = Field(default=None, max_length=100)
     music_track: MusicTrackSnapshot | None = None
     music_audio_mode: MusicAudioMode = MusicAudioMode.SONG_ONLY

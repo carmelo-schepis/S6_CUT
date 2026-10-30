@@ -34,8 +34,9 @@ from .media import _SUBTITLE_PRESETS, MUSIC_TRANSCRIPTION_PROFILE_VERSION, WHISP
 from .models import (
     Asset, AssetDelete, AssetDeleteResult, AssetMove, AssetOrigin, AssetUpdate, AssetPage, CaptionCue, CaptionDownload, CaptionReviewInput, Clip, FolderCreate, FolderMove, FolderUpdate, Health, Job, LibraryPurgeInput, LibraryPurgeResult, SourceOnlyRegenerationRequest,
     LibraryFolder, MatchExplanation, MobileClip, MobileDownload, MobileJob, MobileOverview, RecentClipsPage, ContentFormat, ProcessingMode, ProfileInput, Project, ProjectFolderUpdate,
-    OpenRouterModel, ProviderProfile, SelectionInput, ShortsJobInput, SubscribeAnimationConfig, MusicPresentationConfig, YouTubeMetadataUpdate, now_iso,
+    OpenRouterModel, ProviderProfile, SelectionInput, ShortsJobInput, SubscribeAnimationConfig, MusicPresentationConfig, EditingPresentationConfig, YouTubeMetadataUpdate, now_iso,
 )
+from .editing_presets import validate_editing_request
 from .providers import ProfileService, ProviderError
 from .security import MediaSigner, SecretVault, confined, safe_filename, validate_youtube_url
 from .seo_titles import SEO_PROMPT_VERSION, SEO_TITLE_RULES, normalize_seo_description, normalize_seo_title, source_context_title
@@ -62,6 +63,16 @@ def _music_presentation_request(raw: str) -> MusicPresentationConfig:
         return MusicPresentationConfig.model_validate(json.loads(raw))
     except (json.JSONDecodeError, TypeError, ValueError) as exc:
         raise HTTPException(422, "Music presentation config is invalid") from exc
+
+
+def _editing_presentation_request(raw: str) -> EditingPresentationConfig | None:
+    """Parse the optional editing-style JSON; blank or ``{}`` means nothing was chosen."""
+    if not raw.strip() or raw.strip() == "{}":
+        return None
+    try:
+        return EditingPresentationConfig.model_validate(json.loads(raw))
+    except (json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise HTTPException(422, "Editing presentation config is invalid") from exc
 
 
 def _project_name(value: str | None, fallback: str) -> str:
@@ -429,6 +440,7 @@ async def create_clip_job(
     youtube_metadata: Annotated[bool | None, Form()] = None,
     youtube_metadata_model_id: Annotated[str | None, Form(max_length=200)] = None,
     library_overlays_enabled: Annotated[bool, Form()] = False,
+    editing_presentation: Annotated[str, Form()] = "",
 ) -> dict[str, object]:
     _rate_limit(request)
     selected_folder = db.get_folder(library_folder_id)
@@ -508,6 +520,16 @@ async def create_clip_job(
             raise HTTPException(422, "AI hook text is unavailable in Fast mode.")
         if mode != "smart":
             raise HTTPException(422, "AI hook text is unavailable in Fast mode.")
+    # Validated before any upload is streamed or URL stored, like the options above.
+    editing_config = _editing_presentation_request(editing_presentation)
+    if editing_config is not None:
+        try:
+            validate_editing_request(
+                editing_config, source_profile=source_profile, content_format=content_format, mode=mode,
+                batch_mode=batch_mode, burn_subtitles=True if source_profile == "music" else burn_subtitles,
+            )
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
     presentation = {
         "version": 2 if source_profile == "speech" and content_format == "short" and mode == "smart" else 1,
         "caption": "smart_speech_v2"
@@ -529,6 +551,8 @@ async def create_clip_job(
         "library_folder_id": library_folder_id, "library_overlays_enabled": library_overlays_enabled,
         "subscribe_animation": _subscribe_animation_request(subscribe_animation).model_dump(),
     }
+    if editing_config is not None:
+        private["editing_presentation"] = editing_config.model_dump()
     if source_profile == "music":
         private["music_presentation"] = music_config.model_dump()
         if music_lyrics_language is not None:
@@ -627,7 +651,7 @@ async def create_clip_job(
             steps[1].status = "complete"
             steps[1].detail = f"Source validated - {float(source_metadata['duration']):.1f}s"
             steps[1].started_at = steps[1].completed_at = checkpoint_time
-    job = Job(id=job_id, project_id=project_id, library_folder_id=library_folder_id, mode="clip", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style=style, processing_mode=mode, execution_policy=execution_policy, content_format=content_format, source_profile=source_profile, music_presentation=music_config if source_profile == "music" else None, music_top_text=(music_top_text if music_top_text.strip() else None) if source_profile == "music" else None, music_track=music_track_snapshot, music_audio_mode=music_audio_mode if source_profile == "music" else "song_only", music_song_gain=float(private.get("music_song_gain", 1.0)), music_original_audio_gain=float(private.get("music_original_audio_gain", 1.0)), requested_count=count, batch_mode=batch_mode, effective_target=effective_target, cap_explanation=cap_explanation, burn_subtitles=True if source_profile == "music" else burn_subtitles, embed_subtitles=embed_subtitles, hook_text_enabled=hook_text, youtube_metadata_enabled=youtube_metadata, youtube_metadata_model_id=youtube_metadata_model_id, library_overlays_enabled=library_overlays_enabled, steps=steps)
+    job = Job(id=job_id, project_id=project_id, library_folder_id=library_folder_id, mode="clip", state="queued", stage="queued", stage_label="Queued on this machine", progress=0, style=style, processing_mode=mode, execution_policy=execution_policy, content_format=content_format, source_profile=source_profile, music_presentation=music_config if source_profile == "music" else None, editing_presentation=editing_config, music_top_text=(music_top_text if music_top_text.strip() else None) if source_profile == "music" else None, music_track=music_track_snapshot, music_audio_mode=music_audio_mode if source_profile == "music" else "song_only", music_song_gain=float(private.get("music_song_gain", 1.0)), music_original_audio_gain=float(private.get("music_original_audio_gain", 1.0)), requested_count=count, batch_mode=batch_mode, effective_target=effective_target, cap_explanation=cap_explanation, burn_subtitles=True if source_profile == "music" else burn_subtitles, embed_subtitles=embed_subtitles, hook_text_enabled=hook_text, youtube_metadata_enabled=youtube_metadata, youtube_metadata_model_id=youtube_metadata_model_id, library_overlays_enabled=library_overlays_enabled, steps=steps)
     db.save_project(project)
     db.save_job(job, private)
     try:

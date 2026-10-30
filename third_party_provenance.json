@@ -90,7 +90,7 @@
       "licence": "SIL Open Font License 1.1",
       "source": "https://github.com/google/fonts/tree/main/ofl/anton",
       "use": "Burned-in caption display face (condensed heavy caps)",
-      "vendoredAt": "engine/fonts/anton",
+      "vendoredAt": "engine/fonts/anton; web/public/fonts/anton/Anton-Regular.ttf",
       "licenceFile": "engine/fonts/anton/OFL.txt"
     },
     {
@@ -99,7 +99,7 @@
       "licence": "SIL Open Font License 1.1",
       "source": "https://github.com/google/fonts/tree/main/ofl/archivoblack",
       "use": "Burned-in caption display face (geometric black)",
-      "vendoredAt": "engine/fonts/archivoblack",
+      "vendoredAt": "engine/fonts/archivoblack; web/public/fonts/archivoblack/ArchivoBlack-Regular.ttf",
       "licenceFile": "engine/fonts/archivoblack/OFL.txt"
     },
     {
@@ -108,7 +108,7 @@
       "licence": "SIL Open Font License 1.1",
       "source": "https://github.com/google/fonts/tree/main/ofl/barlow",
       "use": "Burned-in caption text face (clean neutral sans with real heavy weights)",
-      "vendoredAt": "engine/fonts/barlow",
+      "vendoredAt": "engine/fonts/barlow; web/public/fonts/barlow/ (Regular, Bold, Black)",
       "licenceFile": "engine/fonts/barlow/OFL.txt"
     },
     {
@@ -118,7 +118,7 @@
       "source": "https://github.com/JulietaUla/Montserrat/tree/555facfb2a18c72c3c0380f0d9c0f060453a9058/fonts/ttf/Montserrat-Bold.ttf",
       "sha256": "bc6e854971cea46b463be6f9eef4d9cd52f51cfc1fc0dd90c9d3e6483dc0ec61",
       "use": "Burned-in AI hook text face",
-      "vendoredAt": "engine/fonts/montserrat/Montserrat-Bold.ttf",
+      "vendoredAt": "engine/fonts/montserrat/Montserrat-Bold.ttf; web/public/fonts/montserrat/Montserrat-Bold.ttf",
       "licenceFile": "engine/fonts/montserrat/OFL.txt"
     },
     {
@@ -128,7 +128,7 @@
       "source": "https://github.com/JulietaUla/Montserrat/tree/555facfb2a18c72c3c0380f0d9c0f060453a9058/fonts/ttf/Montserrat-ExtraBoldItalic.ttf",
       "sha256": "0984784ee9883389e76bf2c7ceeeda848af26535ec111109fa92e18d448a4759",
       "use": "Smart speech caption and creator-credit face (static weight 800, italic); existing Montserrat Bold remains the AI hook face",
-      "vendoredAt": "engine/fonts/montserrat/Montserrat-ExtraBoldItalic.ttf",
+      "vendoredAt": "engine/fonts/montserrat/Montserrat-ExtraBoldItalic.ttf; web/public/fonts/montserrat/Montserrat-ExtraBoldItalic.ttf",
       "licenceFile": "engine/fonts/montserrat/OFL.txt"
     },
     {

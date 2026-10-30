@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assetSchema, beatSchema, clipSchema, jobSchema, profileSchema, projectSchema, titleSuggestionResponseSchema, musicPresentationSchema, processingModeSchema, processingStepSchema, sourceProfileSchema } from "./types";
+import { assetSchema, beatSchema, clipSchema, jobSchema, profileSchema, projectSchema, titleSuggestionResponseSchema, musicPresentationSchema, editingPresentationSchema, processingModeSchema, processingStepSchema, sourceProfileSchema } from "./types";
 
 const score = {
   hook: 80, coherence: 82, ending: 79, energy: 70, practicalValue: 75,
@@ -25,6 +25,16 @@ describe("versioned UI contracts", () => {
     expect(() => musicPresentationSchema.parse({ version: 1, subtitleTheme: "clean", hookTextFormat: "neon" })).toThrow();
     // A historical two-field response parses without gaining keys.
     expect(Object.keys(musicPresentationSchema.parse({ version: 1, subtitleTheme: "warm" }))).toEqual(["version", "subtitleTheme"]);
+  });
+  it("accepts the three additive highlight Music themes", () => {
+    for (const subtitleTheme of ["karaoke_focus", "soft_glow", "lyric_plate"]) expect(musicPresentationSchema.parse({ version: 1, subtitleTheme })).toEqual({ version: 1, subtitleTheme });
+  });
+  it("parses the optional editing presentation and rejects unknown choices", () => {
+    expect(editingPresentationSchema.parse({ version: 1 })).toEqual({ version: 1 });
+    const full = { version: 1, captionPreset: "karaoke_line", videoFilter: "black_white", headingStyle: "white_banner", emojiMode: "sparse" };
+    expect(editingPresentationSchema.parse(full)).toEqual(full);
+    expect(editingPresentationSchema.parse({ version: 1, videoFilter: null }).videoFilter).toBeNull();
+    for (const bad of [{ version: 2 }, { version: 1, captionPreset: "neon" }, { version: 1, videoFilter: "sepia" }, { version: 1, headingStyle: "glow" }, { version: 1, emojiMode: "all" }]) expect(() => editingPresentationSchema.parse(bad)).toThrow();
   });
   it("rejects malformed clip ranges and scores", () => {
     expect(() => clipSchema.parse({ id: "one", index: 1, state: "complete", start: -1, end: 5, duration: 6, openingLine: "Hello", score, selected: true, fallbackUsed: false, provenance: [] })).toThrow();
