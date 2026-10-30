@@ -14,11 +14,13 @@ import threading
 import time
 import unicodedata
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 from .config import Settings
+from .editing_presets import GRADED_FILTERS, SPEECH_PRESETS, SpeechPreset, emoji_mode_choice, heading_style_choice, normalize_editing_presentation, speech_preset, video_filter_choice
 from .emoji_assets import find_emoji_sequences, resolve_emoji
 from .hook_text import remove_hook_em_dashes
 from .recipes import CAPTION_REFERENCE_SHORT_EDGE, LookTreatment, caption_preset, known_styles, recipe_for
@@ -1519,6 +1521,7 @@ def _reference_music_events(group: list[dict[str, Any]], theme: str, *, width: i
 MUSIC_SUBTITLE_THEMES = frozenset({
     "clean", "warm", "serif", "reference_white_sans", "reference_yellow_sans", "reference_white_serif",
     "condensed_black", "condensed_white", "handwritten_stack",
+    "karaoke_focus", "soft_glow", "lyric_plate",
 })
 # New faces are separate families (Oswald, Gaegu) so no existing theme's
 # resolved font can change. Black text carries a pale halo so it stays legible
@@ -1528,6 +1531,15 @@ _CONDENSED_AND_HAND_PRESETS = {
     "condensed_white": {"fontname": "Oswald", "font": 120, "primary": "&H00FFFFFF&", "outline_color": "&H99000000&", "outline": 2, "shadow": 0, "spacing": 0, "scale_x": 100},
     "handwritten_stack": {"fontname": "Gaegu", "font": 104, "primary": "&H00FFFFFF&", "outline_color": "&H99000000&", "outline": 2, "shadow": 0, "spacing": 0, "scale_x": 100},
 }
+# Karaoke focus accents the sung word; Soft glow adds a blurred pale halo around
+# restrained white text (``blur`` is applied as \\blur); Lyric plate uses libass
+# BorderStyle 3, so each line gets a plate fitted to its text, translucent via the
+# outline colour's alpha (``outline`` is then the plate padding).
+_EXTENDED_MUSIC_PRESETS = {
+    "karaoke_focus": {"fontname": "Barlow", "font": 96, "bold": -1, "primary": "&H00FFFFFF&", "highlight": "&H0066E0FF&", "outline_color": "&H99000000&", "outline": 3, "shadow": 0, "spacing": 0, "scale_x": 100},
+    "soft_glow": {"fontname": "Barlow", "font": 100, "bold": 0, "primary": "&H00FFFFFF&", "highlight": "&H00FFFFFF&", "outline_color": "&H66FFFFFF&", "outline": 6, "shadow": 0, "spacing": 0, "scale_x": 100, "blur": 6},
+    "lyric_plate": {"fontname": "Barlow", "font": 88, "bold": -1, "primary": "&H00FFFFFF&", "highlight": "&H00FFFFFF&", "outline_color": "&H55000000&", "outline": 14, "shadow": 0, "spacing": 0, "scale_x": 100, "border_style": 3},
+}
 _MUSIC_THEME_FONT_FILES = {
     "clean": "barlow/Barlow-Regular.ttf", "warm": "lora/Lora.ttf", "serif": "lora/Lora.ttf",
     "reference_white_sans": "roboto_condensed/RobotoCondensed-Light.ttf",
@@ -1535,6 +1547,7 @@ _MUSIC_THEME_FONT_FILES = {
     "reference_white_serif": "bodoni_moda/BodoniModa-Variable.ttf",
     "condensed_black": "oswald/Oswald-Regular.ttf", "condensed_white": "oswald/Oswald-Regular.ttf",
     "handwritten_stack": "gaegu/Gaegu-Bold.ttf",
+    "karaoke_focus": "barlow/Barlow-Bold.ttf", "soft_glow": "barlow/Barlow-Regular.ttf", "lyric_plate": "barlow/Barlow-Bold.ttf",
 }
 _MUSIC_THEME_LAYOUTS = {
     "clean": music_typography.Layout(max_rows=2, max_words_per_row=8, width_fraction=0.78, max_words_per_block=12),
@@ -1546,6 +1559,9 @@ _MUSIC_THEME_LAYOUTS = {
     "condensed_black": music_typography.Layout(max_rows=3, max_words_per_row=4, width_fraction=0.78, max_words_per_block=12),
     "condensed_white": music_typography.Layout(max_rows=3, max_words_per_row=4, width_fraction=0.78, max_words_per_block=12),
     "handwritten_stack": music_typography.Layout(max_rows=6, max_words_per_row=2, width_fraction=0.46, max_words_per_block=8),
+    "karaoke_focus": music_typography.Layout(max_rows=2, max_words_per_row=6, width_fraction=0.8, max_words_per_block=10),
+    "soft_glow": music_typography.Layout(max_rows=2, max_words_per_row=8, width_fraction=0.78, max_words_per_block=12),
+    "lyric_plate": music_typography.Layout(max_rows=2, max_words_per_row=5, width_fraction=0.72, max_words_per_block=10),
 }
 # Fraction of the canvas height a lyric block may occupy before it shrinks or paginates.
 _MUSIC_LYRIC_HEIGHT_FRACTION = 0.5
@@ -1580,10 +1596,12 @@ def _music_animated_events(words: list[dict[str, Any]], theme: str, preset: dict
     envelopes = music_typography.plan_envelopes(blocks, animation, duration)
     x = round(width * 0.225) if layout.align == "left" else width // 2
     outline_alpha = int(str(preset["outline_color"])[2:4], 16)
+    blur = float(preset.get("blur", 0))
     return [
         music_typography.block_event(
             envelope, animation=animation, ass_time=_ass_time, escape=_ass_escape, position=(x, round(height * 0.5)),
             align=layout.align, primary=str(preset["primary"]), highlight=str(preset["highlight"]), outline_alpha=outline_alpha,
+            extra_tags=rf"\blur{blur:g}" if blur else "",
         )
         for envelope in envelopes
     ]
@@ -1639,6 +1657,39 @@ def _music_hook_banner_events(text: str, *, width: int, height: int, duration: f
     return [
         f"Dialogue: 15,{_ass_time(0)},{end},HookScrim,,0,0,0,,{{\\p1\\an7\\pos(0,0)\\1c&HFFFFFF&\\1a&H00&\\bord0\\shad0}}{rect}{{\\p0}}",
         f"Dialogue: 20,{_ass_time(0)},{end},MusicTop,,0,0,0,,{{\\an5\\q2\\pos({width // 2},{round(plan.centre_y)})\\fnBarlow\\b1\\fs{plan.font_size}\\1c&H000000&\\1a&H00&\\bord0\\shad0}}{body}",
+    ]
+
+
+def _speech_hook_banner_events(text: str, *, width: int, height: int, duration: float, end_time: float | None) -> list[str]:
+    """White strip + black text across the top of speech footage (heading style "White banner").
+
+    Same measured fit as the Music banner (``plan_hook_banner``): up to three lines,
+    shrinking before it would leave the strip's headroom, never truncating text.
+    Footage here is full-bleed, so the strip is a fixed top band; like the plain
+    heading it yields at ``end_time`` (the first Subscribe animation start).
+    """
+    font_path = str(Path(__file__).parent / "fonts" / "barlow" / "Barlow-Bold.ttf")
+    units_per_em, advances = _font_advance_metrics(font_path)
+    height_units = _libass_height_units(font_path)
+
+    def measure(value: str, size: float) -> float:
+        return sum(advances.get(ord(char), units_per_em * 0.55) for char in value) * size / height_units
+
+    scale = width / 1080
+    bottom = round(height * 0.235)
+    plan = music_typography.plan_hook_banner(
+        text, canvas_width=width, footage_top=bottom, base_size=round(60 * scale), min_size=max(16, round(32 * scale)),
+        line_height=1.0, measure=measure, available_height=bottom - round(height * 0.06),
+    )
+    stop = duration if end_time is None else max(0.0, min(duration, end_time))
+    if plan is None or stop <= 0:
+        return []
+    body = r"\N".join(_ass_escape(line) for line in plan.lines)
+    end = _ass_time(stop)
+    rect = f"m 0 {plan.top} l {width} {plan.top} {width} {plan.bottom} 0 {plan.bottom}"
+    return [
+        f"Dialogue: 4,{_ass_time(0)},{end},HookScrim,,0,0,0,,{{\\p1\\an7\\pos(0,0)\\1c&HFFFFFF&\\1a&H00&\\bord0\\shad0}}{rect}{{\\p0}}",
+        f"Dialogue: 5,{_ass_time(0)},{end},MusicTop,,0,0,0,,{{\\an5\\q2\\pos({width // 2},{round(plan.centre_y)})\\fnBarlow\\b1\\fs{plan.font_size}\\1c&H000000&\\1a&H00&\\bord0\\shad0}}{body}",
     ]
 
 
@@ -2077,15 +2128,22 @@ def select_ironic_reactions(words: list[dict[str, Any]], offset: float, duration
     return selected
 
 
-def _caption_emoji_plan(words: list[dict[str, Any]], width: int, height: int, duration: float, *, offset: float, style: str, presentation: str | None, music_theme: str | None, reaction_policy: str | None = None, source_profile: str = "speech") -> list[tuple[Path, float, float, int, int, int]]:
+def _caption_emoji_plan(words: list[dict[str, Any]], width: int, height: int, duration: float, *, offset: float, style: str, presentation: str | None, music_theme: str | None, reaction_policy: str | None = None, source_profile: str = "speech", editing_presentation: dict[str, Any] | None = None) -> list[tuple[Path, float, float, int, int, int]]:
     """Plan phrase-level reaction overlays independently of caption layout."""
     local = caption_words_for_clip(words, offset, offset + duration)
     if not local:
         return []
+    editing = normalize_editing_presentation(editing_presentation)
+    emoji_mode = emoji_mode_choice(editing) if source_profile != "music" and not music_theme else "existing"
+    preset_def = speech_preset(editing) if source_profile != "music" and not music_theme else None
     scale = min(width, height) / 1080
     size = min(round(112 * scale), width, height)
     smart_speech = presentation in {"smart_speech_v1", "smart_speech_v2"}
-    if smart_speech:
+    if preset_def is not None:
+        # Reactions sit just above the preset's own caption block, never over it.
+        block_top = height * preset_def.y_fraction - preset_def.max_lines * max(28, round(preset_def.size * scale)) * _PRESET_LINE_PITCH / 2
+        y = max(round(height * .28), round(block_top - size - 14 * scale))
+    elif smart_speech:
         y = max(round(height * .34), round(height * .54 - 104 * scale - size - 18 * scale))
     else:
         metrics = _ass_style_metrics(width, height)
@@ -2093,15 +2151,24 @@ def _caption_emoji_plan(words: list[dict[str, Any]], width: int, height: int, du
     plan: list[tuple[Path, float, float, int, int, int]] = []
     if source_profile == "music" or (not smart_speech and reaction_policy != "ironic_v1"):
         return plan
-    ironic = reaction_policy == "ironic_v1" and source_profile == "speech"
+    ironic = reaction_policy == "ironic_v1" and source_profile == "speech" and emoji_mode != "off"
     enriched_local = local
     cooldown_until = -1.0
-    for group_start in range(0, len(local), 3):
+    group_starts = range(0, len(local), 3)
+    if emoji_mode == "off":
+        # Off suppresses every generated or artwork emoji; literal glyphs remain caption text.
+        return plan
+    if preset_def is not None:
+        # Literal emoji artwork follows the preset's layout; keyword emoji are not used with presets.
+        layout_words = [{**word, "_emoji_text": str(word.get("text", "")), "text": _emoji_layout_text(str(word.get("text", "")))} for word in local]
+        plan.extend(_preset_emoji_slots(_plan_speech_preset(layout_words, preset_def, width, height, duration), preset_def, width=width, height=height))
+        group_starts = range(0)
+    for group_start in group_starts:
         group = local[group_start:group_start + 3]
         enriched_group = enriched_local[group_start:group_start + 3]
         sequences = [(sequence, asset) for word in enriched_group for _, _, sequence, asset in find_emoji_sequences(str(word.get("text", "")))] if smart_speech else []
         automatic = False
-        if not sequences and not ironic and smart_speech:
+        if not sequences and not ironic and smart_speech and emoji_mode != "off":
             detected = _smart_speech_emoji_kind(str(word.get("text", "")) for word in group)
             sequence = _SMART_SPEECH_EMOJI_SEQUENCES.get(detected or "")
             asset = resolve_emoji(sequence) if sequence else None
@@ -2147,7 +2214,10 @@ def _caption_emoji_plan(words: list[dict[str, Any]], width: int, height: int, du
             x = round(width / 2 - size / 2 - (len(unique[:2]) - 1) * size * .58 + index * size * 1.16)
             plan.extend((asset, interval_start, interval_end, x, y, size) for interval_start, interval_end in active_intervals)
     if ironic:
-        for emoji, cue_start, cue_end in select_ironic_reactions(words, offset, duration, style=style):
+        reactions = select_ironic_reactions(words, offset, duration, style=None if emoji_mode == "sparse" else style)
+        if emoji_mode == "sparse":
+            reactions = _thin_sparse_reactions(reactions, duration)
+        for emoji, cue_start, cue_end in reactions:
             asset = _IRONIC_REACTION_ASSETS.get(emoji)
             if asset is not None:
                 plan.append((asset, cue_start, cue_end, round(width / 2 - size / 2), y, size))
@@ -2233,12 +2303,321 @@ def _smart_speech_lines(group: list[dict[str, Any]], width: int, fontsize: int, 
     return lines
 
 
-def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duration: float, visuals: Iterable[tuple[str, float, float]], width: int, height: int, style: str = "educational", creator_credit: str | None = None, credit_alignment: int = 3, content_format: str | None = None, music_theme: str | None = None, music_top_text: str | None = None, hook_text: str | None = None, hook_end_time: float | None = None, presentation: str | None = None, reaction_policy: str | None = None, burn_emoji_images: bool = False, music_lyric_animation: str | None = None, music_hook_text_format: str | None = None, music_source_dimensions: tuple[int, int] | None = None, music_banner_reserve_top: int | None = None) -> None:
+# --- Speech caption presets (editing-style library) ----------------------------
+#
+# Layout is planned once per phrase from the pinned bundled face's advances, so
+# every line has known coordinates. Each line is its own positioned ASS event;
+# that is what lets plates and active-word boxes be drawn at measured geometry
+# and lets emoji artwork reuse the same slots. Words keep their transcript
+# timing: a preset only decides grouping, emphasis and display envelopes.
+_PRESET_PAUSE = 0.65
+_PRESET_BREAKS = (".", "!", "?", ",", ";", ":")
+_PRESET_LINE_PITCH = 1.16  # of the font size; adjacent plates abut exactly
+_PRESET_MIN_WORD_SECONDS = 0.04
+
+
+@dataclass(frozen=True)
+class _PresetWord:
+    item: dict[str, Any]
+    left: float
+    right: float
+    line: int
+
+
+@dataclass(frozen=True)
+class _PresetPhrase:
+    start: float
+    end: float
+    size: int
+    lines: tuple[tuple[_PresetWord, ...], ...]
+    centres: tuple[float, ...]
+    pitch: float
+
+    @property
+    def words(self) -> tuple[_PresetWord, ...]:
+        return tuple(word for line in self.lines for word in line)
+
+
+def _preset_measure(preset: SpeechPreset, type_scale: float) -> Callable[[str, float], float]:
+    font_path = str(Path(__file__).parent / "fonts" / preset.font_file)
+    units_per_em, advances = _font_advance_metrics(font_path)
+    height_units = _libass_height_units(font_path)
+    scale_x = preset.scale_x / 100
+    spacing = preset.spacing * type_scale
+
+    def measure(text: str, size: float) -> float:
+        return sum(advances.get(ord(char), units_per_em * .55) for char in text) * size / height_units * scale_x + spacing * len(text)
+
+    return measure
+
+
+def _preset_text(item: dict[str, Any], preset: SpeechPreset) -> str:
+    text = str(item["text"])
+    return text.upper() if preset.uppercase else text
+
+
+def _preset_wrap(group: list[dict[str, Any]], preset: SpeechPreset, size: float, limit: float, measure: Callable[[str, float], float]) -> list[list[int]] | None:
+    """Greedy wrap by measured width; None when a single word cannot fit a line."""
+    space = measure(" ", size)
+    rows: list[list[int]] = [[]]
+    used = 0.0
+    for index, item in enumerate(group):
+        width = measure(_preset_text(item, preset), size)
+        if width > limit:
+            return None
+        needed = width if not rows[-1] else used + space + width
+        if rows[-1] and (needed > limit or len(rows[-1]) >= preset.max_words_per_line):
+            rows.append([])
+            needed = width
+        rows[-1].append(index)
+        used = needed
+    return rows
+
+
+def _plan_speech_preset(words: list[dict[str, Any]], preset: SpeechPreset, width: int, height: int, duration: float) -> list[_PresetPhrase]:
+    """Group timed words into stable, fitted phrases; every word lands in exactly one."""
+    type_scale = min(width, height) / _CAPTION_REFERENCE_SHORT_EDGE
+    base = max(28, round(preset.size * type_scale))
+    outline_px = round(preset.outline * type_scale)
+    measure = _preset_measure(preset, type_scale)
+    # Portrait uses the frame width; landscape keeps lines to a readable measure.
+    limit_width = min(width, max(height, width * .6)) * .88
+    floor = max(20, round(base * .62))
+
+    def fit(group: list[dict[str, Any]]) -> tuple[int, list[list[int]]] | None:
+        size = base
+        while True:
+            limit = limit_width - 2 * (round(.34 * size) if preset.plate else 0) - 2 * outline_px
+            rows = _preset_wrap(group, preset, size, limit, measure)
+            if rows is not None and len(rows) <= preset.max_lines:
+                return size, rows
+            if size <= floor:
+                break
+            size = max(floor, size - 2)
+        if len(group) > 1:
+            return None
+        # A lone word is never dropped: it keeps shrinking until it fits the line.
+        size = floor
+        while size > 12:
+            limit = limit_width - 2 * (round(.34 * size) if preset.plate else 0) - 2 * outline_px
+            rows = _preset_wrap(group, preset, size, limit, measure)
+            if rows is not None:
+                return size, rows
+            size -= 1
+        return 12, [[0]]
+
+    items = [
+        dict(word)
+        for word in words
+        if (str(word.get("text", "")).strip() or find_emoji_sequences(str(word.get("_emoji_text", ""))))
+        and float(word.get("end", 0)) > float(word.get("start", 0))
+    ]
+    phrases: list[_PresetPhrase] = []
+    index = 0
+    while index < len(items):
+        group = [items[index]]
+        fitted = fit(group)
+        cursor = index + 1
+        while cursor < len(items) and len(group) < preset.max_words:
+            previous, following = items[cursor - 1], items[cursor]
+            if float(following["start"]) - float(previous["end"]) > _PRESET_PAUSE or str(previous["text"]).rstrip().endswith(_PRESET_BREAKS):
+                break
+            trial = fit(group + [following])
+            if trial is None:
+                break
+            group, fitted, cursor = group + [following], trial, cursor + 1
+        size, rows = fitted  # type: ignore[misc]
+        space = measure(" ", size)
+        pitch = size * _PRESET_LINE_PITCH
+        block_centre = min(max(height * preset.y_fraction, pitch * len(rows) / 2 + 8), height - pitch * len(rows) / 2 - 8)
+        lines: list[tuple[_PresetWord, ...]] = []
+        centres: list[float] = []
+        for row_number, row in enumerate(rows):
+            widths = [measure(_preset_text(group[i], preset), size) for i in row]
+            total = sum(widths) + space * (len(row) - 1)
+            left = (width - total) / 2
+            line_words = []
+            for i, item_width in zip(row, widths):
+                line_words.append(_PresetWord(group[i], left, left + item_width, row_number))
+                left += item_width + space
+            lines.append(tuple(line_words))
+            centres.append(block_centre + (row_number - (len(rows) - 1) / 2) * pitch)
+        start = max(0.0, float(group[0]["start"]))
+        end = min(duration, max(float(word["end"]) for word in group))
+        phrases.append(_PresetPhrase(start, max(end, start + _PRESET_MIN_WORD_SECONDS), size, tuple(lines), tuple(centres), pitch))
+        index = cursor
+    # A phrase never overlaps the next one on screen.
+    clipped: list[_PresetPhrase] = []
+    for position, phrase in enumerate(phrases):
+        if position + 1 < len(phrases) and phrases[position + 1].start < phrase.end:
+            phrase = _PresetPhrase(phrase.start, max(phrase.start + _PRESET_MIN_WORD_SECONDS, phrases[position + 1].start), phrase.size, phrase.lines, phrase.centres, phrase.pitch)
+        clipped.append(phrase)
+    return clipped
+
+
+def _preset_word_intervals(phrase: _PresetPhrase) -> list[tuple[float, float, int | None]]:
+    """(start, end, active word index) segments tiling the phrase: gaps are neutral, never highlighted."""
+    words = phrase.words
+    segments: list[tuple[float, float, int | None]] = []
+    cursor = phrase.start
+    for position, word in enumerate(words):
+        item_start = max(phrase.start, float(word.item["start"]))
+        item_end = float(word.item["end"])
+        if position + 1 < len(words):
+            item_end = min(item_end, float(words[position + 1].item["start"]))
+        item_end = min(phrase.end, max(item_end, item_start + _PRESET_MIN_WORD_SECONDS))
+        if item_start > cursor + 0.01:
+            segments.append((cursor, item_start, None))
+            cursor = item_start
+        item_start = max(item_start, cursor)
+        if item_end > item_start + 0.001:
+            segments.append((item_start, item_end, position))
+            cursor = item_end
+    if phrase.end > cursor + 0.01:
+        segments.append((cursor, phrase.end, None))
+    return segments
+
+
+def _ass_colour_parts(colour: str) -> tuple[str, str]:
+    """``&HAABBGGRR&`` -> (``&HBBGGRR&``, ``&HAA&``) for \\1c / \\1a overrides."""
+    digits = colour.strip("&H")
+    digits = digits.rjust(8, "0")
+    return f"&H{digits[2:]}&", f"&H{digits[:2]}&"
+
+
+def _preset_rect(x0: float, y0: float, x1: float, y1: float, layer: int, start: float, end: float, colour: str) -> str:
+    fill, alpha = _ass_colour_parts(colour)
+    x0, y0, x1, y1 = (round(value) for value in (x0, y0, x1, y1))
+    return (
+        f"Dialogue: {layer},{_ass_time(start)},{_ass_time(end)},HookScrim,,0,0,0,,"
+        f"{{\\p1\\an7\\pos(0,0)\\1c{fill}\\1a{alpha}\\bord0\\shad0}}m {x0} {y0} l {x1} {y0} {x1} {y1} {x0} {y1}{{\\p0}}"
+    )
+
+
+def _speech_preset_events(phrases: list[_PresetPhrase], preset: SpeechPreset, *, width: int, height: int, burn_emoji_images: bool) -> list[str]:
+    """ASS events for the planned phrases: plates 8, active-word boxes 9, text 10."""
+    events: list[str] = []
+    type_scale = min(width, height) / _CAPTION_REFERENCE_SHORT_EDGE
+    outline_px = round(preset.outline * type_scale)
+
+    def body(word: _PresetWord, *, colour: str | None = None, restore: str | None = None) -> str:
+        raw = str(word.item.get("_emoji_text", word.item["text"]))
+        shown = raw.upper() if preset.uppercase else raw
+        text = _emoji_ass_text(shown) if burn_emoji_images else _ass_escape(shown)
+        return f"{{\\1c{colour}}}{text}{{\\1c{restore}}}" if colour else text
+
+    def line_event(phrase: _PresetPhrase, line: int, start: float, end: float, text: str, extra: str = "") -> str:
+        tags = f"\\an5\\q2\\pos({round(width / 2)},{round(phrase.centres[line])})\\fs{phrase.size}{extra}"
+        return f"Dialogue: 10,{_ass_time(start)},{_ass_time(end)},Caption,,0,0,0,,{{{tags}}}{text}"
+
+    for phrase in phrases:
+        start, end = phrase.start, phrase.end
+        if preset.plate:
+            plate_x = round(.34 * phrase.size)
+            half = phrase.size * _PRESET_LINE_PITCH / 2
+            for line_number, line in enumerate(phrase.lines):
+                cy = phrase.centres[line_number]
+                events.append(_preset_rect(line[0].left - plate_x, cy - half, line[-1].right + plate_x, cy + half, 8, start, end, preset.plate_color))
+        if preset.emphasis == "word_pop":
+            for line_number, line in enumerate(phrase.lines):
+                scale = r"\fscx78\fscy78\t(0,90,\fscx100\fscy100)"
+                events.append(line_event(phrase, line_number, start, end, " ".join(body(word) for word in line), scale))
+        elif preset.emphasis in {"word_color", "word_box"}:
+            words = phrase.words
+            for seg_start, seg_end, active in _preset_word_intervals(phrase):
+                active_word = words[active] if active is not None else None
+                for line_number, line in enumerate(phrase.lines):
+                    parts = [body(word, colour=preset.accent, restore=preset.primary) if preset.emphasis == "word_color" and word is active_word else body(word) for word in line]
+                    events.append(line_event(phrase, line_number, seg_start, seg_end, " ".join(parts)))
+                if preset.emphasis == "word_box" and active_word is not None:
+                    word = active_word
+                    cy = phrase.centres[word.line]
+                    box_x, box_half = round(.2 * phrase.size) + outline_px, phrase.size * .56 + outline_px
+                    events.append(_preset_rect(word.left - box_x, cy - box_half, word.right + box_x, cy + box_half, 9, seg_start, seg_end, preset.box_color))
+        elif preset.emphasis == "word_build":
+            for line_number, line in enumerate(phrase.lines):
+                parts = []
+                for word in line:
+                    onset = round(max(0.0, float(word.item["start"]) - start) * 1000)
+                    reveal = rf"\1a&HFF&\3a&HFF&\t({onset},{onset + 40},\1a&H00&\3a&H00&)"
+                    parts.append(f"{{{reveal}}}{body(word)}")
+                events.append(line_event(phrase, line_number, start, end, " ".join(parts)))
+        elif preset.emphasis == "karaoke":
+            for line_number, line in enumerate(phrase.lines):
+                cursor_cs = 0
+                parts = []
+                for position, word in enumerate(line):
+                    onset_cs = round(max(0.0, float(word.item["start"]) - start) * 100)
+                    sweep_cs = max(1, round(max(float(word.item["end"]) - float(word.item["start"]), _PRESET_MIN_WORD_SECONDS) * 100))
+                    gap = max(0, onset_cs - cursor_cs)
+                    lead = f"{{\\k{gap}}}" if gap else ""
+                    trailing = " " if position + 1 < len(line) else ""
+                    parts.append(f"{lead}{{\\kf{sweep_cs}}}{body(word)}{trailing}")
+                    cursor_cs = max(cursor_cs, onset_cs) + sweep_cs
+                extra = f"\\1c{preset.accent}\\2c{preset.neutral}"
+                events.append(line_event(phrase, line_number, start, end, "".join(parts), extra))
+        else:
+            fade_in = min(preset.fade_in_ms, round((end - start) * 300))
+            fade_out = min(preset.fade_out_ms, round((end - start) * 300))
+            fade = f"\\fad({fade_in},{fade_out})" if fade_in or fade_out else ""
+            for line_number, line in enumerate(phrase.lines):
+                events.append(line_event(phrase, line_number, start, end, " ".join(body(word) for word in line), fade))
+    return events
+
+
+def _preset_emoji_slots(phrases: list[_PresetPhrase], preset: SpeechPreset, *, width: int, height: int) -> list[tuple[Path, float, float, int, int, int]]:
+    """Image-artwork slots for literal Unicode emoji, positioned from the preset's own layout."""
+    type_scale = min(width, height) / _CAPTION_REFERENCE_SHORT_EDGE
+    measure = _preset_measure(preset, type_scale)
+    plan: list[tuple[Path, float, float, int, int, int]] = []
+    for phrase in phrases:
+        space = measure(" ", phrase.size)
+        for word in phrase.words:
+            raw = str(word.item.get("_emoji_text", ""))
+            matches = find_emoji_sequences(raw) if raw else []
+            for match_start, _match_end, _sequence, asset in matches:
+                prefix = _speech_layout_text(raw[:match_start], uppercase=preset.uppercase)
+                x = word.left + measure(prefix, phrase.size) + space * 2
+                size = max(36, round(phrase.size * .92))
+                y = phrase.centres[word.line] - size / 2
+                if preset.emphasis == "word_pop":
+                    window = (phrase.start, phrase.end)
+                elif preset.emphasis == "word_build":
+                    window = (max(phrase.start, float(word.item["start"])), phrase.end)
+                else:
+                    window = (phrase.start, phrase.end)
+                plan.append((asset, window[0], window[1], round(x - size / 2), round(y), size))
+    return plan
+
+
+def _thin_sparse_reactions(reactions: list[tuple[str, float, float]], duration: float) -> list[tuple[str, float, float]]:
+    """Sparse emoji mode: spaced-out, capped reaction cues from the same deterministic matcher."""
+    spacing = 9.0
+    cap = max(1, math.ceil(duration / 15.0))
+    kept: list[tuple[str, float, float]] = []
+    for cue in sorted(reactions, key=lambda item: item[1]):
+        if kept and cue[1] < kept[-1][1] + spacing:
+            continue
+        kept.append(cue)
+        if len(kept) >= cap:
+            break
+    return kept
+
+
+def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duration: float, visuals: Iterable[tuple[str, float, float]], width: int, height: int, style: str = "educational", creator_credit: str | None = None, credit_alignment: int = 3, content_format: str | None = None, music_theme: str | None = None, music_top_text: str | None = None, hook_text: str | None = None, hook_end_time: float | None = None, presentation: str | None = None, reaction_policy: str | None = None, burn_emoji_images: bool = False, music_lyric_animation: str | None = None, music_hook_text_format: str | None = None, music_source_dimensions: tuple[int, int] | None = None, music_banner_reserve_top: int | None = None, editing_presentation: dict[str, Any] | None = None) -> None:
     # Unknown additive presentation values intentionally project to the legacy
     # renderer, keeping newer callers forward/backward compatible.
     smart_speech = presentation == "smart_speech_v1"
     styled_speech = presentation == "smart_speech_v2"
-    speech_presentation = smart_speech or styled_speech
+    if hook_text is not None and not hook_text.strip():
+        hook_text = None
+    # An explicit editing style (regular speech only) replaces the caption look but
+    # keeps the speech layout rules: no recipe scrim, centred credit, text-only emoji.
+    editing = normalize_editing_presentation(editing_presentation)
+    style_preset = speech_preset(editing) if not music_theme else None
+    emoji_mode = emoji_mode_choice(editing) if not music_theme else "existing"
+    heading_style = heading_style_choice(editing) if not music_theme else "plain"
+    speech_presentation = smart_speech or styled_speech or style_preset is not None
     preset = _subtitle_preset(style, content_format)
     if styled_speech:
         speech_presets = {
@@ -2253,6 +2632,13 @@ def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duratio
         # ASS applies synthetic bold/italic to this locally available face.
         preset = dict(preset)
         preset.update({"fontname": "Montserrat ExtraBold", "font": 104, "bold": -1, "italic": -1, "primary": "&H00FFFFFF&", "highlight": "&H00FFFFFF&", "outline_color": "&H00000000&", "outline": 6, "shadow": 2, "spacing": 0, "group": 3, "margin_v": 0, "border_style": 1})
+    if style_preset is not None:
+        preset = {
+            **preset, "fontname": style_preset.fontname, "font": style_preset.size, "bold": style_preset.bold, "italic": style_preset.italic,
+            "primary": style_preset.primary, "highlight": style_preset.accent, "outline_color": style_preset.outline_color,
+            "outline": style_preset.outline, "shadow": style_preset.shadow, "spacing": style_preset.spacing, "border_style": 1,
+            "scale_x": style_preset.scale_x, "back_color": "&H00000000&", "margin_v": 0, "group": style_preset.max_words, "uppercase": False,
+        }
     if music_theme in {"clean", "warm", "serif"}:
         preset = dict(preset)
         preset.update({"fontname": "Barlow" if music_theme == "clean" else "Lora", "font": 56, "bold": 0, "italic": 0, "outline": 1, "shadow": 0, "group": 1, "highlight": "&H0000D7FF&" if music_theme == "warm" else "&H00FFFFFF&", "primary": "&H00FFFFFF&", "outline_color": "&H80000000&"})
@@ -2261,10 +2647,11 @@ def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duratio
         "reference_yellow_sans": {"fontname": "Roboto Condensed", "font": 122, "primary": "&H00AAE8F5&", "outline_color": "&H99000000&", "outline": 1, "shadow": 0, "spacing": 1, "scale_x": 115},
         "reference_white_serif": {"fontname": "Bodoni Moda", "font": 150, "primary": "&H00FFFFFF&", "outline_color": "&H99000000&", "outline": 1, "shadow": 0, "spacing": 0, "scale_x": 85},
     }
-    styled_music_presets = {**reference_presets, **_CONDENSED_AND_HAND_PRESETS}
+    styled_music_presets = {**reference_presets, **_CONDENSED_AND_HAND_PRESETS, **_EXTENDED_MUSIC_PRESETS}
     if music_theme in styled_music_presets:
         preset = dict(preset)
-        preset.update({**styled_music_presets[music_theme], "bold": 0, "italic": 0, "group": 1, "highlight": styled_music_presets[music_theme]["primary"]})
+        chosen_theme = styled_music_presets[music_theme]
+        preset.update({"bold": 0, "border_style": 1, **chosen_theme, "italic": 0, "group": 1, "highlight": chosen_theme.get("highlight", chosen_theme["primary"])})
     scrim_style, scrim_events = _scrim_events(recipe_for(style, content_format).look, width, height, duration)
     if speech_presentation:
         scrim_style, scrim_events = "", []
@@ -2279,7 +2666,7 @@ def write_ass(path: Path, words: list[dict[str, Any]], *, offset: float, duratio
     if music_theme in styled_music_presets:
         outline = round(preset["outline"] * type_scale)
         shadow = round(preset["shadow"] * type_scale)
-    elif styled_speech:
+    elif styled_speech or style_preset is not None:
         outline = round(preset["outline"] * type_scale)
         shadow = round(preset["shadow"] * type_scale)
     else:
@@ -2348,10 +2735,12 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
             reserve_top=music_banner_reserve_top, end_time=hook_end_time,
         ) if music_hook_text_format == "white_banner" else []
         events.extend(banner_events or [f"Dialogue: 20,{_ass_time(0)},{_ass_time(duration)},MusicTop,,0,0,0,,{_ass_escape(music_top_text)}"])
-    if hook_text:
+    if hook_text and heading_style == "white_banner":
+        events.extend(_speech_hook_banner_events(" ".join(remove_hook_em_dashes(hook_text).split()), width=width, height=height, duration=duration, end_time=hook_end_time))
+    elif hook_text:
         # A stepped top-edge ramp reaches at most 45% opacity and fades away
         # before the lower edge of the ~30% screen region.
-        scrim_steps = 12
+        scrim_steps = 12 if heading_style == "plain" else 0
         scrim_end = round(height * .30)
         for index in range(scrim_steps):
             y0 = round(scrim_end * index / scrim_steps)
@@ -2387,13 +2776,23 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
             hook_lines = hook_wrap(hook_size)
         hook_body = r"\N".join(" ".join(_ass_escape(str(item["text"])) for item in line) for line in hook_lines)
         end_time = max(0, min(duration, duration if hook_end_time is None else hook_end_time))
+        if heading_style == "dark_box" and hook_lines:
+            # A box fitted to the measured text block (same advances the wrap used), behind the heading.
+            widest = max(sum(glyph_advances.get(ord(char), units_per_em * .6) for char in " ".join(str(item["text"]) for item in line)) * hook_size / height_units for line in hook_lines)
+            pad_x, pad_y = round(.4 * hook_size), round(.22 * hook_size)
+            box_top, box_bottom = hook_top_margin - pad_y, hook_top_margin + len(hook_lines) * hook_size + pad_y
+            box_left, box_right = max(0, round((width - widest) / 2 - pad_x)), min(width, round((width + widest) / 2 + pad_x))
+            rect = f"m {box_left} {box_top} l {box_right} {box_top} {box_right} {box_bottom} {box_left} {box_bottom}"
+            events.append(f"Dialogue: 4,{_ass_time(0)},{_ass_time(end_time)},HookScrim,,0,0,0,,{{\\p1\\an7\\pos(0,0)\\1c&H000000&\\1a&H38&\\bord0\\shad0}}{rect}{{\\p0}}")
         events.append(f"Dialogue: 5,{_ass_time(0)},{_ass_time(end_time)},Hook,,0,0,0,,{{\\fs{hook_size}}}{hook_body}")
     selected_words = caption_words_for_clip(words, offset, offset + duration)
     # Speech presentation intentionally suppresses recipe emoji and uses only
     # local text glyphs, so rendering remains deterministic and offline.
-    local = selected_words if music_theme or speech_presentation or reaction_policy == "ironic_v1" else _caption_words_with_emojis(selected_words, style)
+    local = selected_words if music_theme or speech_presentation or reaction_policy == "ironic_v1" or emoji_mode == "off" else _caption_words_with_emojis(selected_words, style)
     if burn_emoji_images:
         local = [{**word, "_emoji_text": str(word.get("text", "")), "text": _emoji_layout_text(str(word.get("text", "")))} for word in local]
+    if style_preset is not None:
+        events.extend(_speech_preset_events(_plan_speech_preset(local, style_preset, width, height, duration), style_preset, width=width, height=height, burn_emoji_images=burn_emoji_images))
     music_animated = bool(music_theme) and music_lyric_animation in {"slow_fade", "line_crossfade", "word_build"}
     if music_animated:
         events.extend(_music_animated_events(local, str(music_theme), preset, str(music_lyric_animation), width=width, height=height, fontsize=fontsize, duration=duration))
@@ -2402,7 +2801,7 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
             events.extend(_reference_music_events(group, music_theme, width=width, height=height, duration=duration, content_format=content_format))
     serious_next_index = 0
     for index, word in enumerate(local):
-        if music_animated or music_theme in reference_presets:
+        if music_animated or music_theme in reference_presets or style_preset is not None:
             continue
         if music_theme:
             group = _music_caption_group(local, index, max_chars)
@@ -2454,6 +2853,8 @@ Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
         start = max(0, phrase_start if phrase_start is not None else float(word["start"]))
         end = min(duration, max(start + .05, phrase_end if phrase_end is not None else float(word["end"])))
         event_text = r"\N".join(line_bits)
+        if music_theme and preset.get("blur"):
+            event_text = f"{{\\blur{float(preset['blur']):g}}}" + event_text
         if smart_speech:
             event_text = f"{{\\fs{smart_fontsize}\\pos({width // 2},{round(height * .54)})}}" + event_text
         elif styled_speech and style == "hype":
@@ -2687,6 +3088,45 @@ def _music_source_layout_filter(width: int, height: int, source_dimensions: tupl
     )
 
 
+# Editing-style picture filters. Warm, Cool and Black & white reuse the manual
+# editor's bounded grade; Vibrant and Vintage compose the existing look machinery
+# (eq / vignette / pinned-seed grain). They are applied to the fitted footage,
+# before captions, headings, credits, emoji artwork and Subscribe graphics.
+_VIBRANT_LOOK = LookTreatment(contrast=1.06, saturation=1.32)
+_VINTAGE_LOOK = LookTreatment(contrast=1.06, saturation=0.78, gamma=1.04, vignette=0.7854, grain=0.05)
+_VINTAGE_WARMTH = "colorbalance=rm=0.07:gm=0.02:bm=-0.06"
+
+
+def _editing_picture_chain(video_filter: str) -> str:
+    """Filter chain for an explicit editing-style filter; empty when it adds no grade."""
+    if video_filter in {"warm", "cool"}:
+        return _shorts_grade_filter(video_filter, 1.0, "#d58a55", 0)
+    if video_filter == "black_white":
+        return _shorts_grade_filter("monochrome", 1.0, "#d58a55", 0)
+    if video_filter == "vibrant":
+        return ",".join(part for part in (_look_filter(_VIBRANT_LOOK), "format=yuv420p") if part)
+    if video_filter == "vintage":
+        before, after = _look_stages(_VINTAGE_LOOK)
+        return ",".join(part for part in (before, _VINTAGE_WARMTH, after, "format=yuv420p") if part)
+    return ""
+
+
+def _music_treatment_for_filter(video_filter: str, assigned: str | None) -> str | None:
+    """Explicit Music filters replace the automatic colour/grayscale assignment."""
+    if video_filter == "existing":
+        return assigned
+    return "grayscale" if video_filter == "black_white" else "color"
+
+
+def _insert_picture_chain(layout: str, chain: str, *, before_pad: bool) -> str:
+    """Splice the grade into a layout graph just before its ``[base]`` output."""
+    if not chain:
+        return layout
+    if before_pad and ",pad=" in layout:
+        return layout.replace(",pad=", f",{chain},pad=", 1)
+    return layout.replace("[base]", f",{chain}[base]", 1)
+
+
 def _filters(
     width: int, height: int, overlays: list[tuple[Path, float, float]], asset_start_index: int,
     ass_name: str, source_dimensions: tuple[int, int] | None = None,
@@ -2694,12 +3134,13 @@ def _filters(
     music_treatment: str | None = None,
     centered_partial_fill: bool = False,
     sample_aspect_ratio: float = 1.0,
+    picture_chain: str = "",
 ) -> tuple[str, str]:
     if source_dimensions:
         layout = _music_source_layout_filter(width, height, source_dimensions, music_treatment == "grayscale") if music_treatment else _source_layout_filter(*source_dimensions, width, height, centered_partial_fill=centered_partial_fill, sample_aspect_ratio=sample_aspect_ratio)
-        filters = [f"[0:v]{layout}"]
+        filters = [f"[0:v]{_insert_picture_chain(layout, picture_chain, before_pad=bool(music_treatment))}"]
     else:
-        filters = [f"[0:v]scale={width}:{height}:flags=lanczos,setsar=1[base]"]
+        filters = [f"[0:v]{_insert_picture_chain(f'scale={width}:{height}:flags=lanczos,setsar=1[base]', picture_chain, before_pad=False)}"]
     current = "base"
     overlay_width, overlay_height = int(width * .86), int(height * .58)
     for number, (_, start, end) in enumerate(overlays):
@@ -2762,9 +3203,19 @@ def _music_audio_filters(*, source_audio: bool, muted: bool, source_volume: floa
     return filters, "mixedout", True
 
 
-def render_clip(source: Path, output: Path, *, start: float, end: float, aspect: str, words: list[dict[str, Any]], visuals: list[tuple[str, float, float]], overlays: list[tuple[Path, float, float]], settings: Settings, style: str = "educational", has_audio: bool = True, embed_subtitles: bool = False, subtitle_language: str = "und", creator_credit: str | None = None, content_format: str | None = None, centered_partial_fill: bool = False, subscribe_animation: dict[str, Any] | None = None, music_theme: str | None = None, music_top_text: str | None = None, music_treatment: str | None = None, hook_text: str | None = None, presentation: str | None = None, reaction_policy: str | None = None, source_profile: str = "speech", subtitles_enabled: bool = True, muted: bool = False, volume: float = 1.0, filter_preset: str = "none", filter_intensity: float = 1.0, tint_color: str = "#d58a55", tint_opacity: int = 0, text_overlays: list[dict[str, Any]] | None = None, music_track: Path | None = None, music_track_speed: float = 1.0, music_audio_mode: str = "song_only", music_song_gain: float = 1.0, music_original_audio_gain: float = 1.0, music_lyric_animation: str | None = None, music_hook_text_format: str | None = None) -> None:
+def render_clip(source: Path, output: Path, *, start: float, end: float, aspect: str, words: list[dict[str, Any]], visuals: list[tuple[str, float, float]], overlays: list[tuple[Path, float, float]], settings: Settings, style: str = "educational", has_audio: bool = True, embed_subtitles: bool = False, subtitle_language: str = "und", creator_credit: str | None = None, content_format: str | None = None, centered_partial_fill: bool = False, subscribe_animation: dict[str, Any] | None = None, music_theme: str | None = None, music_top_text: str | None = None, music_treatment: str | None = None, hook_text: str | None = None, presentation: str | None = None, reaction_policy: str | None = None, source_profile: str = "speech", subtitles_enabled: bool = True, muted: bool = False, volume: float = 1.0, filter_preset: str = "none", filter_intensity: float = 1.0, tint_color: str = "#d58a55", tint_opacity: int = 0, text_overlays: list[dict[str, Any]] | None = None, music_track: Path | None = None, music_track_speed: float = 1.0, music_audio_mode: str = "song_only", music_song_gain: float = 1.0, music_original_audio_gain: float = 1.0, music_lyric_animation: str | None = None, music_hook_text_format: str | None = None, editing_presentation: dict[str, Any] | None = None) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
-    has_supported_emoji = presentation in {"smart_speech_v1", "smart_speech_v2"} and any(find_emoji_sequences(str(word.get("text", ""))) for word in words)
+    editing = normalize_editing_presentation(editing_presentation)
+    video_filter = video_filter_choice(editing)
+    if music_theme and video_filter != "existing":
+        music_treatment = _music_treatment_for_filter(video_filter, music_treatment)
+        if music_treatment is None:
+            music_treatment = "color"
+    picture_chain = _editing_picture_chain(video_filter) if video_filter != "black_white" or not music_theme else ""
+    preset_active = speech_preset(editing) is not None and not music_theme
+    # Emoji Off: literal Unicode emoji stay ordinary caption text (no artwork overlays or slots).
+    emoji_artwork = not (emoji_mode_choice(editing) == "off" and not music_theme)
+    has_supported_emoji = (presentation in {"smart_speech_v1", "smart_speech_v2"} or preset_active) and emoji_artwork and any(find_emoji_sequences(str(word.get("text", ""))) for word in words)
     separate_burn_script = bool(creator_credit or hook_text or not subtitles_enabled or has_supported_emoji)
     ass = output.parent / (f"{output.stem}.burn.ass" if separate_burn_script else f"{output.stem}.ass")
     duration = end - start
@@ -2777,7 +3228,7 @@ def render_clip(source: Path, output: Path, *, start: float, end: float, aspect:
         src_width, src_height = src_height, src_width
     credit_alignment = _credit_alignment(source, start=start, end=end, width=width, height=height, settings=settings) if creator_credit else 3
     caption_words = words if subtitles_enabled else []
-    write_ass(ass, caption_words, offset=start, duration=duration, visuals=visuals, width=width, height=height, style=style, creator_credit=creator_credit, credit_alignment=credit_alignment, content_format=content_format, music_theme=music_theme, music_top_text=music_top_text, hook_text=hook_text, hook_end_time=hook_end_time, presentation=presentation, reaction_policy=reaction_policy, burn_emoji_images=presentation in {"smart_speech_v1", "smart_speech_v2"}, music_lyric_animation=music_lyric_animation, music_hook_text_format=music_hook_text_format, music_source_dimensions=(src_width, src_height) if music_theme else None, music_banner_reserve_top=_subscribe_reserve_top(width, height, content_format) if music_theme and subscribe_schedule else None)
+    write_ass(ass, caption_words, offset=start, duration=duration, visuals=visuals, width=width, height=height, style=style, creator_credit=creator_credit, credit_alignment=credit_alignment, content_format=content_format, music_theme=music_theme, music_top_text=music_top_text, hook_text=hook_text, hook_end_time=hook_end_time, presentation=presentation, reaction_policy=reaction_policy, burn_emoji_images=(presentation in {"smart_speech_v1", "smart_speech_v2"} or preset_active) and emoji_artwork, music_lyric_animation=music_lyric_animation, music_hook_text_format=music_hook_text_format, music_source_dimensions=(src_width, src_height) if music_theme else None, music_banner_reserve_top=_subscribe_reserve_top(width, height, content_format) if music_theme and subscribe_schedule else None, editing_presentation=editing)
     _append_text_overlays(ass, text_overlays or [], duration, width, height)
     # Downloadable sidecars remain independent of the burn-in toggle; the
     # internal ASS and MP4 overlay receive no speech captions when disabled.
@@ -2785,12 +3236,12 @@ def render_clip(source: Path, output: Path, *, start: float, end: float, aspect:
     if separate_burn_script:
         # Downloadable ASS remains plain Unicode text. The internal burn script
         # can contain image-layout placeholders and is never substituted for it.
-        write_ass(output.with_suffix(".ass"), words, offset=start, duration=duration, visuals=visuals, width=width, height=height, style=style, content_format=content_format, music_theme=music_theme, music_top_text=music_top_text, presentation=presentation, reaction_policy=reaction_policy, music_lyric_animation=music_lyric_animation, music_hook_text_format=music_hook_text_format, music_source_dimensions=(src_width, src_height) if music_theme else None)
+        write_ass(output.with_suffix(".ass"), words, offset=start, duration=duration, visuals=visuals, width=width, height=height, style=style, content_format=content_format, music_theme=music_theme, music_top_text=music_top_text, presentation=presentation, reaction_policy=reaction_policy, music_lyric_animation=music_lyric_animation, music_hook_text_format=music_hook_text_format, music_source_dimensions=(src_width, src_height) if music_theme else None, editing_presentation=editing)
     temp = output.with_suffix(".partial.mp4")
     command = [settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{start:.3f}", "-i", str(source)]
     _overlay_inputs(command, overlays)
     subscribe_animations = _subscribe_animation_inputs(command, subscribe_animation, duration, content_format, width, height, 1 + len(overlays))
-    emoji_plan = _caption_emoji_plan(words, width, height, duration, offset=start, style=style, presentation=presentation, music_theme=music_theme, reaction_policy=reaction_policy, source_profile=source_profile) if subtitles_enabled and (presentation in {"smart_speech_v1", "smart_speech_v2"} or reaction_policy == "ironic_v1") else []
+    emoji_plan = _caption_emoji_plan(words, width, height, duration, offset=start, style=style, presentation=presentation, music_theme=music_theme, reaction_policy=reaction_policy, source_profile=source_profile, editing_presentation=editing) if subtitles_enabled and (presentation in {"smart_speech_v1", "smart_speech_v2"} or reaction_policy == "ironic_v1") else []
     emoji_inputs = list(dict.fromkeys(path for path, *_ in emoji_plan))
     _overlay_inputs(command, [(path, 0, duration) for path in emoji_inputs])
     subtitle_index = 1 + len(overlays) + len(subscribe_animations) + len(emoji_inputs)
@@ -2804,7 +3255,7 @@ def render_clip(source: Path, output: Path, *, start: float, end: float, aspect:
     sample_aspect_ratio = float(source_meta.get("sample_aspect_ratio") or 1.0)
     if source_meta["rotation"] % 180:
         sample_aspect_ratio = 1.0 / sample_aspect_ratio
-    filters, mapped = _filters(width, height, overlays, 1, ass.name, source_dimensions, subscribe_animations, music_treatment, centered_partial_fill, sample_aspect_ratio)
+    filters, mapped = _filters(width, height, overlays, 1, ass.name, source_dimensions, subscribe_animations, music_treatment, centered_partial_fill, sample_aspect_ratio, picture_chain)
     if filter_preset != "none":
         filters = filters.replace("[0:v]", f"[0:v]{_shorts_grade_filter(filter_preset, filter_intensity, tint_color, tint_opacity)},")
     if emoji_plan:
@@ -3105,6 +3556,7 @@ def render_fast_clip(
     music_original_audio_gain: float = 1.0,
     music_lyric_animation: str | None = None,
     music_hook_text_format: str | None = None,
+    editing_presentation: dict[str, Any] | None = None,
 ) -> None:
     """Render a fast clip with optional captions and no overlays or visual beats.
 
@@ -3144,8 +3596,12 @@ def render_fast_clip(
     width, height = dimensions(aspect)
     duration = max(0.1, end - start)
     temp = output.with_suffix(".partial.mp4")
+    editing = normalize_editing_presentation(editing_presentation)
+    captions_styled = bool(editing) and subtitles_enabled and bool(words) and (
+        editing["caption_preset"] != "editorial_default" or editing["emoji_mode"] != "existing" or editing["heading_style"] != "plain"
+    )
 
-    if presentation is not None or (reaction_policy == "ironic_v1" and subtitles_enabled and words):
+    if presentation is not None or captions_styled or (reaction_policy == "ironic_v1" and subtitles_enabled and words):
         source_timed_words = [
             {**word, "start": start + float(word["start"]), "end": start + float(word["end"])}
             for word in (words or [])
@@ -3162,7 +3618,7 @@ def render_fast_clip(
             tint_color=tint_color, tint_opacity=tint_opacity, text_overlays=text_overlays,
             music_track=music_track, music_track_speed=music_track_speed,
             music_audio_mode=music_audio_mode, music_song_gain=music_song_gain,
-            music_original_audio_gain=music_original_audio_gain,
+            music_original_audio_gain=music_original_audio_gain, editing_presentation=editing,
         )
         return
 
@@ -3183,7 +3639,7 @@ def render_fast_clip(
             tint_color=tint_color, tint_opacity=tint_opacity, text_overlays=text_overlays,
             music_track=music_track, music_track_speed=music_track_speed,
             music_audio_mode=music_audio_mode, music_song_gain=music_song_gain,
-            music_original_audio_gain=music_original_audio_gain,
+            music_original_audio_gain=music_original_audio_gain, editing_presentation=editing,
         )
         return
 
@@ -3211,6 +3667,14 @@ def render_fast_clip(
             logger.info("Skipping punch-in for %s: source %dx%d has no headroom over %dx%d",
                         output.name, src_width, src_height, width, height)
     vf = f"{vf},{_shorts_grade_filter(filter_preset, filter_intensity, tint_color, tint_opacity)}" if filter_preset != "none" else vf
+    editing_filter = video_filter_choice(editing)
+    if editing_filter != "existing":
+        # An explicit choice replaces the style's own grade (Original colour just
+        # drops it); punch-in and the caption scrim are framing, not colour.
+        look_before = look_after = ""
+        chain = _editing_picture_chain(editing_filter)
+        if chain:
+            vf = f"{vf},{chain}"
     if look_before:
         vf = f"{vf},{look_before}"
     if look_after:

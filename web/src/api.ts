@@ -27,6 +27,7 @@ import {
   type ProcessingMode,
   type SourceProfile,
   type MusicPresentationConfig,
+  type EditingPresentationConfig,
   type Project,
   type ProviderProfile,
   type OpenRouterModel,
@@ -219,6 +220,8 @@ type ClipJobInput = {
   subscribeAnimation?: SubscribeAnimationConfig;
   libraryFolderId?: string;
   musicPresentation?: MusicPresentationConfig;
+  /** Serialized as the optional multipart `editing_presentation` JSON; omitted keeps today's behaviour. */
+  editingPresentation?: EditingPresentationConfig;
   musicTopText?: string;
   musicTrackFile?: File;
   musicTrackUrl?: string;
@@ -258,6 +261,7 @@ export async function createClipJob(input: ClipJobInput): Promise<{ project: Pro
   if (input.youtubeMetadata !== undefined) form.set("youtube_metadata", String(input.youtubeMetadata));
   if (input.youtubeMetadataModelId?.trim()) form.set("youtube_metadata_model_id", input.youtubeMetadataModelId.trim());
   if (input.libraryFolderId) form.set("library_folder_id", input.libraryFolderId);
+  if (input.editingPresentation) form.set("editing_presentation", JSON.stringify(input.editingPresentation));
   if (input.subscribeAnimation) form.set("subscribe_animation", JSON.stringify(input.subscribeAnimation));
   if (input.sourceProfile === "music") {
     if (input.musicLyricsLanguage) form.set("music_lyrics_language", input.musicLyricsLanguage);

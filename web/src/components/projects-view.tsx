@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, Film, Plus, Sparkles, Zap } from "lucide-react";
 import { createClipJob, createFolder, listFolders, readableError } from "../api";
-import { DEFAULT_SUBSCRIBE_ANIMATION, type BatchMode, type ContentFormat, type Health, type LibraryFolder, type ProcessingMode, type Project, type ProviderProfile, type SourceProfile, type Style, type SubscribeAnimationConfig, type MusicTheme, type MusicLyricAnimation, type MusicHookTextFormat } from "../types";
+import { DEFAULT_SUBSCRIBE_ANIMATION, type BatchMode, type ContentFormat, type Health, type LibraryFolder, type ProcessingMode, type Project, type ProviderProfile, type SourceProfile, type Style, type SubscribeAnimationConfig, type MusicTheme, type MusicLyricAnimation, type MusicHookTextFormat, type CaptionPreset, type VideoFilter, type HeadingStyle, type EmojiMode } from "../types";
 import { Button, Field, FieldGroup, StepBadge, useSingleFlight } from "./common";
 import { VideoSourcePicker } from "./video-source-picker";
 import { VideoOnlyDownload } from "./video-only-download";
 import { SubscribeAnimationControl } from "./subscribe-animation-control";
 import { RecentClips } from "./recent-clips";
 import { MusicHookFormatPicker, MusicLyricAnimationPicker } from "./music-typography-controls";
+import { EmojiModeControls, HeadingStyleControls, SpeechSubtitleStyleControls, VideoFilterPicker } from "./speech-style-controls";
+import { DEFAULT_CAPTION_PRESET, DEFAULT_EMOJI_MODE, DEFAULT_HEADING_STYLE, DEFAULT_VIDEO_FILTER, musicEditingPresentation, speechEditingPresentation } from "../editing-presets";
 
 const RECENT_FOLDER_KEY = "s6-cut.recent-library-folder";
 const PROVIDER_CALLOUT_DISMISSED_KEY = "s6-cut.provider-callout-dismissed";
@@ -58,6 +60,12 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
   const [musicLyricAnimation, setMusicLyricAnimation] = useState<MusicLyricAnimation>("legacy");
   const [musicHookFormat, setMusicHookFormat] = useState<MusicHookTextFormat>("plain");
   const [musicTopText, setMusicTopText] = useState("");
+  // Regular and Music choices are kept apart so a mode switch never submits the other mode's selection.
+  const [captionPreset, setCaptionPreset] = useState<CaptionPreset>(DEFAULT_CAPTION_PRESET);
+  const [speechVideoFilter, setSpeechVideoFilter] = useState<VideoFilter>(DEFAULT_VIDEO_FILTER);
+  const [musicVideoFilter, setMusicVideoFilter] = useState<VideoFilter>(DEFAULT_VIDEO_FILTER);
+  const [headingStyle, setHeadingStyle] = useState<HeadingStyle>(DEFAULT_HEADING_STYLE);
+  const [emojiMode, setEmojiMode] = useState<EmojiMode>(DEFAULT_EMOJI_MODE);
   const [musicTrackFile, setMusicTrackFile] = useState<File | null>(null);
   const musicTrackInput = useRef<HTMLInputElement>(null);
   const [musicTrackUrl, setMusicTrackUrl] = useState("");
@@ -170,6 +178,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
           ...(sourceProfile === "speech" && speechHookTextEnabled && manualHookText.trim() ? { manualHookText: manualHookText.trim() } : {}),
           // Eligible: always send the explicit choice so an untick is respected.
           ...(metadataDisabledReason === null ? { youtubeMetadata: youtubeMetadataActive } : {}),
+          ...(editingPresentation ? { editingPresentation } : {}),
           subscribeAnimation, libraryFolderId: libraryFolderId || undefined, libraryOverlaysEnabled: libraryOverlaysEnabled && libraryOverlaysSupported,
           ...(sourceProfile === "music" ? { musicPresentation: { version: 1 as const, subtitleTheme: musicTheme, ...(musicLyricAnimation !== "legacy" ? { lyricAnimation: musicLyricAnimation } : {}), ...(musicHookTextEnabled && musicHookFormat !== "plain" ? { hookTextFormat: musicHookFormat } : {}) }, musicTopText: musicHookTextEnabled ? musicTopText : "", musicLyricsLanguage: musicLyricsLanguage || undefined } : {}),
           ...(sourceProfile === "music" ? { musicTrackFile: musicTrackFile || undefined, musicTrackUrl: musicTrackUrl.trim() || undefined, musicTrackSpeed: Number(musicTrackSpeed), musicAudioMode, ...(musicAudioMode === "mix_original" ? { musicSongGain: musicSongVolume / 100 } : {}) } : {}),
@@ -207,6 +216,12 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
   }
   const speechHookTextEnabled = speechHookTextEligible && hookTextChoice;
   const musicHookTextEnabled = musicHookTextEligible && musicHookTextChoice;
+  const speechCaptionsDisabledReason = fastMode ? "Fast mode skips transcription, so there are no captions or emoji reactions to style. The video filter still applies."
+    : !burnSubtitles ? "Burn in subtitles is off, so there are no captions or emoji reactions to style. The video filter still applies."
+      : null;
+  const editingPresentation = sourceProfile === "music"
+    ? musicEditingPresentation(musicVideoFilter)
+    : speechEditingPresentation({ captionPreset, videoFilter: speechVideoFilter, headingStyle, emojiMode, captionsAvailable: speechCaptionsDisabledReason === null, headingAvailable: speechHookTextEligible });
   const hookTextEnabled = sourceProfile === "music" ? musicHookTextEnabled : speechHookTextEnabled;
   const metadataDisabledReason = contentFormat !== "short" ? "Available for Short form only."
       : sourceProfile === "speech" && processingMode === "fast" ? "Fast mode does not support metadata generation. Choose Auto or Smart."
@@ -274,6 +289,16 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
             </div>
           </FieldGroup>
 
+          {sourceProfile === "speech" && <>
+            <FieldGroup title="Subtitle style" hint="Choose how captions look. Editorial style above still decides which moments are chosen.">
+              <SpeechSubtitleStyleControls value={captionPreset} onChange={setCaptionPreset} editorialStyle={style} videoFilter={speechVideoFilter}
+                heading={{ enabled: speechHookTextEnabled, text: manualHookText.trim() || "Your heading here", style: headingStyle }} emojiMode={emojiMode} disabledReason={speechCaptionsDisabledReason} />
+            </FieldGroup>
+            <FieldGroup title="Video filter" hint="Applied to the footage before captions, headings and graphics are added.">
+              <VideoFilterPicker value={speechVideoFilter} onChange={setSpeechVideoFilter} existingNote="Keeps today’s look" />
+            </FieldGroup>
+          </>}
+
           <>
             {sourceProfile === "music" && <FieldGroup title="Lyrics presentation" hint={MUSIC_PROFILE_NOTE}>
               <Field label="Lyrics language" hint="English is the default. Choose another language or automatic detection for songs in other languages.">
@@ -304,8 +329,18 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
                 <button type="button" aria-label="Condensed white" aria-pressed={musicTheme === "condensed_white"} className={musicTheme === "condensed_white" ? "active" : ""} onClick={() => setMusicTheme("condensed_white")}><span className="theme-condensed-white">do you think<br />that i’ve forgotten<br />about</span><strong>Condensed white</strong><small>Narrow · for dark footage</small></button>
                 <button type="button" aria-label="Handwritten stack" aria-pressed={musicTheme === "handwritten_stack"} className={musicTheme === "handwritten_stack" ? "active" : ""} onClick={() => setMusicTheme("handwritten_stack")}><span className="theme-handwritten-stack">do you<br />think that<br />i’ve</span><strong>Handwritten stack</strong><small>White · vertical stack</small></button>
               </div>
+              <p className="music-theme-group-label">Highlight styles</p>
+              <div className="music-theme-options">
+                <button type="button" aria-label="Karaoke focus" aria-pressed={musicTheme === "karaoke_focus"} className={musicTheme === "karaoke_focus" ? "active" : ""} onClick={() => setMusicTheme("karaoke_focus")}><span className="theme-karaoke-focus">do you <em>think</em><br />that i’ve forgotten<br />about</span><strong>Karaoke focus</strong><small>Sung word accented</small></button>
+                <button type="button" aria-label="Soft glow" aria-pressed={musicTheme === "soft_glow"} className={musicTheme === "soft_glow" ? "active" : ""} onClick={() => setMusicTheme("soft_glow")}><span className="theme-soft-glow">do you think<br />that i’ve forgotten<br />about</span><strong>Soft glow</strong><small>White · gentle glow</small></button>
+                <button type="button" aria-label="Lyric plate" aria-pressed={musicTheme === "lyric_plate"} className={musicTheme === "lyric_plate" ? "active" : ""} onClick={() => setMusicTheme("lyric_plate")}><span className="theme-lyric-plate"><i>do you think</i><i>that i’ve forgotten</i><i>about</i></span><strong>Lyric plate</strong><small>Dark translucent plate</small></button>
+              </div>
               </div>
               <MusicLyricAnimationPicker value={musicLyricAnimation} theme={musicTheme} onChange={setMusicLyricAnimation} />
+              <div className="music-filter-group">
+                <p className="music-theme-group-label">Video filter</p>
+                <VideoFilterPicker value={musicVideoFilter} onChange={setMusicVideoFilter} existingNote="Keeps the automatic colour / black-and-white mix" label="Music video filter" />
+              </div>
             </FieldGroup>}
             <FieldGroup title="Format">
               <div className="segmented mode-tabs format-tabs" aria-label="Content format">
@@ -374,6 +409,8 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
           {musicHookTextEnabled && <Field label="Top text" hint="Optional · displayed in the upper black area. Up to 100 characters."><input aria-label="Top text" value={musicTopText} maxLength={100} onChange={(event) => setMusicTopText(event.target.value)} placeholder="Leave blank to omit" /></Field>}
           {musicHookTextEnabled && <MusicHookFormatPicker value={musicHookFormat} onChange={setMusicHookFormat} />}
           {speechHookTextEnabled && <Field label="Hook text to display" hint="Up to 150 characters. Your text will be shown on each clip."><textarea aria-label="Hook text to display" rows={2} maxLength={150} value={manualHookText} onChange={(event) => setManualHookText(event.target.value)} placeholder="Leave blank to generate a hook from the transcript" /></Field>}
+          {speechHookTextEligible && <HeadingStyleControls value={headingStyle} onChange={setHeadingStyle} />}
+          {sourceProfile === "speech" && <EmojiModeControls value={emojiMode} onChange={setEmojiMode} disabledReason={speechCaptionsDisabledReason} />}
           <label className="subtitle-toggle"><input type="checkbox" aria-label="Write SEO titles with AI (YouTube metadata)" data-testid="youtube-metadata-toggle" checked={youtubeMetadataActive} disabled={metadataDisabledReason !== null} onChange={(event) => setYoutubeMetadataChoice(event.target.checked)} /> <span><strong>Generate YouTube metadata</strong><small>{metadataDisabledReason ?? (processingMode === "fast" ? "Fast mode has no transcript. Choose Auto or Smart." : executionPolicy === "engine_only" ? "Uses transcript-based local descriptions and deterministic titles." : `${youtubeMetadataDefault ? "On by default (Settings › Auto-write SEO titles)" : "Off by default"}. Uses ${selectedProfile?.youtubeMetadataModelId || "the configured Settings model"} when available, with local fallback. Editable and separate from burned-in text.`)}</small></span></label>
 
           <button className="advanced-toggle" onClick={() => setAdvanced(!advanced)} aria-expanded={advanced}>Advanced controls <span aria-hidden="true">{advanced ? "−" : "+"}</span></button>

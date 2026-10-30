@@ -26,9 +26,10 @@ from .media import (
     _metadata_text, sha256_file, transcribe, transcription_cache_key, youtube_import_metadata, youtube_import_title,
 )
 from .models import (
-    Asset, CaptionCue, Clip, ContentFormat, Job, ProcessingMode, ProcessingStep, ProvenanceRecord, ScoreBreakdown, YouTubeMetadataUpdate, now_iso,
+    Asset, CaptionCue, Clip, ContentFormat, EditingPresentationConfig, Job, ProcessingMode, ProcessingStep, ProvenanceRecord, ScoreBreakdown, YouTubeMetadataUpdate, now_iso,
 )
 from .seo_titles import SEO_PROMPT_VERSION, SEO_TITLE_RULES, fallback_clip_title, normalize_seo_description, normalize_seo_title, project_name_is_auto, source_context_title
+from .editing_presets import manifest_summary, normalize_editing_presentation, sanitize_for_uncaptioned_path
 from .hook_text import HOOK_TEXT_RULES, hook_text_clips, hook_text_schema, local_hook_text, normalize_hook_text
 from .providers import ProfileService, ProviderError, provider_runtime_message
 from .security import confined, redact, safe_archive_title, safe_filename
@@ -517,6 +518,27 @@ def _presentation_render_kwargs(render, private: dict[str, Any]) -> dict[str, st
         return {}
     if any(parameter.name == "presentation" or parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters):
         return {"presentation": choice}
+    return {}
+
+
+def _editing_render_kwargs(render, private: dict[str, Any], source_profile: str = "speech") -> dict[str, Any]:
+    """Pass the saved editing-style snapshot only to renderers that accept it.
+
+    Jobs created without a choice (and every historical job) send nothing, so
+    recorded call shapes and renderer defaults are unchanged. Music carries the
+    shared picture filter only; its lyric look lives in ``music_presentation``.
+    """
+    value = normalize_editing_presentation(private.get("editing_presentation"))
+    if value is None:
+        return {}
+    if source_profile == "music":
+        value = {"version": value["version"], "video_filter": value["video_filter"]}
+    try:
+        parameters = inspect.signature(render).parameters.values()
+    except (TypeError, ValueError):
+        return {}
+    if any(parameter.name == "editing_presentation" or parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters):
+        return {"editing_presentation": value}
     return {}
 
 
@@ -1574,6 +1596,7 @@ class JobManager:
                 **_format_render_kwargs(render, job_content_format(job, private)),
                 **_creator_render_kwargs(render, youtube_creator_credit(job, private)),
                 **_presentation_render_kwargs(render, private), **music_kwargs,
+                **_editing_render_kwargs(render, private, job.source_profile),
                 **({"music_track": music_track, "music_track_speed": 1.0} if music_track else {}),
                 **({"music_audio_mode": job.music_audio_mode, "music_song_gain": job.music_song_gain, "music_original_audio_gain": job.music_original_audio_gain} if job.source_profile == "music" else {}),
             }
@@ -2552,6 +2575,7 @@ class JobManager:
                     **_creator_render_kwargs(render_clip, youtube_creator_credit(job, private)),
                     **_format_render_kwargs(render_clip, job_content_format(job, private)),
                     **_presentation_render_kwargs(render_clip, private),
+                    **_editing_render_kwargs(render_clip, private, job.source_profile),
                     "subtitles_enabled": subtitles_enabled,
                     **_reaction_policy_render_kwargs(render_clip, private, job.source_profile, subtitles_enabled),
                     **(_music_render_kwargs(
@@ -2784,6 +2808,7 @@ class JobManager:
                 render_kwargs.update(_creator_render_kwargs(render, youtube_creator_credit(job, private)))
                 render_kwargs.update(_format_render_kwargs(render, job_content_format(job, private)))
                 render_kwargs.update(_presentation_render_kwargs(render, private))
+                render_kwargs.update(_editing_render_kwargs(render, private, job.source_profile))
                 render_kwargs.update(_reaction_policy_render_kwargs(render, private, job.source_profile, subtitles_enabled))
                 if job.source_profile == "music":
                     render_kwargs.update({"music_audio_mode": job.music_audio_mode, "music_song_gain": job.music_song_gain, "music_original_audio_gain": job.music_original_audio_gain})
@@ -3063,6 +3088,10 @@ class JobManager:
         new_private = dict(private)
         new_private["processing_mode"] = "fast"
         new_private["presentation"] = {"version": 1, "caption": "legacy"}
+        # A fast cut skips captions: keep the picture filter, drop what only captions can honour.
+        fast_editing = sanitize_for_uncaptioned_path(private.get("editing_presentation"))
+        if fast_editing is not None:
+            new_private["editing_presentation"] = fast_editing
         new_private["library_folder_id"] = job.library_folder_id
         new_private.pop("transcript", None)
         new_id = str(uuid.uuid4())
@@ -3073,6 +3102,7 @@ class JobManager:
             requested_count=job.requested_count, batch_mode=job.batch_mode, effective_target=job.effective_target,
             cap_explanation=job.cap_explanation, state="queued", stage="queued", stage_label="Queued on this machine",
             progress=0, style=job.style, burn_subtitles=bool(new_private.get("burn_subtitles", job.burn_subtitles)), steps=self._fast_steps(),
+            editing_presentation=EditingPresentationConfig.model_validate(fast_editing) if fast_editing is not None else None,
         )
         self.db.save_job(new_job, new_private)
         self._save(new_job)
@@ -3125,6 +3155,11 @@ class JobManager:
         manifest_outputs = []
         credits = []
         warning_summary = []
+        # Additive, only for jobs that chose a presentation. Music only has a picture filter to report.
+        editing_private = self.db.get_job_private(job.id).get("editing_presentation")
+        editing_summary = manifest_summary(editing_private)
+        if editing_summary is not None and job.source_profile == "music":
+            editing_summary = {"version": editing_summary["version"], "video_filter": editing_summary["video_filter"]}
         for number, (clip, source) in enumerate(export_sources, 1):
             filename = f"{number:02d}-{safe_filename(source.stem, 'cut')}.mp4"
             manifest_outputs.append({
@@ -3151,6 +3186,7 @@ class JobManager:
                     },
                     "music_top_text": clip.music_top_text or job.music_top_text,
                 } if job.source_profile == "music" else {}),
+                **({"editing_presentation": editing_summary} if editing_summary is not None else {}),
             })
             if clip.creator_credit or clip.provenance:
                 credits.append({
@@ -3185,6 +3221,7 @@ class JobManager:
                 "updated_at": job.updated_at,
                 "music_track": job.music_track.model_dump(mode="json") if job.music_track else None,
                 "music_audio": {"mode": job.music_audio_mode.value, "song_gain": job.music_song_gain, "original_audio_gain": job.music_original_audio_gain},
+                **({"editing_presentation": editing_summary} if editing_summary is not None else {}),
             },
             "outputs": manifest_outputs,
         }

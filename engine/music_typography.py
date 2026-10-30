@@ -287,7 +287,7 @@ def _alpha(value: int) -> str:
 def block_event(
     envelope: BlockEnvelope, *, animation: str, ass_time: Callable[[float], str], escape: Callable[[str], str],
     position: tuple[int, int], align: str, primary: str, highlight: str | None, outline_alpha: int, layer: int = 10,
-    style: str = "Caption",
+    style: str = "Caption", extra_tags: str = "",
 ) -> str:
     """One ASS dialogue line carrying the whole block.
 
@@ -300,6 +300,8 @@ def block_event(
     x, y = position
     anchor = r"\an4" if align == "left" else r"\an5"
     tags = [anchor, r"\q2", rf"\pos({x},{y})", rf"\fs{max(1, round(block.font_size))}"]
+    if extra_tags:
+        tags.append(extra_tags)
     if animation != "word_build" and (envelope.fade_in > 0 or envelope.fade_out > 0):
         tags.append(rf"\fad({_ms(envelope.fade_in)},{_ms(envelope.fade_out)})")
     elif animation == "word_build" and envelope.fade_out > 0:
