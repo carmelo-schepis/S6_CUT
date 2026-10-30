@@ -97,6 +97,7 @@ async function submit(page: any, request: any, options: { name: string; source: 
   }
   await page.getByRole('button', { name: 'Music / sung vocals' }).click();
   while (Number(await page.locator('.count-control strong').textContent()) > 1) await page.getByRole('button', { name: 'Fewer clips' }).click();
+  await page.getByRole('button', { name: 'Background song', exact: true }).click();
   if (options.replacement === 'upload') {
     await page.getByLabel('Background song MP3').setInputFiles(path.join(fixtures!, 'replacement.mp3'));
   } else if (options.replacement === 'invalid') {
@@ -376,6 +377,7 @@ test('mobile Music form has no horizontal overflow and exposes replacement mode'
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Create a project' })).toBeVisible();
   await page.getByRole('button', { name: 'Music / sung vocals' }).click();
+  await page.getByRole('button', { name: 'Background song', exact: true }).click();
   await page.getByLabel('Choose video file').setInputFiles(path.join(fixtures!, 'source.mp4'));
   await page.getByLabel('Background song MP3').setInputFiles(path.join(fixtures!, 'replacement.mp3'));
   const width = await page.evaluate(() => ({ viewport: document.documentElement.clientWidth, document: document.documentElement.scrollWidth }));
@@ -389,6 +391,7 @@ test('voice replacement control is scoped to Music mode', async ({ page }, testI
   await expect(page.getByRole('heading', { name: 'Create a project' })).toBeVisible();
   await expect(page.getByRole('button', { name: /Keep voice, replace background music/i })).toHaveCount(0);
   await page.getByRole('button', { name: 'Music / sung vocals' }).click();
+  await page.getByRole('button', { name: 'Background song', exact: true }).click();
   await page.getByLabel('Background song MP3').setInputFiles(path.join(fixtures!, 'replacement.mp3'));
   const replacementMode = page.getByRole('button', { name: /Keep voice, replace background music/i });
   await expect(replacementMode).toBeVisible();

@@ -207,7 +207,7 @@ describe("Music presentation creation controls", () => {
     const mix = screen.getByRole("button", { name: "Original audio + song" });
     expect(only).toBeDisabled();
     expect(mix).toBeDisabled();
-    expect(screen.getByText("Add a song for the Song only and Original audio + song choices. Keep voice, replace background music works without one.")).toBeVisible();
+    expect(screen.getByText("Add a song to choose how audio is combined. Keep voice works without a replacement song.")).toBeVisible();
     fireEvent.change(screen.getByLabelText("Background song MP3"), { target: { files: [new File(["song"], "song.mp3", { type: "audio/mpeg" })] } });
     expect(only).toBeEnabled();
     expect(mix).toBeEnabled();
@@ -232,6 +232,7 @@ describe("Music presentation creation controls", () => {
     vi.mocked(createClipJob).mockResolvedValue({ project: { ...project, sourceProfile: "music" }, job: undefined as never });
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
     fireEvent.click(mode("Music"));
+    fireEvent.click(screen.getByRole("button", { name: "Background song" }));
     const keepVoice = screen.getByRole("button", { name: "Keep voice, replace background music" });
     expect(keepVoice).toHaveAttribute("aria-pressed", "false");
     fireEvent.click(keepVoice);

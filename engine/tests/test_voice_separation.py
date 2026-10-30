@@ -179,6 +179,12 @@ def test_corrupt_or_wrong_sample_count_outputs_are_rejected(tmp_path):
         separation._validate_output(valid, 5, 2, shutil.which("ffprobe"))
 
 
+def test_settings_identity_changes_when_inference_settings_change():
+    assert separation._settings_identity(chunk_seconds=separation.CHUNK_SECONDS + 1) != separation.SEPARATION_SETTINGS_ID
+    assert separation._settings_identity(context_seconds=separation.CONTEXT_SECONDS + 1) != separation.SEPARATION_SETTINGS_ID
+    assert separation._settings_identity(sample_rate=separation.MODEL_SAMPLE_RATE + 1) != separation.SEPARATION_SETTINGS_ID
+
+
 def test_model_initialization_failure_is_actionable(tmp_path, monkeypatch):
     model_dir = tmp_path / "models"
     model_dir.mkdir()
