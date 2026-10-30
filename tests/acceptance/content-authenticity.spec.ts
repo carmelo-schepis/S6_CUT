@@ -25,6 +25,13 @@ const writeManifest = (name: string, payload: unknown) => writeManifestTo(artifa
 
 test.describe.configure({ mode: "serial" });
 
+// Apple phones and tablets run the deliberate read-only status app (covered by
+// ios-status-view.spec.ts), whose shell has neither the desktop Projects rail
+// nor the create panel this file drives. iPad desktop mode serves the desktop
+// shell, so it stays in the matrix.
+test.skip(({ userAgent }) => /iPad|iPhone/.test(userAgent ?? ""),
+  "the Apple mobile shell is a deliberate read-only status app with no clip-creation UI");
+
 test.describe("S6_cut generates real playable video", () => {
   test("Smart mode renders multiple clips from the uploaded source", async ({ page }) => {
     test.setTimeout(OVERALL_DEADLINE_MS + 5 * 60_000);
@@ -34,9 +41,7 @@ test.describe("S6_cut generates real playable video", () => {
     const observed = new Set<string>();
 
     await page.goto("/", { waitUntil: "domcontentloaded" });
-    // The engine-health badge reads "Local engine" in both the desktop top bar
-    // and the mobile shell, so this works before any shell-specific copy.
-    await expect(page.locator(".status-local").filter({ hasText: "Local engine" })).toBeVisible({ timeout: 90_000 });
+    await expect(page.getByText("Local engine ready")).toBeVisible({ timeout: 90_000 });
 
     await createClipProject(page, { name: projectName, count: 2, mode: "Smart", aspect: "9:16", min: 8, max: 20, captions: true, source: { kind: "file", path: fixture } });
     await waitForProjectReady(page, observed);
@@ -169,7 +174,7 @@ test.describe("S6_cut generates real playable video", () => {
     const observed = new Set<string>();
 
     await page.goto("/", { waitUntil: "domcontentloaded" });
-    await expect(page.locator(".status-local").filter({ hasText: "Local engine" })).toBeVisible({ timeout: 90_000 });
+    await expect(page.getByText("Local engine ready")).toBeVisible({ timeout: 90_000 });
 
     await createClipProject(page, { name: projectName, count: 2, mode: "Fast", aspect: "9:16", min: 8, max: 20, captions: false, source: { kind: "file", path: fixture } });
     await waitForProjectReady(page, observed);
@@ -230,14 +235,14 @@ test.describe("S6_cut generates real playable video", () => {
     if (!profileKey) throw new Error("the harness did not provide a profile key");
     const created = await fetch(`${gateway}/api/v1/profiles`, {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "Authenticity OpenRouter failure", modelId: "openai/gpt-4.1-mini", openrouterKey: profileKey, persistence: "encrypted", selected: true }),
+      body: JSON.stringify({ name: "Authenticity OpenRouter failure", textModelId: "openai/gpt-4.1-mini", openrouterKey: profileKey, persistence: "encrypted", selected: true }),
     });
     expect(created.ok).toBeTruthy();
     const profile = await created.json();
     expect((await fetch(`${gateway}/api/v1/profiles/${profile.id}/test`, { method: "POST" })).ok).toBeTruthy();
 
     await page.goto("/", { waitUntil: "domcontentloaded" });
-    await expect(page.locator(".status-local").filter({ hasText: "Local engine" })).toBeVisible({ timeout: 90_000 });
+    await expect(page.getByText("Local engine ready")).toBeVisible({ timeout: 90_000 });
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await expect(page.getByRole("article").filter({ hasText: "Authenticity OpenRouter failure" }).first())
       .toContainText(/Connected/, { timeout: 30_000 });
