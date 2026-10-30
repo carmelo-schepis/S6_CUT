@@ -894,7 +894,6 @@ main { min-width: 0; }
 .engine-chips .ok { color: var(--text-primary); border-color: rgba(76,183,130,.28); background: rgba(76,183,130,.14); }
 .engine-chips .warn { color: var(--text-primary); border-color: rgba(240,168,75,.28); background: rgba(240,168,75,.2); }
 .engine-dot.checking { background: var(--text-disabled); }
-.advanced-toggle { width: 100%; display: flex; justify-content: space-between; align-items: center; min-height: var(--control-height); margin: 0; padding: var(--control-pad-y) var(--space-1); border: 0; border-bottom: 0; border-radius: 0; background: transparent; color: var(--text-primary); }.advanced-toggle span { color: var(--text-primary); }
 .advanced-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); margin: 0; }.advanced-grid .field:first-child { grid-column: span 2; }
 /* The trailing control of the style column and of the action column are both
    pinned to the bottom of their column, so the Processing mode segmented
@@ -2353,7 +2352,7 @@ main { min-width: 0; }
 .asset-card-details-content > span:not(.origin-badge):not(.status), .settings-card-head p,
 .workspace-source-meta, .workspace-secondary-meta, .clip-line, .clip-meta, .crumb, .topbar-context > .muted,
 .timeline-scale, .recent-clip-content > span, .recent-clip-folder, .section-count, .count-pill,
-.engine-chips :is(.ok, .warn), .advanced-toggle, .checklist-status-text { color: var(--text-muted); }
+.engine-chips :is(.ok, .warn), .checklist-status-text { color: var(--text-muted); }
 input::placeholder, textarea::placeholder { color: #737373; }
 
 /* Buttons: the primary action is a filled grey; on hover the logo's gradient
@@ -2721,8 +2720,29 @@ input[type="checkbox"]:checked::before {
 .engine-chips { gap: var(--space-4); }
 .engine-chips :is(.ok, .warn) { color: var(--text-muted); font-weight: var(--type-text-weight); }
 .subscribe-animation-control .subscribe-animation-timing { display: grid; justify-content: stretch; gap: var(--gap-tight); }
-.advanced-toggle { justify-content: flex-start; gap: var(--space-2); padding-inline: 0; color: var(--text-muted); }
 .create-actions { padding-top: var(--gap-group); }
+/* The create panel is denser: options in the right column sit 16px apart and the
+   title, callout and Create action sit closer together, so Create lands on the first 900px screen. */
+.projects-page .create-topline { padding-bottom: var(--space-8); }
+.projects-page .provider-callout { margin-bottom: var(--space-8); }
+.projects-page .action-step { gap: var(--space-4); }
+.projects-page .create-actions { padding-top: 0; }
+/* Option rows: the heavy pickers sit behind one line each, showing their
+   current value. The list follows the key options and spans the column. */
+.create-option-list { display: grid; gap: var(--space-2); min-width: 0; grid-column: 1 / -1; }
+.style-step > .create-option-list { order: 3; }
+.create-option { min-width: 0; border-radius: var(--radius-lg); background: var(--control-translucent); }
+.create-option:hover { background: var(--control-translucent-hover); }
+.create-option:has(.create-option-toggle[aria-expanded="true"]) { background: var(--control-translucent-selected); box-shadow: inset 0 0 0 1px var(--control-border); }
+.create-option-toggle { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); width: 100%; min-height: 48px; margin: 0; padding: 0 var(--space-4); border: 0; border-radius: var(--radius-lg); background: transparent; color: var(--text); text-align: left; cursor: pointer; }
+.create-option-toggle:focus-visible { outline: 2px solid var(--selector-highlight); outline-offset: 2px; }
+.create-option-title { font-weight: var(--type-emphasis-weight); white-space: nowrap; }
+.create-option-value { min-width: 0; overflow: hidden; color: var(--text-muted); text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.create-option-chevron { color: var(--text-muted); transition: transform 160ms ease; }
+.create-option-toggle[aria-expanded="true"] .create-option-chevron { transform: rotate(180deg); }
+.create-option-panel { display: grid; gap: var(--space-4); padding: 0 var(--space-4) var(--space-4); }
+.create-option-panel[hidden] { display: none; }
+@media (prefers-reduced-motion: reduce) { .create-option-chevron { transition: none; } }
 .recent-clips-section { margin-top: 96px; }
 
 /* --- Workspace: three panes held apart by gutters ----------------------- */
@@ -2798,6 +2818,26 @@ input[type="checkbox"]:checked::before {
 }
 .workspace-page > .notice-panel { background: color-mix(in srgb, var(--warning) 6%, var(--box-bg)); }
 .workspace-page > .notice-panel :is(.notice-panel-head, .notice-list) { padding-inline: 0; }
+/* Status bands share the box: the stalled callout and the job strip are
+   one-line boxes, 16px from their neighbours, not flat 24px bands. */
+.workspace-page > :is(.stalled-callout, .job-strip) {
+  margin: var(--box-gap) 0 0;
+  padding: var(--space-3) var(--box-pad);
+  border: 1px solid var(--box-edge);
+  border-top-color: var(--box-edge-top);
+  border-radius: var(--box-radius);
+  background: var(--box-bg);
+}
+.workspace-page > .stalled-callout { background: color-mix(in srgb, var(--warning) 6%, var(--box-bg)); }
+.workspace-page > .job-strip { min-height: 56px; margin-bottom: 0; }
+.workspace-page > .job-strip .progress-wrap { width: clamp(160px, 36%, 440px); }
+.workspace-page > .job-strip .progress-track span { background: var(--text); }
+.workspace-page > .job-strip .progress-wrap > span:last-child { min-width: 4ch; text-align: right; font-variant-numeric: tabular-nums; }
+/* The notes panel is one compact box: a count pill and a short list. */
+.workspace-page > .notice-panel { padding: var(--space-3) var(--box-pad); }
+.workspace-page > .notice-panel .notice-panel-head { min-height: 0; }
+.workspace-page > .notice-panel .notice-list { margin-top: var(--space-2); padding: 0; }
+.workspace-page > .notice-panel .notice-count { min-width: 0; padding: 0 var(--space-2); border-radius: 999px; font-variant-numeric: tabular-nums; }
 .workspace-page > .checklist-panel { padding-block: var(--space-3); }
 .workspace-page > :is(.notice-panel, .checklist-panel, .workspace-grid, .board-panel) { margin-top: var(--box-gap); }
 .viewer-stage { background: transparent; }

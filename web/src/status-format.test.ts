@@ -106,6 +106,11 @@ describe("jobFacts", () => {
     expect(jobFacts({ ...job, downloadProgress: { ...download, phase: "complete" } }).stage).toBe("Transcribing audio");
   });
 
+  it("never prints an item count larger than its total", () => {
+    expect(jobFacts({ ...job, currentItem: 263, totalItems: 9 }).detail).toBeNull();
+    expect(jobFacts({ ...job, currentItem: 9, totalItems: 9 }).detail).toBe("9 of 9");
+  });
+
   it("marks a download with no percentage as indeterminate", () => {
     expect(jobFacts({ ...job, downloadProgress: { ...download, percent: null } }).indeterminate).toBe(true);
   });

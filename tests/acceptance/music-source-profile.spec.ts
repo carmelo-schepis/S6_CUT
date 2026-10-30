@@ -44,9 +44,11 @@ test("Music / sung vocals opts into Smart and sends the durable music profile", 
   const musicChoice = page.getByRole("button", { name: "Music / sung vocals" });
   await musicChoice.click();
   await expect(musicChoice).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Lyrics presentation", exact: true }).click();
   await expect(page.getByText(/always uses Smart transcription locally.*VAD disabled.*word timestamps retained/i)).toBeVisible();
   await page.getByRole("tab", { name: "YouTube" }).click();
   await page.getByLabel("YouTube URL").fill("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+  await page.getByRole("button", { name: "Background song", exact: true }).click();
   await expect(page.getByLabel("YouTube song URL")).toBeVisible();
   await page.getByLabel("YouTube song URL").fill("https://music.youtube.com/watch?v=9bZkp7q19f0");
   await page.getByLabel("Song speed").selectOption("1.5");
@@ -78,6 +80,7 @@ test("switching from a picked MP3 to a song URL clears the native picker state",
   await page.getByRole("button", { name: "Music / sung vocals" }).click();
   await page.getByRole("tab", { name: "YouTube" }).click();
   await page.getByLabel("YouTube URL").fill("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+  await page.getByRole("button", { name: "Background song", exact: true }).click();
   const picker = page.getByLabel("Background song MP3");
   await picker.setInputFiles({ name: "backing.mp3", mimeType: "audio/mpeg", buffer: backgroundSong });
   await expect.poll(() => picker.evaluate((element) => (element as HTMLInputElement).files?.length)).toBe(1);
@@ -120,6 +123,7 @@ test("Music mode uploads an MP3 background song with the selected slow speed", a
   await page.getByRole("button", { name: "Music / sung vocals" }).click();
   await page.getByRole("tab", { name: "YouTube" }).click();
   await page.getByLabel("YouTube URL").fill("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+  await page.getByRole("button", { name: "Background song", exact: true }).click();
   await page.getByLabel("Background song MP3").setInputFiles({ name: "backing-track.mp3", mimeType: "audio/mpeg", buffer: backgroundSong });
   const songPicker = page.getByLabel("Background song MP3");
   await page.getByRole("button", { name: "Remove song" }).click();

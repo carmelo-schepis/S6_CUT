@@ -4,6 +4,8 @@ test.use({ serviceWorkers: "block" });
 
 test("editorial style cards clearly mark exactly one selection by mouse and keyboard", async ({ page }) => {
   await page.goto("/", { waitUntil: "domcontentloaded" });
+  // The startup splash covers the cards until the app reveals; keys sent before that land on the splash.
+  await expect(page.locator("#startup-screen")).toHaveCount(0);
   const group = page.getByRole("region", { name: "Editorial style" });
   const cards = group.locator(".style-card");
   await expect(cards).toHaveCount(4);

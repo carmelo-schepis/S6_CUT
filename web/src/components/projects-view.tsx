@@ -4,12 +4,13 @@ import { createClipJob, createFolder, listFolders, readableError } from "../api"
 import { DEFAULT_SUBSCRIBE_ANIMATION, type BatchMode, type ContentFormat, type Health, type LibraryFolder, type ProcessingMode, type Project, type ProviderProfile, type SourceProfile, type Style, type SubscribeAnimationConfig, type MusicTheme, type MusicLyricAnimation, type MusicHookTextFormat, type CaptionPreset, type VideoFilter, type HeadingStyle, type EmojiMode } from "../types";
 import { Button, Field, FieldGroup, StepBadge, useSingleFlight } from "./common";
 import { VideoSourcePicker } from "./video-source-picker";
+import { OptionRow } from "./option-row";
 import { VideoOnlyDownload } from "./video-only-download";
 import { SubscribeAnimationControl } from "./subscribe-animation-control";
 import { RecentClips } from "./recent-clips";
-import { MusicHookFormatPicker, MusicLyricAnimationPicker } from "./music-typography-controls";
+import { MUSIC_THEME_LABELS, MusicHookFormatPicker, MusicLyricAnimationPicker } from "./music-typography-controls";
 import { EmojiModeControls, HeadingStyleControls, SpeechSubtitleStyleControls, VideoFilterPicker } from "./speech-style-controls";
-import { DEFAULT_CAPTION_PRESET, DEFAULT_EMOJI_MODE, DEFAULT_HEADING_STYLE, DEFAULT_VIDEO_FILTER, musicEditingPresentation, speechEditingPresentation } from "../editing-presets";
+import { CAPTION_PRESETS, DEFAULT_CAPTION_PRESET, DEFAULT_EMOJI_MODE, DEFAULT_HEADING_STYLE, DEFAULT_VIDEO_FILTER, EMOJI_MODES, HEADING_STYLES, VIDEO_FILTERS, labelOf, musicEditingPresentation, speechEditingPresentation } from "../editing-presets";
 
 const RECENT_FOLDER_KEY = "s6-cut.recent-library-folder";
 const PROVIDER_CALLOUT_DISMISSED_KEY = "s6-cut.provider-callout-dismissed";
@@ -48,7 +49,13 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
   const [highVolumeCount, setHighVolumeCount] = useState("5");
   const [batchMode, setBatchMode] = useState<BatchMode>("standard");
   const [contentFormat, setContentFormat] = useState<ContentFormat>("short");
-  const [advanced, setAdvanced] = useState(false);
+  // Option rows start closed on every visit; each one opens on its own.
+  const [openRows, setOpenRows] = useState<ReadonlySet<string>>(() => new Set());
+  const toggleRow = (id: string) => setOpenRows((current) => {
+    const next = new Set(current);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
   const [minDuration, setMinDuration] = useState(20);
   const [maxDuration, setMaxDuration] = useState(60);
   const [aspectRatio, setAspectRatio] = useState("9:16");
@@ -241,6 +248,17 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
   const musicFeasibilityMessage = sourceProfile === "music" && knownSourceDuration !== null && Number.isFinite(minDuration) && minDuration > 0 && activeCount > Math.floor((knownSourceDuration + 1e-9) / minDuration)
     ? `This ${knownSourceDuration.toFixed(1)}s source may not contain enough distinct lyric windows for ${activeCount} clips of at least ${minDuration}s. Music will check lyric availability and repeat valid windows when possible.`
     : null;
+  // Display-only summaries for the option rows. Nothing here changes what is submitted.
+  const subtitleSummary = fastMode ? "Off in Fast mode" : !burnSubtitles ? "Subtitles off" : labelOf(CAPTION_PRESETS, captionPreset, "Editorial default");
+  const headingSummary = `${labelOf(HEADING_STYLES, headingStyle, "Plain")}${speechHookTextEnabled ? "" : " · Hook text off"}`;
+  const emojiSummary = speechCaptionsDisabledReason ? "Unavailable" : labelOf(EMOJI_MODES, emojiMode, "Existing behaviour");
+  const speechFilterSummary = labelOf(VIDEO_FILTERS, speechVideoFilter, "Existing look");
+  const musicFilterSummary = labelOf(VIDEO_FILTERS, musicVideoFilter, "Existing look");
+  const musicLyricsSummary = `${MUSIC_THEME_LABELS[musicTheme]} · ${musicLyricsLanguage === "auto" ? "Auto-detect" : musicLyricsLanguage.toUpperCase()}`;
+  const musicTrackSummary = musicTrackFile ? musicTrackFile.name : musicTrackUrl.trim() ? "YouTube link" : "None";
+  const subscribeSummary = !subscribeAnimation.enabled ? "Off" : contentFormat === "long" ? "Midpoint and final 30 s" : `${subscribeAnimation.shortFormLeadSeconds} s before the end`;
+  const advancedSummary = `${contentFormat === "long" ? "16:9" : aspectRatio} · ${minDuration}–${maxDuration} s${libraryOverlaysEnabled && libraryOverlaysSupported ? " · B-roll on" : ""}`;
+
   return <div className="page projects-page">
     {/* Every screen carries exactly one h1. The page introduction that used to
         hold this one was removed with the Projects header, and the create panel
@@ -289,59 +307,8 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
             </div>
           </FieldGroup>
 
-          {sourceProfile === "speech" && <>
-            <FieldGroup title="Subtitle style" hint="Choose how captions look. Editorial style above still decides which moments are chosen.">
-              <SpeechSubtitleStyleControls value={captionPreset} onChange={setCaptionPreset} editorialStyle={style} videoFilter={speechVideoFilter}
-                heading={{ enabled: speechHookTextEnabled, text: manualHookText.trim() || "Your heading here", style: headingStyle }} emojiMode={emojiMode} disabledReason={speechCaptionsDisabledReason} />
-            </FieldGroup>
-            <FieldGroup title="Video filter" hint="Applied to the footage before captions, headings and graphics are added.">
-              <VideoFilterPicker value={speechVideoFilter} onChange={setSpeechVideoFilter} existingNote="Keeps today’s look" />
-            </FieldGroup>
-          </>}
 
           <>
-            {sourceProfile === "music" && <FieldGroup title="Lyrics presentation" hint={MUSIC_PROFILE_NOTE}>
-              <Field label="Lyrics language" hint="English is the default. Choose another language or automatic detection for songs in other languages.">
-                <select aria-label="Lyrics language" value={musicLyricsLanguage} onChange={(event) => setMusicLyricsLanguage(event.target.value)}>
-                  <option value="auto">Detect automatically</option>
-                  <option value="en">English</option><option value="es">Spanish</option><option value="fr">French</option>
-                  <option value="de">German</option><option value="it">Italian</option><option value="pt">Portuguese</option>
-                  <option value="ar">Arabic</option><option value="zh">Chinese</option><option value="hi">Hindi</option>
-                  <option value="ja">Japanese</option><option value="ko">Korean</option><option value="ru">Russian</option>
-                </select>
-              </Field>
-              <div role="group" aria-label="Lyrics subtitle theme">
-              <p className="music-theme-group-label">Current styles</p>
-              <div className="music-theme-options">
-                <button type="button" aria-label="Clean sans" aria-pressed={musicTheme === "clean"} className={musicTheme === "clean" ? "active" : ""} onClick={() => setMusicTheme("clean")}><span className="theme-clean">i’ve<br />forgotten<br />about</span><strong>Clean sans</strong><small>White · compact</small></button>
-                <button type="button" aria-label="Warm highlight" aria-pressed={musicTheme === "warm"} className={musicTheme === "warm" ? "active" : ""} onClick={() => setMusicTheme("warm")}><span className="theme-warm">do you think<br />that i’ve forgotten<br />about</span><strong>Warm highlight</strong><small>Soft yellow accents</small></button>
-                <button type="button" aria-label="Soft serif" aria-pressed={musicTheme === "serif"} className={musicTheme === "serif" ? "active" : ""} onClick={() => setMusicTheme("serif")}><span className="theme-serif">do you think<br />that i’ve forgotten<br />about</span><strong>Soft serif</strong><small>Light editorial</small></button>
-              </div>
-              <p className="music-theme-group-label">Reference styles</p>
-              <div className="music-theme-options">
-                <button type="button" aria-label="Reference white sans" aria-pressed={musicTheme === "reference_white_sans"} className={musicTheme === "reference_white_sans" ? "active" : ""} onClick={() => setMusicTheme("reference_white_sans")}><span className="theme-reference-white-sans">i’ve<br />forgotten<br />about</span><strong>Reference white sans</strong><small>Light · stacked</small></button>
-                <button type="button" aria-label="Reference yellow sans" aria-pressed={musicTheme === "reference_yellow_sans"} className={musicTheme === "reference_yellow_sans" ? "active" : ""} onClick={() => setMusicTheme("reference_yellow_sans")}><span className="theme-reference-yellow-sans">do you think<br />that i’ve forgotten<br />about</span><strong>Reference yellow sans</strong><small>Pale yellow · spaced</small></button>
-                <button type="button" aria-label="Reference white serif" aria-pressed={musicTheme === "reference_white_serif"} className={musicTheme === "reference_white_serif" ? "active" : ""} onClick={() => setMusicTheme("reference_white_serif")}><span className="theme-reference-white-serif">do you think<br />that i’ve forgotten<br />about</span><strong>Reference white serif</strong><small>White · editorial</small></button>
-              </div>
-              <p className="music-theme-group-label">Typography styles</p>
-              <div className="music-theme-options">
-                <button type="button" aria-label="Condensed black" aria-pressed={musicTheme === "condensed_black"} className={musicTheme === "condensed_black" ? "active" : ""} onClick={() => setMusicTheme("condensed_black")}><span className="theme-condensed-black">do you think<br />that i’ve forgotten<br />about</span><strong>Condensed black</strong><small>Narrow · light halo</small></button>
-                <button type="button" aria-label="Condensed white" aria-pressed={musicTheme === "condensed_white"} className={musicTheme === "condensed_white" ? "active" : ""} onClick={() => setMusicTheme("condensed_white")}><span className="theme-condensed-white">do you think<br />that i’ve forgotten<br />about</span><strong>Condensed white</strong><small>Narrow · for dark footage</small></button>
-                <button type="button" aria-label="Handwritten stack" aria-pressed={musicTheme === "handwritten_stack"} className={musicTheme === "handwritten_stack" ? "active" : ""} onClick={() => setMusicTheme("handwritten_stack")}><span className="theme-handwritten-stack">do you<br />think that<br />i’ve</span><strong>Handwritten stack</strong><small>White · vertical stack</small></button>
-              </div>
-              <p className="music-theme-group-label">Highlight styles</p>
-              <div className="music-theme-options">
-                <button type="button" aria-label="Karaoke focus" aria-pressed={musicTheme === "karaoke_focus"} className={musicTheme === "karaoke_focus" ? "active" : ""} onClick={() => setMusicTheme("karaoke_focus")}><span className="theme-karaoke-focus">do you <em>think</em><br />that i’ve forgotten<br />about</span><strong>Karaoke focus</strong><small>Sung word accented</small></button>
-                <button type="button" aria-label="Soft glow" aria-pressed={musicTheme === "soft_glow"} className={musicTheme === "soft_glow" ? "active" : ""} onClick={() => setMusicTheme("soft_glow")}><span className="theme-soft-glow">do you think<br />that i’ve forgotten<br />about</span><strong>Soft glow</strong><small>White · gentle glow</small></button>
-                <button type="button" aria-label="Lyric plate" aria-pressed={musicTheme === "lyric_plate"} className={musicTheme === "lyric_plate" ? "active" : ""} onClick={() => setMusicTheme("lyric_plate")}><span className="theme-lyric-plate"><i>do you think</i><i>that i’ve forgotten</i><i>about</i></span><strong>Lyric plate</strong><small>Dark translucent plate</small></button>
-              </div>
-              </div>
-              <MusicLyricAnimationPicker value={musicLyricAnimation} theme={musicTheme} onChange={setMusicLyricAnimation} />
-              <div className="music-filter-group">
-                <p className="music-theme-group-label">Video filter</p>
-                <VideoFilterPicker value={musicVideoFilter} onChange={setMusicVideoFilter} existingNote="Keeps the automatic colour / black-and-white mix" label="Music video filter" />
-              </div>
-            </FieldGroup>}
             <FieldGroup title="Format">
               <div className="segmented mode-tabs format-tabs" aria-label="Content format">
                 <button type="button" aria-pressed={contentFormat === "short"} className={contentFormat === "short" ? "active" : ""} onClick={() => { setContentFormat("short"); setAspectRatio("9:16"); }}>Short form · 9:16</button>
@@ -384,6 +351,67 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
               </div>
             </FieldGroup>}
           </>
+          {sourceProfile === "speech" && <div className="create-option-list">
+            <OptionRow id="subtitle" title="Subtitle style" summary={subtitleSummary} open={openRows.has("subtitle")} onToggle={() => toggleRow("subtitle")}>
+              <p className="field-group-hint">Choose how captions look. Editorial style above still decides which moments are chosen.</p>
+              <SpeechSubtitleStyleControls value={captionPreset} onChange={setCaptionPreset} editorialStyle={style} videoFilter={speechVideoFilter}
+                heading={{ enabled: speechHookTextEnabled, text: manualHookText.trim() || "Your heading here", style: headingStyle }} emojiMode={emojiMode} disabledReason={speechCaptionsDisabledReason} />
+            </OptionRow>
+            <OptionRow id="video-filter" title="Video filter" summary={speechFilterSummary} open={openRows.has("video-filter")} onToggle={() => toggleRow("video-filter")}>
+              <p className="field-group-hint">Applied to the footage before captions, headings and graphics are added.</p>
+              <VideoFilterPicker value={speechVideoFilter} onChange={setSpeechVideoFilter} existingNote="Keeps today’s look" />
+            </OptionRow>
+            {speechHookTextEligible && <OptionRow id="heading" title="Heading appearance" summary={headingSummary} open={openRows.has("heading")} onToggle={() => toggleRow("heading")}>
+              <HeadingStyleControls value={headingStyle} onChange={setHeadingStyle} />
+            </OptionRow>}
+            <OptionRow id="emoji" title="Emoji reactions" summary={emojiSummary} open={openRows.has("emoji")} onToggle={() => toggleRow("emoji")}>
+              <EmojiModeControls value={emojiMode} onChange={setEmojiMode} disabledReason={speechCaptionsDisabledReason} />
+            </OptionRow>
+          </div>}
+          {sourceProfile === "music" && <div className="create-option-list">
+            <OptionRow id="music-lyrics" title="Lyrics presentation" summary={musicLyricsSummary} open={openRows.has("music-lyrics")} onToggle={() => toggleRow("music-lyrics")}>
+            <p className="field-group-hint">{MUSIC_PROFILE_NOTE}</p>
+            <Field label="Lyrics language" hint="English is the default. Choose another language or automatic detection for songs in other languages.">
+              <select aria-label="Lyrics language" value={musicLyricsLanguage} onChange={(event) => setMusicLyricsLanguage(event.target.value)}>
+                <option value="auto">Detect automatically</option>
+                <option value="en">English</option><option value="es">Spanish</option><option value="fr">French</option>
+                <option value="de">German</option><option value="it">Italian</option><option value="pt">Portuguese</option>
+                <option value="ar">Arabic</option><option value="zh">Chinese</option><option value="hi">Hindi</option>
+                <option value="ja">Japanese</option><option value="ko">Korean</option><option value="ru">Russian</option>
+              </select>
+            </Field>
+            <div role="group" aria-label="Lyrics subtitle theme">
+            <p className="music-theme-group-label">Current styles</p>
+            <div className="music-theme-options">
+              <button type="button" aria-label="Clean sans" aria-pressed={musicTheme === "clean"} className={musicTheme === "clean" ? "active" : ""} onClick={() => setMusicTheme("clean")}><span className="theme-clean">i’ve<br />forgotten<br />about</span><strong>Clean sans</strong><small>White · compact</small></button>
+              <button type="button" aria-label="Warm highlight" aria-pressed={musicTheme === "warm"} className={musicTheme === "warm" ? "active" : ""} onClick={() => setMusicTheme("warm")}><span className="theme-warm">do you think<br />that i’ve forgotten<br />about</span><strong>Warm highlight</strong><small>Soft yellow accents</small></button>
+              <button type="button" aria-label="Soft serif" aria-pressed={musicTheme === "serif"} className={musicTheme === "serif" ? "active" : ""} onClick={() => setMusicTheme("serif")}><span className="theme-serif">do you think<br />that i’ve forgotten<br />about</span><strong>Soft serif</strong><small>Light editorial</small></button>
+            </div>
+            <p className="music-theme-group-label">Reference styles</p>
+            <div className="music-theme-options">
+              <button type="button" aria-label="Reference white sans" aria-pressed={musicTheme === "reference_white_sans"} className={musicTheme === "reference_white_sans" ? "active" : ""} onClick={() => setMusicTheme("reference_white_sans")}><span className="theme-reference-white-sans">i’ve<br />forgotten<br />about</span><strong>Reference white sans</strong><small>Light · stacked</small></button>
+              <button type="button" aria-label="Reference yellow sans" aria-pressed={musicTheme === "reference_yellow_sans"} className={musicTheme === "reference_yellow_sans" ? "active" : ""} onClick={() => setMusicTheme("reference_yellow_sans")}><span className="theme-reference-yellow-sans">do you think<br />that i’ve forgotten<br />about</span><strong>Reference yellow sans</strong><small>Pale yellow · spaced</small></button>
+              <button type="button" aria-label="Reference white serif" aria-pressed={musicTheme === "reference_white_serif"} className={musicTheme === "reference_white_serif" ? "active" : ""} onClick={() => setMusicTheme("reference_white_serif")}><span className="theme-reference-white-serif">do you think<br />that i’ve forgotten<br />about</span><strong>Reference white serif</strong><small>White · editorial</small></button>
+            </div>
+            <p className="music-theme-group-label">Typography styles</p>
+            <div className="music-theme-options">
+              <button type="button" aria-label="Condensed black" aria-pressed={musicTheme === "condensed_black"} className={musicTheme === "condensed_black" ? "active" : ""} onClick={() => setMusicTheme("condensed_black")}><span className="theme-condensed-black">do you think<br />that i’ve forgotten<br />about</span><strong>Condensed black</strong><small>Narrow · light halo</small></button>
+              <button type="button" aria-label="Condensed white" aria-pressed={musicTheme === "condensed_white"} className={musicTheme === "condensed_white" ? "active" : ""} onClick={() => setMusicTheme("condensed_white")}><span className="theme-condensed-white">do you think<br />that i’ve forgotten<br />about</span><strong>Condensed white</strong><small>Narrow · for dark footage</small></button>
+              <button type="button" aria-label="Handwritten stack" aria-pressed={musicTheme === "handwritten_stack"} className={musicTheme === "handwritten_stack" ? "active" : ""} onClick={() => setMusicTheme("handwritten_stack")}><span className="theme-handwritten-stack">do you<br />think that<br />i’ve</span><strong>Handwritten stack</strong><small>White · vertical stack</small></button>
+            </div>
+            <p className="music-theme-group-label">Highlight styles</p>
+            <div className="music-theme-options">
+              <button type="button" aria-label="Karaoke focus" aria-pressed={musicTheme === "karaoke_focus"} className={musicTheme === "karaoke_focus" ? "active" : ""} onClick={() => setMusicTheme("karaoke_focus")}><span className="theme-karaoke-focus">do you <em>think</em><br />that i’ve forgotten<br />about</span><strong>Karaoke focus</strong><small>Sung word accented</small></button>
+              <button type="button" aria-label="Soft glow" aria-pressed={musicTheme === "soft_glow"} className={musicTheme === "soft_glow" ? "active" : ""} onClick={() => setMusicTheme("soft_glow")}><span className="theme-soft-glow">do you think<br />that i’ve forgotten<br />about</span><strong>Soft glow</strong><small>White · gentle glow</small></button>
+              <button type="button" aria-label="Lyric plate" aria-pressed={musicTheme === "lyric_plate"} className={musicTheme === "lyric_plate" ? "active" : ""} onClick={() => setMusicTheme("lyric_plate")}><span className="theme-lyric-plate"><i>do you think</i><i>that i’ve forgotten</i><i>about</i></span><strong>Lyric plate</strong><small>Dark translucent plate</small></button>
+            </div>
+            </div>
+            <MusicLyricAnimationPicker value={musicLyricAnimation} theme={musicTheme} onChange={setMusicLyricAnimation} />
+            </OptionRow>
+            <OptionRow id="music-filter" title="Video filter" summary={musicFilterSummary} open={openRows.has("music-filter")} onToggle={() => toggleRow("music-filter")}>
+              <VideoFilterPicker value={musicVideoFilter} onChange={setMusicVideoFilter} existingNote="Keeps the automatic colour / black-and-white mix" label="Music video filter" />
+            </OptionRow>
+          </div>}
         </div>
 
         <div className="create-step action-step">
@@ -391,34 +419,35 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
           <FieldGroup title="Destination">
             <Field label="Project name" hint="Optional. Leave blank for a generated name."><input id="project-name" aria-label="Project name" value={projectName} maxLength={160} onChange={(event) => setProjectName(event.target.value)} placeholder="e.g. Launch highlights" /></Field>
             <div className="folder-picker"><Field label="Business folder"><select aria-label="Business folder" value={libraryFolderId} onChange={(event) => setLibraryFolderId(event.target.value)}>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></Field><Button variant="ghost" onClick={addFolder}><Plus size={13} /> New folder</Button></div>
-            {libraryOverlaysSupported && <label className="subtitle-toggle"><input type="checkbox" aria-label="Use eligible Library B-roll" checked={libraryOverlaysEnabled} onChange={(event) => setLibraryOverlaysEnabled(event.target.checked)} /><span><strong>Use eligible Library B-roll</strong><small>Off by default. Only manually imported images or videos explicitly marked eligible are considered. A job keeps the same choices through retries.</small></span></label>}
           </FieldGroup>
-
-          {sourceProfile === "music" && <FieldGroup title="Background song" hint="Optional · upload an MP3 or paste a public YouTube song URL. Choose whether the song replaces or accompanies the video audio.">
-            <label className="field"><span className="field-label">MP3 upload</span><input ref={musicTrackInput} aria-label="Background song MP3" type="file" accept="audio/mpeg,.mp3" onChange={(event) => { const next = event.target.files?.[0] || null; setMusicTrackFile(next); if (next) setMusicTrackUrl(""); }} /><small>{musicTrackFile?.name || "MP3 audio only"}</small>{musicTrackFile && <button type="button" className="button button-quiet" onClick={() => { setMusicTrackFile(null); if (musicTrackInput.current) musicTrackInput.current.value = ""; }}>Remove song</button>}</label>
-            <Field label="YouTube song URL"><input aria-label="YouTube song URL" type="url" value={musicTrackUrl} onChange={(event) => { setMusicTrackUrl(event.target.value); if (event.target.value) { setMusicTrackFile(null); if (musicTrackInput.current) musicTrackInput.current.value = ""; } }} placeholder="https://www.youtube.com/watch?v=..." /></Field>
-            <div className="field"><span className="field-label">Audio</span><div role="group" aria-label="Music audio mode" className="segmented mode-tabs"><button type="button" aria-pressed={musicAudioMode === "song_only"} className={musicAudioMode === "song_only" ? "active" : ""} disabled={!musicTrackFile && !musicTrackUrl.trim()} onClick={() => setMusicAudioMode("song_only")}>Song only</button><button type="button" aria-pressed={musicAudioMode === "mix_original"} className={musicAudioMode === "mix_original" ? "active" : ""} disabled={!musicTrackFile && !musicTrackUrl.trim()} onClick={() => setMusicAudioMode("mix_original")}>Original audio + song</button></div>{!musicTrackFile && !musicTrackUrl.trim() && <small>Add a song to choose how audio is combined.</small>}{musicAudioMode === "mix_original" && <small>Original audio at full volume · song at {musicSongVolume}% volume</small>}</div>
-            {musicAudioMode === "mix_original" && <label className="field"><span className="field-label">Background song volume · {musicSongVolume}%</span><input type="range" aria-label="Background song volume" aria-describedby="music-song-volume-help" min="0" max="100" step="1" value={musicSongVolume} disabled={!musicTrackFile && !musicTrackUrl.trim()} onChange={(event) => setMusicSongVolume(Number(event.target.value))} /><small id="music-song-volume-help">For clearer voices, try 10–15%. Lower further for quiet speech or a loud song. 0% mutes the song. This level stays fixed throughout the clip.</small></label>}
-            <Field label="Song speed"><select aria-label="Song speed" value={musicTrackSpeed} onChange={(event) => setMusicTrackSpeed(event.target.value)}><option value="1">Standard speed</option><option value="1.25">Speed up · 1.25×</option><option value="1.5">Sped-up · 1.5×</option><option value="0.85">Slow down · 0.85×</option><option value="0.75">Slowed · 0.75×</option></select></Field>
-          </FieldGroup>}
-
-          <SubscribeAnimationControl value={subscribeAnimation} onChange={setSubscribeAnimation} longForm={contentFormat === "long"} />
 
           {sourceProfile === "speech" && <label className="subtitle-toggle"><input type="checkbox" checked={fastMode ? false : burnSubtitles} disabled={fastMode} onChange={(event) => setBurnSubtitles(event.target.checked)} /> <span><strong>Burn in subtitles</strong><small>{fastMode ? "Fast mode skips transcription and captions. Choose Auto or Smart to enable them." : "Uses local word timing. Fast mode skips captions."}</small></span></label>}
           <label className="subtitle-toggle"><input type="checkbox" aria-label="Hook text" checked={hookTextEnabled} disabled={!hookTextEligible} onChange={(event) => sourceProfile === "music" ? setMusicHookTextChoice(event.target.checked) : setHookTextChoice(event.target.checked)} /> <span><strong>Hook text</strong><small>{hookTextDisabledReason ?? (sourceProfile === "music" ? "Off by default. Tick to enter optional text shown in the upper black area of each clip (up to 100 characters)." : "Off by default. Tick to enter your own hook or leave blank to generate one from the transcript.")}</small></span></label>
           {musicHookTextEnabled && <Field label="Top text" hint="Optional · displayed in the upper black area. Up to 100 characters."><input aria-label="Top text" value={musicTopText} maxLength={100} onChange={(event) => setMusicTopText(event.target.value)} placeholder="Leave blank to omit" /></Field>}
           {musicHookTextEnabled && <MusicHookFormatPicker value={musicHookFormat} onChange={setMusicHookFormat} />}
           {speechHookTextEnabled && <Field label="Hook text to display" hint="Up to 150 characters. Your text will be shown on each clip."><textarea aria-label="Hook text to display" rows={2} maxLength={150} value={manualHookText} onChange={(event) => setManualHookText(event.target.value)} placeholder="Leave blank to generate a hook from the transcript" /></Field>}
-          {speechHookTextEligible && <HeadingStyleControls value={headingStyle} onChange={setHeadingStyle} />}
-          {sourceProfile === "speech" && <EmojiModeControls value={emojiMode} onChange={setEmojiMode} disabledReason={speechCaptionsDisabledReason} />}
           <label className="subtitle-toggle"><input type="checkbox" aria-label="Write SEO titles with AI (YouTube metadata)" data-testid="youtube-metadata-toggle" checked={youtubeMetadataActive} disabled={metadataDisabledReason !== null} onChange={(event) => setYoutubeMetadataChoice(event.target.checked)} /> <span><strong>Generate YouTube metadata</strong><small>{metadataDisabledReason ?? (processingMode === "fast" ? "Fast mode has no transcript. Choose Auto or Smart." : executionPolicy === "engine_only" ? "Uses transcript-based local descriptions and deterministic titles." : `${youtubeMetadataDefault ? "On by default (Settings › Auto-write SEO titles)" : "Off by default"}. Uses ${selectedProfile?.youtubeMetadataModelId || "the configured Settings model"} when available, with local fallback. Editable and separate from burned-in text.`)}</small></span></label>
 
-          <button className="advanced-toggle" onClick={() => setAdvanced(!advanced)} aria-expanded={advanced}>Advanced controls <span aria-hidden="true">{advanced ? "−" : "+"}</span></button>
-          {advanced && <div className="advanced-grid">
-            <Field label="Aspect"><select value={aspectRatio} disabled={contentFormat === "long"} onChange={(event) => setAspectRatio(event.target.value)}><option>9:16</option><option>1:1</option><option>16:9</option><option>4:5</option></select></Field>
-            <Field label="Minimum seconds"><input type="number" min={8} max={120} value={minDuration} onChange={(event) => setMinDuration(Number(event.target.value))} /></Field><Field label="Maximum seconds"><input type="number" min={10} max={contentFormat === "long" ? 1800 : 180} value={maxDuration} onChange={(event) => setMaxDuration(Number(event.target.value))} /></Field>
-          </div>}
-
+          <div className="create-option-list">
+            {sourceProfile === "music" && <OptionRow id="song" title="Background song" summary={musicTrackSummary} open={openRows.has("song")} onToggle={() => toggleRow("song")}>
+              <p className="field-group-hint">Optional · upload an MP3 or paste a public YouTube song URL. Choose whether the song replaces or accompanies the video audio.</p>
+              <label className="field"><span className="field-label">MP3 upload</span><input ref={musicTrackInput} aria-label="Background song MP3" type="file" accept="audio/mpeg,.mp3" onChange={(event) => { const next = event.target.files?.[0] || null; setMusicTrackFile(next); if (next) setMusicTrackUrl(""); }} /><small>{musicTrackFile?.name || "MP3 audio only"}</small>{musicTrackFile && <button type="button" className="button button-quiet" onClick={() => { setMusicTrackFile(null); if (musicTrackInput.current) musicTrackInput.current.value = ""; }}>Remove song</button>}</label>
+              <Field label="YouTube song URL"><input aria-label="YouTube song URL" type="url" value={musicTrackUrl} onChange={(event) => { setMusicTrackUrl(event.target.value); if (event.target.value) { setMusicTrackFile(null); if (musicTrackInput.current) musicTrackInput.current.value = ""; } }} placeholder="https://www.youtube.com/watch?v=..." /></Field>
+              <div className="field"><span className="field-label">Audio</span><div role="group" aria-label="Music audio mode" className="segmented mode-tabs"><button type="button" aria-pressed={musicAudioMode === "song_only"} className={musicAudioMode === "song_only" ? "active" : ""} disabled={!musicTrackFile && !musicTrackUrl.trim()} onClick={() => setMusicAudioMode("song_only")}>Song only</button><button type="button" aria-pressed={musicAudioMode === "mix_original"} className={musicAudioMode === "mix_original" ? "active" : ""} disabled={!musicTrackFile && !musicTrackUrl.trim()} onClick={() => setMusicAudioMode("mix_original")}>Original audio + song</button></div>{!musicTrackFile && !musicTrackUrl.trim() && <small>Add a song to choose how audio is combined.</small>}{musicAudioMode === "mix_original" && <small>Original audio at full volume · song at {musicSongVolume}% volume</small>}</div>
+              {musicAudioMode === "mix_original" && <label className="field"><span className="field-label">Background song volume · {musicSongVolume}%</span><input type="range" aria-label="Background song volume" aria-describedby="music-song-volume-help" min="0" max="100" step="1" value={musicSongVolume} disabled={!musicTrackFile && !musicTrackUrl.trim()} onChange={(event) => setMusicSongVolume(Number(event.target.value))} /><small id="music-song-volume-help">For clearer voices, try 10–15%. Lower further for quiet speech or a loud song. 0% mutes the song. This level stays fixed throughout the clip.</small></label>}
+              <Field label="Song speed"><select aria-label="Song speed" value={musicTrackSpeed} onChange={(event) => setMusicTrackSpeed(event.target.value)}><option value="1">Standard speed</option><option value="1.25">Speed up · 1.25×</option><option value="1.5">Sped-up · 1.5×</option><option value="0.85">Slow down · 0.85×</option><option value="0.75">Slowed · 0.75×</option></select></Field>
+            </OptionRow>}
+            <OptionRow id="subscribe" title="Subscribe animation" summary={subscribeSummary} open={openRows.has("subscribe")} onToggle={() => toggleRow("subscribe")}>
+              <SubscribeAnimationControl value={subscribeAnimation} onChange={setSubscribeAnimation} longForm={contentFormat === "long"} />
+            </OptionRow>
+            <OptionRow id="advanced" title="Advanced controls" summary={advancedSummary} open={openRows.has("advanced")} onToggle={() => toggleRow("advanced")}>
+              <div className="advanced-grid">
+                <Field label="Aspect"><select value={aspectRatio} disabled={contentFormat === "long"} onChange={(event) => setAspectRatio(event.target.value)}><option>9:16</option><option>1:1</option><option>16:9</option><option>4:5</option></select></Field>
+                <Field label="Minimum seconds"><input type="number" min={8} max={120} value={minDuration} onChange={(event) => setMinDuration(Number(event.target.value))} /></Field><Field label="Maximum seconds"><input type="number" min={10} max={contentFormat === "long" ? 1800 : 180} value={maxDuration} onChange={(event) => setMaxDuration(Number(event.target.value))} /></Field>
+              </div>
+              {libraryOverlaysSupported && <label className="subtitle-toggle"><input type="checkbox" aria-label="Use eligible Library B-roll" checked={libraryOverlaysEnabled} onChange={(event) => setLibraryOverlaysEnabled(event.target.checked)} /><span><strong>Use eligible Library B-roll</strong><small>Off by default. Only manually imported images or videos explicitly marked eligible are considered. A job keeps the same choices through retries.</small></span></label>}
+            </OptionRow>
+          </div>
           <div className="create-actions">
             {musicConfigurationMessage && <p className="form-error" role="status">{musicConfigurationMessage}</p>}
             {!musicConfigurationMessage && musicFeasibilityMessage && <p className="form-hint" role="status">{musicFeasibilityMessage}</p>}

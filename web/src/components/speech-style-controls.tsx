@@ -136,7 +136,6 @@ export function SpeechSubtitleStyleControls({ value, onChange, editorialStyle, v
 
 export function HeadingStyleControls({ value, onChange }: { value: HeadingStyle; onChange: (value: HeadingStyle) => void }) {
   return <div className="heading-style-picker">
-    <p className="music-theme-group-label">Heading appearance</p>
     <div role="group" aria-label="Heading appearance" className="heading-style-options">
       {HEADING_STYLES.map((item) => <button key={item.id} type="button" aria-label={item.label} aria-pressed={value === item.id} className={value === item.id ? "active" : ""} onClick={() => onChange(item.id)}>
         <span className="heading-style-chip" aria-hidden="true"><HeadingSampleBar text="Your heading" style={item.id} /></span>
@@ -149,7 +148,6 @@ export function HeadingStyleControls({ value, onChange }: { value: HeadingStyle;
 
 export function EmojiModeControls({ value, onChange, disabledReason }: { value: EmojiMode; onChange: (value: EmojiMode) => void; disabledReason: string | null }) {
   return <div className="emoji-mode-picker">
-    <p className="music-theme-group-label">Emoji reactions</p>
     {disabledReason ? <p className="form-hint" role="status">{disabledReason}</p> : <>
       <div role="group" aria-label="Emoji reactions" className="heading-style-options">
         {EMOJI_MODES.map((item) => <button key={item.id} type="button" aria-label={item.label} aria-pressed={value === item.id} className={value === item.id ? "active" : ""} onClick={() => onChange(item.id)}><strong>{item.label}</strong><small>{item.note}</small></button>)}

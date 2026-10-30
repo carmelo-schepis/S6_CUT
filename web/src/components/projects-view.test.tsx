@@ -13,6 +13,9 @@ vi.mock("../api", () => {
 });
 
 import { createClipJob } from "../api";
+
+/** Opens every collapsed option row, as a customer would to reach its controls. */
+const openOptions = () => screen.queryAllByRole("button").filter((button) => button.classList.contains("create-option-toggle") && button.getAttribute("aria-expanded") === "false").forEach((button) => fireEvent.click(button));
 const mockCreateClipJob = vi.mocked(createClipJob);
 
 const storedValues = new Map<string, string>();
@@ -55,6 +58,7 @@ describe("Projects create flow", () => {
   });
   it("keeps creation settings and Recent Clips while omitting Recent projects and its UI", () => {
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    openOptions();
     expect(screen.getByRole("heading", { name: "Create a project" })).toBeInTheDocument();
     expect(screen.getByText("Editorial style")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Create 5 short clips/i })).toBeEnabled();
@@ -69,6 +73,7 @@ describe("Projects create flow", () => {
 
   it("offers Library B-roll only on render routes that honor the explicit choice", () => {
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    openOptions();
     expect(screen.getByRole("checkbox", { name: "Use eligible Library B-roll" })).not.toBeChecked();
 
     fireEvent.click(screen.getByRole("button", { name: /Fast/ }));
@@ -86,6 +91,7 @@ describe("Projects create flow", () => {
   it("selects Long form by keyboard-friendly control and sends landscape format", async () => {
     mockCreateClipJob.mockResolvedValue({ project: { ...project, contentFormat: "long" }, job: undefinedJob });
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    openOptions();
     fireEvent.click(screen.getByRole("button", { name: /Long form · 16:9/i }));
     expect(screen.getByRole("button", { name: /Long form · 16:9/i })).toHaveClass("active");
     expect(screen.getByRole("button", { name: /Create 5 landscape clips/i })).toBeEnabled();
@@ -96,6 +102,7 @@ describe("Projects create flow", () => {
 
   it.each([1, 37, 500])("shows %i as the requested high-volume count and in Create", (value) => {
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    openOptions();
     fireEvent.click(screen.getByRole("button", { name: /High-volume/ }));
     const count = screen.getByLabelText("Clips requested");
     fireEvent.change(count, { target: { value: String(value) } });
@@ -105,6 +112,7 @@ describe("Projects create flow", () => {
 
   it.each(["501", "9999"])("corrects pasted/entered high-volume count %s to 500 immediately", (value) => {
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    openOptions();
     fireEvent.click(screen.getByRole("button", { name: /High-volume/ }));
     const count = screen.getByLabelText("Clips requested");
     fireEvent.change(count, { target: { value } });
@@ -114,6 +122,7 @@ describe("Projects create flow", () => {
 
   it("allows clearing then typing 250 without forcing zero or losing input focus", () => {
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    openOptions();
     fireEvent.click(screen.getByRole("button", { name: /High-volume/ }));
     const count = screen.getByLabelText("Clips requested");
     count.focus();
@@ -130,6 +139,7 @@ describe("Projects create flow", () => {
 
   it.each(["", "0", "-1"])("normalizes blank or non-positive count %s on blur and Create", async (value) => {
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    openOptions();
     fireEvent.click(screen.getByRole("button", { name: /High-volume/ }));
     const count = screen.getByLabelText("Clips requested");
     fireEvent.change(count, { target: { value } });
@@ -144,6 +154,7 @@ describe("Projects create flow", () => {
   it.each(["", "0", "-1"])("normalizes a blank or non-positive high-volume count on Create (%s)", async (value) => {
     mockCreateClipJob.mockResolvedValue({ project, job: undefinedJob });
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    openOptions();
     fireEvent.click(screen.getByRole("tab", { name: "YouTube" }));
     fireEvent.change(screen.getByRole("textbox", { name: "YouTube URL" }), { target: { value: "https://www.youtube.com/watch?v=fixture" } });
     fireEvent.click(screen.getByRole("button", { name: /High-volume/ }));
@@ -156,6 +167,7 @@ describe("Projects create flow", () => {
 
   it.each(["1.5", "abc"])("does not submit malformed high-volume count %s", (value) => {
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    openOptions();
     fireEvent.click(screen.getByRole("button", { name: /High-volume/ }));
     const count = screen.getByLabelText("Clips requested");
     fireEvent.change(count, { target: { value } });
@@ -169,6 +181,7 @@ describe("Projects create flow", () => {
   it("submits a corrected 500 high-volume count and mode", async () => {
     mockCreateClipJob.mockResolvedValue({ project: { ...project, requestedCount: 500, batchMode: "high_volume" }, job: undefinedJob });
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    openOptions();
     fireEvent.click(screen.getByRole("button", { name: /High-volume/ }));
     const count = screen.getByLabelText("Clips requested");
     fireEvent.change(count, { target: { value: "501" } });
@@ -181,6 +194,7 @@ describe("Projects create flow", () => {
 
   it.each(["Standard · up to 30", "Music / sung vocals"])("caps a 500 count at 30 when switching to %s", (mode) => {
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    openOptions();
     fireEvent.click(screen.getByRole("button", { name: /High-volume/ }));
     const count = screen.getByLabelText("Clips requested");
     fireEvent.change(count, { target: { value: "500" } });
@@ -191,6 +205,7 @@ describe("Projects create flow", () => {
 
   it("uses the Scenes requested label and same high-volume count behavior for Long form", () => {
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    openOptions();
     fireEvent.click(screen.getByRole("button", { name: /Long form · 16:9/i }));
     fireEvent.click(screen.getByRole("button", { name: /High-volume/ }));
     const count = screen.getByLabelText("Scenes requested");
@@ -201,6 +216,7 @@ describe("Projects create flow", () => {
 
   it("rejects a long-form minimum duration above the engine boundary before submitting", async () => {
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    openOptions();
     fireEvent.click(screen.getByRole("tab", { name: "YouTube" }));
     fireEvent.change(screen.getByRole("textbox", { name: "YouTube URL" }), { target: { value: "https://www.youtube.com/watch?v=fixture" } });
     fireEvent.click(screen.getByRole("button", { name: /Long form · 16:9/i }));
@@ -215,6 +231,7 @@ describe("Projects create flow", () => {
   it("uses Smart transcription and keeps sung lyrics enabled without a subtitle toggle", async () => {
     mockCreateClipJob.mockResolvedValue({ project: { ...project, sourceProfile: "music" }, job: { ...undefinedJob, sourceProfile: "music", processingMode: "smart" } });
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    openOptions();
     fireEvent.click(screen.getByRole("button", { name: "Music / sung vocals" }));
     expect(screen.getByText(/Music \/ sung vocals always uses Smart transcription locally\. VAD disabled; word timestamps retained\./)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Auto" })).not.toBeInTheDocument();
@@ -227,6 +244,7 @@ describe("Projects create flow", () => {
 
   it.each(["Auto", "Smart"])("keeps eligible %s hook text unchecked by default with a connected provider", (mode) => {
     render(<ProjectsView health={health} hasSelectedProvider onCreated={vi.fn()} />);
+    openOptions();
     if (mode === "Smart") fireEvent.click(screen.getByRole("button", { name: "Smart" }));
     const hookText = screen.getByRole("checkbox", { name: /Hook text/i });
     expect(hookText).toBeEnabled();
@@ -237,6 +255,7 @@ describe("Projects create flow", () => {
   it("sends hookText true only after an explicit opt-in", async () => {
     mockCreateClipJob.mockResolvedValue({ project, job: undefinedJob });
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    openOptions();
     fireEvent.click(screen.getByRole("button", { name: "Smart" }));
     fireEvent.click(screen.getByRole("checkbox", { name: /Hook text/i }));
     fireEvent.click(screen.getByRole("tab", { name: "YouTube" }));
@@ -248,6 +267,7 @@ describe("Projects create flow", () => {
   it("omits hookText when eligible but unticked", async () => {
     mockCreateClipJob.mockResolvedValue({ project, job: undefinedJob });
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    openOptions();
     fireEvent.click(screen.getByRole("tab", { name: "YouTube" }));
     fireEvent.change(screen.getByRole("textbox", { name: "YouTube URL" }), { target: { value: "https://www.youtube.com/watch?v=fixture" } });
     fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
@@ -257,6 +277,7 @@ describe("Projects create flow", () => {
 
   it("uses Music mode's effective Smart processing after Fast was selected", () => {
     render(<ProjectsView health={health} providersLoaded hasSelectedProvider onCreated={vi.fn()} />);
+    openOptions();
     fireEvent.click(screen.getByRole("button", { name: "Fast" }));
     fireEvent.click(screen.getByRole("button", { name: "Music / sung vocals" }));
     expect(screen.getByRole("checkbox", { name: /YouTube metadata/ })).toBeEnabled();
@@ -264,6 +285,7 @@ describe("Projects create flow", () => {
 
   it("resets hook text opt-in after eligibility is lost and regained", () => {
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    openOptions();
     const checkbox = screen.getByRole("checkbox", { name: /Hook text/i });
     fireEvent.click(checkbox);
     expect(checkbox).toBeChecked();
@@ -280,6 +302,7 @@ describe("Projects create flow", () => {
     ["High-volume", "High-volume batches do not support AI hook text."],
   ])("explains why hook text is unavailable for %s", (reason, message) => {
     render(<ProjectsView health={health} hasSelectedProvider={reason !== "No provider"} onCreated={vi.fn()} />);
+    openOptions();
     if (reason === "Fast") fireEvent.click(screen.getByRole("button", { name: "Fast" }));
     if (reason === "Long form") fireEvent.click(screen.getByRole("button", { name: /Long form/ }));
     if (reason === "High-volume") fireEvent.click(screen.getByRole("button", { name: /High-volume/ }));
@@ -291,6 +314,7 @@ describe("Projects create flow", () => {
   it("opens Music Top text from Hook text and submits it only when enabled", async () => {
     mockCreateClipJob.mockResolvedValue({ project: { ...project, sourceProfile: "music" }, job: { ...undefinedJob, sourceProfile: "music" } });
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    openOptions();
     fireEvent.click(screen.getByRole("button", { name: "Music / sung vocals" }));
     const hookText = screen.getByRole("checkbox", { name: /Hook text/i });
     expect(hookText).toBeEnabled();
@@ -311,6 +335,7 @@ describe("Projects create flow", () => {
   it("omits a Music Top text draft while Hook text is unchecked", async () => {
     mockCreateClipJob.mockResolvedValue({ project: { ...project, sourceProfile: "music" }, job: { ...undefinedJob, sourceProfile: "music" } });
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    openOptions();
     fireEvent.click(screen.getByRole("button", { name: "Music / sung vocals" }));
     fireEvent.click(screen.getByRole("checkbox", { name: /Hook text/i }));
     fireEvent.change(screen.getByRole("textbox", { name: "Top text" }), { target: { value: "Draft should not be sent" } });
@@ -324,6 +349,7 @@ describe("Projects create flow", () => {
 
   it("defaults to Auto mode with local transcription available without a provider", () => {
     render(<ProjectsView health={health} hasSelectedProvider={false} onCreated={vi.fn()} />);
+    openOptions();
     expect(screen.getByRole("button", { name: "Auto" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("heading", { name: "Processing mode" })).toBeInTheDocument();
   });
@@ -337,6 +363,7 @@ describe("Projects create flow", () => {
   ])("submits $label with the expected processing and caption behavior", async ({ providersLoaded, hasSelectedProvider, mode, expectedMode, burnSubtitles }) => {
     mockCreateClipJob.mockResolvedValue({ project, job: undefinedJob });
     render(<ProjectsView health={health} providersLoaded={providersLoaded} hasSelectedProvider={hasSelectedProvider} onCreated={vi.fn()} />);
+    openOptions();
     if (mode !== "Auto") fireEvent.click(screen.getByRole("button", { name: mode }));
     fireEvent.click(screen.getByRole("tab", { name: "YouTube" }));
     fireEvent.change(screen.getByRole("textbox", { name: "YouTube URL" }), { target: { value: "https://www.youtube.com/watch?v=fixture" } });
@@ -346,6 +373,7 @@ describe("Projects create flow", () => {
 
   it("keeps the provider callout absent while /profiles is pending", () => {
     render(<ProjectsView health={health} providersLoaded={false} hasSelectedProvider={false} onCreated={vi.fn()} />);
+    openOptions();
     expect(screen.queryByText(/No provider is connected/i)).not.toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: /Hook text/i })).toBeEnabled();
     // The "add a provider" callout is the same claim in another shape.
@@ -359,6 +387,7 @@ describe("Projects create flow", () => {
 
   it("shows the optional-provider callout only after /profiles confirms disconnection", () => {
     render(<ProjectsView health={health} providersLoaded hasSelectedProvider={false} onCreated={vi.fn()} />);
+    openOptions();
     expect(screen.getByText(/Add optional AI providers/i)).toBeInTheDocument();
   });
 
@@ -370,11 +399,13 @@ describe("Projects create flow", () => {
     first.unmount();
 
     render(<ProjectsView {...props} />);
+    openOptions();
     expect(screen.queryByText(/Add optional AI providers/i)).not.toBeInTheDocument();
   });
 
   it("reports a connected provider once /profiles confirms it", () => {
     render(<ProjectsView health={health} providersLoaded hasSelectedProvider onCreated={vi.fn()} />);
+    openOptions();
     expect(screen.queryByText(/Add optional AI providers/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/No provider is connected|Auto uses a connected provider/i)).not.toBeInTheDocument();
   });
@@ -393,6 +424,7 @@ describe("Projects create flow", () => {
 
   it("keeps explicit Smart as a local Whisper opt-in without a provider", () => {
     render(<ProjectsView health={health} hasSelectedProvider={false} onCreated={vi.fn()} />);
+    openOptions();
     fireEvent.click(screen.getByRole("button", { name: "Smart" }));
     expect(screen.getByRole("button", { name: "Smart" })).toHaveAttribute("aria-pressed", "true");
   });
@@ -409,6 +441,7 @@ describe("Projects create flow", () => {
     it("defaults on for a connected profile with auto SEO titles and sends an explicit true", async () => {
       mockCreateClipJob.mockResolvedValue({ project, job: undefinedJob });
       render(<ProjectsView health={health} providersLoaded hasSelectedProvider selectedProfile={profile} onCreated={vi.fn()} />);
+      openOptions();
       expect(screen.getByRole("checkbox", { name: /Write SEO titles with AI/ })).toBe(toggle());
       expect(screen.getByText("Generate YouTube metadata")).toBeInTheDocument();
       expect(toggle()).toBeChecked();
@@ -419,6 +452,7 @@ describe("Projects create flow", () => {
     it("defaults off when the profile disables auto SEO titles and sends an explicit false", async () => {
       mockCreateClipJob.mockResolvedValue({ project, job: undefinedJob });
       render(<ProjectsView health={health} providersLoaded hasSelectedProvider selectedProfile={{ ...profile, autoSeoTitles: false }} onCreated={vi.fn()} />);
+      openOptions();
       expect(toggle()).toBeEnabled();
       expect(toggle()).not.toBeChecked();
       submitUrl();
@@ -441,6 +475,7 @@ describe("Projects create flow", () => {
     it("respects the customer's untick across eligibility changes", async () => {
       mockCreateClipJob.mockResolvedValue({ project, job: undefinedJob });
       render(<ProjectsView health={health} providersLoaded hasSelectedProvider selectedProfile={profile} onCreated={vi.fn()} />);
+      openOptions();
       fireEvent.click(toggle());
       expect(toggle()).not.toBeChecked();
       fireEvent.click(screen.getByRole("button", { name: "Fast" }));
@@ -455,6 +490,7 @@ describe("Projects create flow", () => {
     it("omits the field when the toggle is ineligible", async () => {
       mockCreateClipJob.mockResolvedValue({ project, job: undefinedJob });
       render(<ProjectsView health={health} providersLoaded hasSelectedProvider selectedProfile={profile} onCreated={vi.fn()} />);
+      openOptions();
       fireEvent.click(screen.getByRole("button", { name: /Long form · 16:9/i }));
       expect(toggle()).toBeDisabled();
       expect(toggle()).not.toBeChecked();
@@ -471,6 +507,7 @@ describe("Local execution selection", () => {
     mockCreateClipJob.mockReset();
     mockCreateClipJob.mockResolvedValue({ project, job: undefinedJob });
     render(<ProjectsView health={health} providersLoaded hasSelectedProvider={connected} onCreated={vi.fn()} />);
+    openOptions();
     fireEvent.click(screen.getByRole("button", { name: "Engine only" }));
     expect(screen.getByRole("button", { name: "Engine only" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("checkbox", { name: /Burn in subtitles/ })).toBeEnabled();

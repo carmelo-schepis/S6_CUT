@@ -11,6 +11,9 @@ vi.mock("../api", () => ({
 }));
 import { createClipJob } from "../api";
 
+/** Opens every collapsed option row, as a customer would to reach its controls. */
+const openOptions = () => screen.queryAllByRole("button").filter((button) => button.classList.contains("create-option-toggle") && button.getAttribute("aria-expanded") === "false").forEach((button) => fireEvent.click(button));
+
 const health: Health = {
   status: "ready", version: "test", database: true, ffmpeg: true, ffprobe: true, whisper: true,
   ytdlp: true, dataPath: "Local mounted data directory", freeBytes: 1_000_000,
@@ -30,8 +33,10 @@ describe("Music presentation creation controls", () => {
   it("defaults Music to English and preserves explicit automatic detection", async () => {
     vi.mocked(createClipJob).mockResolvedValue({ project, job: undefined as never });
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    openOptions();
     expect(screen.queryByRole("combobox", { name: "Lyrics language" })).not.toBeInTheDocument();
     fireEvent.click(mode("Music"));
+    openOptions();
     const language = screen.getByRole("combobox", { name: "Lyrics language" });
     expect(language).toHaveValue("en");
     chooseFile();
@@ -43,6 +48,7 @@ describe("Music presentation creation controls", () => {
     await waitFor(() => expect(createClipJob).toHaveBeenCalledTimes(2));
     expect(vi.mocked(createClipJob).mock.calls[1][0]).toMatchObject({ sourceProfile: "music", musicLyricsLanguage: "auto" });
     fireEvent.click(mode("Clip"));
+    openOptions();
     fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
     await waitFor(() => expect(createClipJob).toHaveBeenCalledTimes(3));
     expect(vi.mocked(createClipJob).mock.calls[2][0]).not.toHaveProperty("musicLyricsLanguage");
@@ -50,21 +56,26 @@ describe("Music presentation creation controls", () => {
 
   it("keeps Clip as the initial mode and promotes Music", () => {
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    openOptions();
     expect(mode("Clip")).toHaveAttribute("aria-pressed", "true");
     expect(mode("Music")).toBeVisible();
     expect(screen.queryByRole("button", { name: /Script mode/i })).not.toBeInTheDocument();
     fireEvent.click(mode("Music"));
+    openOptions();
     expect(mode("Music")).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: /Short form · 9:16/i })).toHaveAttribute("aria-pressed", "true");
     expect(screen.queryByRole("button", { name: "Auto" })).not.toBeInTheDocument();
     fireEvent.click(mode("Clip"));
+    openOptions();
     expect(mode("Clip")).toHaveAttribute("aria-pressed", "true");
   });
 
   it("offers all themes and preserves exact 100-character top text in Music creation only", async () => {
     vi.mocked(createClipJob).mockResolvedValue({ project: { ...project, sourceProfile: "music" }, job: undefined as never });
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    openOptions();
     fireEvent.click(mode("Music"));
+    openOptions();
     const themeGroup = within(screen.getByRole("group", { name: "Lyrics subtitle theme" }));
     const themeLabels = ["Clean sans", "Warm highlight", "Soft serif", "Reference white sans", "Reference yellow sans", "Reference white serif"];
     for (const label of themeLabels) expect(themeGroup.getByRole("button", { name: new RegExp(`^${label}$`) })).toBeVisible();
@@ -94,7 +105,9 @@ describe("Music presentation creation controls", () => {
     try {
       vi.mocked(createClipJob).mockResolvedValue({ project: { ...project, sourceProfile: "music" }, job: undefined as never });
       render(<ProjectsView health={health} onCreated={vi.fn()} />);
+      openOptions();
       fireEvent.click(mode("Music"));
+      openOptions();
       const themeGroup = within(screen.getByRole("group", { name: "Lyrics subtitle theme" }));
       for (const label of ["Condensed black", "Condensed white", "Handwritten stack"]) expect(themeGroup.getByRole("button", { name: new RegExp(`^${label}$`) })).toBeVisible();
       const animations = within(screen.getByRole("group", { name: "Lyric animation" }));
@@ -124,7 +137,9 @@ describe("Music presentation creation controls", () => {
 
   it("autoplays the sample when motion is allowed and replays on request", () => {
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    openOptions();
     fireEvent.click(mode("Music"));
+    openOptions();
     expect(document.querySelector(".lyric-preview")).toHaveAttribute("data-state", "playing");
     fireEvent.click(within(screen.getByRole("group", { name: "Lyric animation" })).getByRole("button", { name: "Slow fade" }));
     expect(screen.getByRole("button", { name: "Replay preview" })).toBeVisible();
@@ -134,7 +149,9 @@ describe("Music presentation creation controls", () => {
   it("offers a hook text format only inside the checked Hook text section and keeps plain as the default", async () => {
     vi.mocked(createClipJob).mockResolvedValue({ project: { ...project, sourceProfile: "music" }, job: undefined as never });
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    openOptions();
     fireEvent.click(mode("Music"));
+    openOptions();
     expect(screen.getByRole("checkbox", { name: "Hook text" })).not.toBeChecked();
     expect(screen.queryByRole("group", { name: "Hook text format" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("checkbox", { name: "Hook text" }));
@@ -158,7 +175,9 @@ describe("Music presentation creation controls", () => {
   it("does not send the banner format when Hook text is unchecked and never leaks Music options into Clip submissions", async () => {
     vi.mocked(createClipJob).mockResolvedValue({ project, job: undefined as never });
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    openOptions();
     fireEvent.click(mode("Music"));
+    openOptions();
     fireEvent.click(within(screen.getByRole("group", { name: "Lyric animation" })).getByRole("button", { name: "Line crossfade" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Hook text" }));
     fireEvent.click(within(screen.getByRole("group", { name: "Hook text format" })).getByRole("button", { name: "White banner" }));
@@ -170,6 +189,7 @@ describe("Music presentation creation controls", () => {
     expect(music.musicPresentation).toEqual({ version: 1, subtitleTheme: "clean", lyricAnimation: "line_crossfade" });
     expect(music.musicTopText).toBe("");
     fireEvent.click(mode("Clip"));
+    openOptions();
     fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
     await waitFor(() => expect(createClipJob).toHaveBeenCalledTimes(2));
     const clip = vi.mocked(createClipJob).mock.calls[1][0];
@@ -180,7 +200,9 @@ describe("Music presentation creation controls", () => {
   it("offers audio combination only after a song is selected and submits the choice", async () => {
     vi.mocked(createClipJob).mockResolvedValue({ project: { ...project, sourceProfile: "music" }, job: undefined as never });
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    openOptions();
     fireEvent.click(mode("Music"));
+    openOptions();
     const only = screen.getByRole("button", { name: "Song only" });
     const mix = screen.getByRole("button", { name: "Original audio + song" });
     expect(only).toBeDisabled();
@@ -208,9 +230,11 @@ describe("Music presentation creation controls", () => {
 
   it("forces short vertical music output and resets captions when switching from long-form Clip mode", () => {
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    openOptions();
     fireEvent.click(screen.getByRole("button", { name: /Long form · 16:9/i }));
     expect(screen.getByRole("button", { name: /Long form · 16:9/i })).toHaveAttribute("aria-pressed", "true");
     fireEvent.click(mode("Music"));
+    openOptions();
     expect(screen.getByRole("button", { name: /Short form · 9:16/i })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: /Long form · 16:9/i })).toBeDisabled();
     expect(screen.queryByRole("checkbox", { name: /Burn in subtitles/i })).not.toBeInTheDocument();
@@ -220,6 +244,7 @@ describe("Music presentation creation controls", () => {
   it("omits Music-only settings from Clip submissions and avoids stale setting leaks", async () => {
     vi.mocked(createClipJob).mockResolvedValue({ project, job: undefined as never });
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    openOptions();
     chooseFile();
     fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
     await waitFor(() => expect(createClipJob).toHaveBeenCalledTimes(1));
@@ -228,9 +253,11 @@ describe("Music presentation creation controls", () => {
     expect(vi.mocked(createClipJob).mock.calls[0][0]).not.toHaveProperty("musicAudioMode");
 
     fireEvent.click(mode("Music"));
+    openOptions();
     fireEvent.click(screen.getByRole("checkbox", { name: "Hook text" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Top text" }), { target: { value: "Do not leak" } });
     fireEvent.click(mode("Music"));
+    openOptions();
     chooseFile();
     fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
     await waitFor(() => expect(createClipJob).toHaveBeenCalledTimes(2));

@@ -157,7 +157,8 @@ test.describe("removed helper copy", () => {
     await capture(page, testInfo, "projects-high-volume");
 
     await page.getByRole("button", { name: "Music / sung vocals" }).click();
-    await expect(page.getByRole("heading", { name: "Lyrics presentation" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Lyrics presentation", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Lyrics presentation", exact: true }).click();
     await expect(page.getByText(/Music \/ sung vocals always uses Smart transcription locally\. VAD disabled; word timestamps retained\./)).toBeVisible();
     await expect(page.getByRole("heading", { name: "Format" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Auto", exact: true })).toHaveCount(0);
