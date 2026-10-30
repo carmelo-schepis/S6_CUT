@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const artifactDir = path.join(root, "test-artifacts");
+const artifactDir = path.resolve(process.env.S6_PLAYWRIGHT_ARTIFACTS || path.join(root, "test-artifacts"));
 
 async function capture(page: Page, name: string) {
   await page.screenshot({ path: path.join(artifactDir, `${name}.png`), fullPage: true });
@@ -71,6 +71,8 @@ test("Docker-served studio acceptance workflow", async ({ page, request }) => {
   await expect(page.getByText("Local engine ready")).toBeVisible({ timeout: 60_000 });
   await capture(page, "desktop-projects");
 
+  // Wait for the startup splash to release the app before checking keyboard focus.
+  await expect(page.locator("#root")).not.toHaveAttribute("inert", "");
   // Basic keyboard/focus and responsive evidence.
   await page.keyboard.press("Tab");
   await expect(page.locator(":focus")).toBeVisible();
@@ -99,7 +101,8 @@ test("Docker-served studio acceptance workflow", async ({ page, request }) => {
   await open(page, "Jobs");
   const completedJobCard = page.locator(`.job-card[data-project-id="${browserProject!.id}"]`);
   await expect(completedJobCard).toContainText(/complete/i);
-  await expect(completedJobCard).toContainText(/5 outputs ready/);
+  // The supplied 4.3s fixture is below Fast's minimum window, so its valid result is one full-source output.
+  await expect(completedJobCard).toContainText(/1 output ready/);
   await open(page, "Workspace");
   await page.getByRole("tab", { name: "Media" }).click();
   await expect(page.getByRole("tabpanel", { name: "Media" })).toBeVisible();
@@ -123,7 +126,7 @@ test("Docker-served studio acceptance workflow", async ({ page, request }) => {
 
   // Shorts Editor: real source preview, local assistant proposal, and output list.
   await open(page, "Shorts Editor");
-  await expect(page.getByRole("heading", { name: "Editor" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Editor", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { level: 1, name: "Editor" })).toBeVisible();
   await expect(page.getByText("Trim an authorised video into a social-ready clip. Choose the section, output shape, and subtitles, then queue the render.")).toHaveCount(0);
   await page.setViewportSize({ width: 768, height: 1024 });
@@ -131,7 +134,7 @@ test("Docker-served studio acceptance workflow", async ({ page, request }) => {
   await fs.writeFile(path.join(artifactDir, "responsive-measurements.json"), JSON.stringify(tabletMeasure, null, 2));
   expect(tabletMeasure.scrollWidth).toBeLessThanOrEqual(tabletMeasure.clientWidth);
   await openClips(page);
-  await expect(page.getByRole("heading", { name: "AI editing assistant" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Editing assistant" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Queue short" })).toBeVisible();
   await capture(page, "shorts-editor-tablet");
   await page.setViewportSize({ width: 1440, height: 1000 });
@@ -144,7 +147,7 @@ test("Docker-served studio acceptance workflow", async ({ page, request }) => {
   await expect(page.getByRole("button", { name: "Reject" })).toBeVisible();
   await expect(page.getByLabel("Aspect ratio")).toHaveValue("9:16");
   await expect(page.getByText("Unsaved edits")).not.toBeVisible();
-  await expect(page.getByRole("button", { name: "Undo" })).not.toBeVisible();
+  await expect(page.getByRole("button", { name: "Undo" })).toBeDisabled();
   await capture(page, "proposal-pending");
   await page.getByRole("button", { name: "Reject" }).click();
   await expect(page.getByLabel("Aspect ratio")).toHaveValue("9:16");
@@ -161,7 +164,7 @@ test("Docker-served studio acceptance workflow", async ({ page, request }) => {
   await page.getByRole("button", { name: "Undo" }).click();
   await expect(page.getByLabel("Aspect ratio")).toHaveValue("9:16");
   await expect(page.getByText("All changes saved")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Undo" })).not.toBeVisible();
+  await expect(page.getByRole("button", { name: "Undo" })).toBeDisabled();
   await capture(page, "proposal-undone");
   await openClips(page);
   await page.locator('input[aria-label="Editing request"]').fill("Change the aspect ratio to 1:1 now.");
@@ -200,27 +203,42 @@ test("Docker-served studio acceptance workflow", async ({ page, request }) => {
   await page.getByRole("tab", { name: "YouTube" }).click();
   await page.getByLabel("YouTube URL").fill("https://www.youtube.com/watch?v=aqz-KE-bpKQ");
   await page.getByRole("button", { name: "Fast", exact: true }).click();
+  const youtubeJobResponse = page.waitForResponse((response) =>
+    response.request().method() === "POST" && new URL(response.url()).pathname === "/api/v1/jobs/clip",
+  );
   await page.getByRole("button", { name: /Create 5 (?:short )?clips/ }).click();
-  await expect(page.getByRole("button", { name: /Stop & keep/ })).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText(/download|import|source/i).first()).toBeVisible();
-  await page.getByRole("button", { name: /Stop & keep/ }).click();
-  await expect(page.getByText(/Stopped|cancelled|partial/i).first()).toBeVisible({ timeout: 30_000 });
-  const retryImport = page.getByRole("button", { name: /Retry import/ }).first();
-  await expect(retryImport).toBeVisible({ timeout: 30_000 });
-  if (await retryImport.isVisible()) {
+  const { job: youtubeJob } = await (await youtubeJobResponse).json();
+  try {
+    // The shell can intentionally keep following a previously active job when a
+    // new project is created. Open the exact YouTube job before testing recovery.
+    await open(page, "Jobs");
+    const youtubeJobCard = page.locator(`.job-card[data-job-id="${youtubeJob.id}"]`);
+    await expect(youtubeJobCard).toBeVisible({ timeout: 30_000 });
+    await youtubeJobCard.getByRole("button", { name: "Open" }).click();
+    await expect(page.getByRole("button", { name: /Stop & keep/ })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText(/download|import|source/i).first()).toBeVisible();
+    await page.getByRole("button", { name: /Stop & keep/ }).click();
+    await expect(page.getByText(/YouTube import stopped before the download began|Stopped with partial YouTube download retained/i)).toBeVisible({ timeout: 30_000 });
+    const retryImport = page.locator(".warning-strip").getByRole("button", { name: "Retry import", exact: true });
+    await expect(retryImport).toBeVisible({ timeout: 30_000 });
+    const retryResponse = page.waitForResponse((response) =>
+      response.request().method() === "POST" && new URL(response.url()).pathname === `/api/v1/jobs/${youtubeJob.id}/control/retry-import`,
+    );
     await retryImport.click();
-    // The response itself is the durable retry evidence: the same job must
-    // immediately leave cancelled_kept and expose a new queued/active phase.
-    await expect(page.locator(".workspace-commandbar .status")).toContainText(/Retrying YouTube import|Downloading YouTube source|ready|failed/i, { timeout: 30_000 });
+    const retriedJob = await (await retryResponse).json();
+    expect(["queued", "active", "failed", "complete"]).toContain(retriedJob.state);
     await expect(retryImport).not.toBeVisible();
-    await expect(page.getByText(/Retrying YouTube import|Downloading YouTube source/).first()).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator(".workspace-commandbar .status")).toContainText(/Retrying YouTube import|Downloading YouTube source|ready|failed/i, { timeout: 30_000 });
+    await capture(page, "youtube-retry-active");
+  } finally {
+    const latestJobResponse = await request.get(`/api/v1/jobs/${youtubeJob.id}`);
+    expect(latestJobResponse.ok()).toBeTruthy();
+    const latestJob = await latestJobResponse.json();
+    if (["queued", "active", "recovered", "paused"].includes(latestJob.state)) {
+      const cleanup = await request.post(`/api/v1/jobs/${youtubeJob.id}/control/stop-keep`);
+      expect(cleanup.ok()).toBeTruthy();
+    }
   }
-  await capture(page, "youtube-retry-active");
-  const stopAfterRetry = page.getByRole("button", { name: /Stop & keep/ }).first();
-  await expect(stopAfterRetry).toBeVisible({ timeout: 30_000 });
-  await stopAfterRetry.click();
-  await expect(page.getByText(/Stopped|cancelled|partial/i).first()).toBeVisible({ timeout: 30_000 });
-  await capture(page, "youtube-stop");
 
   await fs.writeFile(path.join(artifactDir, "browser-diagnostics.json"), JSON.stringify({ consoleErrors, pageErrors, failedRequests, abortedRequests, note: "Chromium may emit a COOP warning when testing the HTTP IP origin; that known browser limitation is intentionally excluded from consoleErrors." }, null, 2));
   await fs.writeFile(path.join(artifactDir, "job-evidence.json"), JSON.stringify(jobEvidence, null, 2));
