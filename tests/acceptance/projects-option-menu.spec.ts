@@ -94,6 +94,24 @@ test("a row opens and closes from the keyboard and keeps its value", async ({ pa
   await expect(subtitle).toHaveAccessibleDescription("Editorial default");
 });
 
+test("keyboard order reaches the option rows only after the main controls, as they appear", async ({ page }) => {
+  await openCreatePanel(page);
+  const order = await page.evaluate(() => {
+    const step = document.querySelector(".style-step")!;
+    const controls = [...step.querySelectorAll<HTMLElement>("button, input, select, textarea")].filter((el) => !el.closest(".create-option-list"));
+    const rows = [...step.querySelectorAll<HTMLElement>(".create-option-toggle")];
+    const lastControl = controls[controls.length - 1];
+    return {
+      rowsAfterInTabOrder: rows.every((row) => Boolean(lastControl.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING)),
+      rowsBelowControls: Math.min(...rows.map((row) => row.getBoundingClientRect().top)) >= Math.max(...controls.map((el) => el.getBoundingClientRect().bottom)) - 1,
+      rowCount: rows.length,
+    };
+  });
+  expect(order.rowCount).toBeGreaterThan(0);
+  expect(order.rowsAfterInTabOrder, "rows come after the main controls in the Tab order").toBe(true);
+  expect(order.rowsBelowControls, "rows sit below the main controls on screen").toBe(true);
+});
+
 test("Music mode swaps the rows and shows the lyric and song values", async ({ page }) => {
   await openCreatePanel(page);
   await page.getByRole("button", { name: "Music / sung vocals" }).click();

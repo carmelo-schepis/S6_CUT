@@ -307,69 +307,8 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
             </div>
           </FieldGroup>
 
-          {sourceProfile === "speech" && <div className="create-option-list">
-            <OptionRow id="subtitle" title="Subtitle style" summary={subtitleSummary} open={openRows.has("subtitle")} onToggle={() => toggleRow("subtitle")}>
-              <p className="field-group-hint">Choose how captions look. Editorial style above still decides which moments are chosen.</p>
-              <SpeechSubtitleStyleControls value={captionPreset} onChange={setCaptionPreset} editorialStyle={style} videoFilter={speechVideoFilter}
-                heading={{ enabled: speechHookTextEnabled, text: manualHookText.trim() || "Your heading here", style: headingStyle }} emojiMode={emojiMode} disabledReason={speechCaptionsDisabledReason} />
-            </OptionRow>
-            <OptionRow id="video-filter" title="Video filter" summary={speechFilterSummary} open={openRows.has("video-filter")} onToggle={() => toggleRow("video-filter")}>
-              <p className="field-group-hint">Applied to the footage before captions, headings and graphics are added.</p>
-              <VideoFilterPicker value={speechVideoFilter} onChange={setSpeechVideoFilter} existingNote="Keeps today’s look" />
-            </OptionRow>
-            {speechHookTextEligible && <OptionRow id="heading" title="Heading appearance" summary={headingSummary} open={openRows.has("heading")} onToggle={() => toggleRow("heading")}>
-              <HeadingStyleControls value={headingStyle} onChange={setHeadingStyle} />
-            </OptionRow>}
-            <OptionRow id="emoji" title="Emoji reactions" summary={emojiSummary} open={openRows.has("emoji")} onToggle={() => toggleRow("emoji")}>
-              <EmojiModeControls value={emojiMode} onChange={setEmojiMode} disabledReason={speechCaptionsDisabledReason} />
-            </OptionRow>
-          </div>}
 
           <>
-            {sourceProfile === "music" && <div className="create-option-list">
-              <OptionRow id="music-lyrics" title="Lyrics presentation" summary={musicLyricsSummary} open={openRows.has("music-lyrics")} onToggle={() => toggleRow("music-lyrics")}>
-              <p className="field-group-hint">{MUSIC_PROFILE_NOTE}</p>
-              <Field label="Lyrics language" hint="English is the default. Choose another language or automatic detection for songs in other languages.">
-                <select aria-label="Lyrics language" value={musicLyricsLanguage} onChange={(event) => setMusicLyricsLanguage(event.target.value)}>
-                  <option value="auto">Detect automatically</option>
-                  <option value="en">English</option><option value="es">Spanish</option><option value="fr">French</option>
-                  <option value="de">German</option><option value="it">Italian</option><option value="pt">Portuguese</option>
-                  <option value="ar">Arabic</option><option value="zh">Chinese</option><option value="hi">Hindi</option>
-                  <option value="ja">Japanese</option><option value="ko">Korean</option><option value="ru">Russian</option>
-                </select>
-              </Field>
-              <div role="group" aria-label="Lyrics subtitle theme">
-              <p className="music-theme-group-label">Current styles</p>
-              <div className="music-theme-options">
-                <button type="button" aria-label="Clean sans" aria-pressed={musicTheme === "clean"} className={musicTheme === "clean" ? "active" : ""} onClick={() => setMusicTheme("clean")}><span className="theme-clean">i’ve<br />forgotten<br />about</span><strong>Clean sans</strong><small>White · compact</small></button>
-                <button type="button" aria-label="Warm highlight" aria-pressed={musicTheme === "warm"} className={musicTheme === "warm" ? "active" : ""} onClick={() => setMusicTheme("warm")}><span className="theme-warm">do you think<br />that i’ve forgotten<br />about</span><strong>Warm highlight</strong><small>Soft yellow accents</small></button>
-                <button type="button" aria-label="Soft serif" aria-pressed={musicTheme === "serif"} className={musicTheme === "serif" ? "active" : ""} onClick={() => setMusicTheme("serif")}><span className="theme-serif">do you think<br />that i’ve forgotten<br />about</span><strong>Soft serif</strong><small>Light editorial</small></button>
-              </div>
-              <p className="music-theme-group-label">Reference styles</p>
-              <div className="music-theme-options">
-                <button type="button" aria-label="Reference white sans" aria-pressed={musicTheme === "reference_white_sans"} className={musicTheme === "reference_white_sans" ? "active" : ""} onClick={() => setMusicTheme("reference_white_sans")}><span className="theme-reference-white-sans">i’ve<br />forgotten<br />about</span><strong>Reference white sans</strong><small>Light · stacked</small></button>
-                <button type="button" aria-label="Reference yellow sans" aria-pressed={musicTheme === "reference_yellow_sans"} className={musicTheme === "reference_yellow_sans" ? "active" : ""} onClick={() => setMusicTheme("reference_yellow_sans")}><span className="theme-reference-yellow-sans">do you think<br />that i’ve forgotten<br />about</span><strong>Reference yellow sans</strong><small>Pale yellow · spaced</small></button>
-                <button type="button" aria-label="Reference white serif" aria-pressed={musicTheme === "reference_white_serif"} className={musicTheme === "reference_white_serif" ? "active" : ""} onClick={() => setMusicTheme("reference_white_serif")}><span className="theme-reference-white-serif">do you think<br />that i’ve forgotten<br />about</span><strong>Reference white serif</strong><small>White · editorial</small></button>
-              </div>
-              <p className="music-theme-group-label">Typography styles</p>
-              <div className="music-theme-options">
-                <button type="button" aria-label="Condensed black" aria-pressed={musicTheme === "condensed_black"} className={musicTheme === "condensed_black" ? "active" : ""} onClick={() => setMusicTheme("condensed_black")}><span className="theme-condensed-black">do you think<br />that i’ve forgotten<br />about</span><strong>Condensed black</strong><small>Narrow · light halo</small></button>
-                <button type="button" aria-label="Condensed white" aria-pressed={musicTheme === "condensed_white"} className={musicTheme === "condensed_white" ? "active" : ""} onClick={() => setMusicTheme("condensed_white")}><span className="theme-condensed-white">do you think<br />that i’ve forgotten<br />about</span><strong>Condensed white</strong><small>Narrow · for dark footage</small></button>
-                <button type="button" aria-label="Handwritten stack" aria-pressed={musicTheme === "handwritten_stack"} className={musicTheme === "handwritten_stack" ? "active" : ""} onClick={() => setMusicTheme("handwritten_stack")}><span className="theme-handwritten-stack">do you<br />think that<br />i’ve</span><strong>Handwritten stack</strong><small>White · vertical stack</small></button>
-              </div>
-              <p className="music-theme-group-label">Highlight styles</p>
-              <div className="music-theme-options">
-                <button type="button" aria-label="Karaoke focus" aria-pressed={musicTheme === "karaoke_focus"} className={musicTheme === "karaoke_focus" ? "active" : ""} onClick={() => setMusicTheme("karaoke_focus")}><span className="theme-karaoke-focus">do you <em>think</em><br />that i’ve forgotten<br />about</span><strong>Karaoke focus</strong><small>Sung word accented</small></button>
-                <button type="button" aria-label="Soft glow" aria-pressed={musicTheme === "soft_glow"} className={musicTheme === "soft_glow" ? "active" : ""} onClick={() => setMusicTheme("soft_glow")}><span className="theme-soft-glow">do you think<br />that i’ve forgotten<br />about</span><strong>Soft glow</strong><small>White · gentle glow</small></button>
-                <button type="button" aria-label="Lyric plate" aria-pressed={musicTheme === "lyric_plate"} className={musicTheme === "lyric_plate" ? "active" : ""} onClick={() => setMusicTheme("lyric_plate")}><span className="theme-lyric-plate"><i>do you think</i><i>that i’ve forgotten</i><i>about</i></span><strong>Lyric plate</strong><small>Dark translucent plate</small></button>
-              </div>
-              </div>
-              <MusicLyricAnimationPicker value={musicLyricAnimation} theme={musicTheme} onChange={setMusicLyricAnimation} />
-              </OptionRow>
-              <OptionRow id="music-filter" title="Video filter" summary={musicFilterSummary} open={openRows.has("music-filter")} onToggle={() => toggleRow("music-filter")}>
-                <VideoFilterPicker value={musicVideoFilter} onChange={setMusicVideoFilter} existingNote="Keeps the automatic colour / black-and-white mix" label="Music video filter" />
-              </OptionRow>
-            </div>}
             <FieldGroup title="Format">
               <div className="segmented mode-tabs format-tabs" aria-label="Content format">
                 <button type="button" aria-pressed={contentFormat === "short"} className={contentFormat === "short" ? "active" : ""} onClick={() => { setContentFormat("short"); setAspectRatio("9:16"); }}>Short form · 9:16</button>
@@ -412,6 +351,67 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
               </div>
             </FieldGroup>}
           </>
+          {sourceProfile === "speech" && <div className="create-option-list">
+            <OptionRow id="subtitle" title="Subtitle style" summary={subtitleSummary} open={openRows.has("subtitle")} onToggle={() => toggleRow("subtitle")}>
+              <p className="field-group-hint">Choose how captions look. Editorial style above still decides which moments are chosen.</p>
+              <SpeechSubtitleStyleControls value={captionPreset} onChange={setCaptionPreset} editorialStyle={style} videoFilter={speechVideoFilter}
+                heading={{ enabled: speechHookTextEnabled, text: manualHookText.trim() || "Your heading here", style: headingStyle }} emojiMode={emojiMode} disabledReason={speechCaptionsDisabledReason} />
+            </OptionRow>
+            <OptionRow id="video-filter" title="Video filter" summary={speechFilterSummary} open={openRows.has("video-filter")} onToggle={() => toggleRow("video-filter")}>
+              <p className="field-group-hint">Applied to the footage before captions, headings and graphics are added.</p>
+              <VideoFilterPicker value={speechVideoFilter} onChange={setSpeechVideoFilter} existingNote="Keeps today’s look" />
+            </OptionRow>
+            {speechHookTextEligible && <OptionRow id="heading" title="Heading appearance" summary={headingSummary} open={openRows.has("heading")} onToggle={() => toggleRow("heading")}>
+              <HeadingStyleControls value={headingStyle} onChange={setHeadingStyle} />
+            </OptionRow>}
+            <OptionRow id="emoji" title="Emoji reactions" summary={emojiSummary} open={openRows.has("emoji")} onToggle={() => toggleRow("emoji")}>
+              <EmojiModeControls value={emojiMode} onChange={setEmojiMode} disabledReason={speechCaptionsDisabledReason} />
+            </OptionRow>
+          </div>}
+          {sourceProfile === "music" && <div className="create-option-list">
+            <OptionRow id="music-lyrics" title="Lyrics presentation" summary={musicLyricsSummary} open={openRows.has("music-lyrics")} onToggle={() => toggleRow("music-lyrics")}>
+            <p className="field-group-hint">{MUSIC_PROFILE_NOTE}</p>
+            <Field label="Lyrics language" hint="English is the default. Choose another language or automatic detection for songs in other languages.">
+              <select aria-label="Lyrics language" value={musicLyricsLanguage} onChange={(event) => setMusicLyricsLanguage(event.target.value)}>
+                <option value="auto">Detect automatically</option>
+                <option value="en">English</option><option value="es">Spanish</option><option value="fr">French</option>
+                <option value="de">German</option><option value="it">Italian</option><option value="pt">Portuguese</option>
+                <option value="ar">Arabic</option><option value="zh">Chinese</option><option value="hi">Hindi</option>
+                <option value="ja">Japanese</option><option value="ko">Korean</option><option value="ru">Russian</option>
+              </select>
+            </Field>
+            <div role="group" aria-label="Lyrics subtitle theme">
+            <p className="music-theme-group-label">Current styles</p>
+            <div className="music-theme-options">
+              <button type="button" aria-label="Clean sans" aria-pressed={musicTheme === "clean"} className={musicTheme === "clean" ? "active" : ""} onClick={() => setMusicTheme("clean")}><span className="theme-clean">i’ve<br />forgotten<br />about</span><strong>Clean sans</strong><small>White · compact</small></button>
+              <button type="button" aria-label="Warm highlight" aria-pressed={musicTheme === "warm"} className={musicTheme === "warm" ? "active" : ""} onClick={() => setMusicTheme("warm")}><span className="theme-warm">do you think<br />that i’ve forgotten<br />about</span><strong>Warm highlight</strong><small>Soft yellow accents</small></button>
+              <button type="button" aria-label="Soft serif" aria-pressed={musicTheme === "serif"} className={musicTheme === "serif" ? "active" : ""} onClick={() => setMusicTheme("serif")}><span className="theme-serif">do you think<br />that i’ve forgotten<br />about</span><strong>Soft serif</strong><small>Light editorial</small></button>
+            </div>
+            <p className="music-theme-group-label">Reference styles</p>
+            <div className="music-theme-options">
+              <button type="button" aria-label="Reference white sans" aria-pressed={musicTheme === "reference_white_sans"} className={musicTheme === "reference_white_sans" ? "active" : ""} onClick={() => setMusicTheme("reference_white_sans")}><span className="theme-reference-white-sans">i’ve<br />forgotten<br />about</span><strong>Reference white sans</strong><small>Light · stacked</small></button>
+              <button type="button" aria-label="Reference yellow sans" aria-pressed={musicTheme === "reference_yellow_sans"} className={musicTheme === "reference_yellow_sans" ? "active" : ""} onClick={() => setMusicTheme("reference_yellow_sans")}><span className="theme-reference-yellow-sans">do you think<br />that i’ve forgotten<br />about</span><strong>Reference yellow sans</strong><small>Pale yellow · spaced</small></button>
+              <button type="button" aria-label="Reference white serif" aria-pressed={musicTheme === "reference_white_serif"} className={musicTheme === "reference_white_serif" ? "active" : ""} onClick={() => setMusicTheme("reference_white_serif")}><span className="theme-reference-white-serif">do you think<br />that i’ve forgotten<br />about</span><strong>Reference white serif</strong><small>White · editorial</small></button>
+            </div>
+            <p className="music-theme-group-label">Typography styles</p>
+            <div className="music-theme-options">
+              <button type="button" aria-label="Condensed black" aria-pressed={musicTheme === "condensed_black"} className={musicTheme === "condensed_black" ? "active" : ""} onClick={() => setMusicTheme("condensed_black")}><span className="theme-condensed-black">do you think<br />that i’ve forgotten<br />about</span><strong>Condensed black</strong><small>Narrow · light halo</small></button>
+              <button type="button" aria-label="Condensed white" aria-pressed={musicTheme === "condensed_white"} className={musicTheme === "condensed_white" ? "active" : ""} onClick={() => setMusicTheme("condensed_white")}><span className="theme-condensed-white">do you think<br />that i’ve forgotten<br />about</span><strong>Condensed white</strong><small>Narrow · for dark footage</small></button>
+              <button type="button" aria-label="Handwritten stack" aria-pressed={musicTheme === "handwritten_stack"} className={musicTheme === "handwritten_stack" ? "active" : ""} onClick={() => setMusicTheme("handwritten_stack")}><span className="theme-handwritten-stack">do you<br />think that<br />i’ve</span><strong>Handwritten stack</strong><small>White · vertical stack</small></button>
+            </div>
+            <p className="music-theme-group-label">Highlight styles</p>
+            <div className="music-theme-options">
+              <button type="button" aria-label="Karaoke focus" aria-pressed={musicTheme === "karaoke_focus"} className={musicTheme === "karaoke_focus" ? "active" : ""} onClick={() => setMusicTheme("karaoke_focus")}><span className="theme-karaoke-focus">do you <em>think</em><br />that i’ve forgotten<br />about</span><strong>Karaoke focus</strong><small>Sung word accented</small></button>
+              <button type="button" aria-label="Soft glow" aria-pressed={musicTheme === "soft_glow"} className={musicTheme === "soft_glow" ? "active" : ""} onClick={() => setMusicTheme("soft_glow")}><span className="theme-soft-glow">do you think<br />that i’ve forgotten<br />about</span><strong>Soft glow</strong><small>White · gentle glow</small></button>
+              <button type="button" aria-label="Lyric plate" aria-pressed={musicTheme === "lyric_plate"} className={musicTheme === "lyric_plate" ? "active" : ""} onClick={() => setMusicTheme("lyric_plate")}><span className="theme-lyric-plate"><i>do you think</i><i>that i’ve forgotten</i><i>about</i></span><strong>Lyric plate</strong><small>Dark translucent plate</small></button>
+            </div>
+            </div>
+            <MusicLyricAnimationPicker value={musicLyricAnimation} theme={musicTheme} onChange={setMusicLyricAnimation} />
+            </OptionRow>
+            <OptionRow id="music-filter" title="Video filter" summary={musicFilterSummary} open={openRows.has("music-filter")} onToggle={() => toggleRow("music-filter")}>
+              <VideoFilterPicker value={musicVideoFilter} onChange={setMusicVideoFilter} existingNote="Keeps the automatic colour / black-and-white mix" label="Music video filter" />
+            </OptionRow>
+          </div>}
         </div>
 
         <div className="create-step action-step">
