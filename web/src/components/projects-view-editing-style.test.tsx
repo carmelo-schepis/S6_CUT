@@ -214,16 +214,16 @@ describe("editing presentation payload builders", () => {
 describe("option rows", () => {
   it("starts every row closed and shows each current value on its line", () => {
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
-    const subtitle = screen.getByRole("button", { name: "Subtitle style", exact: true });
+    const subtitle = screen.getByRole("button", { name: "Subtitle style" });
     expect(subtitle).toHaveAttribute("aria-expanded", "false");
     expect(subtitle).toHaveAccessibleDescription("Editorial default");
-    expect(screen.getByRole("button", { name: "Advanced controls", exact: true })).toHaveAccessibleDescription("9:16 · 20–60 s");
+    expect(screen.getByRole("button", { name: "Advanced controls" })).toHaveAccessibleDescription("9:16 · 20–60 s");
     expect(screen.queryByRole("group", { name: "Subtitle style" })).not.toBeInTheDocument();
   });
 
   it("keeps a choice made in a row after the row is collapsed, and still submits it", async () => {
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
-    const subtitle = screen.getByRole("button", { name: "Subtitle style", exact: true });
+    const subtitle = screen.getByRole("button", { name: "Subtitle style" });
     fireEvent.click(subtitle);
     fireEvent.click(pressed("Subtitle style", "Word pop"));
     fireEvent.click(subtitle);
