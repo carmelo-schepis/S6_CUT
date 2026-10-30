@@ -124,6 +124,14 @@ describe("WorkspaceView – page structure", () => {
 });
 
 // ---------------------------------------------------------------
+describe("WorkspaceView – persisted Music audio mode", () => {
+  it("distinguishes voice replacement with no replacement song", async () => {
+    mockGetJob.mockResolvedValue({ ...freshSmartJob, sourceProfile: "music", musicAudioMode: "replace_music_keep_voice" });
+    renderView({ project: { ...project, sourceProfile: "music", musicAudioMode: "replace_music_keep_voice" } });
+    expect(await screen.findByText("Keep voice, replace background music · voice only")).toBeInTheDocument();
+  });
+});
+
 describe("WorkspaceView – stalled smart detection", () => {
   beforeEach(() => {
     vi.spyOn(Date, "now").mockReturnValue(REFERENCE_NOW);

@@ -122,3 +122,19 @@ def test_interrupted_hook_generation_recovers_locally_without_replaying_paid_req
 @pytest.mark.parametrize("text", ["", "short", "Visit https://example.com for the full story"])
 def test_local_hook_does_not_invent_text_for_missing_or_unsuitable_context(text):
     assert local_hook_text(text) is None
+
+def test_local_only_music_narration_planning_never_calls_provider(monkeypatch, tmp_path):
+    _, manager, job, private = cluster(tmp_path, public_policy="auto", private_policy="auto")
+    calls = []
+
+    async def forbidden(*args, **kwargs):
+        calls.append("provider")
+        raise AssertionError("narration planning must stay local")
+
+    candidate = object()
+    monkeypatch.setattr(manager.profiles, "openrouter_json", forbidden)
+    monkeypatch.setattr("engine.jobs.select_candidates", lambda *args, **kwargs: [candidate])
+    result = manager._plan_smart_candidates(job, private, [{"text": "a complete spoken sentence", "start": 1, "end": 6}], local_only=True)
+    assert result == [candidate]
+    assert calls == []
+    assert next(step for step in job.steps if step.id == "local_planning").status == "complete"

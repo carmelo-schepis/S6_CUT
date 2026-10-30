@@ -415,7 +415,7 @@ async def create_clip_job(
     url: Annotated[str | None, Form()] = None,
     music_track_url: Annotated[str | None, Form()] = None,
     music_track_speed: Annotated[float, Form()] = 1.0,
-    music_audio_mode: Annotated[Literal["song_only", "mix_original"], Form()] = "song_only",
+    music_audio_mode: Annotated[Literal["song_only", "mix_original", "replace_music_keep_voice"], Form()] = "song_only",
     music_song_gain: Annotated[float | None, Form(ge=0, le=1)] = None,
     name: Annotated[str | None, Form()] = None,
     style: Annotated[Literal["funny", "serious", "educational", "hype"], Form()] = "educational",
@@ -560,7 +560,7 @@ async def create_clip_job(
         private["music_top_text"] = music_top_text if music_top_text.strip() else None
         private["music_track_speed"] = music_track_speed
         private["music_audio_mode"] = music_audio_mode
-        private["music_song_gain"] = (music_song_gain if music_song_gain is not None else 0.25) if music_audio_mode == "mix_original" else 1.0
+        private["music_song_gain"] = (music_song_gain if music_song_gain is not None else 0.25) if music_audio_mode in {"mix_original", "replace_music_keep_voice"} else 1.0
         private["music_original_audio_gain"] = 1.0
         if music_track_url and music_track_url.strip():
             try:
@@ -629,7 +629,7 @@ async def create_clip_job(
         cap_explanation = "Effective target will be confirmed after YouTube download and FFprobe validation."
     project = Project(id=project_id, name=_project_name(name, Path(source_name).stem), name_is_auto=not _project_name(name, ""), mode="clip", style=style, state="queued", source_name=source_name, source_kind=source_kind, requested_count=count, batch_mode=batch_mode, effective_target=effective_target, cap_explanation=cap_explanation, content_format=content_format, source_profile=source_profile, music_track=music_track_snapshot, music_audio_mode=music_audio_mode if source_profile == "music" else "song_only", music_song_gain=float(private.get("music_song_gain", 1.0)), music_original_audio_gain=float(private.get("music_original_audio_gain", 1.0)), latest_job_id=job_id, library_folder_id=library_folder_id)
     high_volume_smart_landscape = batch_mode == "high_volume" and content_format == "long" and mode == "smart"
-    steps = manager._fast_steps() if uses_fast_pipeline(mode, content_format) and not high_volume_smart_landscape else manager._smart_steps(bool(private["use_openrouter"]), source_profile, include_hook_text=hook_text)
+    steps = manager._fast_steps() if uses_fast_pipeline(mode, content_format) and not high_volume_smart_landscape else manager._smart_steps(bool(private["use_openrouter"]), source_profile, include_hook_text=hook_text, preserve_voice=music_audio_mode == "replace_music_keep_voice")
     music_step = next((step for step in steps if step.id == "music_track"), None)
     if music_step:
         if music_track_snapshot is None:

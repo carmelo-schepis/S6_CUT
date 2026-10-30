@@ -893,7 +893,7 @@ class JobManager:
             ProcessingStep(id="ready", label="Project ready"),
         ]
 
-    def _smart_steps(self, use_openrouter: bool = False, source_profile: str = "speech", include_hook_text: bool = False) -> list[ProcessingStep]:
+    def _smart_steps(self, use_openrouter: bool = False, source_profile: str = "speech", include_hook_text: bool = False, preserve_voice: bool = False) -> list[ProcessingStep]:
         music = source_profile == "music"
         provider_step = ProcessingStep(id="openrouter", label="Provider bypassed for music profile" if music else "OpenRouter planning")
         if not use_openrouter:
@@ -906,10 +906,10 @@ class JobManager:
             ProcessingStep(id="probe", label="Video validated"),
             *([ProcessingStep(id="music_track", label="Background song prepared")] if music else []),
             ProcessingStep(id="audio", label="Audio prepared"),
-            ProcessingStep(id="transcribe", label="Music words timed" if music else "Speech transcribed"),
+            ProcessingStep(id="transcribe", label="Narration words timed" if preserve_voice else "Music words timed" if music else "Speech transcribed"),
             provider_step,
-            ProcessingStep(id="local_planning", label="Lyric windows planned" if music else "Local planning fallback"),
-            ProcessingStep(id="select", label="Lyric windows selected" if music else "Complete moments selected"),
+            ProcessingStep(id="local_planning", label="Narration moments planned" if preserve_voice else "Lyric windows planned" if music else "Local planning fallback"),
+            ProcessingStep(id="select", label="Narration moments selected" if preserve_voice else "Lyric windows selected" if music else "Complete moments selected"),
             ProcessingStep(id="boundaries", label="Clip boundaries verified"),
             ProcessingStep(id="render", label="Clips rendered and saved"),
             ProcessingStep(id="verify", label="Outputs verified"),
@@ -975,7 +975,7 @@ class JobManager:
         if job.steps or job.state == "complete":
             return
         as_of = job.updated_at
-        job.steps = self._fast_steps() if job_uses_fast_pipeline(job, private) else self._smart_steps(bool(private.get("use_openrouter")), job.source_profile, include_hook_text=job.hook_text_enabled)
+        job.steps = self._fast_steps() if job_uses_fast_pipeline(job, private) else self._smart_steps(bool(private.get("use_openrouter")), job.source_profile, include_hook_text=job.hook_text_enabled, preserve_voice=job.music_audio_mode.value == "replace_music_keep_voice")
         self._restore_proven_steps(job, private, as_of)
         self._save(job, private)
 
@@ -1005,7 +1005,7 @@ class JobManager:
         """
         if job_uses_fast_pipeline(job, private):
             return {step.id for step in self._fast_steps()}
-        return {step.id for step in self._smart_steps(bool(private.get("use_openrouter")), job.source_profile, include_hook_text=job.hook_text_enabled)}
+        return {step.id for step in self._smart_steps(bool(private.get("use_openrouter")), job.source_profile, include_hook_text=job.hook_text_enabled, preserve_voice=job.music_audio_mode.value == "replace_music_keep_voice")}
 
     def _repair_step_shape(self, job: Job, private: dict[str, Any]) -> None:
         """Rebuild a checklist persisted in the wrong shape for its pipeline.
@@ -1025,7 +1025,7 @@ class JobManager:
         if {step.id for step in job.steps} == self._required_step_ids(job, private):
             return
         as_of = job.updated_at
-        job.steps = self._fast_steps() if job_uses_fast_pipeline(job, private) else self._smart_steps(bool(private.get("use_openrouter")), job.source_profile, include_hook_text=job.hook_text_enabled)
+        job.steps = self._fast_steps() if job_uses_fast_pipeline(job, private) else self._smart_steps(bool(private.get("use_openrouter")), job.source_profile, include_hook_text=job.hook_text_enabled, preserve_voice=job.music_audio_mode.value == "replace_music_keep_voice")
         # Replays nothing: published clips keep the render counters they earned.
         self._restore_proven_steps(job, private, as_of)
         self._save(job, private)
@@ -1043,14 +1043,16 @@ class JobManager:
                 self._save(job, private)
 
     @staticmethod
-    def _transcript_detail(transcript: dict[str, Any], *, source_duration: float | None = None, music: bool = False) -> str:
+    def _transcript_detail(transcript: dict[str, Any], *, source_duration: float | None = None, music: bool = False, narration: bool = False) -> str:
         words = transcript.get("words") or []
         segments = transcript.get("segments") or []
         duration = max((float(word["end"]) for word in words if "end" in word), default=0.0)
-        if music:
+        if music or narration:
             total = source_duration if source_duration is not None else duration
             coverage = min(100.0, duration / total * 100) if total > 0 else 0.0
-            return f"{len(words)} word timings · decoded through {duration:.0f}s of {total:.0f}s ({coverage:.0f}% timeline); lyric coverage is not guaranteed"
+            subject = "narration" if narration else "music"
+            note = "" if narration else "; lyric coverage is not guaranteed"
+            return f"{len(words)} {subject} word timings · decoded through {duration:.0f}s of {total:.0f}s ({coverage:.0f}% timeline){note}"
         if segments:
             return f"{len(segments)} segments · {duration:.0f}s processed"
         return f"{len(words)} words · {duration:.0f}s processed"
@@ -1528,6 +1530,66 @@ class JobManager:
         else:
             self._process_clip_smart(job, private)
 
+
+    def _music_voice_stem(self, job: Job, private: dict[str, Any], source: Path, metadata: dict[str, Any]) -> Path:
+        if not metadata.get("audio"):
+            raise MediaError("Keep voice, replace background music requires an audio track in the source video")
+        from .voice_separation import MODEL_ID, VoiceSeparationCancelled, separate_voice, validate_voice_stem
+
+        source_hash = str(private.get("source_hash") or sha256_file(source))
+        private["source_hash"] = source_hash
+        target = self.settings.data_path / "jobs" / job.id / "transcription" / (
+            f"voice-{source_hash[:24]}-{hashlib.sha256(MODEL_ID.encode()).hexdigest()[:12]}.wav"
+        )
+        state = private.get("music_voice_stem")
+        if isinstance(state, dict):
+            path = Path(str(state.get("path") or ""))
+            if (
+                state.get("source_hash") == source_hash
+                and state.get("model_identity") == MODEL_ID
+                and path == target and path.is_file()
+                and state.get("stem_hash") == sha256_file(path)
+                and validate_voice_stem(path, float(metadata["duration"]), self.settings)
+            ):
+                return path
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        step = self._step_by_id(job, "audio") if job.steps else None
+        step_live = step is not None and step.status in {"pending", "active"}
+        if step_live:
+            self.start_step(job, "audio", detail="Separating original narration from background music", label="Isolating original voice", progress=12, private=private)
+
+        def cancelled() -> bool:
+            return not self._cooperate(job)
+
+        def progress(fraction: float) -> None:
+            if step_live:
+                percent = min(99, max(0, int(float(fraction) * 100)))
+                self._apply_step(job, step, status="active", detail=f"Separating original voice ({percent}%)", current=percent, total=100)
+                self._sync_legacy(job, step, label="Isolating original voice", progress=12 + percent * 0.15)
+                self._save(job, private)
+
+        try:
+            result = separate_voice(source, target, self.settings, cancellation_callback=cancelled, progress_callback=progress)
+            if not result.is_file() or not validate_voice_stem(result, float(metadata["duration"]), self.settings):
+                raise MediaError("Voice separation returned an empty or invalid narration stem")
+            private["music_voice_stem"] = {
+                "path": str(target), "source_hash": source_hash,
+                "model_identity": MODEL_ID, "stem_hash": sha256_file(result),
+            }
+            self._save(job, private)
+            return target
+        except Exception as exc:
+            if isinstance(exc, VoiceSeparationCancelled):
+                raise media_module.TranscriptionCancelled("Voice separation cancelled") from exc
+            if isinstance(exc, media_module.TranscriptionCancelled):
+                raise
+            if step_live:
+                self.fail_step(job, "audio", detail=f"Voice isolation failed: {redact(str(exc)) or 'check the source and local separation model'}", private=private)
+            if isinstance(exc, MediaError):
+                raise
+            raise MediaError(f"Could not isolate original narration: {redact(str(exc)) or 'check the source and local separation model'}") from exc
+
     def _process_caption_rerender(self, job: Job, private: dict[str, Any], request: dict[str, Any]) -> None:
         """Render a reviewed snapshot to a new immutable output before publishing it."""
         clip_id, revision, run_id = request.get("clip_id"), request.get("revision"), request.get("run_id")
@@ -1560,6 +1622,11 @@ class JobManager:
             source = self._source(job, private)
             metadata = probe_source(job, private, source, self.settings)
             music_track = self._music_track_source(job, private) if job.source_profile == "music" else None
+            music_voice_track = (
+                self._music_voice_stem(job, private, source, metadata)
+                if job.source_profile == "music" and job.music_audio_mode.value == "replace_music_keep_voice"
+                else None
+            )
             if music_track is not None:
                 speed = float(private.get("music_track_speed", 1.0))
                 music_track = _media_fn("prepare_music_track")(
@@ -1598,6 +1665,7 @@ class JobManager:
                 **_presentation_render_kwargs(render, private), **music_kwargs,
                 **_editing_render_kwargs(render, private, job.source_profile),
                 **({"music_track": music_track, "music_track_speed": 1.0} if music_track else {}),
+                **({"music_voice_track": music_voice_track} if music_voice_track else {}),
                 **({"music_audio_mode": job.music_audio_mode, "music_song_gain": job.music_song_gain, "music_original_audio_gain": job.music_original_audio_gain} if job.source_profile == "music" else {}),
             }
             render(source, output, **_compatible_render_kwargs(render, rerender_kwargs))
@@ -1646,6 +1714,7 @@ class JobManager:
 
     def _transcribe_with_stages(self, job: Job, audio: Path, duration: float, private: dict[str, Any]) -> dict[str, Any]:
         profile = job.source_profile
+        preserve_voice = profile == "music" and job.music_audio_mode.value == "replace_music_keep_voice"
         language = private.get("transcription_language", "en")
         # Keep the legacy speech call shape for injected/test adapters; the
         # music branch must explicitly consult its separate selected model.
@@ -1669,7 +1738,7 @@ class JobManager:
                 last_persist = now
 
         callback = self._transcription_progress(job, private, duration)
-        transcription_label = "Transcribing music without speech VAD" if profile == "music" else "Transcribing audio"
+        transcription_label = ("Transcribing isolated narration with speech VAD" if preserve_voice else "Transcribing music without speech VAD" if profile == "music" else "Transcribing audio")
         self.start_step(job, "transcribe", detail=transcription_label, label=transcription_label, progress=18, private=private)
         try:
             from .transcription import supervise
@@ -1688,6 +1757,7 @@ class JobManager:
                     cancelled=lambda: not self._cooperate(job), heartbeat=heartbeat,
                     meaningful=lambda fraction: setattr(job, "transcription_processed_seconds", min(duration, duration * fraction)),
                     source_seconds=duration, profile=profile, language=language,
+                    vad_filter=True if preserve_voice else None,
                 )
         finally:
             job.transcription_elapsed_seconds = time.monotonic() - started
@@ -1706,7 +1776,7 @@ class JobManager:
                 return
             last_fraction = fraction
             processed = min(duration, duration * fraction)
-            label = f"Transcribing music — {processed:.0f}s of {duration:.0f}s" if job.source_profile == "music" else f"Transcribing audio — {processed:.0f}s of {duration:.0f}s"
+            label = (f"Transcribing isolated narration — {processed:.0f}s of {duration:.0f}s" if job.source_profile == "music" and job.music_audio_mode.value == "replace_music_keep_voice" else f"Transcribing music — {processed:.0f}s of {duration:.0f}s" if job.source_profile == "music" else f"Transcribing audio — {processed:.0f}s of {duration:.0f}s")
             step = self._step_by_id(job, "transcribe")
             self._apply_step(
                 job, step, status="active", detail=label,
@@ -1731,7 +1801,7 @@ class JobManager:
         self.complete_step(job, "local_planning", detail=f"{len(chosen)} candidates planned locally", private=private)
         return chosen
 
-    def _plan_smart_candidates(self, job: Job, private: dict[str, Any], words: list[dict[str, Any]]):
+    def _plan_smart_candidates(self, job: Job, private: dict[str, Any], words: list[dict[str, Any]], *, local_only: bool = False):
         requested = int(private.get("effective_target", private["count"]))
         high_volume = private.get("batch_mode", job.batch_mode) == "high_volume"
         if high_volume:
@@ -1742,6 +1812,11 @@ class JobManager:
                 words, job.style, min(30, max(requested, requested * 3)),
                 float(private["min_duration"]), float(private["max_duration"]),
             )
+        if local_only:
+            self.start_step(job, "local_planning", detail="Planning isolated narration moments", label="Planning narration moments", progress=33, private=private)
+            chosen = pool[:requested]
+            self.complete_step(job, "local_planning", detail=f"{len(chosen)} narration moments planned locally", private=private)
+            return chosen
         if not pool:
             return []
         if high_volume or not private.get("use_openrouter") or not job_allows_provider(job, private):
@@ -2246,7 +2321,7 @@ class JobManager:
         new_private.pop("caption_rerender", None)
         new_private.pop("caption_rerender_error", None)
         fast = job_uses_fast_pipeline(job, new_private)
-        steps = self._fast_steps() if fast else self._smart_steps(False, job.source_profile, include_hook_text=False)
+        steps = self._fast_steps() if fast else self._smart_steps(False, job.source_profile, include_hook_text=False, preserve_voice=job.music_audio_mode.value == "replace_music_keep_voice")
         warnings = ["New source-only versions are rendering from the saved original source. Previous outputs are preserved."]
         if job.source_profile == "music":
             repeated = len(clips) - len({(clip.start, clip.end) for clip in clips})
@@ -2285,6 +2360,10 @@ class JobManager:
                 job.warnings.append(warning)
         profile = job.source_profile
         music_track = self._music_track_source(job, private) if profile == "music" else None
+        preserve_voice = profile == "music" and job.music_audio_mode.value == "replace_music_keep_voice"
+        music_voice_track = self._music_voice_stem(job, private, source, metadata) if preserve_voice else None
+        if preserve_voice and not metadata["audio"]:
+            raise MediaError("Keep voice, replace background music requires an audio track in the source video")
         if not metadata["audio"] and music_track is None:
             requirement = "readable sung vocals" if job.source_profile == "music" else "speech"
             raise MediaError(f"This video has no readable audio track. Automatic clips require {requirement}; retain it as a source for manual editing.")
@@ -2297,11 +2376,12 @@ class JobManager:
         # ASR can now cache/check the original identity before doing any audio
         # conversion, and produce decoder PCM without an intermediate MP3.
         music_track_source = music_track
-        transcript_source = source
+        transcript_source = music_voice_track or source
         # A selected song often continues past the visual source boundary. Keep
         # bounded real audio after that boundary so Whisper can finish its last
         # phrase; clip selection/rendering remain limited to the video duration.
         transcript_duration = (
+            source_duration if preserve_voice else
             _music_transcription_duration(
                 source_duration,
                 music_track_source is not None,
@@ -2310,10 +2390,14 @@ class JobManager:
             if profile == "music" else source_duration
         )
         music_context_seconds = max(0.0, transcript_duration - source_duration)
-        speed = float(private.get("music_track_speed", 1.0)) if music_track_source is not None else 1.0
+        speed = float(private.get("music_track_speed", 1.0)) if music_track_source is not None and not preserve_voice else 1.0
         planning_duration = source_duration
         target = self._resolve_batch_target(job, private, planning_duration)
-        if music_track_source is not None:
+        if preserve_voice and music_voice_track is not None:
+            voice_state = private["music_voice_stem"]
+            voice_identity = f"{voice_state['source_hash']}:{voice_state['model_identity']}:{voice_state['stem_hash']}"
+            transcription_source_hash = hashlib.sha256(voice_identity.encode()).hexdigest()
+        elif music_track_source is not None:
             transcription_source_hash = _media_fn("music_transcription_source_hash")(
                 sha256_file(music_track_source), speed, transcript_duration,
             )
@@ -2330,6 +2414,7 @@ class JobManager:
             language=language,
             beam_size=beam,
             word_timestamps=True,
+            vad_filter=True if preserve_voice else None,
         )
         transcript = private.get("transcript")
         if transcript and private.get("transcript_cache_key") != cache_key:
@@ -2344,12 +2429,21 @@ class JobManager:
                 return
             transcript = self.db.cache_get(cache_key)
             if transcript:
-                self.skip_step(job, "audio", detail="Validated transcript cache reused", private=private)
-                job.warnings.append("Reused a validated local transcript cache entry.")
+                if preserve_voice:
+                    self.complete_step(job, "audio", detail="Isolated narration stem ready; validated transcript cache reused", private=private)
+                else:
+                    self.skip_step(job, "audio", detail="Validated transcript cache reused", private=private)
+                    job.warnings.append("Reused a validated local transcript cache entry.")
             else:
                 self.start_step(job, "audio", detail="Extracting 16 kHz mono audio", label="Preparing audio for transcription", progress=12, private=private)
                 audio_path = self.settings.data_path / "jobs" / job.id / "transcription" / "audio-16k.wav"
-                if music_track_source is not None:
+                if preserve_voice and music_voice_track is not None:
+                    audio = media_module.extract_audio_16k(
+                        music_voice_track, self.settings, output=audio_path,
+                        duration=transcript_duration,
+                        cancellation_callback=lambda: not self._cooperate(job),
+                    )
+                elif music_track_source is not None:
                     audio = _media_fn("extract_music_audio_16k")(
                         music_track_source, self.settings, output=audio_path, speed=speed,
                         duration=transcript_duration,
@@ -2370,7 +2464,7 @@ class JobManager:
             private["transcript"] = transcript
             private["transcript_cache_key"] = cache_key
             self._save(job, private)
-            self.complete_step(job, "transcribe", detail=self._transcript_detail(transcript, source_duration=source_duration, music=profile == "music"), private=private)
+            self.complete_step(job, "transcribe", detail=self._transcript_detail(transcript, source_duration=source_duration, music=profile == "music" and not preserve_voice, narration=preserve_voice), private=private)
         words = transcript["words"]
         boundary_truncated_words: list[dict[str, Any]] = []
         if profile == "music":
@@ -2396,16 +2490,24 @@ class JobManager:
             if not self._cooperate(job):
                 self._save(job)
                 return
-            candidates = select_music_candidates(words, job.style, target, float(private["min_duration"]), float(private["max_duration"])) if profile == "music" else self._plan_smart_candidates(job, private, words)
-            if profile == "music":
+            candidates = (
+                self._plan_smart_candidates(job, private, words, local_only=True)
+                if preserve_voice else
+                select_music_candidates(words, job.style, target, float(private["min_duration"]), float(private["max_duration"]))
+                if profile == "music" else
+                self._plan_smart_candidates(job, private, words)
+            )
+            if profile == "music" and not preserve_voice:
                 self.start_step(job, "local_planning", detail="Grouping timed words into lyric lines", label="Grouping lyric lines locally", progress=33, private=private)
                 self.complete_step(job, "local_planning", detail=f"{len(candidates)} duration-bounded lyric windows planned", private=private)
             self.start_step(job, "select", detail="Selecting complete moments", label="Finding coherent, complete moments", progress=34, private=private)
             if not candidates and private.get("batch_mode", job.batch_mode) != "high_volume":
+                if preserve_voice:
+                    raise MediaError("Isolated narration did not contain enough timed speech for the requested duration; choose a shorter clip or a source with a longer spoken passage")
                 if profile == "music":
                     raise MediaError("The lyric transcript did not contain a timed, non-overlapping line group inside the requested duration range")
                 raise MediaError("The transcript did not contain a valid complete moment inside the requested duration range")
-            if profile == "music" and candidates:
+            if profile == "music" and candidates and not preserve_voice:
                 requested_count = int(private["count"])
                 unique_candidates = list(candidates)
                 duplicate_count = max(0, requested_count - len(unique_candidates))
@@ -2498,10 +2600,11 @@ class JobManager:
                 previous_end = end
         self._snapshot_video_overlays(job, private, words)
         if music_track_source is not None:
+            render_speed = float(private.get("music_track_speed", speed))
             music_track = _media_fn("prepare_music_track")(
                 music_track_source,
-                self.settings.data_path / "jobs" / job.id / "transcription" / f"music-{speed:.2f}.mp3",
-                speed, self.settings, duration=source_duration,
+                self.settings.data_path / "jobs" / job.id / "transcription" / f"music-{render_speed:.2f}.mp3",
+                render_speed, self.settings, duration=source_duration,
                 cancellation_callback=lambda: not self._cooperate(job),
             )
         output_dir = self.settings.data_path / "jobs" / job.id / "clips"
@@ -2586,6 +2689,7 @@ class JobManager:
                         (private.get("music_presentation") or {}).get("hook_text_format"),
                     ) if profile == "music" else {}),
                     **({"music_track": music_track, "music_track_speed": 1.0} if music_track else {}),
+                    **({"music_voice_track": music_voice_track} if music_voice_track else {}),
                     **({"music_audio_mode": job.music_audio_mode, "music_song_gain": job.music_song_gain, "music_original_audio_gain": job.music_original_audio_gain} if job.source_profile == "music" else {}),
                 }
                 try:

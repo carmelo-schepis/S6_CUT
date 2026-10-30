@@ -88,6 +88,9 @@ describe("engine API boundary", () => {
     await createClipJob({ style: "serious", count: 1, minDuration: 8, maxDuration: 20, aspectRatio: "9:16", sourceProfile: "music", musicAudioMode: "mix_original", musicSongGain: 0 });
     expect(body?.get("music_audio_mode")).toBe("mix_original");
     expect(body?.get("music_song_gain")).toBe("0");
+    await createClipJob({ style: "serious", count: 1, minDuration: 8, maxDuration: 20, aspectRatio: "9:16", sourceProfile: "music", musicAudioMode: "replace_music_keep_voice", musicSongGain: 0 });
+    expect(body?.get("music_audio_mode")).toBe("replace_music_keep_voice");
+    expect(body?.get("music_song_gain")).toBe("0");
   });
 
   it("sends editing_presentation only when a selection was made", async () => {

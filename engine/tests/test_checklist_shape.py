@@ -61,6 +61,18 @@ def test_long_form_smart_job_is_routed_to_the_fast_pipeline() -> None:
     assert uses_fast_pipeline("smart", "short") is False
 
 
+def test_music_voice_replacement_stays_on_music_smart_pipeline() -> None:
+    job = Job(
+        id="j-music-voice-pipeline", project_id="p", mode="clip", state="queued", stage="queued",
+        stage_label="Queued", progress=0, style="serious", processing_mode="smart",
+        content_format="long", source_profile="music", music_audio_mode="replace_music_keep_voice",
+        steps=[],
+    )
+    # Music creation resolves to its Smart presentation pipeline even if a
+    # stale or direct fast/long request appears in checkpoint metadata.
+    assert job_uses_fast_pipeline(job, {"processing_mode": "fast", "content_format": "long"}) is False
+
+
 def test_high_volume_long_form_smart_job_uses_transcript_planning_checklist(tmp_path_local: Path) -> None:
     db, manager = _cluster(tmp_path_local)
     smart_ids = {step.id for step in manager._smart_steps(False)}
