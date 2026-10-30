@@ -202,3 +202,88 @@ def test_real_mix_mode_still_renders_song_for_silent_video(tmp_path: Path, setti
     )
     assert _tone_amplitude(output, 660, settings) > .01
     assert not any(abs(value) > .01 for value in [_tone_amplitude(output, 440, settings)])
+
+
+def _voice_tone(path: Path, settings: Settings) -> Path:
+    _require_media(settings)
+    subprocess.run([
+        settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+        "sine=frequency=880:sample_rate=44100:duration=2", "-c:a", "pcm_s16le", str(path),
+    ], check=True, capture_output=True)
+    return path
+
+
+@pytest.mark.parametrize("renderer", ["complex", "fast"])
+@pytest.mark.parametrize("gain", [0, 0.1, 0.25])
+def test_replace_music_keep_voice_preserves_stem_and_excludes_original(
+    tmp_path: Path, settings: Settings, renderer: str, gain: float,
+) -> None:
+    silent, song = _fixtures(tmp_path, settings)
+    source = _with_original_tone(silent, tmp_path / "with-original.mp4", settings)
+    voice = _voice_tone(tmp_path / "isolated-voice.wav", settings)
+    output = tmp_path / f"preserved-{renderer}-{gain}.mp4"
+    render = render_clip if renderer == "complex" else render_fast_clip
+    kwargs = {"words": [], "visuals": [], "overlays": []} if renderer == "complex" else {}
+    render(
+        source, output, start=.2, end=1.4, aspect="16:9", settings=settings, has_audio=True,
+        subtitles_enabled=False, music_track=song, music_voice_track=voice,
+        music_audio_mode="replace_music_keep_voice", music_song_gain=gain, **kwargs,
+    )
+    assert _tone_amplitude(output, 440, settings) < .01
+    assert _tone_amplitude(output, 880, settings) > .05
+    assert _tone_amplitude(output, 660, settings) / _tone_amplitude(output, 880, settings) == pytest.approx(gain, abs=.03)
+
+
+@pytest.mark.parametrize("renderer", ["complex", "fast"])
+def test_replace_music_keep_voice_without_song_is_voice_only(
+    tmp_path: Path, settings: Settings, renderer: str,
+) -> None:
+    silent = _fixtures(tmp_path, settings)[0]
+    source = _with_original_tone(silent, tmp_path / "with-original.mp4", settings)
+    voice = _voice_tone(tmp_path / "isolated-voice.wav", settings)
+    output = tmp_path / f"voice-only-{renderer}.mp4"
+    render = render_clip if renderer == "complex" else render_fast_clip
+    kwargs = {"words": [], "visuals": [], "overlays": []} if renderer == "complex" else {}
+    render(
+        source, output, start=.2, end=1.4, aspect="16:9", settings=settings, has_audio=True,
+        subtitles_enabled=False, music_voice_track=voice,
+        music_audio_mode="replace_music_keep_voice", **kwargs,
+    )
+    assert _tone_amplitude(output, 440, settings) < .01
+    assert _tone_amplitude(output, 880, settings) > .05
+
+
+@pytest.mark.parametrize("renderer", ["complex", "fast"])
+def test_replacement_speed_does_not_change_isolated_voice(
+    tmp_path: Path, settings: Settings, renderer: str,
+) -> None:
+    silent, song = _fixtures(tmp_path, settings)
+    voice = _voice_tone(tmp_path / "isolated-voice.wav", settings)
+    output = tmp_path / f"speed-{renderer}.mp4"
+    render = render_clip if renderer == "complex" else render_fast_clip
+    kwargs = {"words": [], "visuals": [], "overlays": []} if renderer == "complex" else {}
+    render(
+        silent, output, start=1, end=1.8, aspect="16:9", settings=settings, has_audio=False,
+        subtitles_enabled=False, music_track=song, music_voice_track=voice,
+        music_track_speed=1.25, music_audio_mode="replace_music_keep_voice",
+        music_song_gain=.25, **kwargs,
+    )
+    assert _tone_amplitude(output, 880, settings) > .05
+    assert _tone_amplitude(output, 825, settings) > .01
+    assert _tone_amplitude(output, 660, settings) < .01
+
+
+@pytest.mark.parametrize("renderer", ["complex", "fast"])
+def test_replace_music_keep_voice_fails_closed_without_stem(
+    tmp_path: Path, settings: Settings, renderer: str,
+) -> None:
+    video, song = _fixtures(tmp_path, settings)
+    output = tmp_path / f"no-stem-{renderer}.mp4"
+    render = render_clip if renderer == "complex" else render_fast_clip
+    kwargs = {"words": [], "visuals": [], "overlays": []} if renderer == "complex" else {}
+    with pytest.raises(MediaError, match="isolated narration stem is unavailable"):
+        render(
+            video, output, start=0, end=1, aspect="16:9", settings=settings, has_audio=False,
+            subtitles_enabled=False, music_track=song, music_audio_mode="replace_music_keep_voice",
+            **kwargs,
+        )
