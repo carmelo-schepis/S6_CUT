@@ -771,8 +771,15 @@ test("Speech: real YouTube import renders the selected subtitle style, filter, h
         const labels = JSON.parse(execFileSync("docker", ["inspect", "--format", "{{json .Config.Labels}}", engineContainer], { encoding: "utf8" })) as Record<string, string>;
         expect(labels["com.docker.compose.project"], "restart target belongs to the isolated project").toBe(composeProject);
         expect(composeProject).not.toBe("s6-cut");
-        execFileSync("docker", ["restart", engineContainer], { stdio: "ignore" });
-        await expect.poll(async () => { try { return (await fetch(new URL("/healthz", gateway))).ok && (await fetch(new URL("/api/health", gateway))).ok; } catch { return false; } }, { timeout: 240_000, intervals: [2_000] }).toBe(true);
+        // Allow only the deliberate outage window: the still-open Workspace logs
+        // transient gateway errors while the engine restarts. Scope it to the
+        // restart and the health poll so unrelated errors after the engine is
+        // healthy (including the reload below) still fail acceptance.
+        expectErrors = true;
+        try {
+          execFileSync("docker", ["restart", engineContainer], { stdio: "ignore" });
+          await expect.poll(async () => { try { return (await fetch(new URL("/healthz", gateway))).ok && (await fetch(new URL("/api/health", gateway))).ok; } catch { return false; } }, { timeout: 240_000, intervals: [2_000] }).toBe(true);
+        } finally { expectErrors = false; }
         const afterRestart = await refreshJob(job.id);
         expect(normalizeKeys(afterRestart.editingPresentation), "presentation survives an engine restart").toEqual(normalizeKeys(requestPresentation));
         expect(afterRestart.state).toBe("complete");
@@ -832,7 +839,10 @@ test("Speech: real YouTube import renders the selected subtitle style, filter, h
         expect(["failed", "stalled"], "unavailable source ends in a failure state").toContain(probe.job.state);
         expect(probe.job.clips.filter((item) => item.state === "complete"), "no stale success outputs").toHaveLength(0);
         await expect(page.locator(".clip-tile.complete")).toHaveCount(0);
-        await expect(page.getByText("Project ready", { exact: true }).locator("xpath=ancestor::li[1]")).not.toHaveClass(/status-complete/);
+        // A failed import unbinds the Workspace (App keeps no selected project), so
+        // the "Project ready" chip may legitimately not exist; assert no completed
+        // checklist row is visible instead of requiring the row first.
+        await expect(page.locator(".process-checklist li.status-complete")).toHaveCount(0);
         record("speech:unavailable-source", "pass", { state: probe.job.state, error: probe.job.error });
       } finally { expectErrors = false; phase = "speech"; }
     } else record("speech:unavailable-source", "unmet", "insufficient live budget remained");
