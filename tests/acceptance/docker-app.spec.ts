@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
 import path from "node:path";
 import fs from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -21,18 +21,34 @@ async function openClips(page: Page) {
   await expect(page.getByRole("complementary", { name: "Clips and editing assistant" })).toBeVisible();
 }
 
-async function waitForJob(page: Page, terminal = true) {
-  const status = page.locator(".workspace-commandbar .status");
-  const observed: string[] = [];
-  const deadline = Date.now() + 150_000;
+async function waitForJob(page: Page, jobId: string) {
+  const terminalStates = new Set(["complete", "failed", "partial", "cancelled_kept"]);
+  const deadline = Date.now() + 240_000;
+  let latest: { state: string; stageLabel?: string } | undefined;
+  let lastSeen = "";
   while (Date.now() < deadline) {
-    const value = (await status.textContent())?.trim() || "";
-    if (value && observed.at(-1) !== value) observed.push(value);
-    if (!terminal || /ready|failed|stopped|complete|cancelled/i.test(value)) break;
+    const response = await page.request.get(`/api/v1/jobs/${jobId}`);
+    if (!response.ok()) throw new Error(`Could not read job ${jobId}: HTTP ${response.status()}`);
+    latest = await response.json();
+    const status = `${latest.state}: ${latest.stageLabel || ""}`;
+    if (status !== lastSeen) {
+      await fs.appendFile(path.join(artifactDir, "progress.log"), `${new Date().toISOString()} ${status}\n`);
+      lastSeen = status;
+    }
+    if (terminalStates.has(latest.state)) return latest;
     await page.waitForTimeout(1_500);
   }
-  await fs.appendFile(path.join(artifactDir, "progress.log"), `${new Date().toISOString()} ${JSON.stringify(observed)}\n`);
-  return observed;
+  throw new Error(`Job ${jobId} did not finish before timeout (last state: ${latest?.state || "unknown"})`);
+}
+
+async function stopLiveJob(request: APIRequestContext, jobId: string) {
+  const response = await request.get(`/api/v1/jobs/${jobId}`);
+  expect(response.ok()).toBeTruthy();
+  const job = await response.json();
+  if (["queued", "active", "recovered", "paused"].includes(job.state)) {
+    const stopped = await request.post(`/api/v1/jobs/${jobId}/control/stop-keep`);
+    expect(stopped.ok()).toBeTruthy();
+  }
 }
 
 test("Docker-served studio acceptance workflow", async ({ page, request }) => {
@@ -87,12 +103,19 @@ test("Docker-served studio acceptance workflow", async ({ page, request }) => {
   const browserProjectName = `Browser acceptance ${Date.now()}`;
   await page.getByLabel("Project name").fill(browserProjectName);
   await page.getByRole("button", { name: "Fast", exact: true }).click();
+  const localJobResponse = page.waitForResponse((response) =>
+    response.request().method() === "POST" && new URL(response.url()).pathname === "/api/v1/jobs/clip",
+  );
   await page.getByRole("button", { name: /Create 5 (?:short )?clips/ }).click();
-  await expect(page.getByText(/Local engine ready|Preparing project|fast/i).first()).toBeVisible();
-  const progress = await waitForJob(page);
-  expect(progress.length).toBeGreaterThan(0);
-  await expect(page.getByText(/ready|cut.*ready/i).first()).toBeVisible({ timeout: 150_000 });
-  await capture(page, "workspace-complete");
+  const { job: localJob } = await (await localJobResponse).json();
+  try {
+    const finishedJob = await waitForJob(page, localJob.id);
+    expect(finishedJob.state).toBe("complete");
+    await expect(page.getByText(/1 fast cut ready/)).toBeVisible();
+    await capture(page, "workspace-complete");
+  } finally {
+    await stopLiveJob(request, localJob.id);
+  }
 
   // The durable Jobs queue retains terminal state and progress for the completed project.
   const projects = await (await page.request.get("/api/v1/projects")).json() as { id: string; name: string }[];
@@ -231,13 +254,7 @@ test("Docker-served studio acceptance workflow", async ({ page, request }) => {
     await expect(page.locator(".workspace-commandbar .status")).toContainText(/Retrying YouTube import|Downloading YouTube source|ready|failed/i, { timeout: 30_000 });
     await capture(page, "youtube-retry-active");
   } finally {
-    const latestJobResponse = await request.get(`/api/v1/jobs/${youtubeJob.id}`);
-    expect(latestJobResponse.ok()).toBeTruthy();
-    const latestJob = await latestJobResponse.json();
-    if (["queued", "active", "recovered", "paused"].includes(latestJob.state)) {
-      const cleanup = await request.post(`/api/v1/jobs/${youtubeJob.id}/control/stop-keep`);
-      expect(cleanup.ok()).toBeTruthy();
-    }
+    await stopLiveJob(request, youtubeJob.id);
   }
 
   await fs.writeFile(path.join(artifactDir, "browser-diagnostics.json"), JSON.stringify({ consoleErrors, pageErrors, failedRequests, abortedRequests, note: "Chromium may emit a COOP warning when testing the HTTP IP origin; that known browser limitation is intentionally excluded from consoleErrors." }, null, 2));
