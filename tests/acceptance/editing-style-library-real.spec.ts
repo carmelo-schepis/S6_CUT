@@ -19,7 +19,10 @@
  * current Projects UI: groups "Subtitle style", "Video filter", "Music video
  * filter", "Heading appearance", "Emoji reactions", "Lyrics subtitle theme",
  * "Lyric animation"; a "Style sample:" image; "Play sample"/"Replay sample"; and a
- * read-only "Editing style" Workspace summary. If the UI diverges, the affected
+ * read-only "Editing style" Workspace summary. Each picker sits inside a
+ * collapsible create option row ("Subtitle style", "Video filter", "Heading
+ * appearance", "Emoji reactions", "Lyrics presentation"); the spec opens the row
+ * that contains a group before touching its buttons (see ROW_FOR_GROUP). If the UI diverges, the affected
  * check FAILS with a clear message; it is never silently skipped.
  *
  * The report (live-report.json) separates pass / fail / unmet checks. Any unmet
@@ -33,7 +36,7 @@ import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-import { assertPlayback, checkPlayback, gateway, openOptionRow, openProjects, zipEntry, zipNames, assertZipIntact } from "./support/workspace";
+import { assertPlayback, checkPlayback, gateway, openProjects, zipEntry, zipNames, assertZipIntact } from "./support/workspace";
 
 const exec = promisify(execFile);
 const enabled = process.env.S6_EDITING_RUNNER === "1" && process.env.S6_ACCEPTANCE_ISOLATED === "1" && Boolean(process.env.S6_EDITING_ARTIFACTS);
@@ -227,14 +230,29 @@ const ui = {
   sample: (page: Page) => page.getByRole("img", { name: /^Style sample:/ }),
   summary: (page: Page) => page.locator('[aria-label="Editing style"]'),
 };
-/** The Projects option row (OptionRow id) that holds each option group used below. */
-const OPTION_ROW_FOR_GROUP: Record<string, string> = {
-  "Subtitle style": "subtitle", "Video filter": "video-filter", "Heading appearance": "heading", "Emoji reactions": "emoji",
-  "Lyrics subtitle theme": "music-lyrics", "Lyric animation": "music-lyrics", "Music video filter": "music-filter",
+// The Projects create panel keeps the heavy pickers in collapsible option rows
+// that show their current value; a row's controls are hidden until it is opened.
+// Map each control group to its containing row so interactions open it first.
+const ROW_FOR_GROUP: Record<string, string> = {
+  "Subtitle style": "Subtitle style",
+  "Video filter": "Video filter",
+  "Music video filter": "Video filter",
+  "Heading appearance": "Heading appearance",
+  "Emoji reactions": "Emoji reactions",
+  "Lyrics subtitle theme": "Lyrics presentation",
+  "Lyric animation": "Lyrics presentation",
 };
+async function openGroupRow(page: Page, groupName: string) {
+  const title = ROW_FOR_GROUP[groupName];
+  if (!title) return;
+  const toggle = page.getByRole("button", { name: title, exact: true });
+  await expect(toggle, `create option row "${title}" is present (UI contract; see spec header)`).toBeVisible({ timeout: 20_000 });
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+  await expect(toggle, `create option row "${title}" is open`).toHaveAttribute("aria-expanded", "true");
+}
 async function selectChoice(page: Page, groupName: string, label: string) {
+  await openGroupRow(page, groupName);
   const group = ui.group(page, groupName);
-  await openOptionRow(page, OPTION_ROW_FOR_GROUP[groupName]);
   await expect(group, `control group "${groupName}" is present (UI contract; see spec header)`).toBeVisible({ timeout: 20_000 });
   const button = ui.choice(group, label);
   await expect(button, `"${label}" in "${groupName}"`).toBeVisible();
@@ -553,6 +571,7 @@ test("Projects UI: editorial intent stays separate; all subtitle/filter/music ch
     // Fast: captions/emoji preview gated with a reason, filter still available.
     await page.getByRole("button", { name: "Fast", exact: true }).click();
     await expect(page.getByText(/Fast mode skips transcription, so there are no captions or emoji reactions to style/).first()).toBeVisible();
+    await openGroupRow(page, "Video filter");
     await expect(ui.group(page, "Video filter")).toBeVisible();
     await page.getByRole("button", { name: "Smart", exact: true }).click();
     if (!(await subtitleToggle.isChecked())) await subtitleToggle.check();
@@ -570,8 +589,8 @@ test("Projects UI: editorial intent stays separate; all subtitle/filter/music ch
     await expect(ui.group(page, "Subtitle style"), "regular subtitle choices hidden in Music").toHaveCount(0);
     await expect(ui.group(page, "Heading appearance"), "regular heading appearance hidden in Music").toHaveCount(0);
     await expect(ui.group(page, "Emoji reactions"), "speech emoji reactions hidden in Music").toHaveCount(0);
+    await openGroupRow(page, "Lyrics subtitle theme");
     const themes = ui.group(page, "Lyrics subtitle theme");
-    await openOptionRow(page, "music-lyrics");
     await expect(themes).toBeVisible();
     for (const label of [...ORIGINAL_MUSIC_THEMES, ...NEW_MUSIC_THEMES]) await expect(ui.choice(themes, label), `Music theme ${label} in the existing grid`).toBeVisible();
     await selectChoice(page, "Lyrics subtitle theme", pick.musicTheme);
