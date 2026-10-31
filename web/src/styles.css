@@ -2852,6 +2852,166 @@ input[type="checkbox"]:checked::before {
   :root { --box-pad: var(--space-4); --box-radius: 16px; }
 }
 
+/* --- Workspace focus: quiet header, one progress dropdown ---------------- */
+/* EXCLUDED from the two typography roles on purpose (owner request,
+   2026-10-31): the Workspace should lead the eye to the three-pane workbench,
+   so the project meta line, the project details panel, the step rows and the
+   step count read as quiet, integrated text. They carry their own smaller
+   pair of sizes; the title, the progress band, the buttons and the workbench
+   keep the house roles. Line boxes stay whole pixels. */
+.workspace-page { --ws-meta-size: 12px; --ws-meta-line: 16px; }
+
+/* Header: the title and the actions share one row; one muted meta line (the
+   details toggle) sits under the title. The title keeps the flexible column,
+   so the actions never squeeze it. */
+.workspace-commandbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--space-4);
+  row-gap: var(--space-1);
+}
+.workspace-project-context, .workspace-project-meta { display: contents; }
+.workspace-project-name {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+.workspace-controls { grid-column: 2; grid-row: 1; flex-wrap: nowrap; }
+.workspace-meta-toggle {
+  grid-column: 1;
+  grid-row: 2;
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: var(--space-1) 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--ws-meta-size);
+  line-height: var(--ws-meta-line);
+  text-align: left;
+  cursor: pointer;
+}
+.workspace-meta-toggle:hover { color: var(--text); }
+.workspace-meta-toggle:focus-visible, .checklist-toggle-chevron:focus-visible { outline: 2px solid var(--selector-highlight); outline-offset: 2px; }
+.workspace-meta-toggle .workspace-secondary-meta {
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workspace-meta-chevron, .checklist-chevron { flex: 0 0 auto; transition: transform 160ms ease; }
+.workspace-meta-toggle[aria-expanded="true"] .workspace-meta-chevron,
+.checklist-toggle-chevron[aria-expanded="true"] .checklist-chevron { transform: rotate(180deg); }
+.workspace-commandbar .status { display: inline-flex; }
+
+/* Project details: an inline box under the header, kept mounted. */
+.workspace-project-details {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-1) var(--space-4);
+  width: fit-content;
+  max-width: min(100%, 560px);
+  margin-top: var(--box-gap);
+  padding: var(--space-3) var(--box-pad);
+  border: 1px solid var(--box-edge);
+  border-top-color: var(--box-edge-top);
+  border-radius: var(--box-radius);
+  background: var(--box-bg);
+  font-size: var(--ws-meta-size);
+  line-height: var(--ws-meta-line);
+}
+.workspace-project-details[hidden] { display: none; }
+.workspace-detail-row, .workspace-project-details .workspace-folder-field { display: contents; }
+.workspace-detail-label, .workspace-project-details .workspace-folder-field label {
+  color: var(--text-muted);
+  font-size: var(--ws-meta-size);
+  font-weight: inherit;
+  line-height: var(--ws-meta-line);
+}
+.workspace-detail-value, .workspace-project-details .workspace-source-meta {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--ws-meta-size);
+  line-height: var(--ws-meta-line);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workspace-project-details .workspace-folder-field select { justify-self: start; max-width: 100%; }
+
+/* Progress dropdown: the band is the closed state. Inside the heading row it
+   gives up its own box and stretches; the panel is the box. */
+.checklist-panel.is-collapsible .checklist-heading { min-height: 36px; flex-wrap: nowrap; }
+.checklist-heading > .job-strip {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.checklist-heading > .job-strip .progress-wrap { width: clamp(160px, 36%, 440px); }
+.checklist-heading > .job-strip .progress-track span { background: var(--text); }
+.checklist-heading > .job-strip .progress-wrap > span:last-child { min-width: 4ch; text-align: right; font-variant-numeric: tabular-nums; }
+.checklist-panel.is-collapsible .checklist-count { flex: 0 0 auto; font-size: var(--ws-meta-size); line-height: var(--ws-meta-line); }
+.checklist-toggle-chevron { flex: 0 0 auto; display: inline-grid; place-items: center; width: var(--control-height-small); padding: 0; cursor: pointer; }
+.checklist-panel.is-collapsible .process-checklist {
+  margin-top: var(--space-2);
+  padding: var(--space-2) 0 0;
+  border-top: 1px solid var(--box-edge-top);
+}
+.checklist-panel.is-collapsible .process-checklist[hidden] { display: none; }
+.checklist-panel.is-collapsible .process-checklist::before { top: calc(var(--space-2) + 12px); left: 8px; }
+.checklist-panel.is-collapsible .checklist-step {
+  padding-inline: 0;
+  font-size: var(--ws-meta-size);
+  line-height: var(--ws-meta-line);
+}
+.checklist-panel.is-collapsible :is(.checklist-label, .checklist-status-text, .checklist-detail, .checklist-elapsed, .checklist-progress, .checklist-step-meta) {
+  font-size: var(--ws-meta-size);
+  line-height: var(--ws-meta-line);
+}
+
+@media (max-width: 820px) {
+  .workspace-commandbar { grid-template-columns: minmax(0, 1fr); }
+  .workspace-controls { grid-column: 1; grid-row: 3; flex-wrap: wrap; justify-content: flex-start; margin-top: var(--space-2); }
+}
+@media (max-width: 540px) {
+  .workspace-project-name {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  /* The band's text takes row one; the bar, percentage, step count and
+     chevron share row two. */
+  .checklist-panel.is-collapsible .checklist-heading { flex-wrap: wrap; row-gap: var(--space-1); }
+  .checklist-heading > .job-strip { display: contents; }
+  .checklist-heading > .job-strip .job-strip-text { flex: 1 1 100%; }
+  .checklist-heading > .job-strip .progress-wrap { flex: 1 1 0; width: auto; min-width: 0; margin: 0; }
+  .checklist-panel.is-collapsible .checklist-count { margin-left: 0; }
+}
+@media (prefers-reduced-motion: reduce) { .workspace-meta-chevron, .checklist-chevron { transition: none; } }
+
 /* --- Editor boxes: the same boxes as the Workspace ---------------------- */
 /* The tools column, the monitor, the inspector, the Subscribe panel and the
    timeline are each one box, 16px apart, like the Workspace panes. Two boxes
