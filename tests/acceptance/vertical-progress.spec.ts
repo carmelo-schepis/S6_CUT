@@ -117,6 +117,10 @@ test.describe("vertical creation progress", () => {
 
       const progress = page.getByRole("region", { name: "Short creation progress" });
       await expect(progress).toBeVisible({ timeout: 120_000 });
+      // The Workspace progress box is collapsed by default (its closed summary is
+      // the one-line band); open it before asserting on the step list.
+      await expect(progress.getByRole("list")).toBeHidden();
+      await progress.getByRole("button", { name: "Show steps" }).click();
       const expectedLabels = sourceJob?.steps.map((step) => step.label) || workflowLabels;
       const items = progress.getByRole("listitem");
       await expect(items).toHaveCount(expectedLabels.length);
@@ -149,7 +153,9 @@ test.describe("vertical creation progress", () => {
         const checklistBox = await progress.boundingBox();
         const lowerWorkspaceBox = await page.locator("[data-testid=\"lower-workspace\"]").boundingBox();
         expect(checklistBox && lowerWorkspaceBox && lowerWorkspaceBox.y >= checklistBox.y + checklistBox.height).toBe(true);
-        const banners = page.locator(".workspace-offline, .workspace-alert, .failure-strip, .warning-strip, .job-strip");
+        // The band inside the progress box is the box's own summary row, so only the
+        // standalone band (no steps) counts as a banner that must sit above it.
+        const banners = page.locator(".workspace-offline, .workspace-alert, .failure-strip, .warning-strip, .workspace-page > .job-strip");
         const progressTop = checklistBox?.y || 0;
         for (const banner of await banners.all()) {
           const bannerBox = await banner.boundingBox();
@@ -169,7 +175,9 @@ test.describe("vertical creation progress", () => {
         expect(checklistBox).not.toBeNull();
         expect(checklistBox!.height).toBeLessThanOrEqual(380);
         expect(checklistBox!.height).toBeGreaterThanOrEqual(280);
-        expect(checklistBox!.height).toBeLessThanOrEqual(340);
+        // The box now carries the one-line band as its summary row (measured 343px
+        // with 11 steps at 1440x900 and 1920x1080, was <= 340), so the window grew by 20px.
+        expect(checklistBox!.height).toBeLessThanOrEqual(360);
         if (await page.evaluate(() => window.innerWidth) === 1440) console.log(`Dense checklist at 1440x900: ${checklistBox!.height}px`);
         expect(boxes.every((box) => box !== null && box.height <= 28)).toBe(true);
         for (let index = 0; index < boxes.length; index += 1) {
@@ -237,6 +245,8 @@ test.describe("vertical creation progress", () => {
       const failedProgress = page.getByRole("region", { name: "Short creation progress" });
       await expect(failedProgress).toBeVisible({ timeout: 30_000 });
       await expect.poll(() => failedProgress.locator(".checklist-step.status-failed").count(), { timeout: 15_000 }).toBe(1);
+      // A failed step opens the list without a click.
+      await expect(failedProgress.getByRole("button", { name: "Hide steps" })).toHaveAttribute("aria-expanded", "true");
       await expect(failedProgress.getByText("Failed", { exact: true })).toBeVisible();
       await expect(failedProgress.getByText("Deterministic test failure: provider unavailable.", { exact: true })).toBeVisible();
       await expect(page.getByRole("button", { name: "Retry failed work" })).toBeVisible();
@@ -263,6 +273,9 @@ test.describe("vertical creation progress", () => {
 
       await page.setViewportSize({ width: 390, height: 844 });
       await expect(failedProgress).toBeVisible();
+      // The list opened itself for the failure; once the retry runs it follows the
+      // default (collapsed) again, so open it to check the phone layout.
+      if (await failedProgress.locator(".process-checklist").isHidden()) await failedProgress.getByRole("button", { name: "Show steps" }).click();
       await expect(failedProgress.locator(".process-checklist")).toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
       await page.screenshot({ path: "test-artifacts/progress-list-mobile-failed.png", fullPage: true });

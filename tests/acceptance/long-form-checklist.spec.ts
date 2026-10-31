@@ -41,7 +41,10 @@ test("a long-form Smart project builds the checklist its pipeline asks for", asy
 
   // A landscape project is not a short, and its panel should not claim to be.
   await expect(panel.getByRole("heading", { name: "Short creation progress" })).toHaveCount(0);
-  await expect(panel.getByRole("heading", { name: "Long-form creation progress" })).toBeVisible();
+  // While the run is live the heading is screen-reader text (the band is the
+  // visible summary), so the box is named through its region.
+  await expect(page.getByRole("region", { name: "Long-form creation progress" })).toBeVisible();
+  await expect(panel.getByRole("heading", { name: "Long-form creation progress" })).toHaveCount(1);
 
   // The persisted checklist is the fast one the renderer actually walks.
   const jobs = await (await fetch(`${gateway}/api/v1/jobs`)).json() as { projectId: string; steps?: { id: string }[] }[];

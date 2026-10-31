@@ -241,8 +241,17 @@ test.describe("workspace command bar", () => {
 
     const controls = page.locator(".workspace-controls");
     await expect(controls).toBeVisible();
-    await expect(page.locator("#workspace-business-folder")).toBeVisible();
-    await expect(controls.locator(".status")).toBeVisible();
+    // The folder picker now lives in the header details panel (closed by
+    // default), and the stage text is the progress band: the status chip joins
+    // the row only once the job is terminal.
+    const band = page.locator(".workspace-page .job-strip");
+    if (await band.count()) {
+      await expect(band).toBeVisible();
+      await expect(controls.locator(".status")).toHaveCount(0);
+    } else {
+      await expect(controls.locator(".status")).toBeVisible();
+    }
+    await expect(page.locator("#workspace-business-folder")).toBeHidden();
 
     const measured = await controls.evaluate((row) => {
       const axis = (element: Element, label: string) => {
@@ -250,11 +259,9 @@ test.describe("workspace command bar", () => {
         return { label, top: rect.top, bottom: rect.bottom, height: rect.height, centre: (rect.top + rect.bottom) / 2 };
       };
       const items = [
-        axis(row.querySelector("#workspace-business-folder")!, "business folder select"),
         ...[...row.querySelectorAll(".status")].map((chip) => axis(chip, `status "${(chip.textContent || "").trim()}"`)),
         ...[...row.querySelectorAll(".button")].map((button) => axis(button, `button "${(button.textContent || "").trim()}"`)),
       ];
-      const field = row.querySelector(".workspace-folder-field")!;
       // A wrapped row has no single axis to hold, so count the lines before
       // measuring centres. Lines are counted by vertical overlap, never by top
       // edge: a centred row deliberately gives a 24px chip and a 32px button
@@ -269,18 +276,14 @@ test.describe("workspace command bar", () => {
       return {
         items,
         rowHeight: row.getBoundingClientRect().height,
-        fieldHeight: field.getBoundingClientRect().height,
         controlHeight: parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--control-height")),
         lines,
       };
     });
 
-    expect(measured.items.length, "expected the picker, the badge and the job actions").toBeGreaterThanOrEqual(4);
+    expect(measured.items.length, "expected the badge or band-era actions: Pause, Stop & keep, Download ZIP").toBeGreaterThanOrEqual(2);
     expect(measured.lines, "the command bar wrapped at 1512px; centres cannot share an axis").toBe(1);
 
-    // The label must not add height to a control row.
-    expect(measured.fieldHeight, "the folder field is taller than one control height")
-      .toBeLessThanOrEqual(measured.controlHeight + 1);
     expect(measured.rowHeight, "the command bar is taller than one control height")
       .toBeLessThanOrEqual(measured.controlHeight + 1);
 
@@ -290,5 +293,18 @@ test.describe("workspace command bar", () => {
       spread(centres),
       `command bar items are off one axis:\n${measured.items.map((item) => `  ${item.label}: centre ${item.centre.toFixed(1)} h ${item.height}`).join("\n")}`,
     ).toBeLessThanOrEqual(1);
+
+    // The folder select is asserted separately, after opening the header
+    // details; the label must not add height to its control row.
+    await page.locator(".workspace-meta-toggle").click();
+    await expect(page.locator("#workspace-business-folder")).toBeVisible();
+    const folder = await page.locator("#workspace-project-details .workspace-folder-field").evaluate((field) => ({
+      fieldHeight: field.getBoundingClientRect().height,
+      selectHeight: field.querySelector("select")!.getBoundingClientRect().height,
+    }));
+    expect(folder.fieldHeight, "the folder field is taller than one control height")
+      .toBeLessThanOrEqual(measured.controlHeight + 1);
+    expect(folder.selectHeight, "the folder select is taller than one control height")
+      .toBeLessThanOrEqual(measured.controlHeight + 1);
   });
 });

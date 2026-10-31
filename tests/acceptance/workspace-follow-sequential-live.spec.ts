@@ -81,7 +81,7 @@ test("follows actual one-worker sequential processing after a second UI-submitte
   expect(firstJob?.state).toBe("complete");
   expect(secondJob?.state).toBe("active");
   await expect(page.locator(".topbar-context")).toContainText(secondName, { timeout: 30_000 });
-  await expect(page.locator(".workspace-controls")).toContainText(secondJob!.stageLabel);
+  await expect(page.locator(".job-strip")).toContainText(secondJob!.stageLabel);
   await expect(errors).toEqual([]);
   if (browserWarnings.length) test.info().annotations.push({ type: "browser-warning", description: browserWarnings.join(" | ") });
   await page.screenshot({ path: test.info().outputPath("workspace-follow-sequential-live.png"), fullPage: true });
