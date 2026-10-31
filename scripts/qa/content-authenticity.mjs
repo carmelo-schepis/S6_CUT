@@ -147,8 +147,12 @@ process.once("SIGTERM", () => stopOnSignal("SIGTERM"));
 async function startStack({ label, port, enginePort, hooks = {} }) {
   // The dataset must be bind-mountable by the Docker daemon; the OS temp
   // directory is not a Docker Desktop shared path, so it lives under the
-  // ignored test-artifacts directory and is removed on teardown.
-  const data = await mkdtemp(join(root, "test-artifacts", `content-authenticity-${label}-`));
+  // ignored test-artifacts directory and is removed on teardown. Create that
+  // parent first: a custom S6_PLAYWRIGHT_ARTIFACTS puts the reports elsewhere,
+  // so on a clean checkout nothing else has made this directory yet.
+  const dataParent = join(root, "test-artifacts");
+  await mkdir(dataParent, { recursive: true });
+  const data = await mkdtemp(join(dataParent, `content-authenticity-${label}-`));
   await chmod(data, 0o777);
   const overrideFile = join(data, "compose.override.yaml");
   const project = `s6-authenticity-${label}-${process.pid}-${Date.now()}-${randomBytes(3).toString("hex")}`;
