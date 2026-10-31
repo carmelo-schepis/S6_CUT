@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assetSchema, beatSchema, clipSchema, jobSchema, profileSchema, projectSchema, titleSuggestionResponseSchema, musicPresentationSchema, editingPresentationSchema, processingModeSchema, processingStepSchema, sourceProfileSchema } from "./types";
+import { assetSchema, beatSchema, clipSchema, jobSchema, profileSchema, projectSchema, titleSuggestionResponseSchema, musicPresentationSchema, editingPresentationSchema, processingModeSchema, processingStepSchema, sourceProfileSchema, musicAudioModeSchema } from "./types";
 
 const score = {
   hook: 80, coherence: 82, ending: 79, energy: 70, practicalValue: 75,
@@ -114,6 +114,13 @@ describe("versioned UI contracts", () => {
     expect(processingStepSchema.safeParse({ ...base, status: "pending", completedAt: "2026-01-01T00:00:00Z" }).success).toBe(false);
     expect(processingStepSchema.safeParse({ ...base, status: "active", currentItem: 4, totalItems: 3 }).success).toBe(false);
     expect(processingStepSchema.safeParse({ ...base, status: "complete", completedAt: "2026-01-01T00:00:00Z" }).success).toBe(true);
+  });
+
+  it("accepts the additive Music audio mode while retaining existing choices", () => {
+    expect(musicAudioModeSchema.parse("song_only")).toBe("song_only");
+    expect(musicAudioModeSchema.parse("mix_original")).toBe("mix_original");
+    expect(musicAudioModeSchema.parse("replace_music_keep_voice")).toBe("replace_music_keep_voice");
+    expect(musicAudioModeSchema.safeParse("unknown").success).toBe(false);
   });
 
   it("accepts only the persisted source profile values", () => {

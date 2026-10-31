@@ -405,6 +405,17 @@ class TestWhisperModelCached:
         assert transcription_cache_identity(settings, profile="music", language="en") == music
         assert transcription_cache_key("source-digest", settings, profile="music", language="en") == f"{music}:source-digest"
 
+    def test_music_profile_can_enable_speech_vad_without_changing_model_or_beam(self, settings: Settings) -> None:
+        from engine.media import transcription_options
+
+        music = transcription_options(settings, profile="music")
+        narration = transcription_options(settings, profile="music", vad_filter=True)
+        assert narration["model"] == music["model"] == settings.music_whisper_model
+        assert narration["beam_size"] == music["beam_size"] == settings.music_whisper_beam_size
+        assert narration["vad_filter"] is True
+        assert music["vad_filter"] is False
+        assert transcription_cache_identity(settings, profile="music", vad_filter=True) != transcription_cache_identity(settings, profile="music")
+
     def test_not_cached_with_local_path_missing_model_bin(self, settings: Settings, tmp_path: Path) -> None:
         model_dir = tmp_path / "my-model"
         model_dir.mkdir(parents=True)

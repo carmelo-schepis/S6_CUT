@@ -24,3 +24,7 @@ No source code was copied from the reference repositories during this build. The
 - Barlow, Montserrat, Lora, Bodoni Moda, and Roboto Condensed files are unmodified upstream assets. Font names and Reserved Font Names are untouched. See `third_party_provenance.json` for source URLs, pinned revisions, and checksums.
 
 Code licences do not grant rights to source media, downloaded media, models, voices, fonts, or the supplied S6_cut logo. The provenance ledger identifies local wallpapers, app icons, help media and selected test media whose source, creator or licence could not be verified from repository records; it makes no ownership or licence claim for those assets. Their provenance remains unresolved. Users must verify their own rights and provider terms.
+
+## Music voice separation model
+
+`sherpa-onnx==2.0.1` is Apache-2.0 licensed. Spleeter two-stem ONNX weights are downloaded from the pinned sherpa-onnx release and verified by archive and file SHA-256 in `engine/voice_separation.py`. Spleeter code is MIT; its JOSS paper says pretrained models are MIT, while the current README does not separately clarify weight licensing. Treat the model-weight license as unresolved pending authoritative clarification.

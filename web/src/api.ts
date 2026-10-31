@@ -26,6 +26,7 @@ import {
   type BatchMode,
   type ProcessingMode,
   type SourceProfile,
+  type MusicAudioMode,
   type MusicPresentationConfig,
   type EditingPresentationConfig,
   type Project,
@@ -227,7 +228,7 @@ type ClipJobInput = {
   musicTrackUrl?: string;
   musicTrackSpeed?: number;
   musicLyricsLanguage?: string;
-  musicAudioMode?: "song_only" | "mix_original";
+  musicAudioMode?: MusicAudioMode;
   musicSongGain?: number;
   hookText?: boolean;
   manualHookText?: string;
@@ -271,7 +272,7 @@ export async function createClipJob(input: ClipJobInput): Promise<{ project: Pro
     if (input.musicTrackUrl) form.set("music_track_url", input.musicTrackUrl);
     if (input.musicTrackSpeed !== undefined) form.set("music_track_speed", String(input.musicTrackSpeed));
     if (input.musicAudioMode !== undefined) form.set("music_audio_mode", input.musicAudioMode);
-    if (input.musicAudioMode === "mix_original" && input.musicSongGain !== undefined) form.set("music_song_gain", String(input.musicSongGain));
+    if ((input.musicAudioMode === "mix_original" || input.musicAudioMode === "replace_music_keep_voice") && input.musicSongGain !== undefined) form.set("music_song_gain", String(input.musicSongGain));
   }
   const value = await request<{ project: unknown; job: unknown }>("/jobs/clip", { method: "POST", body: form });
   return { project: projectSchema.parse(value.project), job: jobSchema.parse(value.job) };

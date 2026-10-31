@@ -111,7 +111,7 @@ def candidate_quality(words: list[dict[str, Any]], minimum_speech_density: float
     return True, "Low transcript confidence; review recommended" if review else "", review
 
 
-def select_candidates(words: list[dict[str, Any]], style: Style, count: int, minimum: float, maximum: float) -> list[Candidate]:
+def select_candidates(words: list[dict[str, Any]], style: Style, count: int, minimum: float, maximum: float, *, strict_bounds: bool = False) -> list[Candidate]:
     if not words:
         return []
     sentences = _sentence_ranges(words)
@@ -132,7 +132,29 @@ def select_candidates(words: list[dict[str, Any]], style: Style, count: int, min
             candidates.append(Candidate(float(segment[0]["start"]), float(segment[-1]["end"]), segment, _score(segment, style, target)))
             if duration >= target * .85:
                 break
-    if not candidates:
+    if strict_bounds:
+        for start_index, end_index in sentences:
+            sentence = words[start_index:end_index]
+            if float(sentence[-1]["end"]) - float(sentence[0]["start"]) <= maximum:
+                continue
+            offset = start_index
+            while offset < end_index:
+                end = offset + 1
+                while end < end_index:
+                    duration = float(words[end]["end"]) - float(words[offset]["start"])
+                    if duration > maximum:
+                        break
+                    end += 1
+                    if duration >= minimum:
+                        break
+                segment = words[offset:end]
+                duration = float(segment[-1]["end"]) - float(segment[0]["start"])
+                if minimum <= duration <= maximum:
+                    eligible, _, _ = candidate_quality(segment)
+                    if eligible:
+                        candidates.append(Candidate(float(segment[0]["start"]), float(segment[-1]["end"]), segment, _score(segment, style, target)))
+                offset = end
+    if not candidates and not strict_bounds:
         chunk_words = max(1, math.ceil(len(words) * min(maximum, float(words[-1]["end"])) / max(float(words[-1]["end"]), 1)))
         for index in range(0, len(words), chunk_words):
             segment = words[index:index + chunk_words]
@@ -140,6 +162,12 @@ def select_candidates(words: list[dict[str, Any]], style: Style, count: int, min
                 eligible, _, _ = candidate_quality(segment)
                 if eligible:
                     candidates.append(Candidate(float(segment[0]["start"]), float(segment[-1]["end"]), segment, _score(segment, style, target)))
+    if strict_bounds:
+        candidates = [
+            item for item in candidates
+            if minimum - 1e-6 <= item.end - item.start <= maximum + 1e-6
+        ]
+        return _select_non_overlapping_candidates(candidates, count)
     candidates.sort(key=lambda item: (-item.score.total, item.start))
     selected: list[Candidate] = []
     for candidate in candidates:
@@ -239,7 +267,7 @@ def _music_units(lines: list[list[dict[str, Any]]], maximum: float) -> list[list
     return units
 
 
-def _better_music_selection(left: tuple[Candidate, ...] | None, right: tuple[Candidate, ...] | None) -> tuple[Candidate, ...] | None:
+def _better_interval_selection(left: tuple[Candidate, ...] | None, right: tuple[Candidate, ...] | None) -> tuple[Candidate, ...] | None:
     if left is None:
         return right
     if right is None:
@@ -253,6 +281,24 @@ def _better_music_selection(left: tuple[Candidate, ...] | None, right: tuple[Can
     left_signature = tuple((item.start, item.end) for item in left)
     right_signature = tuple((item.start, item.end) for item in right)
     return left if left_signature <= right_signature else right
+
+
+def _select_non_overlapping_candidates(candidates: list[Candidate], count: int) -> list[Candidate]:
+    if count <= 0 or not candidates:
+        return []
+    ordered = sorted(candidates, key=lambda item: (item.end, item.start, -item.score.total))
+    ends = [item.end for item in ordered]
+    states: list[dict[int, tuple[Candidate, ...]]] = [{0: ()}]
+    for index, candidate in enumerate(ordered, start=1):
+        previous = states[index - 1].copy()
+        compatible = bisect_right(ends, candidate.start, 0, index - 1)
+        for size, selection in states[compatible].items():
+            if size < count:
+                option = selection + (candidate,)
+                previous[size + 1] = _better_interval_selection(previous.get(size + 1), option) or option
+        states.append(previous)
+    selected = states[-1].get(min(count, max(states[-1], default=0)), ())
+    return sorted(selected, key=lambda item: (item.start, item.end))
 
 
 def _music_content_duration(words: list[dict[str, Any]]):
@@ -294,22 +340,8 @@ def select_music_candidates(words: list[dict[str, Any]], style: Style, count: in
     if not candidates:
         return []
 
-    # Weighted interval scheduling maximises the number of usable clips first,
-    # then their deterministic music score.  A score-first greedy pass can
-    # consume a long window and incorrectly hide several distinct windows.
-    candidates.sort(key=lambda item: (item.end, item.start, -item.score.total))
-    ends = [item.end for item in candidates]
-    states: list[dict[int, tuple[Candidate, ...]]] = [{0: ()}]
-    for index, candidate in enumerate(candidates, start=1):
-        previous = states[index - 1].copy()
-        compatible = bisect_right(ends, candidate.start, 0, index - 1)
-        for size, selection in states[compatible].items():
-            if size < count:
-                option = selection + (candidate,)
-                previous[size + 1] = _better_music_selection(previous.get(size + 1), option) or option
-        states.append(previous)
-    selected = states[-1].get(min(count, max(states[-1], default=0)), ())
-    return sorted(selected, key=lambda item: (item.start, item.end))
+    # Maximise usable clips first, then their deterministic score.
+    return _select_non_overlapping_candidates(candidates, count)
 
 
 def clip_from_candidate(candidate: Candidate, index: int) -> Clip:

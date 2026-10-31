@@ -4,7 +4,7 @@ name: s6-cut
 
 services:
   pot-provider:
-    image: brainicism/bgutil-ytdlp-pot-provider:1.3.2-deno
+    image: brainicism/bgutil-ytdlp-pot-provider:2.0.2-deno
     restart: unless-stopped
     init: true
     cpus: 0.75

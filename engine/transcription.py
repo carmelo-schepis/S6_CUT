@@ -23,6 +23,7 @@ def _child(
     language: str | None = "en",
     beam_size: int | None = None,
     condition_on_previous_text: bool | None = None,
+    vad_filter: bool | None = None,
 ) -> None:
     try:
         events.put({"type": "started", "run_id": run_id})
@@ -33,6 +34,7 @@ def _child(
             cancellation_callback=lambda: False, word_timestamps=True,
             profile=profile, language=language, beam_size=beam_size,
             condition_on_previous_text=condition_on_previous_text,
+            vad_filter=vad_filter,
         )
         events.put({"type": "completed", "run_id": run_id, "result": result})
     except BaseException as exc:
@@ -76,6 +78,7 @@ def supervise(
     language: str | None = "en",
     beam_size: int | None = None,
     condition_on_previous_text: bool | None = None,
+    vad_filter: bool | None = None,
 ) -> dict[str, Any]:
     run_id = uuid.uuid4().hex
     # Jobs run on background threads. Forking the multithreaded Uvicorn process
@@ -89,7 +92,7 @@ def supervise(
     worker_args = base_args
     worker_kwargs: dict[str, Any] = {}
     if worker is _child:
-        worker_args += (profile, language, beam_size, condition_on_previous_text)
+        worker_args += (profile, language, beam_size, condition_on_previous_text, vad_filter)
     else:
         try:
             signature = inspect.signature(worker)
