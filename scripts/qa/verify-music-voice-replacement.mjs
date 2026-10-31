@@ -98,7 +98,7 @@ let potCreated = false;
 try {
   await run('docker', ['network', 'create', network]);
   networkCreated = true;
-  await run('docker', ['run', '-d', '--name', pot, '--network', network, '--network-alias', 'pot-provider', '--memory=384m', '--memory-swap=512m', '--cpus=0.75', '--pids-limit=128', 'brainicism/bgutil-ytdlp-pot-provider:1.3.2-deno']);
+  await run('docker', ['run', '-d', '--name', pot, '--network', network, '--network-alias', 'pot-provider', '--memory=384m', '--memory-swap=512m', '--cpus=0.75', '--pids-limit=128', 'brainicism/bgutil-ytdlp-pot-provider:2.0.2-deno']);
   potCreated = true;
   let potHealthy = false;
   for (let attempt = 0; attempt < 90; attempt++) {
