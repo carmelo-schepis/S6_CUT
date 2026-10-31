@@ -326,6 +326,13 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
                 }} />{highVolumeCount.trim() !== "" && !/^-?[0-9]+$/.test(highVolumeCount.trim()) && <span className="form-hint" aria-live="polite">Enter a whole number from 1 to 500.</span>}</div>}
               </Field>
             </FieldGroup>
+            {sourceProfile === "speech" && <FieldGroup title="Processing mode">
+              <div className="segmented mode-tabs processing-mode-tabs" aria-label="Processing mode">
+                <button type="button" aria-pressed={processingMode === "auto"} className={processingMode === "auto" ? "active" : ""} onClick={() => setProcessingMode("auto")}><Sparkles size={13} /> <span>Auto</span></button>
+                <button type="button" aria-pressed={processingMode === "fast"} className={processingMode === "fast" ? "active" : ""} onClick={() => { setProcessingMode("fast"); setBurnSubtitles(false); }}><Zap size={13} /> <span>Fast</span></button>
+                <button type="button" aria-pressed={processingMode === "smart"} className={processingMode === "smart" ? "active" : ""} onClick={() => setProcessingMode("smart")}><Sparkles size={13} /> <span>Smart</span></button>
+              </div>
+            </FieldGroup>}
             <FieldGroup title="Batch size" hint={batchMode === "standard" ? "Standard keeps the existing planning behavior and limit of 30." : "High-volume allows up to 500 requested cuts. If the source cannot satisfy the request, the engine explains its effective target."}>
               <div className="segmented mode-tabs" aria-label="Batch size">
                 <button type="button" aria-pressed={batchMode === "standard"} className={batchMode === "standard" ? "active" : ""} onClick={() => { const value = highVolumeCount.trim(); const next = value !== "" && /^[0-9]+$/.test(value) ? Number(value) : count; setCount(Math.min(30, Math.max(1, next))); setBatchMode("standard"); }}>Standard · up to 30</button>
@@ -343,13 +350,6 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
               </div>
               <p className="form-hint">{executionPolicy === "engine_only" ? "All processing stays on this machine; no API calls are made." : "Uses a connected API for supported text features and falls back to local processing."}</p>
             </FieldGroup>
-            {sourceProfile === "speech" && <FieldGroup title="Processing mode">
-              <div className="segmented mode-tabs processing-mode-tabs" aria-label="Processing mode">
-                <button type="button" aria-pressed={processingMode === "auto"} className={processingMode === "auto" ? "active" : ""} onClick={() => setProcessingMode("auto")}><Sparkles size={13} /> <span>Auto</span></button>
-                <button type="button" aria-pressed={processingMode === "fast"} className={processingMode === "fast" ? "active" : ""} onClick={() => { setProcessingMode("fast"); setBurnSubtitles(false); }}><Zap size={13} /> <span>Fast</span></button>
-                <button type="button" aria-pressed={processingMode === "smart"} className={processingMode === "smart" ? "active" : ""} onClick={() => setProcessingMode("smart")}><Sparkles size={13} /> <span>Smart</span></button>
-              </div>
-            </FieldGroup>}
           </>
           {sourceProfile === "speech" && <div className="create-option-list">
             <OptionRow id="subtitle" title="Subtitle style" summary={subtitleSummary} open={openRows.has("subtitle")} onToggle={() => toggleRow("subtitle")}>

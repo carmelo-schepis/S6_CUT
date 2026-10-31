@@ -71,6 +71,14 @@ describe("Projects create flow", () => {
     expect(screen.queryByRole("button", { name: /Delete project Interview/ })).not.toBeInTheDocument();
   });
 
+  it("lists the step-2 groups in screen order, with Processing mode beside Format", () => {
+    render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    const groups = () => [...document.querySelectorAll<HTMLElement>(".style-step > section.field-group")].map((group) => group.getAttribute("aria-label"));
+    expect(groups()).toEqual(["Editorial style", "Format", "Processing mode", "Batch size", "Execution"]);
+    fireEvent.click(screen.getByRole("button", { name: /^Music(?: \/ sung vocals)?$/i }));
+    expect(groups()).toEqual(["Editorial style", "Format", "Batch size", "Execution"]);
+  });
+
   it("offers Library B-roll only on render routes that honor the explicit choice", () => {
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
     openOptions();

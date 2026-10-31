@@ -12,7 +12,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { assertZipIntact, extractZip, openWorkspaceForProject, zipNames } from "./support/workspace";
+import { assertZipIntact, extractZip, openOptionRow, openWorkspaceForProject, zipNames } from "./support/workspace";
 import { verifyVideoOutput } from "../support/video-output";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -97,6 +97,7 @@ async function createAndRender(page: Page, options: {
   await page.getByLabel("Maximum seconds").fill("10");
 
   const settings = page.getByRole("group", { name: "Automatic Subscribe animation" });
+  await openOptionRow(page, "subscribe");
   const enabled = settings.getByRole("checkbox", { name: "Enable Subscribe animation" });
   const timing = settings.getByRole("combobox", { name: "Subscribe animation timing" });
   await expect(settings).toBeVisible();
@@ -233,6 +234,7 @@ test("Subscribe animation controls persist and affect real rendered/exported med
   await expect(page.getByText("Local engine ready")).toBeVisible({ timeout: 90_000 });
 
   const defaultControl = page.getByRole("group", { name: "Automatic Subscribe animation" });
+  await openOptionRow(page, "subscribe");
   await expect(defaultControl.getByRole("checkbox", { name: "Enable Subscribe animation" })).toBeChecked();
   await expect(defaultControl.getByRole("combobox", { name: "Subscribe animation timing" })).toHaveValue("5");
   await page.getByRole("button", { name: "Shorts Editor", exact: true }).click();
@@ -242,7 +244,9 @@ test("Subscribe animation controls persist and affect real rendered/exported med
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole("button", { name: "Projects", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible();
-  await expect(page.getByRole("group", { name: "Automatic Subscribe animation" })).toBeVisible();
+  const mobileControl = page.getByRole("group", { name: "Automatic Subscribe animation" });
+  await openOptionRow(page, "subscribe");
+  await expect(mobileControl).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("subscribe-controls-mobile.png"), fullPage: true });
   await page.setViewportSize({ width: 1280, height: 900 });
 
@@ -316,6 +320,7 @@ test("long-form exported scene replays the animation at midpoint and 30 seconds 
   await page.getByLabel("Minimum seconds").fill("80");
   await page.getByLabel("Maximum seconds").fill("110");
   const settings = page.getByRole("group", { name: "Automatic Subscribe animation" });
+  await openOptionRow(page, "subscribe");
   await expect(settings.getByRole("checkbox", { name: "Enable Subscribe animation" })).toBeChecked();
   await expect(settings).toContainText(/midpoint and again starting 30 seconds before the end/);
 

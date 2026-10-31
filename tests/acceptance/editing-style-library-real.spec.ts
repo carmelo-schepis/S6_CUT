@@ -33,7 +33,7 @@ import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-import { assertPlayback, checkPlayback, gateway, openProjects, zipEntry, zipNames, assertZipIntact } from "./support/workspace";
+import { assertPlayback, checkPlayback, gateway, openOptionRow, openProjects, zipEntry, zipNames, assertZipIntact } from "./support/workspace";
 
 const exec = promisify(execFile);
 const enabled = process.env.S6_EDITING_RUNNER === "1" && process.env.S6_ACCEPTANCE_ISOLATED === "1" && Boolean(process.env.S6_EDITING_ARTIFACTS);
@@ -227,8 +227,14 @@ const ui = {
   sample: (page: Page) => page.getByRole("img", { name: /^Style sample:/ }),
   summary: (page: Page) => page.locator('[aria-label="Editing style"]'),
 };
+/** The Projects option row (OptionRow id) that holds each option group used below. */
+const OPTION_ROW_FOR_GROUP: Record<string, string> = {
+  "Subtitle style": "subtitle", "Video filter": "video-filter", "Heading appearance": "heading", "Emoji reactions": "emoji",
+  "Lyrics subtitle theme": "music-lyrics", "Lyric animation": "music-lyrics", "Music video filter": "music-filter",
+};
 async function selectChoice(page: Page, groupName: string, label: string) {
   const group = ui.group(page, groupName);
+  await openOptionRow(page, OPTION_ROW_FOR_GROUP[groupName]);
   await expect(group, `control group "${groupName}" is present (UI contract; see spec header)`).toBeVisible({ timeout: 20_000 });
   const button = ui.choice(group, label);
   await expect(button, `"${label}" in "${groupName}"`).toBeVisible();
@@ -565,6 +571,7 @@ test("Projects UI: editorial intent stays separate; all subtitle/filter/music ch
     await expect(ui.group(page, "Heading appearance"), "regular heading appearance hidden in Music").toHaveCount(0);
     await expect(ui.group(page, "Emoji reactions"), "speech emoji reactions hidden in Music").toHaveCount(0);
     const themes = ui.group(page, "Lyrics subtitle theme");
+    await openOptionRow(page, "music-lyrics");
     await expect(themes).toBeVisible();
     for (const label of [...ORIGINAL_MUSIC_THEMES, ...NEW_MUSIC_THEMES]) await expect(ui.choice(themes, label), `Music theme ${label} in the existing grid`).toBeVisible();
     await selectChoice(page, "Lyrics subtitle theme", pick.musicTheme);

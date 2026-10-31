@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { assertPlayback, checkPlayback, zipEntry } from './support/workspace';
+import { assertPlayback, checkPlayback, openOptionRow, zipEntry } from './support/workspace';
 
 const fixtures = process.env.S6_SOUNDTRACK_FIXTURES;
 const container = process.env.S6_SOUNDTRACK_CONTAINER;
@@ -88,7 +88,9 @@ test('real attributed Music job keeps typography, banner, audio and saved captio
   await page.getByLabel('YouTube URL').fill('https://www.youtube.com/watch?v=dQw4w9WgXcQ');
   await page.getByRole('button', { name: 'Music / sung vocals' }).click();
   while (Number(await page.locator('.count-control strong').textContent()) > 2) await page.getByRole('button', { name: 'Fewer clips' }).click();
+  await openOptionRow(page, "song");
   await page.getByLabel('Background song MP3').setInputFiles({ name: 'song.mp3', mimeType: 'audio/mpeg', buffer: await fs.readFile(path.join(fixtures!, 'short-song.mp3')) });
+  await openOptionRow(page, "music-lyrics");
   await page.getByRole('group', { name: 'Lyrics subtitle theme' }).getByRole('button', { name: 'Condensed white', exact: true }).click();
   await page.getByRole('group', { name: 'Lyric animation' }).getByRole('button', { name: 'Word build', exact: true }).click();
   await page.getByRole('checkbox', { name: 'Hook text' }).check();
