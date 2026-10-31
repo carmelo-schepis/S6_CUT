@@ -21,8 +21,13 @@ import { spawn } from "node:child_process";
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const composeFile = join(root, "compose.yaml");
-const artifacts = join(root, "test-artifacts", "content-authenticity");
-await mkdir(join(artifacts, "reports"), { recursive: true });
+const artifactBase = resolve(root, process.env.S6_PLAYWRIGHT_ARTIFACTS || "test-artifacts");
+const artifacts = join(artifactBase, "content-authenticity");
+const reports = join(artifacts, "reports");
+await mkdir(reports, { recursive: true });
+for (const mode of ["smart", "fast", "fallback"]) {
+  await rm(join(reports, `${mode}.json`), { force: true });
+}
 
 async function directoryExists(directory) {
   try { await fsAccess(directory); return true; } catch { return false; }
@@ -142,8 +147,12 @@ process.once("SIGTERM", () => stopOnSignal("SIGTERM"));
 async function startStack({ label, port, enginePort, hooks = {} }) {
   // The dataset must be bind-mountable by the Docker daemon; the OS temp
   // directory is not a Docker Desktop shared path, so it lives under the
-  // ignored test-artifacts directory and is removed on teardown.
-  const data = await mkdtemp(join(root, "test-artifacts", `content-authenticity-${label}-`));
+  // ignored test-artifacts directory and is removed on teardown. Create that
+  // parent first: a custom S6_PLAYWRIGHT_ARTIFACTS puts the reports elsewhere,
+  // so on a clean checkout nothing else has made this directory yet.
+  const dataParent = join(root, "test-artifacts");
+  await mkdir(dataParent, { recursive: true });
+  const data = await mkdtemp(join(dataParent, `content-authenticity-${label}-`));
   await chmod(data, 0o777);
   const overrideFile = join(data, "compose.override.yaml");
   const project = `s6-authenticity-${label}-${process.pid}-${Date.now()}-${randomBytes(3).toString("hex")}`;
@@ -212,7 +221,10 @@ try {
 // Media validation runs against the downloaded files after the stacks are gone.
 if (exitCode === 0) {
   try {
-    await run("node", ["scripts/qa/verify-outputs.mjs"], { timeoutMs: 40 * 60_000 });
+    await run("node", ["scripts/qa/verify-outputs.mjs"], {
+      timeoutMs: 40 * 60_000,
+      env: { ...process.env, S6_AUTHENTICITY_ROOT: artifacts },
+    });
   } catch (error) {
     console.error(error);
     exitCode = Number.isInteger(error?.exitCode) ? error.exitCode : 1;

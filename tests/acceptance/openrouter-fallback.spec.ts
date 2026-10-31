@@ -41,7 +41,7 @@ test.describe("OpenRouter Smart fallback", () => {
     // the connected profile in Settings before creating the job.
     const gateway = process.env.S6_ACCEPTANCE_URL || "http://127.0.0.1:8080";
     const profileResponse = await fetch(`${gateway}/api/v1/profiles`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({
-      name: "E2E OpenRouter failure", modelId: "openai/gpt-4.1-mini", openrouterKey: profileKey, persistence: "encrypted", selected: true,
+      name: "E2E OpenRouter failure", textModelId: "openai/gpt-4.1-mini", openrouterKey: profileKey, persistence: "encrypted", selected: true,
     }) });
     expect(profileResponse.ok).toBeTruthy();
     const profile = await profileResponse.json();

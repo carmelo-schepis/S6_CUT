@@ -6,6 +6,14 @@ import { join, resolve } from "node:path";
 test.describe.configure({ mode: "serial" });
 
 test("downloads only completed MP4s in a titled Unicode ZIP", async ({ page }, testInfo) => {
+  const acceptanceUrl = process.env.S6_ACCEPTANCE_URL;
+  const composeProject = process.env.S6_ACCEPTANCE_COMPOSE_PROJECT;
+  if (process.env.S6_ACCEPTANCE_ISOLATED !== "1" || !acceptanceUrl || !composeProject || composeProject === "s6-cut") {
+    throw new Error("Bulk export requires an explicitly isolated S6_ACCEPTANCE_URL and S6_ACCEPTANCE_COMPOSE_PROJECT.");
+  }
+  const port = new URL(acceptanceUrl).port;
+  if (!port || port === "8080" || port === "8001") throw new Error("Bulk export refuses the default application ports.");
+
   const consoleErrors: string[] = [];
   const failedRequests: string[] = [];
   page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
@@ -46,10 +54,14 @@ test("downloads only completed MP4s in a titled Unicode ZIP", async ({ page }, t
     execFileSync("ffmpeg", ffmpegArgs);
   } catch (error) {
     if (!(error instanceof Error) || !("code" in error) || error.code !== "ENOENT") throw error;
-    execFileSync("docker", ["compose", "exec", "-T", "engine", "ffmpeg", ...ffmpegArgs.map((value) => value.replace(dataRoot, "/app/data").replace(process.cwd(), "/app"))]);
+    execFileSync("docker", ["compose", "-p", composeProject, "exec", "-T", "engine", "ffmpeg", ...ffmpegArgs.map((value) => value.replace(dataRoot, "/app/data").replace(process.cwd(), "/app"))]);
   }
   await page.getByLabel("Project name").fill(title);
   await page.getByLabel("Choose video file").setInputFiles(sourcePath);
+  // The desktop rail peeks open while the pointer rests over its nav button.
+  // Form filling moves focus without moving the pointer, so leave the rail
+  // before clicking controls that sit beneath its expanded overlay.
+  await page.mouse.move(500, 300);
   await page.getByRole("button", { name: "Fewer clips" }).click();
   await page.getByRole("button", { name: "Fewer clips" }).click();
   await page.getByRole("button", { name: "Fewer clips" }).click();
@@ -77,7 +89,7 @@ test("downloads only completed MP4s in a titled Unicode ZIP", async ({ page }, t
   expect(job?.clips.every((clip) => clip.state === "complete" && clip.outputName)).toBeTruthy();
 
   const outputNames = job!.clips.map((clip) => clip.outputName!);
-  execFileSync("docker", ["compose", "exec", "-T", "engine", "python", "-c", `from pathlib import Path
+  execFileSync("docker", ["compose", "-p", composeProject, "exec", "-T", "engine", "python", "-c", `from pathlib import Path
 import sys
 clips = Path('/app/data/jobs') / sys.argv[1] / 'clips'
 for output_name in sys.argv[2:]:
@@ -88,8 +100,13 @@ for output_name in sys.argv[2:]:
 (clips / '.DS_Store').write_text('mac metadata')
 (clips / 'render.mp4.partial').write_text('temporary')`, job!.id, ...outputNames]);
 
-  const checks = page.locator('input[type="checkbox"]');
+  // The engine publishes the terminal API record before the workspace poll has
+  // necessarily rendered every completed tile. Wait for both UI selections so
+  // this test proves a two-clip export rather than racing the final refresh.
+  const checks = page.locator(".clip-tile.complete input[type=checkbox]");
+  await expect(checks).toHaveCount(2, { timeout: 30_000 });
   for (let index = 0; index < await checks.count(); index += 1) if (!(await checks.nth(index).isChecked())) await checks.nth(index).check();
+  await expect(page.getByRole("button", { name: /Download ZIP 2/ })).toBeVisible();
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: /Download ZIP/ }).click();
   const download = await downloadPromise;

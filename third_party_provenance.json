@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-13",
+  "generatedAt": "2026-10-27",
   "directCodeCopies": [],
   "behavioralReferences": [
     {
@@ -71,12 +71,12 @@
     },
     {
       "name": "Microsoft Fluent Emoji 3D PNG library",
-      "version": "Commit 1ffb34c752ecf5d402f04cfb4b392c77f57c54bc; curated 32-sequence subset",
+      "version": "Commit 1ffb34c752ecf5d402f04cfb4b392c77f57c54bc; curated 40-sequence subset",
       "licence": "MIT",
       "source": "https://github.com/microsoft/fluentui-emoji/tree/1ffb34c752ecf5d402f04cfb4b392c77f57c54bc/assets",
       "upstreamRevision": "1ffb34c752ecf5d402f04cfb4b392c77f57c54bc",
-      "assetScope": "32 transparent 3D PNG assets: every _EMOJI_CANDIDATES value, 😩, faces/reactions/hearts/gestures, 👍🏽, 👩‍💻, and 👩🏽‍💻. Not complete Unicode coverage.",
-      "bundledBytes": 1245901,
+      "assetScope": "40 transparent 3D PNG assets: every _EMOJI_CANDIDATES value, 😩, faces/reactions/hearts/gestures, 👍🏽, 👩‍💻, and 👩🏽‍💻. Not complete Unicode coverage.",
+      "bundledBytes": 1512717,
       "use": "Offline full-colour emoji overlays for supported complete Unicode sequences; exact sequence manifest and SHA-256 inventory in the vendored directory",
       "vendoredAt": "engine/assets/fluent-emoji/",
       "licenceFile": "engine/assets/fluent-emoji/LICENSE",
@@ -185,53 +185,81 @@
   "unverifiedAssets": [
     {
       "path": "web/public/projects-wallpaper.jpg",
-      "status": "unverified",
-      "reason": "The repository does not record a source, creator, or licence; no ownership or licence claim is made."
+      "status": "source-unverified",
+      "reason": "The repository does not record the original source, creator, specific licence, attribution terms, or a byte-for-byte match to any claimed source; no claims are made for those details.",
+      "ownerConfirmedPermission": "Public redistribution rights confirmed by the repository owner on 2026-10-27."
     },
     {
       "path": "web/public/mobile-wallpaper.jpg",
-      "status": "unverified",
-      "reason": "The repository does not record a source, creator, or licence; no ownership or licence claim is made."
+      "status": "source-unverified",
+      "reason": "The repository does not record the original source, creator, specific licence, attribution terms, or a byte-for-byte match to any claimed source; no claims are made for those details.",
+      "ownerConfirmedPermission": "Public redistribution rights confirmed by the repository owner on 2026-10-27."
     },
     {
       "path": "web/public/favicon.png",
-      "status": "unverified",
-      "reason": "The repository does not record a source, creator, or licence; no ownership or licence claim is made."
+      "status": "source-unverified",
+      "reason": "The repository does not record the original source, creator, specific licence, attribution terms, or a byte-for-byte match to any claimed source; no claims are made for those details.",
+      "ownerConfirmedPermission": "Public redistribution rights confirmed by the repository owner on 2026-10-27."
     },
     {
       "path": "web/public/icons/",
-      "status": "unverified",
-      "reason": "The repository does not record a source, creator, or licence for the app icon files; no ownership or licence claim is made."
+      "status": "source-unverified",
+      "reason": "The repository does not record the original source, creator, specific licence, attribution terms, or a byte-for-byte match to any claimed source; no claims are made for those details.",
+      "ownerConfirmedPermission": "Public redistribution rights confirmed by the repository owner on 2026-10-27."
     },
     {
       "path": "web/public/help/",
-      "status": "unverified",
-      "reason": "The repository does not record source, creator, or licence information for the bundled help images and video clips; no ownership or licence claim is made."
+      "status": "source-unverified",
+      "reason": "The repository does not record the original source, creator, specific licence, attribution terms, or a byte-for-byte match to any claimed source; no claims are made for those details.",
+      "ownerConfirmedPermission": "Public redistribution rights confirmed by the repository owner on 2026-10-27."
     },
     {
       "path": "tests/fixtures/youtube-credit.mp4",
-      "status": "unverified",
-      "reason": "The repository does not record source, creator, or licence information; retained as an existing required acceptance fixture without a rights claim."
+      "status": "source-unverified",
+      "reason": "The repository does not record the original source, creator, specific licence, attribution terms, or a byte-for-byte match to any claimed source; no claims are made for those details.",
+      "ownerConfirmedPermission": "Public redistribution rights confirmed by the repository owner on 2026-10-27."
     },
     {
       "path": "tests/fixtures/youtube-credit-known.mp4",
-      "status": "unverified",
-      "reason": "The repository does not record source, creator, or licence information; retained as an existing required acceptance fixture without a rights claim."
+      "status": "source-unverified",
+      "reason": "The repository does not record the original source, creator, specific licence, attribution terms, or a byte-for-byte match to any claimed source; no claims are made for those details.",
+      "ownerConfirmedPermission": "Public redistribution rights confirmed by the repository owner on 2026-10-27."
     },
     {
       "path": "tests/fixtures/youtube-credit-export.zip",
-      "status": "unverified",
-      "reason": "The repository does not record the provenance or licence of its bundled media; retained as an existing acceptance fixture without a rights claim."
+      "status": "source-unverified",
+      "reason": "The repository does not record the original source, creator, specific licence, attribution terms, or a byte-for-byte match to any claimed source; no claims are made for those details.",
+      "ownerConfirmedPermission": "Public redistribution rights confirmed by the repository owner on 2026-10-27."
     },
     {
       "path": "tests/fixtures/background-song.mp3",
-      "status": "unverified",
-      "reason": "The repository does not record source, creator, or licence information; retained as an existing required acceptance fixture without a rights claim."
+      "status": "source-unverified",
+      "reason": "The repository does not record the original source, creator, specific licence, attribution terms, or a byte-for-byte match to any claimed source; no claims are made for those details.",
+      "ownerConfirmedPermission": "Public redistribution rights confirmed by the repository owner on 2026-10-27."
     },
     {
       "path": "test-video.mp4",
-      "status": "unverified",
-      "reason": "The repository does not record source, creator, or licence information; retained as an existing acceptance fixture without a rights claim."
+      "status": "source-unverified",
+      "reason": "The repository does not record the original source, creator, specific licence, attribution terms, or a byte-for-byte match to any claimed source; no claims are made for those details.",
+      "ownerConfirmedPermission": "Public redistribution rights confirmed by the repository owner on 2026-10-27."
+    },
+    {
+      "path": "LOGO/App icon.png",
+      "status": "source-unverified",
+      "reason": "The repository does not record the original source, creator, specific licence, attribution terms, or a byte-for-byte match to any claimed source; no claims are made for those details.",
+      "ownerConfirmedPermission": "Public redistribution rights confirmed by the repository owner on 2026-10-27."
+    },
+    {
+      "path": "LOGO/Default logo.png",
+      "status": "source-unverified",
+      "reason": "The repository does not record the original source, creator, specific licence, attribution terms, or a byte-for-byte match to any claimed source; no claims are made for those details.",
+      "ownerConfirmedPermission": "Public redistribution rights confirmed by the repository owner on 2026-10-27."
+    },
+    {
+      "path": "LOGO/Logo for legal.png",
+      "status": "source-unverified",
+      "reason": "The repository does not record the original source, creator, specific licence, attribution terms, or a byte-for-byte match to any claimed source; no claims are made for those details.",
+      "ownerConfirmedPermission": "Public redistribution rights confirmed by the repository owner on 2026-10-27."
     }
   ]
 }
