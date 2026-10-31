@@ -7,7 +7,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { assertZipIntact, extractZip, openWorkspaceForProject, zipNames } from "./support/workspace";
+import { assertZipIntact, extractZip, openOptionRow, openWorkspaceForProject, zipNames } from "./support/workspace";
 import { verifyVideoOutput } from "../support/video-output";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -95,6 +95,7 @@ async function createAndRender(page: Page, options: { projectName: string; aspec
   await page.getByLabel("Minimum seconds").fill("8");
   await page.getByLabel("Maximum seconds").fill("10");
   const settings = page.getByRole("group", { name: "Automatic Subscribe animation" });
+  await openOptionRow(page, "subscribe");
   const enabled = settings.getByRole("checkbox", { name: "Enable Subscribe animation" });
   const timing = settings.getByRole("combobox", { name: "Subscribe animation timing" });
   if (options.subscribe) {

@@ -254,6 +254,16 @@ export async function openProjects(page: Page) {
   await expect(page.getByRole("heading", { name: "Create a project" })).toBeVisible({ timeout: 30_000 });
 }
 
+/**
+ * Opens the collapsed Projects option row with this OptionRow id (for example "subscribe"), if it is closed.
+ * Its controls stay mounted but hidden until the row opens, so they are reached through the row's own toggle.
+ */
+export async function openOptionRow(page: Page, id: string) {
+  const toggle = page.locator(`.create-option-toggle[aria-controls="create-option-${id}-panel"]`);
+  if (await toggle.count() === 0) throw new Error(`Projects option row "${id}" is not on screen`);
+  if (await toggle.getAttribute("aria-expanded") === "false") await toggle.click();
+}
+
 /** Reopen a project from its durable job record rather than Projects list UI. */
 export async function openWorkspaceForProject(page: Page, projectName: string) {
   const { job } = await jobBoundaries(projectName);
