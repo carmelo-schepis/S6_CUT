@@ -243,7 +243,7 @@ def test_video_timeline_pads_shorter_audio_and_delayed_audio(tmp_path, monkeypat
     separation.separate_voice(source, target, _settings(tmp_path), timeline_duration=1.0)
 
     with wave.open(str(target), "rb") as wav:
-        pcm = np.frombuffer(wav.readframes(wav.getnframes()), dtype="<i2")
+        pcm = np.frombuffer(wav.readframes(wav.getnframes()), dtype="<i2").reshape(-1, wav.getnchannels())
         assert wav.getnframes() == separation.MODEL_SAMPLE_RATE
     assert not np.any(pcm[:round(0.15 * separation.MODEL_SAMPLE_RATE)])
     assert np.any(pcm[round(0.30 * separation.MODEL_SAMPLE_RATE):round(0.65 * separation.MODEL_SAMPLE_RATE)])

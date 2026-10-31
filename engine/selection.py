@@ -132,6 +132,28 @@ def select_candidates(words: list[dict[str, Any]], style: Style, count: int, min
             candidates.append(Candidate(float(segment[0]["start"]), float(segment[-1]["end"]), segment, _score(segment, style, target)))
             if duration >= target * .85:
                 break
+    if strict_bounds:
+        for start_index, end_index in sentences:
+            sentence = words[start_index:end_index]
+            if float(sentence[-1]["end"]) - float(sentence[0]["start"]) <= maximum:
+                continue
+            offset = start_index
+            while offset < end_index:
+                end = offset + 1
+                while end < end_index:
+                    duration = float(words[end]["end"]) - float(words[offset]["start"])
+                    if duration > maximum:
+                        break
+                    end += 1
+                    if duration >= minimum:
+                        break
+                segment = words[offset:end]
+                duration = float(segment[-1]["end"]) - float(segment[0]["start"])
+                if minimum <= duration <= maximum:
+                    eligible, _, _ = candidate_quality(segment)
+                    if eligible:
+                        candidates.append(Candidate(float(segment[0]["start"]), float(segment[-1]["end"]), segment, _score(segment, style, target)))
+                offset = end
     if not candidates and not strict_bounds:
         chunk_words = max(1, math.ceil(len(words) * min(maximum, float(words[-1]["end"])) / max(float(words[-1]["end"]), 1)))
         for index in range(0, len(words), chunk_words):

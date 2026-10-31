@@ -158,6 +158,19 @@ def test_strict_speech_selection_maximizes_valid_nonoverlapping_count(monkeypatc
     assert [(item.start, item.end) for item in selected] == [(0.0, 8.0), (8.0, 16.0)]
 
 
+def test_strict_speech_selection_splits_punctuation_free_runs_into_bounded_clips():
+    words = [
+        {"text": f"word{index}", "start": index * 0.75, "end": index * 0.75 + 0.25}
+        for index in range(40)
+    ]
+
+    selected = select_candidates(words, "serious", 3, 8, 10, strict_bounds=True)
+
+    assert len(selected) == 3
+    assert all(8 <= item.end - item.start <= 10 for item in selected)
+    assert all(left.end <= right.start for left, right in zip(selected, selected[1:]))
+
+
 def test_strict_speech_selection_does_not_use_short_chunk_fallback():
     words = [{"text": "Only short speech.", "start": 0.0, "end": 4.0}]
 
