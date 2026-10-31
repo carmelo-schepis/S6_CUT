@@ -1571,7 +1571,7 @@ class JobManager:
                 self._save(job, private)
 
         try:
-            result = separate_voice(source, target, self.settings, cancellation_callback=cancelled, progress_callback=progress)
+            result = separate_voice(source, target, self.settings, timeline_duration=float(metadata["duration"]), cancellation_callback=cancelled, progress_callback=progress)
             if not result.is_file() or not validate_voice_stem(result, float(metadata["duration"]), self.settings):
                 raise MediaError("Voice separation returned an empty or invalid narration stem")
             private["music_voice_stem"] = {
@@ -1806,13 +1806,15 @@ class JobManager:
     def _plan_smart_candidates(self, job: Job, private: dict[str, Any], words: list[dict[str, Any]], *, local_only: bool = False):
         requested = int(private.get("effective_target", private["count"]))
         high_volume = private.get("batch_mode", job.batch_mode) == "high_volume"
-        if high_volume:
+        preserve_voice = job.source_profile == "music" and job.music_audio_mode.value == "replace_music_keep_voice"
+        if high_volume and not preserve_voice:
             source_duration = float((private.get("source_metadata") or {}).get("duration", 0))
             pool = _high_volume_smart_candidates(words, job.style, requested, float(private["min_duration"]), float(private["max_duration"]), source_duration)
         else:
             pool = select_candidates(
-                words, job.style, min(30, max(requested, requested * 3)),
+                words, job.style, requested if preserve_voice else min(30, max(requested, requested * 3)),
                 float(private["min_duration"]), float(private["max_duration"]),
+                **({"strict_bounds": True} if preserve_voice else {}),
             )
         if local_only:
             self.start_step(job, "local_planning", detail="Planning isolated narration moments", label="Planning narration moments", progress=33, private=private)

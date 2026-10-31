@@ -49,6 +49,7 @@ def _settings_identity(
         "chunk_seconds": chunk_seconds,
         "context_seconds": context_seconds,
         "output_format": "pcm_s16le",
+        "timeline_alignment": "source-video-duration-and-audio-start-time-v1",
     }
     encoded = json.dumps(settings, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(encoded).hexdigest()
@@ -224,25 +225,30 @@ def _get_model(model_dir: Path) -> Any:
         return _MODEL
 
 
-def _probe_audio(source: Path, ffprobe: str) -> tuple[float, int]:
+def _probe_audio(source: Path, ffprobe: str) -> tuple[float, int, float, bool]:
     command = [
         ffprobe, "-v", "error", "-select_streams", "a:0", "-show_entries",
-        "stream=duration,channels,sample_rate", "-of", "json", str(source),
+        "stream=duration,channels,sample_rate,start_time:format=start_time", "-of", "json", str(source),
     ]
     try:
         result = subprocess.run(command, check=True, capture_output=True, text=True, timeout=30)
-        streams = json.loads(result.stdout).get("streams", [])
+        payload = json.loads(result.stdout)
+        streams = payload.get("streams", [])
         if not streams:
             raise VoiceSeparationError("Source has no decodable audio stream")
         stream = streams[0]
         channels = int(stream["channels"])
         duration = float(stream.get("duration") or 0)
+        duration_is_reliable = duration > 0
         if duration <= 0:
             duration_cmd = [ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", str(source)]
             duration = float(subprocess.run(duration_cmd, check=True, capture_output=True, text=True, timeout=30).stdout.strip())
-        if not np.isfinite(duration) or duration <= 0 or channels not in (1, 2):
+        container_start = float(payload.get("format", {}).get("start_time") or 0)
+        stream_start = float(stream.get("start_time") or container_start)
+        relative_start = stream_start - container_start
+        if not np.isfinite(duration) or duration <= 0 or not np.isfinite(relative_start) or channels not in (1, 2):
             raise VoiceSeparationError("Source audio must have a positive duration and one or two channels")
-        return duration, channels
+        return duration, channels, max(0.0, relative_start), duration_is_reliable
     except VoiceSeparationError:
         raise
     except (OSError, ValueError, KeyError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
@@ -340,13 +346,21 @@ def separate_voice(
     settings: Any,
     cancellation_callback: Callable[[], bool] | None = None,
     progress_callback: Callable[[float], None] | None = None,
+    timeline_duration: float | None = None,
 ) -> Path:
     """Write an isolated Spleeter vocals WAV atomically and return its path."""
     source_path, target_path = Path(source), Path(target)
     if not source_path.is_file() or source_path.stat().st_size <= 0:
         raise VoiceSeparationError(f"Source audio is missing or empty: {source_path}")
     target_path.parent.mkdir(parents=True, exist_ok=True)
-    duration, channels = _probe_audio(source_path, settings.ffprobe)
+    duration, channels, audio_start, duration_is_reliable = _probe_audio(source_path, settings.ffprobe)
+    timeline_duration = duration if timeline_duration is None else float(timeline_duration)
+    if not np.isfinite(timeline_duration) or timeline_duration <= 0:
+        raise VoiceSeparationError("Source video timeline must have a positive duration")
+    timeline_expected_frames = round(timeline_duration * MODEL_SAMPLE_RATE)
+    leading_frames = min(timeline_expected_frames, round(audio_start * MODEL_SAMPLE_RATE))
+    available_frames = timeline_expected_frames - leading_frames
+    expected_audio_frames = min(available_frames, round(duration * MODEL_SAMPLE_RATE))
     model_dir = _download_model(Path(settings.data_path) / "models", cancellation_callback)
     model = _get_model(model_dir)
 
@@ -356,14 +370,14 @@ def separate_voice(
     os.close(fd)
     partial = Path(partial_name)
     process: subprocess.Popen[bytes] | None = None
-    expected_frames = 0
+    decoded_frames = 0
     chunk_frames = CHUNK_SECONDS * MODEL_SAMPLE_RATE
     context_frames = CONTEXT_SECONDS * MODEL_SAMPLE_RATE
     bytes_per_frame = 2 * 4
     try:
         command = [
             settings.ffmpeg, "-hide_banner", "-loglevel", "error", "-xerror", "-err_detect", "explode",
-            "-nostdin", "-i", str(source_path),
+            "-nostdin", "-i", str(source_path), "-t", f"{timeline_duration:.6f}",
             "-map", "0:a:0", "-vn", "-sn", "-dn", "-ac", "2", "-ar", str(MODEL_SAMPLE_RATE),
             "-f", "f32le", "-acodec", "pcm_f32le", "pipe:1",
         ]
@@ -374,9 +388,17 @@ def separate_voice(
             wav.setnchannels(channels)
             wav.setsampwidth(2)
             wav.setframerate(MODEL_SAMPLE_RATE)
+            if leading_frames:
+                silence = np.zeros((_READ_FRAMES, channels), dtype="<i2")
+                remaining = leading_frames
+                while remaining:
+                    _cancelled(cancellation_callback)
+                    count = min(remaining, _READ_FRAMES)
+                    wav.writeframesraw(silence[:count].tobytes())
+                    remaining -= count
             carry = np.empty((0, 2), dtype=np.float32)
             eof = False
-            while True:
+            while decoded_frames < timeline_expected_frames - leading_frames:
                 _cancelled(cancellation_callback)
                 while carry.shape[0] < chunk_frames + context_frames and not eof:
                     raw = _read_exact(process.stdout, _READ_FRAMES * bytes_per_frame)
@@ -391,13 +413,13 @@ def separate_voice(
                     carry = np.concatenate((carry, decoded), axis=0)
                 if carry.shape[0] == 0:
                     break
-                core_count = min(chunk_frames, carry.shape[0])
+                core_count = min(chunk_frames, carry.shape[0], timeline_expected_frames - leading_frames - decoded_frames)
                 future_count = min(context_frames, max(0, carry.shape[0] - core_count))
                 if not eof and core_count == chunk_frames and future_count < context_frames:
                     continue
                 left_context = (
                     np.repeat(carry[:1], context_frames, axis=0)
-                    if expected_frames == 0 else previous_context
+                    if decoded_frames == 0 else previous_context
                 )
                 right = carry[core_count:core_count + context_frames]
                 right_pad_count = context_frames - right.shape[0]
@@ -415,14 +437,34 @@ def separate_voice(
                 start = context_frames
                 vocals = _infer(model, window, required_frames=start + core_count)
                 _write_pcm16(wav, vocals[start:start + core_count], channels)
-                expected_frames += core_count
+                decoded_frames += core_count
                 if progress_callback is not None:
-                    progress_callback(min(0.99, expected_frames / (duration * MODEL_SAMPLE_RATE)))
+                    progress_callback(min(0.99, (leading_frames + decoded_frames) / timeline_expected_frames))
                 if eof and core_count == carry.shape[0]:
                     carry = np.empty((0, 2), dtype=np.float32)
                     break
                 previous_context = carry[max(0, core_count - context_frames):core_count]
                 carry = carry[core_count:]
+            if duration_is_reliable:
+                tolerance_frames = round(max(0.1, duration * 0.005) * MODEL_SAMPLE_RATE)
+                if abs(decoded_frames - expected_audio_frames) > tolerance_frames:
+                    raise VoiceSeparationError(
+                        "Decoded source length does not match its audio stream duration "
+                        f"({decoded_frames / MODEL_SAMPLE_RATE:.3f}s decoded, "
+                        f"{expected_audio_frames / MODEL_SAMPLE_RATE:.3f}s expected)"
+                    )
+            trailing_frames = max(0, available_frames - decoded_frames)
+            if trailing_frames:
+                silence = np.zeros((_READ_FRAMES, channels), dtype="<i2")
+                while trailing_frames:
+                    _cancelled(cancellation_callback)
+                    count = min(trailing_frames, _READ_FRAMES)
+                    wav.writeframesraw(silence[:count].tobytes())
+                    trailing_frames -= count
+        # Drain any decoded samples beyond the video boundary so FFmpeg can
+        # exit cleanly instead of receiving a broken pipe.
+        while _read_exact(process.stdout, _READ_FRAMES * bytes_per_frame):
+            _cancelled(cancellation_callback)
 
         if process.stdout:
             process.stdout.close()
@@ -430,15 +472,9 @@ def separate_voice(
         return_code = process.wait(timeout=60)
         if return_code != 0:
             raise VoiceSeparationError(f"FFmpeg could not decode source audio: {stderr.decode(errors='replace')[-1000:]}")
-        if expected_frames == 0:
+        if decoded_frames == 0:
             raise VoiceSeparationError("Source audio decoded to no samples")
-        output_duration = expected_frames / MODEL_SAMPLE_RATE
-        duration_tolerance = max(0.1, duration * 0.005)
-        if abs(output_duration - duration) > duration_tolerance:
-            raise VoiceSeparationError(
-                "Decoded source length does not match its audio duration metadata "
-                f"({output_duration:.3f}s decoded, {duration:.3f}s reported)"
-            )
+        expected_frames = timeline_expected_frames
         _cancelled(cancellation_callback)
         _validate_output(partial, expected_frames, channels, settings.ffprobe)
         os.replace(partial, target_path)

@@ -8,7 +8,7 @@ from engine.database import Database
 from engine.hook_text import local_hook_text
 from engine.jobs import JobManager
 from engine.library import LibraryRules
-from engine.models import Clip, Job, Project
+from engine.models import Clip, Job, MusicAudioMode, Project
 from engine.providers import ProfileService
 from engine.security import SecretVault
 
@@ -138,3 +138,22 @@ def test_local_only_music_narration_planning_never_calls_provider(monkeypatch, t
     assert result == [candidate]
     assert calls == []
     assert next(step for step in job.steps if step.id == "local_planning").status == "complete"
+
+
+def test_keep_voice_planning_uses_strict_narration_selection(monkeypatch, tmp_path):
+    _, manager, job, private = cluster(tmp_path)
+    job.source_profile = "music"
+    job.music_audio_mode = MusicAudioMode.REPLACE_MUSIC_KEEP_VOICE
+    private.update({"count": 2, "min_duration": 8, "max_duration": 12})
+    candidate = object()
+    requested = []
+
+    def candidates(_words, _style, count, *_bounds, strict_bounds=False):
+        requested.append((count, strict_bounds))
+        return [candidate]
+
+    monkeypatch.setattr("engine.jobs.select_candidates", candidates)
+    result = manager._plan_smart_candidates(job, private, [], local_only=True)
+
+    assert requested == [(2, True)]
+    assert result == [candidate]

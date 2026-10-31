@@ -219,3 +219,33 @@ def test_opt_in_real_model_produces_decodable_full_length_stem(tmp_path):
     result = separation.separate_voice(source, target, _settings(tmp_path))
     assert result == target
     separation._validate_output(target, round(2.0 * separation.MODEL_SAMPLE_RATE), 2, shutil.which("ffprobe"))
+
+
+@pytest.mark.parametrize("container_start", [0.0, 5.0])
+def test_video_timeline_pads_shorter_audio_and_delayed_audio(tmp_path, monkeypatch, container_start):
+    audio = _make_source(tmp_path / "audio.wav", 0.6)
+    source = tmp_path / "delayed-audio.mkv"
+    command = [shutil.which("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y"]
+    if container_start:
+        command.extend(["-itsoffset", str(container_start)])
+    command.extend(["-f", "lavfi", "-i", "color=c=black:s=32x32:r=10:d=1"])
+    command.extend(["-itsoffset", str(container_start + 0.2), "-i", str(audio)])
+    command.extend([
+        "-map", "0:v:0", "-map", "1:a:0", "-c:v", "ffv1", "-c:a", "pcm_s16le",
+        "-t", str(container_start + 1), str(source),
+    ])
+    subprocess.run(command, check=True, capture_output=True)
+    assert separation._probe_audio(source, shutil.which("ffprobe"))[2] == pytest.approx(0.2, abs=0.02)
+    model = IdentityModel()
+    _patch_pipeline(monkeypatch, model)
+    target = tmp_path / "aligned-voice.wav"
+
+    separation.separate_voice(source, target, _settings(tmp_path), timeline_duration=1.0)
+
+    with wave.open(str(target), "rb") as wav:
+        pcm = np.frombuffer(wav.readframes(wav.getnframes()), dtype="<i2")
+        assert wav.getnframes() == separation.MODEL_SAMPLE_RATE
+    assert not np.any(pcm[:round(0.15 * separation.MODEL_SAMPLE_RATE)])
+    assert np.any(pcm[round(0.30 * separation.MODEL_SAMPLE_RATE):round(0.65 * separation.MODEL_SAMPLE_RATE)])
+    assert not np.any(pcm[round(0.9 * separation.MODEL_SAMPLE_RATE):])
+    assert separation.validate_voice_stem(target, 1.0, _settings(tmp_path))

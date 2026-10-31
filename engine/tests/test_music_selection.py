@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from engine.selection import group_music_lyric_lines, select_music_candidates
+from types import SimpleNamespace
+
+from engine import selection
+from engine.selection import group_music_lyric_lines, select_candidates, select_music_candidates
 
 
 def _words(line_count: int = 8) -> list[dict[str, object]]:
@@ -130,3 +133,32 @@ def test_music_candidates_never_return_subsecond_or_under_minimum_windows() -> N
     assert select_music_candidates(words, "serious", 1, 0, 5) == []
     selected = select_music_candidates(_words(4), "serious", 5, 3, 12)
     assert all(item.end - item.start >= 3 for item in selected)
+
+
+def test_strict_speech_selection_maximizes_valid_nonoverlapping_count(monkeypatch):
+    words = []
+    for base, prefix in ((0.0, "first"), (8.0, "second")):
+        for index in range(5):
+            start = base + index * 1.6
+            text = f"{prefix} {index}"
+            if index == 4:
+                text += "."
+            words.append({"text": text, "start": start, "end": start + 0.3})
+        words[-1]["end"] = base + 8.0
+
+    monkeypatch.setattr(
+        selection, "_score",
+        lambda segment, _style, _target: SimpleNamespace(
+            total=100.0 if float(segment[-1]["end"]) - float(segment[0]["start"]) > 12 else 20.0
+        ),
+    )
+
+    selected = select_candidates(words, "serious", 2, 8, 16, strict_bounds=True)
+
+    assert [(item.start, item.end) for item in selected] == [(0.0, 8.0), (8.0, 16.0)]
+
+
+def test_strict_speech_selection_does_not_use_short_chunk_fallback():
+    words = [{"text": "Only short speech.", "start": 0.0, "end": 4.0}]
+
+    assert select_candidates(words, "serious", 1, 8, 12, strict_bounds=True) == []
