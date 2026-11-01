@@ -18,6 +18,9 @@ const STEP_LABELS = [
 
 const nowIso = () => new Date().toISOString();
 
+/** How long the active step has been running. A test may raise it to check long elapsed text. */
+let activeElapsedMs = 42_000;
+
 function buildSteps(phase: Phase) {
   const stamp = nowIso();
   const steps = STEP_LABELS.map((label, index) => ({
@@ -27,7 +30,7 @@ function buildSteps(phase: Phase) {
   for (let index = 0; index < 4; index++) Object.assign(steps[index], { status: "complete", completedAt: stamp });
   Object.assign(steps[5], { status: "skipped", completedAt: stamp, detail: SKIPPED_DETAIL });
   if (phase === "running" || phase === "paused") {
-    Object.assign(steps[4], { status: "active", startedAt: new Date(Date.now() - 42_000).toISOString(), detail: STAGE_LABEL, currentItem: 26, totalItems: 389 });
+    Object.assign(steps[4], { status: "active", startedAt: new Date(Date.now() - activeElapsedMs).toISOString(), detail: STAGE_LABEL, currentItem: 26, totalItems: 389 });
   }
   if (phase === "failed") Object.assign(steps[4], { status: "failed", completedAt: stamp, detail: FAILED_DETAIL });
   if (phase === "complete") {
@@ -355,5 +358,39 @@ test.describe("workspace focus pass", () => {
 
     expect(harness.errors).toEqual([]);
     expect(harness.failedRequests).toEqual([]);
+  });
+
+  test("long elapsed: step icons clear the edge, elapsed reads in full, the bar is the logo gradient", async ({ page }) => {
+    test.setTimeout(120_000);
+    activeElapsedMs = 42 * 60_000 + 10_000;
+    try {
+      await setup(page, "running");
+      for (const [width, height] of [[1440, 900], [1024, 768]] as const) {
+        await page.setViewportSize({ width, height });
+        await openWorkspace(page);
+        if ((await stepsToggle(page).getAttribute("aria-expanded")) !== "true") await stepsToggle(page).click();
+        const row = page.locator(".checklist-step.status-active");
+        const rowBox = await row.boundingBox();
+        const iconBox = await row.locator(".checklist-icon").boundingBox();
+        expect(iconBox!.x - rowBox!.x, `${width}px icon inset`).toBeGreaterThanOrEqual(8);
+        const elapsed = row.locator(".checklist-elapsed");
+        await expect(elapsed).toHaveText(/^Elapsed 42:\d\d$/);
+        expect(await elapsed.evaluate((el) => el.scrollWidth <= el.clientWidth + 1), `${width}px elapsed clipped`).toBe(true);
+        const e = await elapsed.boundingBox();
+        const status = await row.locator(".checklist-status-text").boundingBox();
+        expect(status!.x - (e!.x + e!.width), `${width}px gap before status`).toBeGreaterThanOrEqual(8);
+      }
+      const fill = page.locator(".checklist-heading > .job-strip .progress-track span");
+      const read = () => fill.evaluate((el) => { const s = getComputedStyle(el); return { image: s.backgroundImage, anim: s.animationName }; });
+      const moving = await read();
+      expect(moving.image).toContain("linear-gradient");
+      expect(moving.anim).toContain("logo-flow");
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      const still = await read();
+      expect(still.anim).toBe("none");
+      expect(still.image).toContain("linear-gradient");
+    } finally {
+      activeElapsedMs = 42_000;
+    }
   });
 });
