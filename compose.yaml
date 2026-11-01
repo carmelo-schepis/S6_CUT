@@ -106,7 +106,10 @@ services:
       engine:
         condition: service_healthy
     ports:
-      - "${S6_PORT:-8080}:8080"
+      - target: 8080
+        published: "${S6_PORT:-8080}"
+        host_ip: "${S6_HOST_IP:-0.0.0.0}"
+        protocol: tcp
     networks:
       - private
     healthcheck:

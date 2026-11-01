@@ -40,7 +40,7 @@ Frontend: http://localhost:8080
 Backend:  http://localhost:8001
 ```
 
-The engine's own port is bound to loopback and is never published to your network. That is not, however, an access control for the API: the web gateway proxies `/api/` — including the API docs at `/api/docs` — through to the engine, and S6_cut has no authentication. The API is therefore reachable from every interface the frontend is published on, which by default is all of them. Anyone who can reach the frontend can create, read and delete your projects and Library media. Set `S6_PORT` to bind it narrower — `S6_PORT=127.0.0.1:8080` restricts it to this machine, and `S6_PORT=<one-address>:8080` to a single interface — or keep it on a trusted network.
+The engine's own port is bound to loopback and is never published to your network. That is not, however, an access control for the API: the web gateway proxies `/api/` — including the API docs at `/api/docs` — through to the engine, and S6_cut has no authentication. The API is therefore reachable from every interface the frontend is published on, which by default is all of them. To restrict the frontend to this machine, set `S6_HOST_IP=127.0.0.1`; for a specific interface, set `S6_HOST_IP` to that IPv4 address. Both installers also accept the legacy `S6_PORT=127.0.0.1:8080` form. When invoking Compose directly, keep `S6_PORT` numeric and set `S6_HOST_IP` separately.
 
 To uninstall while keeping your data:
 
@@ -126,7 +126,8 @@ Copy `.env.example` to `.env`. Important values:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `S6_PORT` | `8080` | Published web/portal port — the URL you open in a browser and the only port reachable from your network |
+| `S6_PORT` | `8080` | Numeric published web/portal port |
+| `S6_HOST_IP` | `0.0.0.0` | Interface for the published web port; use `127.0.0.1` for local-only access |
 | `S6_ENGINE_PORT` | `8001` | Engine API port, bound to the host loopback only (API docs and debugging) |
 | `S6_DATA_PATH` | `./data` | Persistent database, jobs, uploads, Library, cache, models, exports, and instance secrets |
 | `S6_WHISPER_MODEL` | `base` | CPU-friendly local Faster-Whisper model used only by explicit Smart clips |
