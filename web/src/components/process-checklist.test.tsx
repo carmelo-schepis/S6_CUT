@@ -209,6 +209,80 @@ describe("ProcessChecklist – finished run", () => {
 });
 
 // ---------------------------------------------------------------
+describe("ProcessChecklist – collapsible, summary and quiet (Workspace)", () => {
+  const runningSteps = [complete, active, pending];
+
+  it("is closed by default while running and the toggle opens and closes it", () => {
+    vi.useRealTimers();
+    render(<ProcessChecklist steps={runningSteps} jobState="active" collapsible />);
+    expect(screen.queryByRole("list", { name: "Short creation progress" })).not.toBeInTheDocument();
+    const toggle = screen.getByRole("button", { name: "Show steps" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).toHaveAttribute("aria-controls", screen.getByTestId("progress-step-list").id);
+    act(() => { toggle.click(); });
+    expect(screen.getByRole("list", { name: "Short creation progress" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Hide steps" })).toHaveAttribute("aria-expanded", "true");
+    act(() => { screen.getByRole("button", { name: "Hide steps" }).click(); });
+    expect(screen.queryByRole("list", { name: "Short creation progress" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show steps" })).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("opens by default when a step failed, and the user's choice then wins", () => {
+    vi.useRealTimers();
+    render(<ProcessChecklist steps={[complete, failed]} jobState="failed" collapsible />);
+    expect(screen.getByRole("list", { name: "Short creation progress" })).toBeInTheDocument();
+    expect(screen.getByText("Provider request failed [redacted]")).toBeInTheDocument();
+    act(() => { screen.getByRole("button", { name: "Hide steps" }).click(); });
+    expect(screen.queryByRole("list", { name: "Short creation progress" })).not.toBeInTheDocument();
+  });
+
+  it("renders the summary in the heading row and keeps the h2 as the region's name", () => {
+    render(<ProcessChecklist steps={runningSteps} jobState="active" collapsible summary={<div className="job-strip">Rendering clips 19%</div>} />);
+    const region = screen.getByRole("region", { name: "Short creation progress" });
+    expect(region).toContainElement(screen.getByText("Rendering clips 19%"));
+    const heading = screen.getByRole("heading", { name: "Short creation progress" });
+    expect(heading).toHaveClass("sr-only");
+  });
+
+  it("keeps the visible heading when no summary is given", () => {
+    render(<ProcessChecklist steps={runningSteps} jobState="active" collapsible />);
+    expect(screen.getByRole("heading", { name: "Short creation progress" })).not.toHaveClass("sr-only");
+  });
+
+  it("counts the active step as Step i of M, and keeps the finished wording", () => {
+    const { rerender } = render(<ProcessChecklist steps={runningSteps} jobState="active" collapsible />);
+    expect(screen.getByText("Step 2 of 3")).toBeInTheDocument();
+    rerender(<ProcessChecklist steps={[complete, skipped]} jobState="complete" collapsible />);
+    expect(screen.getByText("1 of 2 complete")).toBeInTheDocument();
+    rerender(<ProcessChecklist steps={[complete, pending]} jobState="active" collapsible />);
+    expect(screen.getByText("2 steps")).toBeInTheDocument();
+  });
+
+  it("does not use the Step i of M wording unless collapsible", () => {
+    render(<ProcessChecklist steps={runningSteps} jobState="active" />);
+    expect(screen.getByText("3 steps")).toBeInTheDocument();
+    expect(screen.queryByText(/^Step \d+ of/)).not.toBeInTheDocument();
+  });
+
+  it("quiet drops the active row's detail and its x of y, but keeps elapsed and status", () => {
+    const completeWithItems: ProcessingStep = { ...complete, currentItem: 4, totalItems: 4 };
+    render(<ProcessChecklist steps={[completeWithItems, active]} jobState="active" quiet />);
+    const row = screen.getByTestId("progress-step-s2");
+    expect(row).toHaveTextContent("In progress");
+    expect(row).toHaveTextContent(/Elapsed 0:00/);
+    expect(row).not.toHaveTextContent("Rendering output 3");
+    expect(row).not.toHaveTextContent("3 of 5");
+    expect(screen.getByTestId("progress-step-s3")).not.toHaveTextContent("4 of 4");
+  });
+
+  it("quiet keeps skipped and failed detail", () => {
+    render(<ProcessChecklist steps={[skipped, failed]} jobState="failed" quiet />);
+    expect(screen.getByText("No connected provider; used local planning")).toBeInTheDocument();
+    expect(screen.getByText("Provider request failed [redacted]")).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------
 describe("ProcessChecklist – accessibility", () => {
   it("has exactly one aria-live polite region for transitions", () => {
     render(<ProcessChecklist steps={[pending, active]} />);

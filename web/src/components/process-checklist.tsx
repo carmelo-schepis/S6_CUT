@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { AlertTriangle, Check, Circle, LoaderCircle, Minus } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+import { AlertTriangle, Check, ChevronDown, Circle, LoaderCircle, Minus } from "lucide-react";
 import { formatSeconds, statesCount } from "../status-format";
 import type { JobState, ProcessingStep } from "../types";
 
@@ -48,8 +48,15 @@ function statusLabel(status: ProcessingStep["status"], paused: boolean) {
  *
  * `compact` is the iPhone/iPad status view's plain-row version; it also leaves
  * out an item count the step's own detail already states ("575s of 1161s").
+ *
+ * Three opt-in props (all off by default) serve the Workspace page:
+ * `summary` takes the heading row in place of the visible title (the title
+ * stays in the DOM as screen-reader text, so the region keeps its name);
+ * `collapsible` keeps the steps closed until asked for, except that a failed
+ * step opens them; `quiet` drops the active row's detail and the "x of y"
+ * counts the summary already carries.
  */
-export function ProcessChecklist({ steps, jobState, compact = false, label = "Short creation progress" }: { steps: ProcessingStep[]; jobState?: JobState; compact?: boolean; label?: string }) {
+export function ProcessChecklist({ steps, jobState, compact = false, label = "Short creation progress", summary, collapsible = false, quiet = false }: { steps: ProcessingStep[]; jobState?: JobState; compact?: boolean; label?: string; summary?: ReactNode; collapsible?: boolean; quiet?: boolean }) {
   const [now, setNow] = useState(() => Date.now());
   const paused = jobState === "paused";
 
@@ -68,6 +75,10 @@ export function ProcessChecklist({ steps, jobState, compact = false, label = "Sh
   const [freshlyCompleted, setFreshlyCompleted] = useState<Set<string>>(() => new Set());
   // A finished run folds to one line; the steps stay one click away.
   const [stepsOpen, setStepsOpen] = useState(false);
+  // Collapsible panels use a tri-state: null means "no choice yet", so the
+  // default (closed, or open on a failure) can follow the steps until the user
+  // decides.
+  const [userOpen, setUserOpen] = useState<boolean | null>(null);
   const [prevSnapshot, setPrevSnapshot] = useState<{ steps: ProcessingStep[]; jobState?: JobState } | null>(null);
   const prev = prevSnapshot;
 
@@ -126,21 +137,29 @@ export function ProcessChecklist({ steps, jobState, compact = false, label = "Sh
   const headingId = `${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-heading`;
   const listId = `${headingId}-steps`;
   const finished = steps.every((step) => step.status === "complete" || step.status === "skipped");
-  const folded = finished && !stepsOpen;
+  const hasFailed = steps.some((step) => step.status === "failed");
+  const activeIndex = steps.findIndex((step) => step.status === "active");
+  const folded = collapsible ? !(userOpen ?? hasFailed) : finished && !stepsOpen;
+  const completeCount = steps.filter((step) => step.status === "complete").length;
+  const countText = finished ? `${completeCount} of ${steps.length} complete`
+    : collapsible && activeIndex >= 0 ? `Step ${activeIndex + 1} of ${steps.length}`
+      : `${steps.length} step${steps.length === 1 ? "" : "s"}`;
 
   return (
-    <section className={`checklist-panel${compact ? " compact" : ""}${paused ? " is-paused" : ""}`} aria-labelledby={headingId} data-testid="short-creation-progress">
+    <section className={`checklist-panel${compact ? " compact" : ""}${collapsible ? " is-collapsible" : ""}${paused ? " is-paused" : ""}`} aria-labelledby={headingId} data-testid="short-creation-progress">
       <div className="checklist-heading">
-        <h2 id={headingId}>{label}</h2>
-        <span className="checklist-count">{finished ? `${steps.filter((step) => step.status === "complete").length} of ${steps.length} complete` : `${steps.length} step${steps.length === 1 ? "" : "s"}`}</span>
-        {finished && <button type="button" className="checklist-toggle" aria-expanded={!folded} aria-controls={listId} onClick={() => setStepsOpen((open) => !open)}>{folded ? "Show steps" : "Hide steps"}</button>}
+        <h2 id={headingId} className={summary ? "sr-only" : undefined}>{label}</h2>
+        {summary}
+        <span className="checklist-count">{countText}</span>
+        {collapsible && <button type="button" className="checklist-toggle checklist-toggle-chevron" aria-label={folded ? "Show steps" : "Hide steps"} title={folded ? "Show steps" : "Hide steps"} aria-expanded={!folded} aria-controls={listId} onClick={() => setUserOpen(folded)}><ChevronDown size={16} aria-hidden="true" className="checklist-chevron" /></button>}
+        {!collapsible && finished && <button type="button" className="checklist-toggle" aria-expanded={!folded} aria-controls={listId} onClick={() => setStepsOpen((open) => !open)}>{folded ? "Show steps" : "Hide steps"}</button>}
       </div>
       <div className="checklist-live sr-only" role="status" aria-live="polite">{announcement}</div>
       <ol id={listId} className="process-checklist" aria-label={label} data-testid="progress-step-list" hidden={folded}>
         {steps.map((step) => {
           const active = step.status === "active";
           const progress = itemProgress(step);
-          const shownProgress = compact && statesCount(step.detail, step.currentItem) ? null : progress;
+          const shownProgress = quiet && (active || step.status === "complete") ? null : compact && statesCount(step.detail, step.currentItem) ? null : progress;
           return (
             <li key={step.id} className={`checklist-step status-${step.status}${active ? " active-row" : ""}${step.status === "complete" && freshlyCompleted.has(step.id) ? " checkmark-new" : ""}`} aria-current={active ? "step" : undefined} data-step-id={step.id} data-testid={`progress-step-${step.id}`}>
               <span className="checklist-icon" aria-hidden="true">{stepIcon(step.status)}</span>
@@ -148,10 +167,10 @@ export function ProcessChecklist({ steps, jobState, compact = false, label = "Sh
                 <span className="checklist-label" title={step.label}>{step.label}</span>
                 <span className="checklist-step-meta">
                   <span className="checklist-status-text">{statusLabel(step.status, paused)}</span>
-                  {active && !paused && (step.detail || step.startedAt) && (
-                    <span className="checklist-detail" title={step.detail || undefined}>
+                  {active && !paused && (quiet ? step.startedAt : (step.detail || step.startedAt)) && (
+                    <span className="checklist-detail" title={quiet ? undefined : step.detail || undefined}>
                       {step.startedAt && <time className="checklist-elapsed">Elapsed {formatElapsed(step.startedAt, now)}</time>}
-                      {step.detail && <span className="checklist-detail-text" title={step.detail}>{step.detail}</span>}
+                      {!quiet && step.detail && <span className="checklist-detail-text" title={step.detail}>{step.detail}</span>}
                     </span>
                   )}
                   {(step.status === "skipped" || step.status === "failed") && step.detail && (

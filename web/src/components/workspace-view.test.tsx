@@ -244,6 +244,8 @@ describe("WorkspaceView – processing checklist placement", () => {
     };
     mockGetJob.mockResolvedValue(withSteps);
     renderView();
+    // The progress box is a dropdown: closed until "Show steps" is clicked.
+    fireEvent.click(await screen.findByRole("button", { name: "Show steps" }));
     expect(await screen.findByRole("list", { name: "Short creation progress" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Short creation progress" })).toBeInTheDocument();
     expect(screen.getByText("Source received")).toBeInTheDocument();
@@ -259,6 +261,83 @@ describe("WorkspaceView – processing checklist placement", () => {
     renderView();
     expect(await screen.findAllByText("Planning with provider")).toBeTruthy();
     expect(document.querySelector(".checklist-panel")).toBeNull();
+  });
+
+  const runningWithSteps: Job = {
+    ...freshSmartJob,
+    steps: [
+      { id: "s1", label: "Source received", status: "complete", completedAt: "2026-08-13T00:00:00Z" },
+      { id: "s2", label: "Video validated", status: "active", startedAt: "2026-08-13T00:00:00Z" },
+    ],
+  };
+
+  it("puts the progress band inside the progress region, with no standalone band, when steps exist", async () => {
+    mockGetJob.mockResolvedValue(runningWithSteps);
+    renderView();
+    const region = await screen.findByRole("region", { name: "Short creation progress" });
+    expect(region.querySelector(".checklist-heading > .job-strip")).toHaveTextContent("Planning with provider");
+    expect(document.querySelectorAll(".job-strip")).toHaveLength(1);
+    expect(document.querySelector(".workspace-page > .job-strip")).toBeNull();
+    expect(region).toHaveTextContent("Step 2 of 2");
+    expect(screen.getByRole("button", { name: "Show steps" })).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("keeps the standalone band when the job has no steps", async () => {
+    mockGetJob.mockResolvedValue(freshSmartJob);
+    renderView();
+    await screen.findAllByText("Planning with provider");
+    expect(document.querySelector(".workspace-page > .job-strip")).not.toBeNull();
+    expect(document.querySelector(".checklist-panel")).toBeNull();
+  });
+
+  it("shows no status chip in the header while the band is showing", async () => {
+    mockGetJob.mockResolvedValue(runningWithSteps);
+    renderView();
+    await screen.findByRole("region", { name: "Short creation progress" });
+    expect(document.querySelector(".workspace-controls .status")).toBeNull();
+  });
+
+  it("shows a status chip in the header once the job is complete, and no band", async () => {
+    mockGetJob.mockResolvedValue({ ...runningWithSteps, state: "complete", stage: "done", stageLabel: "1 clip ready", progress: 100, steps: [{ id: "s1", label: "Source received", status: "complete", completedAt: "2026-08-13T00:00:00Z" }] });
+    renderView();
+    await waitFor(() => expect(document.querySelector(".workspace-controls .status")).toHaveTextContent("1 clip ready"));
+    expect(document.querySelector(".job-strip")).toBeNull();
+    expect(screen.getByText("1 of 1 complete")).toBeInTheDocument();
+  });
+
+  it("treats a partial run as finished: header chip, no band", async () => {
+    mockGetJob.mockResolvedValue({ ...runningWithSteps, state: "partial", stage: "done", stageLabel: "1 of 2 clips ready", progress: 100, steps: [{ id: "s1", label: "Source received", status: "complete", completedAt: "2026-08-13T00:00:00Z" }] });
+    renderView();
+    await waitFor(() => expect(document.querySelector(".workspace-controls .status")).toHaveTextContent("1 of 2 clips ready"));
+    expect(document.querySelector(".job-strip")).toBeNull();
+  });
+
+  it("opens the failed run's steps without a click", async () => {
+    mockGetJob.mockResolvedValue({ ...runningWithSteps, state: "failed", stage: "failed", stageLabel: "Failed", steps: [{ id: "s2", label: "Video validated", status: "failed", detail: "Bad file" }] });
+    renderView();
+    expect(await screen.findByRole("list", { name: "Short creation progress" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Hide steps" })).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("toggles the header details panel, which holds the Business folder picker", async () => {
+    mockListFolders.mockResolvedValue([
+      { id: "unsorted", name: "Unsorted", parentId: null, description: "", color: null, archived: false, system: true, createdAt: "2026-01-01", updatedAt: "2026-01-01" },
+      { id: "acme", name: "Acme Corp", parentId: null, description: "", color: null, archived: false, system: false, createdAt: "2026-01-01", updatedAt: "2026-01-01" },
+    ]);
+    mockGetJob.mockResolvedValue(runningWithSteps);
+    renderView();
+    const toggle = await screen.findByRole("button", { name: /Clip mode · serious/ });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).toHaveAttribute("aria-controls", "workspace-project-details");
+    const details = document.getElementById("workspace-project-details")!;
+    expect(details).toHaveAttribute("hidden");
+    await waitFor(() => expect(details.querySelector("#workspace-business-folder")).not.toBeNull());
+    expect(details.querySelector(".workspace-source-meta")).toHaveTextContent("test.mp4");
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(details).not.toHaveAttribute("hidden");
+    fireEvent.click(toggle);
+    expect(details).toHaveAttribute("hidden");
   });
 });
 
