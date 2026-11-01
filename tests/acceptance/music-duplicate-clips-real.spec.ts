@@ -80,7 +80,7 @@ test("Music repeats valid windows through completion, Library and export", async
   await expect(page.getByText(/Music found 3 valid unique lyric windows and repeated 10 window/)).toBeVisible();
   await expect(page.locator(".clip-tile.complete")).toHaveCount(13);
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.getByRole("heading", { name: "Short creation progress" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Short creation progress" })).toBeVisible();
   await page.setViewportSize({ width: 1440, height: 960 });
 
   const exportResponse = await request.post(`/api/v1/jobs/${jobId}/export`, { data: { clipIds: finished.clips.map((clip: { id: string }) => clip.id) } });

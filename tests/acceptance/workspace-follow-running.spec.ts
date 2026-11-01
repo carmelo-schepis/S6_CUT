@@ -85,8 +85,9 @@ for (const viewport of [
     await expect(page.getByRole("button", { name: "Workspace", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Workspace", exact: true }).click();
     await expect(page.locator(".topbar-context")).toContainText("Stable running project");
-    await expect(page.locator(".workspace-controls")).toContainText("Rendering stable job");
-    await expect(page.locator(".workspace-controls")).not.toContainText("Waiting in queue");
+    await expect(page.locator(".job-strip")).toContainText("Rendering stable job");
+    await expect(page.locator(".job-strip")).not.toContainText("Waiting in queue");
+    await expect(page.locator(".workspace-controls")).not.toContainText("Rendering stable job");
 
     // When the selected job completes, its next active job is followed even
     // though project ordering still favors another updatedAt timestamp.
@@ -100,13 +101,13 @@ for (const viewport of [
     await page.getByRole("button", { name: "Refresh" }).click();
     await page.getByRole("button", { name: "Workspace", exact: true }).click();
     await expect(page.locator(".topbar-context")).toContainText("Next running project");
-    await expect(page.locator(".workspace-controls")).toContainText("Rendering newest job");
+    await expect(page.locator(".job-strip")).toContainText("Rendering newest job");
 
     // Opening a specific project from Jobs selects its latest same-project job;
     // the visible Pause control must target that job's identity.
     await page.getByRole("button", { name: "Jobs", exact: true }).click();
     await page.locator('.job-card[data-job-id="b-job-new"]').getByRole("button", { name: "Open" }).click();
-    await expect(page.locator(".workspace-controls")).toContainText("Rendering newest job");
+    await expect(page.locator(".job-strip")).toContainText("Rendering newest job");
     await page.getByRole("button", { name: "Pause", exact: false }).click();
     await expect.poll(() => controlledPath).toBe("/jobs/b-job-new/control/pause");
     await expect(page.locator(".topbar-context")).toContainText("Next running project");

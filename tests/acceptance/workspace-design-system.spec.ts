@@ -47,7 +47,9 @@ const GRID = 4;
 const BAND_GAP = 24;
 /** `--box-gap`: the space between two boxed sections, and between panes. */
 const BOX_GAP = 16;
-/** The sections drawn as boxes (see "Workspace boxes" in styles.css). */
+/** The sections drawn as boxes (see "Workspace boxes" in styles.css). `job-strip` is the standalone
+ *  band, a direct child of the page (a job with no steps); a band nested in the checklist is part of
+ *  the `checklist-panel` box and is not a page band. */
 const BOXED = ["stalled-callout", "job-strip", "notice-panel", "checklist-panel", "workspace-grid", "board-panel"];
 /** `--box-gap` again: the gutter between two boxed panes. */
 const PANE_GUTTER = BOX_GAP;

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
-import { AlertTriangle, Captions, Check, Clock, Copy, Download, Eye, FileText, Film, Pause, Play, RefreshCw, RotateCcw, RotateCw, SlidersHorizontal, Sparkles, Square, Volume2, Zap } from "lucide-react";
+import { AlertTriangle, Captions, Check, ChevronDown, Clock, Copy, Download, Eye, FileText, Film, Pause, Play, RefreshCw, RotateCcw, RotateCw, SlidersHorizontal, Sparkles, Square, Volume2, Zap } from "lucide-react";
 import { changeProjectFolder, controlJob, createZip, generateYoutubeMetadata, getJob, jobEventsUrl, listAssets, listFolders, readableError, regenerateSourceOnly, retryClip, setClipSelection, updateYoutubeMetadata } from "../api";
 import { emitLibraryChanged } from "../library-sync";
 import { jobSchema, type Clip, type Job, type LibraryAsset, type LibraryFolder, type Project } from "../types";
@@ -82,6 +82,8 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
   const [jobFetched, setJobFetched] = useState(false);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
   const [sourceTab, setSourceTab] = useState<"transcript" | "media">("transcript");
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const detailsToggleRef = useRef<HTMLButtonElement>(null);
   const [mediaAssets, setMediaAssets] = useState<LibraryAsset[]>([]);
   const [mediaLoading, setMediaLoading] = useState(false);
   const [mediaError, setMediaError] = useState<string | null>(null);
@@ -580,6 +582,14 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
   const musicTrack = job?.musicTrack || project.musicTrack;
   const musicAudioMode = job?.musicAudioMode || project.musicAudioMode;
   const musicSongGain = job?.musicSongGain ?? project.musicSongGain ?? 0.25;
+  const musicAudioSummary = musicAudioMode === "replace_music_keep_voice"
+    ? musicTrack ? "Keep voice, replace background music · song at " + Math.round(musicSongGain * 100) + "%" : "Keep voice, replace background music · voice only"
+    : musicTrack ? musicAudioMode === "mix_original" ? "Original audio + song · song at " + Math.round(musicSongGain * 100) + "%" : "Song only" : "";
+  // The one-line progress band shows until the job reaches a terminal state; in
+  // those states the header carries the status chip instead. Exactly one of the
+  // two renders.
+  const showBand = !!job && !isTerminalJob(job);
+  const band = job && showBand ? (() => { const facts = jobFacts(job); return <div className="job-strip"><div className="job-strip-text"><strong>{facts.stage}</strong>{facts.detail && <span>{facts.detail}</span>}</div><Progress value={facts.percent} indeterminate={facts.indeterminate} label={facts.stage} /></div>; })() : null;
 
   return <div className="workspace-page">
     {project.batchMode === "high_volume" && <section className="batch-summary" aria-label="High-volume batch counts">
@@ -587,9 +597,9 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
       {(job?.capExplanation || project.capExplanation) && <p>{job?.capExplanation || project.capExplanation}</p>}
     </section>}
     <div className="workspace-commandbar">
-      <div className="workspace-project-context"><span className="mode-chip">{project.mode === "clip" ? <Film size={13} /> : <FileText size={13} />} {project.mode === "clip" ? "Clip mode" : "Legacy video"}</span><div className="workspace-project-meta"><h1 className="workspace-project-name" title={project.name}>{project.name}</h1><span className="workspace-source-meta" title={sourceLabel}>{sourceLabel}</span><span className="workspace-secondary-meta">{project.style}{project.sourceProfile === "music" ? " · Music / sung vocals" : ""}{project.mode === "clip" && project.contentFormat === "long" ? " · 16:9 landscape" : ""}{job ? ` · ${job.processingMode} processing` : ""}</span>{musicTrack && <span className="workspace-secondary-meta">Song: {musicTrack.title} · {musicTrack.speed === 1 ? "standard speed" : `${musicTrack.speed}× speed`}</span>}{(musicTrack || musicAudioMode === "replace_music_keep_voice") && <span className="workspace-secondary-meta">{musicAudioMode === "replace_music_keep_voice" ? musicTrack ? `Keep voice, replace background music · song at ${Math.round(musicSongGain * 100)}%` : "Keep voice, replace background music · voice only" : musicAudioMode === "mix_original" ? `Original audio + song · song at ${Math.round(musicSongGain * 100)}%` : "Song only"}</span>}</div></div>
-      <div className="workspace-controls">{folders.length > 0 && <div className="workspace-folder-field"><label htmlFor="workspace-business-folder">Business folder</label><select id="workspace-business-folder" value={project.libraryFolderId || folders.find((folder) => folder.system)?.id || ""} disabled={busy} onChange={(event) => void changeFolder(event.target.value)}>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></div>}
-        {job && <StatusBadge state={job.state} label={job.stageLabel} />}
+      <div className="workspace-project-context"><div className="workspace-project-meta"><h1 className="workspace-project-name" title={project.name}>{project.name}</h1><button type="button" ref={detailsToggleRef} className="workspace-meta-toggle" aria-expanded={detailsOpen} aria-controls="workspace-project-details" onClick={() => setDetailsOpen((open) => !open)}><span className="workspace-secondary-meta">{project.mode === "clip" ? "Clip mode" : "Legacy video"} · {project.style}{project.sourceProfile === "music" ? " · Music / sung vocals" : ""}{project.mode === "clip" && project.contentFormat === "long" ? " · 16:9 landscape" : ""}{job ? ` · ${job.processingMode} processing` : ""} · {folderName(project.libraryFolderId, folders, project)}{musicAudioSummary ? " · " + musicAudioSummary : ""}</span><ChevronDown size={14} aria-hidden="true" className="workspace-meta-chevron" /></button></div></div>
+      <div className="workspace-controls">
+        {job && !showBand && <StatusBadge state={job.state} label={job.stageLabel} />}
         {project.mode === "clip" && job && ["active", "queued", "recovered"].includes(job.state) && <Button disabled={busy} onClick={() => act("pause")}><Pause size={15} /> Pause</Button>}
         {project.mode === "clip" && job && ["active", "queued", "recovered", "paused"].includes(job.state) && <Button disabled={busy} onClick={() => act("stop-keep")}><Square size={14} /> Stop & keep</Button>}
         {project.mode === "clip" && job?.state === "paused" && <Button disabled={busy} onClick={() => act("resume")}><Play size={15} /> Resume</Button>}
@@ -598,6 +608,12 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
         <Button variant="primary" disabled={!selectedIds.length || busy} onClick={exportSelected}><Download size={15} /> Download ZIP <span className="button-count">{selectedIds.length}</span></Button>
       </div>
     </div>
+    <div id="workspace-project-details" className="workspace-project-details" hidden={!detailsOpen} onKeyDown={(event) => { if (event.key === "Escape") { setDetailsOpen(false); detailsToggleRef.current?.focus(); } }}>
+      <div className="workspace-detail-row"><span className="workspace-detail-label">Source</span><span className="workspace-source-meta" title={sourceLabel}>{sourceLabel}</span></div>
+      {musicTrack && <div className="workspace-detail-row"><span className="workspace-detail-label">Song</span><span className="workspace-detail-value">{musicTrack.title} · {musicTrack.speed === 1 ? "standard speed" : `${musicTrack.speed}× speed`}</span></div>}
+      {musicAudioSummary && <div className="workspace-detail-row"><span className="workspace-detail-label">Audio</span><span className="workspace-detail-value">{musicAudioSummary}</span></div>}
+      {folders.length > 0 && <div className="workspace-folder-field"><label htmlFor="workspace-business-folder">Business folder</label><select id="workspace-business-folder" value={project.libraryFolderId || folders.find((folder) => folder.system)?.id || ""} disabled={busy} onChange={(event) => void changeFolder(event.target.value)}>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></div>}
+    </div>
 
     {waitingForEngine && <div className="workspace-offline" role="status">Waiting for the local engine — progress is preserved.</div>}
     {error && !waitingForEngine && <div className="workspace-alert" role="alert"><AlertTriangle size={16} /> {error}<button onClick={() => setError(null)}>Dismiss</button></div>}
@@ -605,12 +621,12 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
     {project.mode === "clip" && job?.state === "failed" && <div className="failure-strip" role="alert"><AlertTriangle size={17} /><div><strong>Project failed</strong><span>{job.error || "The engine could not finish this project. Completed outputs, if any, are still preserved."}</span></div><div><Button disabled={busy} onClick={() => act(job.canRetryImport ? "retry-import" : "retry-failed")}><RefreshCw size={14} /> {job.canRetryImport ? "Retry import" : "Retry failed work"}</Button>{providerCouldHelp && <Button onClick={onConfigureProviders}>Configure providers</Button>}{canContinueLocally && <Button disabled={busy} onClick={() => act("retry-failed")}>Continue with local fallback</Button>}</div></div>}
     {project.mode === "clip" && job?.state === "stalled" && <div className="failure-strip" role="alert"><AlertTriangle size={17} /><div><strong>{job.stage === "music_track" ? "Background song download stalled" : "YouTube download stalled"}</strong><span>{job.downloadProgress?.message || "No bytes arrived during the configured inactivity window. The retained partial download is safe to retry."}</span></div>{job.canRetryImport && <Button disabled={busy} onClick={() => act("retry-import")}><RefreshCw size={14} /> Retry import</Button>}</div>}
     {project.mode === "clip" && job?.canRetryImport && job.state === "cancelled_kept" && <div className="warning-strip" role="status"><AlertTriangle size={14} /><span>{job.downloadProgress ? `Stopped with partial YouTube download retained (${formatBytes(job.downloadProgress.downloadedBytes)}). Retry import to resume it.` : "YouTube import stopped before the download began. Retry import to start it."}</span><Button disabled={busy} onClick={() => act("retry-import")}><RefreshCw size={14} /> Retry import</Button></div>}
-    {job && !["complete", "failed", "cancelled_kept"].includes(job.state) && (() => { const facts = jobFacts(job); return <div className="job-strip"><div className="job-strip-text"><strong>{facts.stage}</strong>{facts.detail && <span>{facts.detail}</span>}</div><Progress value={facts.percent} indeterminate={facts.indeterminate} label={facts.stage} /></div>; })()}
+    {!job?.steps.length && band}
     {job && job.warnings.length > 0 && <WarningList warnings={job.warnings} />}
 
     {/* A long-form project renders a landscape video, not a short, so the
         panel names the work it is actually reporting on. */}
-    {job && job.steps.length > 0 && <ProcessChecklist steps={job.steps} jobState={job.state} label={(job.contentFormat ?? project.contentFormat) === "long" ? "Long-form creation progress" : undefined} />}
+    {job && job.steps.length > 0 && <ProcessChecklist steps={job.steps} jobState={job.state} label={(job.contentFormat ?? project.contentFormat) === "long" ? "Long-form creation progress" : undefined} collapsible quiet summary={band ?? undefined} />}
 
     <div className="workspace-grid" data-testid="lower-workspace">
       <aside className="source-panel panel" aria-label="Source material">
