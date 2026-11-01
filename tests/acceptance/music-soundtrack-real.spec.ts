@@ -5,7 +5,7 @@ import { test, expect } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { assertPlayback, checkPlayback, zipEntry } from './support/workspace';
+import { assertPlayback, checkPlayback, openOptionRow, zipEntry } from './support/workspace';
 
 const fixtures = process.env.S6_SOUNDTRACK_FIXTURES;
 const container = process.env.S6_SOUNDTRACK_CONTAINER;
@@ -81,6 +81,7 @@ for (const item of cases) {
       await page.getByRole('button', { name: 'Fewer clips' }).click();
     }
     // The title deliberately matches a lyric: audio must never become a visual overlay.
+    await openOptionRow(page, "song");
     if (item.source === 'upload' || (item.source === 'none' && item.audioMode)) await page.getByLabel('Background song MP3').setInputFiles({ name: 'song.mp3', mimeType: 'audio/mpeg', buffer: await fs.readFile(path.join(fixtures!, 'short-song.mp3')) });
     if (item.source === 'youtube') await page.getByLabel('YouTube song URL').fill('https://music.youtube.com/watch?v=BaW_jenozKc');
     if (item.audioMode) {
