@@ -283,6 +283,30 @@ describe("Projects create flow", () => {
     expect(mockCreateClipJob.mock.calls[0][0]).not.toHaveProperty("hookText");
   });
 
+  it("shows music editorial styles only in Music mode and keeps each mode's choice", async () => {
+    mockCreateClipJob.mockResolvedValue({ project, job: undefinedJob });
+    render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    const pressed = () => [...document.querySelectorAll<HTMLElement>(".style-grid .style-card[aria-pressed=true] strong")].map((node) => node.textContent);
+    const labels = () => [...document.querySelectorAll<HTMLElement>(".style-grid .style-card strong")].map((node) => node.textContent);
+    expect(labels()).toEqual(["Funny", "Serious", "Educational", "Hype"]);
+    expect(pressed()).toEqual(["Educational"]);
+    fireEvent.click(screen.getByRole("button", { name: "Music / sung vocals" }));
+    expect(labels()).toEqual(["Chorus", "Energy", "Storytelling", "Clear lyrics"]);
+    expect(pressed()).toEqual(["Chorus"]);
+    fireEvent.click(screen.getByRole("button", { name: /Storytelling/ }));
+    expect(pressed()).toEqual(["Storytelling"]);
+    fireEvent.click(screen.getByRole("button", { name: /Clip mode/ }));
+    expect(labels()).toEqual(["Funny", "Serious", "Educational", "Hype"]);
+    expect(pressed()).toEqual(["Educational"]);
+    fireEvent.click(screen.getByRole("button", { name: "Music / sung vocals" }));
+    expect(pressed()).toEqual(["Storytelling"]);
+    fireEvent.click(screen.getByRole("tab", { name: "YouTube" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "YouTube URL" }), { target: { value: "https://www.youtube.com/watch?v=fixture" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Create/i }));
+    await waitFor(() => expect(mockCreateClipJob).toHaveBeenCalled());
+    expect(mockCreateClipJob.mock.calls[0][0]).toMatchObject({ style: "serious", sourceProfile: "music" });
+  });
+
   it("uses Music mode's effective Smart processing after Fast was selected", () => {
     render(<ProjectsView health={health} providersLoaded hasSelectedProvider onCreated={vi.fn()} />);
     openOptions();

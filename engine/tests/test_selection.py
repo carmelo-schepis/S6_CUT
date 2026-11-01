@@ -78,3 +78,21 @@ def test_short_source_fallback_returns_candidate_below_requested_minimum() -> No
     picked = select_candidates(words, "serious", 2, 20, 60)
     assert picked, "the fallback must still offer the only available moment"
     assert picked[0].end - picked[0].start < 20
+
+
+def test_music_styles_use_lyric_specific_weighting() -> None:
+    from engine.selection import MUSIC_STYLE_WEIGHTS, STYLE_WEIGHTS
+
+    words = [
+        {"text": text, "start": index * .5, "end": index * .5 + .4}
+        for index, text in enumerate("never let go I love the way we always run wild under the city lights tonight".split())
+    ]
+    scored = {style: _score_music(words, style, 6) for style in ("hype", "funny", "serious", "educational")}
+    assert scored["hype"].explanation.endswith("music Chorus weighting.")
+    assert scored["funny"].explanation.endswith("music Energy weighting.")
+    assert scored["serious"].explanation.endswith("music Storytelling weighting.")
+    assert scored["educational"].explanation.endswith("music Clear lyrics weighting.")
+    assert len({round(item.total, 6) for item in scored.values()}) == 4
+    # Speech weighting is unchanged and separate from the music table.
+    assert STYLE_WEIGHTS["hype"]["hook"] == 1.55
+    assert MUSIC_STYLE_WEIGHTS["hype"] is not STYLE_WEIGHTS["hype"]
