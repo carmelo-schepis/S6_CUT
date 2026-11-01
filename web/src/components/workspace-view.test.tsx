@@ -305,6 +305,13 @@ describe("WorkspaceView – processing checklist placement", () => {
     expect(screen.getByText("1 of 1 complete")).toBeInTheDocument();
   });
 
+  it("treats a partial run as finished: header chip, no band", async () => {
+    mockGetJob.mockResolvedValue({ ...runningWithSteps, state: "partial", stage: "done", stageLabel: "1 of 2 clips ready", progress: 100, steps: [{ id: "s1", label: "Source received", status: "complete", completedAt: "2026-08-13T00:00:00Z" }] });
+    renderView();
+    await waitFor(() => expect(document.querySelector(".workspace-controls .status")).toHaveTextContent("1 of 2 clips ready"));
+    expect(document.querySelector(".job-strip")).toBeNull();
+  });
+
   it("opens the failed run's steps without a click", async () => {
     mockGetJob.mockResolvedValue({ ...runningWithSteps, state: "failed", stage: "failed", stageLabel: "Failed", steps: [{ id: "s2", label: "Video validated", status: "failed", detail: "Bad file" }] });
     renderView();

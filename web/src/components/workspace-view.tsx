@@ -583,7 +583,7 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
   // The one-line progress band shows until the job reaches a terminal state; in
   // those states the header carries the status chip instead. Exactly one of the
   // two renders.
-  const showBand = !!job && !["complete", "failed", "cancelled_kept"].includes(job.state);
+  const showBand = !!job && !isTerminalJob(job);
   const band = job && showBand ? (() => { const facts = jobFacts(job); return <div className="job-strip"><div className="job-strip-text"><strong>{facts.stage}</strong>{facts.detail && <span>{facts.detail}</span>}</div><Progress value={facts.percent} indeterminate={facts.indeterminate} label={facts.stage} /></div>; })() : null;
 
   return <div className="workspace-page">

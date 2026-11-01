@@ -298,10 +298,15 @@ test.describe("workspace command bar", () => {
     // details; the label must not add height to its control row.
     await page.locator(".workspace-meta-toggle").click();
     await expect(page.locator("#workspace-business-folder")).toBeVisible();
-    const folder = await page.locator("#workspace-project-details .workspace-folder-field").evaluate((field) => ({
-      fieldHeight: field.getBoundingClientRect().height,
-      selectHeight: field.querySelector("select")!.getBoundingClientRect().height,
-    }));
+    // The field is `display: contents`, so its own box is empty; measure the
+    // label and the select, which are the real boxes, and take their extent.
+    const folder = await page.locator("#workspace-project-details .workspace-folder-field").evaluate((field) => {
+      const label = field.querySelector("label")!.getBoundingClientRect();
+      const select = field.querySelector("select")!.getBoundingClientRect();
+      const top = Math.min(label.top, select.top);
+      const bottom = Math.max(label.bottom, select.bottom);
+      return { fieldHeight: bottom - top, selectHeight: select.height };
+    });
     expect(folder.fieldHeight, "the folder field is taller than one control height")
       .toBeLessThanOrEqual(measured.controlHeight + 1);
     expect(folder.selectHeight, "the folder select is taller than one control height")

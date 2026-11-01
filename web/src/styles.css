@@ -2944,14 +2944,16 @@ input[type="checkbox"]:checked::before {
   font-weight: inherit;
   line-height: var(--ws-meta-line);
 }
+/* Values wrap rather than clip: a long song or source title is the reason the
+   details are open, so it must read in full. */
 .workspace-detail-value, .workspace-project-details .workspace-source-meta {
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
+  white-space: normal;
+  overflow-wrap: anywhere;
   color: var(--text);
   font-size: var(--ws-meta-size);
   line-height: var(--ws-meta-line);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .workspace-project-details .workspace-folder-field select { justify-self: start; max-width: 100%; }
 
