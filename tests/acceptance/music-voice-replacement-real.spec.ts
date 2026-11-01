@@ -72,7 +72,7 @@ function normalizedCorrelation(left: Buffer, right: Buffer) {
   return dot / Math.sqrt(leftPower * rightPower);
 }
 
-async function waitForTerminal(request: any, id: string) {
+async function waitForTerminal(request: any, id: string, timeoutMs = 1_800_000) {
   const read = async () => {
     const response = await request.get(`/api/v1/jobs/${id}`);
     expect(response.ok(), await response.text()).toBeTruthy();
@@ -82,42 +82,45 @@ async function waitForTerminal(request: any, id: string) {
     const value = await read();
     if (['failed', 'partial', 'stalled', 'cancelled_kept'].includes(value.state)) throw new Error(JSON.stringify(value));
     return value.state === 'complete' && value.steps.every((step: any) => ['complete', 'skipped'].includes(step.status));
-  }, { timeout: 600_000, intervals: [500, 1000, 2500] }).toBe(true);
+  }, { timeout: timeoutMs, intervals: [500, 1000, 2500] }).toBe(true);
   return read();
 }
 
-async function submit(page: any, request: any, options: { name: string; source: 'upload' | 'youtube'; gain: number; speed: number; late: boolean; replacement: 'upload' | 'youtube' | 'invalid' | 'none'; audioMode?: 'replace_music_keep_voice' | 'song_only' | 'mix_original'; video?: string; expectedStatus?: number }) {
+async function submit(page: any, request: any, options: { name: string; source: 'upload' | 'youtube'; gain: number; speed: number; late: boolean; replacement: 'upload' | 'youtube' | 'invalid' | 'none'; audioMode?: 'replace_music_keep_voice' | 'song_only' | 'mix_original'; video?: string; replacementUrl?: string; expectedStatus?: number; count?: number; minDuration?: number; maxDuration?: number }) {
+  await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Create a project' })).toBeVisible();
+  await expect(page.locator("#startup-screen")).toHaveCount(0, { timeout: 30_000 });
   if (options.source === 'upload') {
     await page.getByLabel('Choose video file').setInputFiles(path.join(fixtures!, options.video || 'source.mp4'));
   } else {
     await page.getByRole('tab', { name: 'YouTube', exact: true }).click();
-    await page.getByLabel('YouTube URL', { exact: true }).fill(process.env.S6_MUSIC_VOICE_YOUTUBE_SOURCE!);
+    await page.getByLabel('YouTube URL', { exact: true }).fill(options.video || process.env.S6_MUSIC_VOICE_YOUTUBE_SOURCE!);
   }
   await page.getByRole('button', { name: 'Music / sung vocals' }).click();
-  while (Number(await page.locator('.count-control strong').textContent()) > 1) await page.getByRole('button', { name: 'Fewer clips' }).click();
+  const requestedCount = options.count ?? 1;
+  while (Number(await page.locator('.count-control strong').textContent()) > requestedCount) await page.getByRole('button', { name: 'Fewer clips' }).click();
   await page.getByRole('button', { name: 'Background song', exact: true }).click();
   if (options.replacement === 'upload') {
     await page.getByLabel('Background song MP3').setInputFiles(path.join(fixtures!, 'replacement.mp3'));
   } else if (options.replacement === 'invalid') {
     await page.getByLabel('Background song MP3').setInputFiles(path.join(fixtures!, 'invalid-song.mp3'));
   } else if (options.replacement === 'youtube') {
-    await page.getByLabel('YouTube song URL').fill(process.env.S6_MUSIC_VOICE_YOUTUBE_SONG!);
+    await page.getByLabel('YouTube song URL').fill(options.replacementUrl || process.env.S6_MUSIC_VOICE_YOUTUBE_SONG!);
   }
   const audioMode = options.audioMode || mode;
   if (audioMode === mode) await page.getByRole('button', { name: /Keep voice, replace background music/i }).click();
   else await page.getByRole('button', { name: audioMode === 'song_only' ? 'Song only' : 'Original audio + song', exact: true }).click();
   await page.getByLabel('Song speed').selectOption(String(options.speed));
   await page.getByRole('button', { name: 'Advanced controls' }).click();
-  await page.getByLabel('Minimum seconds').fill('8');
-  await page.getByLabel('Maximum seconds').fill('10');
+  await page.getByLabel('Minimum seconds').fill(String(options.minDuration ?? 8));
+  await page.getByLabel('Maximum seconds').fill(String(options.maxDuration ?? 10));
   await page.getByLabel('Project name').fill(options.name);
   // Gain is collected and submitted as part of the mode; 0% explicitly tests that
   // the separated voice remains even when the replacement song is silent.
   if (options.replacement !== 'none' && audioMode !== 'song_only') await page.getByRole('slider', { name: /replacement song volume|background song volume/i }).fill(String(options.gain));
   const creation = page.waitForResponse((response: any) => response.url().endsWith('/api/v1/jobs/clip') && response.request().method() === 'POST');
-  await page.getByRole('button', { name: 'Create 1 short clip', exact: true }).click();
+  await page.getByRole('button', { name: `Create ${requestedCount} short clip${requestedCount === 1 ? '' : 's'}`, exact: true }).click();
   const response = await creation;
   expect(response.status(), await response.text()).toBe(options.expectedStatus ?? 202);
   const payload = await response.json();
@@ -131,7 +134,7 @@ async function submit(page: any, request: any, options: { name: string; source: 
 test('Music replacement keeps real speech, replaces the song, and survives persisted edits, restart, refresh and export', async ({ page, request }, testInfo) => {
   test.skip(!fixtures || !container, 'Run only through scripts/qa/verify-music-voice-replacement.mjs with real media fixtures');
   test.skip(testInfo.project.name.startsWith('iPhone') || testInfo.project.name.startsWith('iPad'), 'Mobile layout is covered by the dedicated responsive case below');
-  test.setTimeout(1_200_000);
+  test.setTimeout(2_000_000);
   const manifest = JSON.parse(await fs.readFile(path.join(fixtures!, 'manifest.json'), 'utf8'));
   expect(manifest).toMatchObject({ schema: 1, speechWindow: { start: expect.any(Number), duration: expect.any(Number) }, replacement: { metricFrequencyHz: expect.any(Number) }, lateStartMin: expect.any(Number) });
   expect(process.env.S6_TEST_TRANSCRIPT_JSON).toBeUndefined();
@@ -285,7 +288,7 @@ function requireManifest() {
 test('live YouTube source with uploaded replacement uses the production downloader when configured', async ({ page, request }, testInfo) => {
   test.skip(!fixtures || !container || !process.env.S6_MUSIC_VOICE_YOUTUBE_SOURCE, 'No verified live YouTube source URL configured; no mocked downloader is permitted');
   test.skip(testInfo.project.name.startsWith('iPhone') || testInfo.project.name.startsWith('iPad'), 'Desktop live YouTube case only');
-  test.setTimeout(1_200_000);
+  test.setTimeout(2_000_000);
   const job = await submit(page, request, { name: `Live YouTube source voice replacement ${Date.now()}`, source: 'youtube', gain: 10, speed: 1, late: false, replacement: 'upload' });
   const finished = await waitForTerminal(request, job.id);
   expect(finished.musicAudioMode).toBe(mode);
@@ -300,7 +303,7 @@ test('live YouTube source with uploaded replacement uses the production download
 test('live YouTube replacement song with uploaded human source uses the production downloader when configured', async ({ page, request }, testInfo) => {
   test.skip(!fixtures || !container || !process.env.S6_MUSIC_VOICE_YOUTUBE_SONG, 'No verified live YouTube replacement URL configured; no mocked downloader is permitted');
   test.skip(testInfo.project.name.startsWith('iPhone') || testInfo.project.name.startsWith('iPad'), 'Desktop live YouTube case only');
-  test.setTimeout(1_200_000);
+  test.setTimeout(2_000_000);
   const job = await submit(page, request, { name: `Live YouTube song voice replacement ${Date.now()}`, source: 'upload', gain: 10, speed: 1, late: false, replacement: 'youtube' });
   const finished = await waitForTerminal(request, job.id);
   expect(finished.musicAudioMode).toBe(mode);
@@ -313,19 +316,46 @@ test('live YouTube replacement song with uploaded human source uses the producti
 test('live YouTube source and distinct YouTube replacement song complete through production downloading', async ({ page, request }, testInfo) => {
   test.skip(!fixtures || !container || !process.env.S6_MUSIC_VOICE_YOUTUBE_SOURCE || !process.env.S6_MUSIC_VOICE_YOUTUBE_SONG, 'Both verified live YouTube URLs are required; no mocked downloader is permitted');
   test.skip(testInfo.project.name.startsWith('iPhone') || testInfo.project.name.startsWith('iPad'), 'Desktop live YouTube case only');
-  test.setTimeout(1_200_000);
-  const queued = await submit(page, request, { name: `Live YouTube source and song ${Date.now()}`, source: 'youtube', gain: 10, speed: 1.25, late: false, replacement: 'youtube' });
+  test.setTimeout(2_000_000);
+  const queued = await submit(page, request, { name: `Live YouTube source and song ${Date.now()}`, source: 'youtube', gain: 0, speed: 1.5, late: false, replacement: 'youtube', count: 5, minDuration: 20, maxDuration: 120 });
   const finished = await waitForTerminal(request, queued.id);
   const projectResponse = await request.get(`/api/v1/projects/${finished.projectId}`);
   expect(projectResponse.ok(), await projectResponse.text()).toBeTruthy();
   expect((await projectResponse.json()).sourceKind).toBe('youtube');
   expect(finished.musicAudioMode).toBe(mode);
-  expect(finished.musicSongGain).toBe(.1);
-  expect(finished.musicTrack).toMatchObject({ source: 'youtube', speed: 1.25 });
+  expect(finished.musicSongGain).toBe(0);
+  expect(finished.musicTrack).toMatchObject({ source: 'youtube', speed: 1.5 });
+  expect(finished.clips).toHaveLength(5);
+  const windows = finished.clips.map((clip: any) => [clip.start, clip.end]).sort((a: number[], b: number[]) => a[0] - b[0]);
+  expect(windows.every(([start, end]: number[]) => start >= 0 && end - start >= 20 && end - start <= 120)).toBe(true);
+  expect(windows.slice(1).every((window: number[], index: number) => window[0] >= windows[index][1])).toBe(true);
+  const outputName = 'live-youtube-voice-replacement.mp4';
+  await saveClip(request, finished.clips[0], outputName);
+  const outputProbe = probe(outputName);
+  expect(outputProbe.streams.map((stream) => stream.codec_type)).toEqual(expect.arrayContaining(['video', 'audio']));
+  expect(Math.abs(Number(outputProbe.format.duration) - finished.clips[0].duration)).toBeLessThan(1);
+  expect(audioMetrics(decodedAudio(outputName, 0, Math.min(12, finished.clips[0].duration)), 440).rms).toBeGreaterThan(.003);
   expect(finished.steps.find((step: any) => step.id === 'audio')?.status).toBe('complete');
   expect(finished.steps.find((step: any) => step.id === 'transcribe')?.status).toBe('complete');
   expect(finished.state).toBe('complete');
   await testInfo.attach('live-youtube-source-and-song-job', { body: JSON.stringify(finished, null, 2), contentType: 'application/json' });
+});
+
+test('live alternate YouTube pair preserves five bounded windows at 0.75 song speed with audible replacement gain', async ({ page, request }, testInfo) => {
+  test.skip(!fixtures || !container || !process.env.S6_MUSIC_VOICE_YOUTUBE_SOURCE_ALT || !process.env.S6_MUSIC_VOICE_YOUTUBE_SONG_ALT, 'No verified alternate live YouTube pair configured; no mocked downloader is permitted');
+  test.skip(testInfo.project.name.startsWith('iPhone') || testInfo.project.name.startsWith('iPad'), 'Desktop live YouTube case only');
+  test.setTimeout(2_000_000);
+  const queued = await submit(page, request, { name: `Live alternate YouTube source and song ${Date.now()}`, source: 'youtube', video: process.env.S6_MUSIC_VOICE_YOUTUBE_SOURCE_ALT!, gain: 10, speed: .75, late: false, replacement: 'youtube', replacementUrl: process.env.S6_MUSIC_VOICE_YOUTUBE_SONG_ALT!, count: 5, minDuration: 20, maxDuration: 120 });
+  const finished = await waitForTerminal(request, queued.id);
+  expect(finished.musicAudioMode).toBe(mode);
+  expect(finished.musicSongGain).toBe(.1);
+  expect(finished.musicTrack).toMatchObject({ source: 'youtube', speed: .75 });
+  expect(finished.clips).toHaveLength(5);
+  const windows = finished.clips.map((clip: any) => [clip.start, clip.end]).sort((a: number[], b: number[]) => a[0] - b[0]);
+  expect(windows.every(([start, end]: number[]) => start >= 0 && end - start >= 20 && end - start <= 120)).toBe(true);
+  expect(windows.slice(1).every((window: number[], index: number) => window[0] >= windows[index][1])).toBe(true);
+  expect(finished.state).toBe('complete');
+  await testInfo.attach('live-alternate-youtube-source-and-song-job', { body: JSON.stringify(finished, null, 2), contentType: 'application/json' });
 });
 
 test('a real unsupported separator input fails with a clear terminal error, without fallback audio', async ({ page, request }, testInfo) => {

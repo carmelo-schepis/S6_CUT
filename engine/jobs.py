@@ -48,6 +48,33 @@ def _music_transcription_duration(video_duration: float, has_selected_track: boo
     return min(video_duration + _MUSIC_TRANSCRIPTION_CONTEXT_SECONDS, maximum_duration)
 
 
+
+def _validate_music_windows(
+    clips: list[Clip], planning_duration: float, minimum: float, maximum: float, *,
+    allow_identical: bool = True,
+) -> None:
+    """Validate music clip windows, rejecting non-finite persisted boundaries."""
+    if not all(math.isfinite(value) for value in (planning_duration, minimum, maximum)):
+        raise MediaError("Music boundary limits must be finite numbers")
+    windows: list[tuple[float, float]] = []
+    for clip in clips:
+        start, end = float(clip.start), float(clip.end)
+        if not math.isfinite(start) or not math.isfinite(end):
+            raise MediaError(f"Clip {clip.index} has a non-finite saved boundary; retry planning before rendering")
+        duration = end - start
+        if not math.isfinite(duration):
+            raise MediaError(f"Clip {clip.index} has an invalid saved duration; retry planning before rendering")
+        if start < -1e-6 or end > planning_duration + 1e-6 or duration < minimum - 1e-6 or duration > maximum + 1e-6:
+            raise MediaError(f"Clip {clip.index} falls outside the requested {minimum:g}-{maximum:g}s bounds or source timeline")
+        windows.append((start, end))
+    if not allow_identical and len(windows) != len(set(windows)):
+        raise MediaError("Keep voice clips must use distinct narration windows; completed outputs were kept.")
+    previous_end = 0.0
+    for start, end in sorted(set(windows)):
+        if start < previous_end - 1e-6:
+            raise MediaError(f"Clip starting at {start:.2f}s overlaps the previous window ending at {previous_end:.2f}s")
+        previous_end = end
+
 def _probe_detail(metadata: dict[str, Any]) -> str:
     details: list[str] = []
     duration = metadata.get("duration")
@@ -979,12 +1006,12 @@ class JobManager:
         self._restore_proven_steps(job, private, as_of)
         self._save(job, private)
 
-    def _reset_steps_for_retry(self, job: Job) -> None:
+    def _reset_steps_for_retry(self, job: Job, *, recheck_boundaries: bool = False) -> None:
         """Retry resets only the render/output/project steps the retried work re-runs."""
         done = sum(1 for clip in job.clips if clip.state == "complete")
         total = len(job.clips)
         for step in job.steps:
-            if step.id in {"render", "verify", "ready"}:
+            if step.id in ({"render", "verify", "ready", "boundaries"} if recheck_boundaries else {"render", "verify", "ready"}):
                 step.status = "pending"
                 step.detail = "Retrying failed outputs"
                 step.started_at = None
@@ -1036,10 +1063,14 @@ class JobManager:
             raise RetiredScriptJobError("Legacy jobs cannot be reconciled")
         self._init_steps(job, private)
         self._repair_step_shape(job, private)
-        if job.steps and any(clip.state == "queued" for clip in job.clips):
+        preserve_voice = job.source_profile == "music" and job.music_audio_mode.value == "replace_music_keep_voice"
+        if preserve_voice and job.clips and job.state == "recovered":
+            self._reset_steps_for_retry(job, recheck_boundaries=True)
+            self._save(job, private)
+        elif job.steps and any(clip.state == "queued" for clip in job.clips):
             render_step = next((step for step in job.steps if step.id == "render"), None)
             if render_step and render_step.status == "complete":
-                self._reset_steps_for_retry(job)
+                self._reset_steps_for_retry(job, recheck_boundaries=preserve_voice)
                 self._save(job, private)
 
     @staticmethod
@@ -1866,6 +1897,22 @@ class JobManager:
         self.skip_step(job, "local_planning", detail="OpenRouter planning succeeded", private=private)
         return chosen
 
+    def _verify_music_boundaries(
+        self, job: Job, private: dict[str, Any], planning_duration: float, *, allow_identical: bool = True,
+    ) -> None:
+        self.start_step(job, "boundaries", detail="Verifying music clip windows", label="Verifying music boundaries", progress=36, private=private)
+        try:
+            _validate_music_windows(
+                job.clips, planning_duration,
+                float(private["min_duration"]), float(private["max_duration"]),
+                allow_identical=allow_identical,
+            )
+        except MediaError as exc:
+            self.fail_step(job, "boundaries", detail=str(exc), private=private)
+            raise
+        distinct = len({(float(item.start), float(item.end)) for item in job.clips})
+        self.complete_step(job, "boundaries", detail=f"{distinct} music boundaries verified", private=private)
+
     def _repair_saved_music_plan(self, job: Job, private: dict[str, Any], words: list[dict[str, Any]], planning_duration: float) -> None:
         """Reconcile a saved 'Keep voice, replace background music' plan.
 
@@ -1879,14 +1926,30 @@ class JobManager:
         minimum = float(private["min_duration"])
         maximum = float(private["max_duration"])
         completed = [clip for clip in job.clips if clip.state == "complete"]
-        retained = sorted({(float(clip.start), float(clip.end)) for clip in completed})
+        for clip in completed:
+            start, end = float(clip.start), float(clip.end)
+            if not math.isfinite(start) or not math.isfinite(end) or not math.isfinite(end - start):
+                raise MediaError(
+                    f"Completed clip {clip.index} has a non-finite saved boundary; its published output was kept. "
+                    "Repair the project from a valid checkpoint before continuing."
+                )
+        completed_windows = [(float(clip.start), float(clip.end)) for clip in completed]
+        if len(completed_windows) != len(set(completed_windows)):
+            raise MediaError(
+                "Completed Keep voice clips repeat the same narration window; published outputs were kept. "
+                "Remove or regenerate the duplicate clip before continuing."
+            )
+        retained = sorted(set(completed_windows))
 
         def overlaps(left: tuple[float, float], right: tuple[float, float]) -> bool:
             return max(0.0, min(left[1], right[1]) - max(left[0], right[0])) > 1e-6
 
         def window_is_usable(clip: Clip) -> bool:
-            duration = float(clip.end) - float(clip.start)
-            if clip.start < -1e-6 or clip.end > planning_duration + 1e-6:
+            start, end = float(clip.start), float(clip.end)
+            duration = end - start
+            if not math.isfinite(start) or not math.isfinite(end) or not math.isfinite(duration):
+                return False
+            if start < -1e-6 or end > planning_duration + 1e-6:
                 return False
             if duration < minimum - 1e-6 or duration > maximum + 1e-6:
                 return False
@@ -1894,7 +1957,14 @@ class JobManager:
 
         kept: list[Clip] = []
         discarded: list[Clip] = []
-        for clip in sorted((item for item in job.clips if item.state != "complete"), key=lambda item: (float(item.start), float(item.end), item.index)):
+        for clip in sorted(
+            (item for item in job.clips if item.state != "complete"),
+            key=lambda item: (
+                float(item.start) if math.isfinite(float(item.start)) else math.inf,
+                float(item.end) if math.isfinite(float(item.end)) else math.inf,
+                item.index,
+            ),
+        ):
             if window_is_usable(clip) and not any(overlaps((float(clip.start), float(clip.end)), (float(item.start), float(item.end))) for item in kept):
                 kept.append(clip)
             else:
@@ -1918,12 +1988,10 @@ class JobManager:
         reserve = retained + [(float(item.start), float(item.end)) for item in kept]
         requested = int(private.get("effective_target", private["count"]))
         reserved_count = len(reserve)
-        candidates = [
-            candidate for candidate in select_candidates(
-                words, job.style, requested + reserved_count, minimum, maximum, strict_bounds=True,
-            )
-            if not any(overlaps((candidate.start, candidate.end), window) for window in reserve)
-        ][:len(slots)]
+        candidates = select_candidates(
+            words, job.style, requested + reserved_count, minimum, maximum,
+            strict_bounds=True, reserved_windows=tuple(reserve),
+        )[:len(slots)]
         if len(candidates) < len(slots):
             raise MediaError(
                 f"Only {reserved_count + len(candidates)} of {requested} narration windows fit without overlapping "
@@ -2560,10 +2628,6 @@ class JobManager:
         words = transcript["words"]
         boundary_truncated_words: list[dict[str, Any]] = []
         if profile == "music":
-            boundary_truncated_words = [
-                word for word in words
-                if float(word.get("start", 0)) < planning_duration < float(word.get("end", 0))
-            ]
             diagnostics = transcript.get("diagnostics") if isinstance(transcript.get("diagnostics"), dict) else {}
             invalid_count = int(diagnostics.get("invalid_timing_count") or 0)
             if invalid_count:
@@ -2573,12 +2637,29 @@ class JobManager:
                 )
                 if warning not in job.warnings:
                     job.warnings.append(warning)
-            words = [
-                {**word, "end": min(float(word["end"]), planning_duration)}
-                for word in words
-                if float(word.get("start", 0)) < planning_duration
-                and float(word.get("end", 0)) > float(word.get("start", 0))
-            ]
+            if preserve_voice:
+                # Strict narration planning filters malformed timing without
+                # changing the raw cached transcript or its diagnostics.
+                timed_words = _timed_words(words)
+                boundary_truncated_words = [
+                    word for word in timed_words
+                    if float(word["start"]) < planning_duration < float(word["end"])
+                ]
+                words = [
+                    {**word, "end": min(float(word["end"]), planning_duration)}
+                    for word in timed_words if float(word["start"]) < planning_duration
+                ]
+            else:
+                boundary_truncated_words = [
+                    word for word in words
+                    if float(word.get("start", 0)) < planning_duration < float(word.get("end", 0))
+                ]
+                words = [
+                    {**word, "end": min(float(word["end"]), planning_duration)}
+                    for word in words
+                    if float(word.get("start", 0)) < planning_duration
+                    and float(word.get("end", 0)) > float(word.get("start", 0))
+                ]
         if preserve_voice and job.clips:
             # A saved plan with invalid unpublished windows previously failed
             # the pre-render guard forever, because retry skipped replanning
@@ -2599,7 +2680,7 @@ class JobManager:
                 self.start_step(job, "local_planning", detail="Grouping timed words into lyric lines", label="Grouping lyric lines locally", progress=33, private=private)
                 self.complete_step(job, "local_planning", detail=f"{len(candidates)} duration-bounded lyric windows planned", private=private)
             self.start_step(job, "select", detail="Selecting complete moments", label="Finding coherent, complete moments", progress=34, private=private)
-            if not candidates and private.get("batch_mode", job.batch_mode) != "high_volume":
+            if not candidates and (preserve_voice or private.get("batch_mode", job.batch_mode) != "high_volume"):
                 if preserve_voice:
                     raise MediaError("Isolated narration did not contain enough timed speech for the requested duration; choose a shorter clip or a source with a longer spoken passage")
                 if profile == "music":
@@ -2617,7 +2698,7 @@ class JobManager:
                     )
                     if warning not in job.warnings:
                         job.warnings.insert(0, warning)
-            if len(candidates) < target and private.get("batch_mode", job.batch_mode) == "high_volume":
+            if len(candidates) < target and private.get("batch_mode", job.batch_mode) == "high_volume" and not preserve_voice:
                 requested_count = int(private.get("count", target))
                 final_target, reason = _high_volume_shortfall(requested_count, len(candidates), source_duration, "timed-transcript")
                 job.effective_target = final_target
@@ -2672,58 +2753,47 @@ class JobManager:
             job.planned_count = len(clips)
             self._save(job, private)
             self.complete_step(job, "select", detail=f"{len(clips)} moments selected", private=private)
-            self.start_step(job, "boundaries", detail="Verifying clip boundaries against the source timeline", label="Verifying clip boundaries", progress=36, private=private)
-            for clip in clips:
-                clip_timeline_duration = planning_duration if profile == "music" else float(metadata["duration"])
-                if clip.start < 0 or clip.end > clip_timeline_duration + 1e-6 or clip.end <= clip.start:
-                    raise MediaError(f"Clip {clip.index} falls outside the source timeline")
-            if profile == "music":
-                # Attribute narration-bounds failures to the boundaries step,
-                # before any output exists.  Identical windows collapse like the
-                # final pre-render guard, so legacy lyric repetition stays legal.
-                boundary_minimum = float(private["min_duration"])
-                boundary_maximum = float(private["max_duration"])
+            if profile != "music":
+                self.start_step(job, "boundaries", detail="Verifying clip boundaries against the source timeline", label="Verifying clip boundaries", progress=36, private=private)
                 for clip in clips:
-                    boundary_duration = float(clip.end) - float(clip.start)
-                    if boundary_duration < boundary_minimum - 1e-6 or boundary_duration > boundary_maximum + 1e-6:
-                        raise MediaError(f"Clip {clip.index} is {boundary_duration:.1f}s, outside the requested {boundary_minimum:g}–{boundary_maximum:g}s bounds")
-                boundary_windows = sorted({(float(item.start), float(item.end)) for item in sorted(clips, key=lambda item: (item.start, item.end, item.index))})
-                boundary_previous_end = 0.0
-                for boundary_start, boundary_end in boundary_windows:
-                    if boundary_start < boundary_previous_end - 1e-6:
-                        raise MediaError(f"Clip starting at {boundary_start:.2f}s overlaps the previous narration-window end {boundary_previous_end:.2f}s")
-                    boundary_previous_end = boundary_end
-            self.complete_step(job, "boundaries", detail=f"{len(clips)} boundaries verified", private=private)
+                    if clip.start < 0 or clip.end > float(metadata["duration"]) + 1e-6 or clip.end <= clip.start:
+                        raise MediaError(f"Clip {clip.index} falls outside the source timeline")
+                self.complete_step(job, "boundaries", detail=f"{len(clips)} boundaries verified", private=private)
+        if profile == "music" and job.clips:
+            self._verify_music_boundaries(
+                job, private, planning_duration, allow_identical=not preserve_voice,
+            )
         self._generate_youtube_metadata(job, private, words if isinstance(private.get("transcript"), dict) else [])
         self._generate_hook_text(job, private, words if isinstance(private.get("transcript"), dict) else [])
         if profile == "music":
             _assign_music_treatments(job, private, self._save)
-            minimum = float(private["min_duration"])
-            maximum = float(private["max_duration"])
-            ordered = sorted(job.clips, key=lambda item: (item.start, item.end, item.index))
-            distinct_windows = sorted({(float(item.start), float(item.end)) for item in ordered})
-            previous_end = 0.0
-            for start, end in distinct_windows:
-                duration = end - start
-                if (
-                    start < -1e-6
-                    or end > planning_duration + 1e-6
-                    or duration < minimum - 1e-6
-                    or duration > maximum + 1e-6
-                    or start < previous_end - 1e-6
-                ):
-                    raise MediaError(
-                        f"Music clips do not meet the requested {minimum:g}–{maximum:g}s non-overlapping bounds inside the available music timeline; no invalid output was published."
-                    )
-                previous_end = end
+            _validate_music_windows(
+                job.clips, planning_duration,
+                float(private["min_duration"]), float(private["max_duration"]),
+                allow_identical=not preserve_voice,
+            )
         self._snapshot_video_overlays(job, private, words)
         if music_track_source is not None:
+            self.start_step(job, "render", detail="Preparing the background song for clip rendering", label="Preparing replacement song audio", progress=39, private=private)
+            last_music_track_heartbeat = time.monotonic()
+
+            def music_track_cancelled() -> bool:
+                nonlocal last_music_track_heartbeat
+                if not self._cooperate(job):
+                    return True
+                now = time.monotonic()
+                if now - last_music_track_heartbeat >= 5:
+                    job.last_heartbeat_at = now_iso()
+                    self._save(job, private)
+                    last_music_track_heartbeat = now
+                return False
+
             render_speed = float(private.get("music_track_speed", speed))
             music_track = _media_fn("prepare_music_track")(
                 music_track_source,
                 self.settings.data_path / "jobs" / job.id / "transcription" / f"music-{render_speed:.2f}.mp3",
                 render_speed, self.settings, duration=source_duration,
-                cancellation_callback=lambda: not self._cooperate(job),
+                cancellation_callback=music_track_cancelled,
             )
         output_dir = self.settings.data_path / "jobs" / job.id / "clips"
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -3280,7 +3350,9 @@ class JobManager:
                 if clip.state == "failed":
                     clip.state, clip.error = "queued", None
             job.state, job.stage_label, job.error = "queued", "Retrying failed outputs", None
-            self._reset_steps_for_retry(job)
+            private = self.db.get_job_private(job.id)
+            preserve_voice = job.source_profile == "music" and job.music_audio_mode.value == "replace_music_keep_voice"
+            self._reset_steps_for_retry(job, recheck_boundaries=preserve_voice)
             await self.enqueue(job.id)
         self._save(job)
         return job

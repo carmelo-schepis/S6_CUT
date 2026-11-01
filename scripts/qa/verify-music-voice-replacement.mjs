@@ -29,6 +29,7 @@ const engine = `${id}-engine`, web = `${id}-web`, pot = `${id}-pot`, network = `
 const engineImage = process.env.S6_MUSIC_VOICE_ENGINE_IMAGE || `${id}-engine-image`;
 const webImage = process.env.S6_MUSIC_VOICE_WEB_IMAGE || `${id}-web-image`;
 const bindData = await mkdtemp(join(resolve(process.env.S6_MUSIC_DATA_ROOT || tmpdir()), 's6-voice-replacement-data-'));
+if (process.env.S6_MUSIC_VOICE_MODEL_SEED) await cp(resolve(process.env.S6_MUSIC_VOICE_MODEL_SEED), join(bindData, 'models'), { recursive: true });
 const browserTemp = process.env.S6_MUSIC_BROWSER_ROOT ? await mkdtemp(join(resolve(process.env.S6_MUSIC_BROWSER_ROOT), 's6-voice-replacement-browser-')) : null;
 await mkdir(artifacts, { recursive: true });
 

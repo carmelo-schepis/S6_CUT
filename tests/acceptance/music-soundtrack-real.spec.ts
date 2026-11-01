@@ -72,8 +72,10 @@ for (const item of cases) {
     test.skip(testInfo.project.name.startsWith('iPhone') || testInfo.project.name.startsWith('iPad'), 'iOS provides a read-only status view');
     test.setTimeout(900_000);
     const name = `Soundtrack ${item.source} ${item.speed} ${Date.now()}`;
+    await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto('/');
     await expect(page.getByRole('heading', { name: 'Create a project' })).toBeVisible();
+    await expect(page.locator("#startup-screen")).toHaveCount(0, { timeout: 30_000 });
     const videoFixture = item.source === 'none' || (item.audioMode === 'mix_original' && !item.silentVideo) ? 'with-audio.mp4' : 'silent.mp4';
     await page.getByLabel('Choose video file').setInputFiles(path.join(fixtures!, videoFixture));
     await page.getByRole('button', { name: 'Music / sung vocals' }).click();

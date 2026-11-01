@@ -111,7 +111,14 @@ def candidate_quality(words: list[dict[str, Any]], minimum_speech_density: float
     return True, "Low transcript confidence; review recommended" if review else "", review
 
 
-def select_candidates(words: list[dict[str, Any]], style: Style, count: int, minimum: float, maximum: float, *, strict_bounds: bool = False) -> list[Candidate]:
+def select_candidates(
+    words: list[dict[str, Any]], style: Style, count: int, minimum: float, maximum: float, *,
+    strict_bounds: bool = False, reserved_windows: tuple[tuple[float, float], ...] = (),
+) -> list[Candidate]:
+    if strict_bounds:
+        # Keep the persisted transcript untouched while preventing malformed
+        # timestamps from entering candidate construction or interval scoring.
+        words = _timed_words(words)
     if not words:
         return []
     sentences = _sentence_ranges(words)
@@ -155,6 +162,37 @@ def select_candidates(words: list[dict[str, Any]], style: Style, count: int, min
                     if eligible:
                         candidates.append(Candidate(float(segment[0]["start"]), float(segment[-1]["end"]), segment, _score(segment, style, target)))
                 offset = end
+    if strict_bounds:
+        # A transcript can contain several short, correctly punctuated
+        # sentences whose combined duration jumps from below the minimum to
+        # above the maximum. Keep sentence starts, but let the final boundary
+        # land on a real word timestamp in that case; otherwise the only strict
+        # candidate may be a truncated short chunk from the legacy fallback.
+        represented_starts = {candidate.start for candidate in candidates}
+        for start_index, _ in sentences:
+            start = float(words[start_index]["start"])
+            if start in represented_starts:
+                continue
+            partial: list[Candidate] = []
+            for end_index in range(start_index + 1, len(words)):
+                duration = float(words[end_index]["end"]) - start
+                if duration > maximum:
+                    break
+                if duration < minimum:
+                    continue
+                segment = words[start_index:end_index + 1]
+                eligible, _, _ = candidate_quality(segment)
+                if eligible:
+                    partial.append(Candidate(
+                        start, float(segment[-1]["end"]), segment,
+                        _score(segment, style, target),
+                    ))
+            if partial:
+                best = min(
+                    partial,
+                    key=lambda item: (-item.score.total, abs((item.end - item.start) - target), item.end),
+                )
+                candidates.append(best)
     if not candidates and not strict_bounds:
         chunk_words = max(1, math.ceil(len(words) * min(maximum, float(words[-1]["end"])) / max(float(words[-1]["end"]), 1)))
         for index in range(0, len(words), chunk_words):
@@ -167,6 +205,10 @@ def select_candidates(words: list[dict[str, Any]], style: Style, count: int, min
         candidates = [
             item for item in candidates
             if minimum - 1e-6 <= item.end - item.start <= maximum + 1e-6
+            and not any(
+                min(item.end, end) - max(item.start, start) > 1e-6
+                for start, end in reserved_windows
+            )
         ]
         return _select_non_overlapping_candidates(candidates, count)
     candidates.sort(key=lambda item: (-item.score.total, item.start))

@@ -245,3 +245,67 @@ def test_strict_selection_returns_truthful_shortfall_without_padding():
     assert all(20.0 <= end - start <= 120.0 for start, end in windows)
     assert all(left[1] <= right[0] for left, right in zip(windows, windows[1:]))
     assert len(windows) < 5
+
+
+def test_strict_speech_selection_filters_unusable_timestamps_without_mutating_input():
+    invalid = [
+        {"text": "nan", "start": float("nan"), "end": 4.0},
+        {"text": "negative", "start": -1.0, "end": 1.0},
+        {"text": "zero", "start": 2.0, "end": 2.0},
+        {"text": "missing", "end": 5.0},
+        {"text": "infinite", "start": 6.0, "end": float("inf")},
+    ]
+    valid = [
+        {"text": f"spoken{index}.", "start": float(index * 2), "end": index * 2 + 1.5}
+        for index in range(20)
+    ]
+    noisy = [valid[0], *invalid[:2], *valid[1:5], *invalid[2:], *valid[5:]]
+    before = list(noisy)
+
+    expected = select_candidates(valid, "serious", 3, 8, 12, strict_bounds=True)
+    actual = select_candidates(noisy, "serious", 3, 8, 12, strict_bounds=True)
+
+    assert [(item.start, item.end) for item in actual] == [(item.start, item.end) for item in expected]
+    assert noisy == before
+    assert all(8 <= item.end - item.start <= 12 for item in actual)
+
+
+def test_strict_selection_excludes_reserved_completed_windows_before_optimizing():
+    words = [
+        {"text": f"sentence {index} has spoken content.", "start": index * 10.0, "end": index * 10.0 + 9.0}
+        for index in range(12)
+    ]
+    completed = ((0.0, 29.0),)
+
+    selected = select_candidates(
+        words, "serious", 2, 18, 30, strict_bounds=True, reserved_windows=completed,
+    )
+
+    assert len(selected) == 2
+    assert all(item.end <= start or item.start >= end for item in selected for start, end in completed)
+    assert all(left.end <= right.start for left, right in zip(selected, selected[1:]))
+
+
+def test_strict_selection_uses_real_word_boundaries_when_short_sentences_overshoot_maximum():
+    # Timing shape from the 35s KeepVoice acceptance transcript: 44 usable
+    # words in three clean sentences spanning 9.68-26.92s, with sentence
+    # spans 6.00s, 4.96s, 5.14s and short pauses between them.
+    sentence_shapes = [(9.68, 15.68, 16), (16.16, 21.12, 14), (21.78, 26.92, 14)]
+    words = []
+    for sentence_index, (start, end, count) in enumerate(sentence_shapes):
+        for index in range(count):
+            word_start = start + (end - start) * index / count
+            word_end = start + (end - start) * (index + 1) / count
+            text = f"spoken{sentence_index}_{index}"
+            if index == count - 1:
+                text += "."
+            words.append({"text": text, "start": word_start, "end": word_end})
+
+    selected = select_candidates(words, "educational", 1, 8, 10, strict_bounds=True)
+
+    assert len(words) == 44
+    assert len(selected) == 1
+    assert 8 <= selected[0].end - selected[0].start <= 10
+    assert selected[0].start in {start for start, _, _ in sentence_shapes}
+    assert selected[0].words[0]["text"] == "spoken0_0"
+    assert all(left.end <= right.start for left, right in zip(selected, selected[1:]))
