@@ -143,4 +143,4 @@ def test_song_audio_403_on_primary_client_falls_back_to_android_web(tmp_path, mo
     assert result == target and target.is_file()
     assert len(calls) == 2
     assert "youtube:player_client=mweb" in calls[0]
-    assert calls[1][-3:-1] == ["--extractor-args", "youtube:player_client=android,web,web_music"]
+    assert calls[1][-3:-1] == ["--extractor-args", "youtube:player_client=android"]

@@ -748,10 +748,23 @@ def download_youtube_audio(
         # for an audio stream (HTTP 403) that android/web still serves.
         if "HTTP Error 403" not in str(exc):
             raise
-        _cleanup_partials(target.parent)
-        retry = command.copy()
-        retry[-1:-1] = ["--extractor-args", "youtube:player_client=android,web,web_music"]
-        _run_ytdlp_download(retry, target.parent, settings, progress_callback=progress_callback, cancellation_callback=cancellation_callback)
+        # android alone serves some audio streams that the combined list
+        # refuses, because yt-dlp tries the web client first in that list.
+        last_error: MediaError = exc
+        for clients in ("android", "android,web,web_music"):
+            _cleanup_partials(target.parent)
+            retry = command.copy()
+            retry[-1:-1] = ["--extractor-args", f"youtube:player_client={clients}"]
+            try:
+                _run_ytdlp_download(retry, target.parent, settings, progress_callback=progress_callback, cancellation_callback=cancellation_callback)
+                last_error = None
+                break
+            except (TranscriptionCancelled, DownloadStalled):
+                raise
+            except MediaError as retry_exc:
+                last_error = retry_exc
+        if last_error is not None:
+            raise last_error
     if not target.is_file():
         candidates = sorted(target.parent.glob(target.stem + ".*.mp3"))
         if candidates:
