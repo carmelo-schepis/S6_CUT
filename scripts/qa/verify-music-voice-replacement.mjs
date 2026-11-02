@@ -139,14 +139,14 @@ try {
     S6_ACCEPTANCE_URL: url,
     S6_MUSIC_VOICE_FIXTURES: artifacts,
     S6_MUSIC_VOICE_CONTAINER: engine,
-    S6_PLAYWRIGHT_ARTIFACTS: browserTemp || join(artifacts, 'playwright'),
+    S6_PLAYWRIGHT_ARTIFACTS: browserTemp ? join(browserTemp, 'desktop') : join(artifacts, 'playwright'),
   });
   await run('npx', ['playwright', 'test', '--config', 'playwright.config.ts', 'tests/acceptance/music-voice-replacement-real.spec.ts', '--project=Android Chromium', '--grep', 'mobile Music form'], {
     ...process.env,
     S6_ACCEPTANCE_URL: url,
     S6_MUSIC_VOICE_FIXTURES: artifacts,
     S6_MUSIC_VOICE_CONTAINER: engine,
-    S6_PLAYWRIGHT_ARTIFACTS: browserTemp || join(artifacts, 'playwright-mobile'),
+    S6_PLAYWRIGHT_ARTIFACTS: browserTemp ? join(browserTemp, 'mobile') : join(artifacts, 'playwright-mobile'),
   });
   passed = true;
 } finally {
