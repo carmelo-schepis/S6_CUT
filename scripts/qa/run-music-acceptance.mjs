@@ -36,7 +36,7 @@ const image = process.env.S6_MUSIC_ENGINE_IMAGE;
 const webImage = process.env.S6_MUSIC_WEB_IMAGE;
 if (!image || !webImage) fail("set explicit locally built S6_MUSIC_ENGINE_IMAGE and S6_MUSIC_WEB_IMAGE tags; owner deployment images are never defaults");
 if (image === "s6-cut-engine" || webImage === "s6-cut-web") fail("owner deployment image tags are forbidden; use uniquely tagged branch images");
-for (const [label, tag] of [["engine", image], ["web", webImage], ["pot-provider", "brainicism/bgutil-ytdlp-pot-provider:1.3.2-deno"]]) {
+for (const [label, tag] of [["engine", image], ["web", webImage], ["pot-provider", "brainicism/bgutil-ytdlp-pot-provider:2.0.2-deno"]]) {
   const imageCheck = spawnSync("docker", ["image", "inspect", tag], { stdio: "ignore" });
   if (imageCheck.status !== 0) fail(`${label} image ${tag} is not locally built/cached; this runner does not build or pull images`);
 }
