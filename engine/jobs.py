@@ -2528,8 +2528,6 @@ class JobManager:
         music_track = self._music_track_source(job, private) if profile == "music" else None
         preserve_voice = profile == "music" and job.music_audio_mode.value == "replace_music_keep_voice"
         music_voice_track = self._music_voice_stem(job, private, source, metadata) if preserve_voice else None
-        if preserve_voice and not metadata["audio"]:
-            raise MediaError("Keep voice, replace background music requires an audio track in the source video")
         if not metadata["audio"] and music_track is None:
             requirement = "readable sung vocals" if job.source_profile == "music" else "speech"
             raise MediaError(f"This video has no readable audio track. Automatic clips require {requirement}; retain it as a source for manual editing.")
@@ -2664,8 +2662,7 @@ class JobManager:
                 words = [
                     {**word, "end": min(float(word["end"]), planning_duration)}
                     for word in words
-                    if float(word.get("start", 0)) < planning_duration
-                    and float(word.get("end", 0)) > float(word.get("start", 0))
+                    if float(word.get("start", 0)) < planning_duration and float(word.get("end", 0)) > 0
                 ]
         if preserve_voice and job.clips:
             # A saved plan with invalid unpublished windows previously failed
@@ -3357,7 +3354,6 @@ class JobManager:
                 if clip.state == "failed":
                     clip.state, clip.error = "queued", None
             job.state, job.stage_label, job.error = "queued", "Retrying failed outputs", None
-            private = self.db.get_job_private(job.id)
             preserve_voice = job.source_profile == "music" and job.music_audio_mode.value == "replace_music_keep_voice"
             self._reset_steps_for_retry(job, recheck_boundaries=preserve_voice)
             await self.enqueue(job.id)

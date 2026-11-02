@@ -266,8 +266,14 @@ def _read_exact(stream: Any, count: int) -> bytes:
     return b"".join(parts)
 
 
+# The sherpa-onnx separator is shared by every job in the process and is not
+# documented as thread-safe, so inference calls are serialized.
+_INFER_LOCK = threading.Lock()
+
+
 def _infer(model: Any, chunk: np.ndarray, *, required_frames: int | None = None) -> np.ndarray:
-    result = model.process(sample_rate=MODEL_SAMPLE_RATE, samples=np.ascontiguousarray(chunk.T, dtype=np.float32))
+    with _INFER_LOCK:
+        result = model.process(sample_rate=MODEL_SAMPLE_RATE, samples=np.ascontiguousarray(chunk.T, dtype=np.float32))
     stems = result.stems
     if len(stems) != 2:
         raise VoiceSeparationError(f"Spleeter returned {len(stems)} stems; expected two")

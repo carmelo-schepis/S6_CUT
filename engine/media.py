@@ -652,6 +652,10 @@ def _run_ytdlp_download(
         output = process.returncode or 0
         if output:
             detail = "\n".join(lines[-8:])
+            # The 403 line can scroll out of the last eight lines when yt-dlp
+            # prints retry output after it; keep the marker so the fallback fires.
+            if any("HTTP Error 403" in line for line in lines) and "HTTP Error 403" not in detail:
+                detail = "HTTP Error 403: Forbidden (reported earlier by yt-dlp)\n" + detail
             raise MediaError(redact(detail or "yt-dlp failed"))
     except TranscriptionCancelled:
         raise
