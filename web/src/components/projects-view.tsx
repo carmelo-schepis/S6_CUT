@@ -8,6 +8,7 @@ import { OptionRow } from "./option-row";
 import { VideoOnlyDownload } from "./video-only-download";
 import { SubscribeAnimationControl } from "./subscribe-animation-control";
 import { RecentClips } from "./recent-clips";
+import { DEFAULT_MUSIC_EDITORIAL_STYLE, MUSIC_EDITORIAL_STYLES, SPEECH_EDITORIAL_STYLES } from "../editorial-styles";
 import { MUSIC_THEME_LABELS, MusicHookFormatPicker, MusicLyricAnimationPicker } from "./music-typography-controls";
 import { EmojiModeControls, HeadingStyleControls, SpeechSubtitleStyleControls, VideoFilterPicker } from "./speech-style-controls";
 import { CAPTION_PRESETS, DEFAULT_CAPTION_PRESET, DEFAULT_EMOJI_MODE, DEFAULT_HEADING_STYLE, DEFAULT_VIDEO_FILTER, EMOJI_MODES, HEADING_STYLES, VIDEO_FILTERS, labelOf, musicEditingPresentation, speechEditingPresentation } from "../editing-presets";
@@ -20,12 +21,6 @@ const isYouTubeUrl = (value: string) => {
   catch { return false; }
 };
 
-const styles: { id: Style; label: string; note: string }[] = [
-  { id: "funny", label: "Funny", note: "Punchlines & reactions" },
-  { id: "serious", label: "Serious", note: "Complete claims" },
-  { id: "educational", label: "Educational", note: "Clear explanations" },
-  { id: "hype", label: "Hype", note: "Hooks & high energy" },
-];
 
 export function ProjectsView({ health, healthChecked = true, providersLoaded = true, hasSelectedProvider = true, selectedProfile = null, onConfigureProviders = () => undefined, onCreated, onSelectLibraryAsset, onReady }: {
   onReady?: () => void;
@@ -44,7 +39,8 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
   const [file, setFile] = useState<File | null>(null);
   const [url, setUrl] = useState("");
   const [projectName, setProjectName] = useState("");
-  const [style, setStyle] = useState<Style>("educational");
+  const [speechStyle, setSpeechStyle] = useState<Style>("educational");
+  const [musicStyle, setMusicStyle] = useState<Style>(DEFAULT_MUSIC_EDITORIAL_STYLE);
   const [count, setCount] = useState(5);
   const [highVolumeCount, setHighVolumeCount] = useState("5");
   const [batchMode, setBatchMode] = useState<BatchMode>("standard");
@@ -62,6 +58,10 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
   const [processingMode, setProcessingMode] = useState<ProcessingMode>("auto");
   const [executionPolicy, setExecutionPolicy] = useState<"auto" | "engine_only">("auto");
   const [sourceProfile, setSourceProfile] = useState<SourceProfile>("speech");
+  // Speech and Music keep separate editorial choices; Music shows lyric-focused options.
+  const style = sourceProfile === "music" ? musicStyle : speechStyle;
+  const setStyle = sourceProfile === "music" ? setMusicStyle : setSpeechStyle;
+  const editorialStyles = sourceProfile === "music" ? MUSIC_EDITORIAL_STYLES : SPEECH_EDITORIAL_STYLES;
   const [musicTheme, setMusicTheme] = useState<MusicTheme>("clean");
   const [musicLyricsLanguage, setMusicLyricsLanguage] = useState("en");
   const [musicLyricAnimation, setMusicLyricAnimation] = useState<MusicLyricAnimation>("legacy");
@@ -301,7 +301,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
           <div className="step-label"><StepBadge step={2} /><span className="step-label-text">Choose the output</span></div>
           <FieldGroup title="Editorial style">
             <div className="style-grid">
-              {styles.map((item) => <button type="button" key={item.id} className={style === item.id ? "style-card active" : "style-card"} onClick={() => setStyle(item.id)} aria-pressed={style === item.id}>
+              {editorialStyles.map((item) => <button type="button" key={item.id} className={style === item.id ? "style-card active" : "style-card"} onClick={() => setStyle(item.id)} aria-pressed={style === item.id}>
                 <span className="style-card-title"><strong>{item.label}</strong><Check className="style-card-check" size={16} aria-hidden="true" /></span><small>{item.note}</small>
               </button>)}
             </div>
