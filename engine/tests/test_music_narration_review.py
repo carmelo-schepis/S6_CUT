@@ -174,3 +174,17 @@ def test_muted_keep_voice_narration_stays_silent() -> None:
     )
     voice = next(item for item in filters if item.endswith("[voiceout]"))
     assert "volume=0.000000[voiceout]" in voice
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg") or not shutil.which("ffprobe"), reason="requires FFmpeg and FFprobe")
+def test_long_silent_tail_is_padded_in_bounded_chunks(tmp_path, monkeypatch) -> None:
+    # A 25 s timeline with 2 s of audio spans several 10 s padding chunks; the
+    # padded stem must still match the timeline exactly.
+    monkeypatch.setattr(separation, "_download_model", lambda *_args, **_kwargs: Path("/model-cache"))
+    monkeypatch.setattr(separation, "_get_model", lambda _path: _IdentityModel())
+    source = _write_wav(tmp_path / "short.wav", 2.0)
+    target = tmp_path / "voice.wav"
+    settings = SimpleNamespace(data_path=tmp_path, ffmpeg=shutil.which("ffmpeg"), ffprobe=shutil.which("ffprobe"))
+    result = separation.separate_voice(source, target, settings, timeline_duration=25.0)
+    with wave.open(str(result), "rb") as wav:
+        assert wav.getnframes() == round(25.0 * separation.MODEL_SAMPLE_RATE)

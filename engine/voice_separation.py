@@ -460,8 +460,11 @@ def separate_voice(
                     break
                 previous_context = carry[max(0, core_count - context_frames):core_count]
                 carry = carry[core_count:]
-            if written_frames < timeline_frames:
-                write_timeline(np.zeros((timeline_frames - written_frames, 2), dtype=np.float32))
+            # Pad the untouched tail in bounded chunks: one array for a long video
+            # with a short audio track would need gigabytes of float32 at once.
+            pad_chunk = MODEL_SAMPLE_RATE * 10
+            while written_frames < timeline_frames:
+                write_timeline(np.zeros((min(pad_chunk, timeline_frames - written_frames), 2), dtype=np.float32))
 
         if process.stdout:
             process.stdout.close()
