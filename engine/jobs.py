@@ -1751,10 +1751,13 @@ class JobManager:
     def _transcribe_with_stages(self, job: Job, audio: Path, duration: float, private: dict[str, Any]) -> dict[str, Any]:
         profile = job.source_profile
         preserve_voice = profile == "music" and job.music_audio_mode.value == "replace_music_keep_voice"
+        # The isolated narration is spoken audio: decode it with the speech
+        # profile (speech model and VAD), not the sung-lyric profile.
+        decode_profile = "speech" if preserve_voice else profile
         language = private.get("transcription_language", "en")
         # Keep the legacy speech call shape for injected/test adapters; the
         # music branch must explicitly consult its separate selected model.
-        cached = media_module.is_whisper_model_cached(self.settings, profile=profile) if profile == "music" else media_module.is_whisper_model_cached(self.settings)
+        cached = media_module.is_whisper_model_cached(self.settings, profile=decode_profile) if decode_profile == "music" else media_module.is_whisper_model_cached(self.settings)
         model_label = "Preparing transcription model" if cached else "Downloading transcription model"
         self.start_step(job, "transcribe", detail=model_label, label=model_label, progress=16, private=private)
         started = time.monotonic()
@@ -1785,14 +1788,14 @@ class JobManager:
                 transcript = media_module.transcribe(
                     audio, self.settings, progress_callback=callback,
                     cancellation_callback=lambda: not self._cooperate(job), word_timestamps=True,
-                    profile=profile, language=language,
+                    profile=decode_profile, language=language,
                 )
             else:
                 transcript = supervise(
                     audio, self.settings, progress=callback,
                     cancelled=lambda: not self._cooperate(job), heartbeat=heartbeat,
                     meaningful=lambda fraction: setattr(job, "transcription_processed_seconds", min(duration, duration * fraction)),
-                    source_seconds=duration, profile=profile, language=language,
+                    source_seconds=duration, profile=decode_profile, language=language,
                     vad_filter=True if preserve_voice else None,
                 )
         finally:
@@ -2569,11 +2572,12 @@ class JobManager:
             private["source_hash"] = source_hash
             transcription_source_hash = source_hash
         language = private.get("transcription_language", "en")
-        beam = self.settings.music_whisper_beam_size if profile == "music" else self.settings.whisper_beam_size
+        decode_profile = "speech" if preserve_voice else profile
+        beam = self.settings.music_whisper_beam_size if decode_profile == "music" else self.settings.whisper_beam_size
         cache_key = transcription_cache_key(
             transcription_source_hash,
             self.settings,
-            profile=profile,
+            profile=decode_profile,
             language=language,
             beam_size=beam,
             word_timestamps=True,
