@@ -96,3 +96,27 @@ def test_short_source_audio_is_padded_to_the_video_timeline(tmp_path, monkeypatc
     assert separation.validate_voice_stem(result, 3.0, settings)
     with wave.open(str(result), "rb") as wav:
         assert wav.getnframes() == round(3.0 * separation.MODEL_SAMPLE_RATE)
+
+
+def test_youtube_403_on_primary_client_falls_back_to_android_web(tmp_path, monkeypatch) -> None:
+    from engine import media
+    from types import SimpleNamespace as NS
+
+    calls: list[list[str]] = []
+
+    def fake_run(command, target_dir, settings, **_kwargs):
+        calls.append(list(command))
+        if len(calls) == 1:
+            raise media.MediaError("ERROR: unable to download video data: HTTP Error 403: Forbidden")
+        output = target_dir / "source-abc.mp4"
+        output.write_bytes(b"fake")
+        return [output]
+
+    monkeypatch.setattr(media, "_run_ytdlp_download", fake_run)
+    monkeypatch.setattr(media, "probe", lambda *_args, **_kwargs: None)
+    settings = NS(ytdlp="yt-dlp", ytdlp_connect_timeout=5, max_upload_bytes=10**9, ytdlp_setup_timeout=60, ytdlp_inactivity_timeout=60)
+    result = media.download_youtube("https://www.youtube.com/watch?v=nHvqFw8hXh8", tmp_path / "job", settings)
+    assert result.name == "source-abc.mp4"
+    assert len(calls) == 2
+    assert "youtube:player_client=mweb" in calls[0]
+    assert calls[1][-3:-1] == ["--extractor-args", "youtube:player_client=android,web,web_music"]

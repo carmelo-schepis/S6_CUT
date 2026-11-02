@@ -693,7 +693,16 @@ def download_youtube(
         # before any media bytes arrive, so a preview exists while downloading.
         common.append("--write-thumbnail")
     common.append(url)
-    candidates = _run_ytdlp_download(common, target_dir, settings, progress_callback=progress_callback, cancellation_callback=cancellation_callback)
+    try:
+        candidates = _run_ytdlp_download(common, target_dir, settings, progress_callback=progress_callback, cancellation_callback=cancellation_callback)
+    except (TranscriptionCancelled, DownloadStalled):
+        raise
+    except MediaError as exc:
+        # The mweb client can be refused for the video stream (HTTP 403) while
+        # the android/web clients still serve it. Fall back to them once.
+        if "HTTP Error 403" not in str(exc):
+            raise
+        candidates = []
     if not candidates:
         _cleanup_partials(target_dir)
         retry = common.copy()
