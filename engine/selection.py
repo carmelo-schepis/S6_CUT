@@ -26,6 +26,20 @@ STYLE_WEIGHTS: dict[Style, dict[str, float]] = {
 }
 
 
+# Music mode reuses the four style ids with lyric-specific intents: hype is
+# "Chorus" (hooky openings), funny is "Energy" (intense vocals), serious is
+# "Storytelling" (varied verses) and educational is "Clear lyrics" (steady,
+# well-separated lines).  Lyric text rarely carries the speech "practical"
+# vocabulary, so it barely counts here.
+MUSIC_STYLE_WEIGHTS: dict[Style, dict[str, float]] = {
+    "hype": {"hook": 1.8, "coherence": .8, "ending": 1.0, "energy": 1.2, "practical": .2, "visual": .8, "complete": .8},
+    "funny": {"hook": 1.0, "coherence": .7, "ending": .9, "energy": 1.9, "practical": .2, "visual": 1.0, "complete": .8},
+    "serious": {"hook": .6, "coherence": 1.5, "ending": 1.1, "energy": .5, "practical": .2, "visual": 1.6, "complete": 1.3},
+    "educational": {"hook": .8, "coherence": 1.8, "ending": 1.2, "energy": .6, "practical": .2, "visual": .9, "complete": 1.4},
+}
+MUSIC_STYLE_LABELS: dict[Style, str] = {"hype": "Chorus", "funny": "Energy", "serious": "Storytelling", "educational": "Clear lyrics"}
+
+
 @dataclass(frozen=True)
 class Candidate:
     start: float
@@ -218,11 +232,11 @@ def _score_music(words: list[dict[str, Any]], style: Style, target: float) -> Sc
     visual = min(100, 38 + min(25, len(unique) / 2))
     penalties, penalty_items = _penalties(normalized, duration, target, 3)
     values = {"hook": hook, "coherence": coherence, "ending": ending, "energy": energy, "practical": practical, "visual": visual, "complete": complete}
-    weights = STYLE_WEIGHTS[style]
+    weights = MUSIC_STYLE_WEIGHTS[style]
     total = sum(values[key] * weights[key] for key in values) / sum(weights.values()) - penalties
     strongest = max(values, key=values.get)
     reason_map = {"hook": "an immediate lyric opening", "coherence": "continuous lyric timing", "ending": "a natural musical ending", "energy": "a strong lyric energy signal", "practical": "clear lyrical content", "visual": "concrete visual potential", "complete": "a complete lyric passage"}
-    return ScoreBreakdown(hook=hook, coherence=coherence, ending=ending, energy=energy, practical_value=practical, visual_potential=visual, completeness=complete, penalties=penalties, penalty_items=penalty_items, total=max(0, min(100, total)), explanation=f"Selected for {reason_map[strongest]} with music {style} weighting.")
+    return ScoreBreakdown(hook=hook, coherence=coherence, ending=ending, energy=energy, practical_value=practical, visual_potential=visual, completeness=complete, penalties=penalties, penalty_items=penalty_items, total=max(0, min(100, total)), explanation=f"Selected for {reason_map[strongest]} with music {MUSIC_STYLE_LABELS[style]} weighting.")
 
 
 def _music_units(lines: list[list[dict[str, Any]]], maximum: float) -> list[list[dict[str, Any]]]:

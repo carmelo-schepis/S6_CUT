@@ -78,3 +78,44 @@ def test_short_source_fallback_returns_candidate_below_requested_minimum() -> No
     picked = select_candidates(words, "serious", 2, 20, 60)
     assert picked, "the fallback must still offer the only available moment"
     assert picked[0].end - picked[0].start < 20
+
+
+
+def _music_block(parts: list[str], word: float = .6, gap: float = .05, pause: float = 1.2) -> list[dict[str, Any]]:
+    words: list[dict[str, Any]] = []
+    cursor = 0.0
+    for phrase in parts:
+        for text in phrase.split():
+            words.append({"text": text, "start": cursor, "end": cursor + word})
+            cursor += word + gap
+        cursor += pause
+    return words
+
+
+def test_music_styles_prefer_their_intended_lyric_window() -> None:
+    from engine.selection import MUSIC_STYLE_WEIGHTS, STYLE_WEIGHTS, select_music_candidates
+
+    blocks = {
+        "hook": _music_block(["why never love the truth wow never always love"]),
+        "energy": _music_block(["wow love hate crazy shocking huge wow love never always"]),
+        "story": _music_block([
+            "the river bends past old quiet fields",
+            "where grandmother planted orchards",
+            "and the harbor remembered every departure",
+            "while lanterns drifted over the cold water",
+        ]),
+        "repetitive": _music_block(["la la la la la la la la la la la la"]),
+    }
+    intended = {"hype": "hook", "funny": "energy", "serious": "story", "educational": "story"}
+    labels = {"hype": "Chorus", "funny": "Energy", "serious": "Storytelling", "educational": "Clear lyrics"}
+    for style, winner in intended.items():
+        scores = {}
+        for name, words in blocks.items():
+            chosen = select_music_candidates(words, style, 1, 3, 30)
+            assert len(chosen) == 1, (style, name)
+            scores[name] = chosen[0].score.total
+            assert chosen[0].score.explanation.endswith(f"music {labels[style]} weighting.")
+        assert max(scores, key=scores.get) == winner, (style, scores)
+    # Speech weighting is unchanged and separate from the music table.
+    assert STYLE_WEIGHTS["hype"]["hook"] == 1.55
+    assert MUSIC_STYLE_WEIGHTS["hype"] is not STYLE_WEIGHTS["hype"]

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { editorialStyleLabel } from "../editorial-styles";
 import { BriefcaseBusiness, ExternalLink, Pause, Play, RefreshCw } from "lucide-react";
 import { controlJob, readableError } from "../api";
 import type { Job } from "../types";
@@ -47,7 +48,7 @@ export function JobsView({ onOpenProject, jobs, onRefresh }: { onOpenProject: (i
         const settled = ["complete", "failed", "cancelled_kept"].includes(job.state);
         return <>
           <div><strong>{job.stageLabel}</strong><StatusBadge state={job.state} /></div>
-          <p><span className="job-style">{job.style}</span> · {formatAge(job.updatedAt)} · {ready} output{ready === 1 ? "" : "s"} ready</p>
+          <p><span className="job-style">{editorialStyleLabel(job.style, job.sourceProfile)}</span> · {formatAge(job.updatedAt)} · {ready} output{ready === 1 ? "" : "s"} ready</p>
           {download && <dl className="job-download" aria-label="Download">
             <div><dt>{download.phase}</dt><dd>{download.transferred}</dd></div>
             {download.speed && <div><dt>Speed</dt><dd>{download.speed}</dd></div>}
