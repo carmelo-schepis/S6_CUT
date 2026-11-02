@@ -9,6 +9,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg ca-certificates tini curl unzip \
+    && apt-get upgrade -y \
     && rm -rf /var/lib/apt/lists/* \
     && case "${TARGETARCH}" in amd64) deno_arch=x86_64 ;; arm64) deno_arch=aarch64 ;; *) echo "Unsupported Deno target architecture: ${TARGETARCH}" >&2; exit 1 ;; esac \
     && deno_archive="deno-${deno_arch}-unknown-linux-gnu.zip" \
@@ -24,7 +25,7 @@ RUN apt-get update \
 
 WORKDIR /app
 COPY engine/requirements.lock /app/engine/requirements.lock
-RUN python -m pip install --upgrade pip==26.0.1 \
+RUN python -m pip install --upgrade pip==26.2.2 \
     && python -m pip install --requirement /app/engine/requirements.lock
 # Display faces for burned-in captions. Vendored rather than apt-installed so
 # the render is reproducible: without them every style resolved to DejaVu Sans

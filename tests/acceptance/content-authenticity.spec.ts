@@ -12,18 +12,25 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  OVERALL_DEADLINE_MS, assertPlayback, capturePlaybackStills, checkPlayback, collectClips,
+  OVERALL_DEADLINE_MS, assertPlayback, checkPlayback, collectClips,
   createClipProject, gateway, openWorkspaceForProject, waitForProjectReady,
   writeManifest as writeManifestTo,
 } from "./support/workspace";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const artifacts = path.join(root, "test-artifacts/content-authenticity");
+const artifacts = path.join(process.env.S6_PLAYWRIGHT_ARTIFACTS || path.join(root, "test-artifacts"), "content-authenticity");
 const fixture = process.env.S6_AUTHENTICITY_FIXTURE
   || path.join(artifacts, "fixture/s6cut-authenticity-source.mp4");
 const writeManifest = (name: string, payload: unknown) => writeManifestTo(artifacts, name, payload);
 
 test.describe.configure({ mode: "serial" });
+
+// Apple phones and tablets run the deliberate read-only status app (covered by
+// ios-status-view.spec.ts), whose shell has neither the desktop Projects rail
+// nor the create panel this file drives. iPad desktop mode serves the desktop
+// shell, so it stays in the matrix.
+test.skip(({ userAgent }) => /iPad|iPhone/.test(userAgent ?? ""),
+  "the Apple mobile shell is a deliberate read-only status app with no clip-creation UI");
 
 test.describe("S6_cut generates real playable video", () => {
   test("Smart mode renders multiple clips from the uploaded source", async ({ page }) => {
@@ -93,7 +100,8 @@ test.describe("S6_cut generates real playable video", () => {
       { id: string; title: string; blobId: string }[];
 
     await page.getByRole("button", { name: "Library", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "Library" })).toBeVisible({ timeout: 30_000 });
+    // exact:true so the loading "Opening your Library" empty state doesn't match.
+    await expect(page.getByRole("heading", { name: "Library", exact: true })).toBeVisible({ timeout: 30_000 });
     await page.getByLabel("Asset origin").selectOption("generated-clip");
     await expect(page.locator(".asset-card").first()).toBeVisible({ timeout: 30_000 });
 
@@ -227,7 +235,7 @@ test.describe("S6_cut generates real playable video", () => {
     if (!profileKey) throw new Error("the harness did not provide a profile key");
     const created = await fetch(`${gateway}/api/v1/profiles`, {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "Authenticity OpenRouter failure", modelId: "openai/gpt-4.1-mini", openrouterKey: profileKey, persistence: "encrypted", selected: true }),
+      body: JSON.stringify({ name: "Authenticity OpenRouter failure", textModelId: "openai/gpt-4.1-mini", openrouterKey: profileKey, persistence: "encrypted", selected: true }),
     });
     expect(created.ok).toBeTruthy();
     const profile = await created.json();

@@ -2,7 +2,7 @@
 // zod schemas must mirror engine/models.py camelCase fields exactly
 // A parse failure on any view is a hard error — add fields on both sides together
 
-import { z } from "zod";
+import { z } from "zod/v3";
 
 export const styleSchema = z.enum(["funny", "serious", "educational", "hype"]);
 export type Style = z.infer<typeof styleSchema>;

@@ -1,5 +1,9 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
+// This spec stubs engine APIs with page.route; the production PWA service
+// worker would otherwise serve the live isolated stack before Playwright can.
+test.use({ serviceWorkers: "block" });
+
 // The iPhone/iPad status view: Home, Library and Jobs. Read-only, and built from
 // the desktop's own tokens. These specs stub the engine so they never touch data.
 

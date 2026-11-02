@@ -28,7 +28,7 @@ async function ensureConnectedProvider() {
   const createdResponse = await fetch(`${gateway}/api/v1/profiles`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name: "AI hook acceptance provider", modelId: "openai/gpt-4.1-mini", openrouterKey: profileKey, persistence: "encrypted", selected: true }),
+    body: JSON.stringify({ name: "AI hook acceptance provider", textModelId: "openai/gpt-4.1-mini", openrouterKey: profileKey, persistence: "encrypted", selected: true }),
   });
   expect(createdResponse.ok, "the isolated OpenRouter profile should be created").toBeTruthy();
   const created = await createdResponse.json();
