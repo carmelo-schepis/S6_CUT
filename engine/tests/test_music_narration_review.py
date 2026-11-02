@@ -144,3 +144,33 @@ def test_song_audio_403_on_primary_client_falls_back_to_android_web(tmp_path, mo
     assert len(calls) == 2
     assert "youtube:player_client=mweb" in calls[0]
     assert calls[1][-3:-1] == ["--extractor-args", "youtube:player_client=android"]
+
+
+def test_keep_voice_narration_is_normalised_before_the_song_mix() -> None:
+    # Separated narration is quiet next to a mastered song; the default must lift it
+    # to the speech target while the song keeps its own user-set level.
+    from engine import media
+
+    filters, output, mixed = media._music_audio_filters(
+        source_audio=True, muted=False, source_volume=1.0, mode="replace_music_keep_voice",
+        song_gain=0.25, original_gain=1.0, duration=10.0, song_input=2, speed=1.0, voice_input=1,
+    )
+    assert output == "mixedout" and mixed is True
+    voice = next(item for item in filters if item.endswith("[voiceout]"))
+    assert f"loudnorm=I={media.VOICE_NARRATION_TARGET_LUFS:.1f}:TP=-1.5" in voice
+    assert "volume=1.000000[voiceout]" in voice
+    song = next(item for item in filters if item.endswith("[songout]"))
+    assert "volume=0.250000[songout]" in song and "loudnorm" not in song
+    mix = next(item for item in filters if item.endswith("[mixedout]"))
+    assert "alimiter=limit=0.89" in mix
+
+
+def test_muted_keep_voice_narration_stays_silent() -> None:
+    from engine import media
+
+    filters, _, _ = media._music_audio_filters(
+        source_audio=True, muted=True, source_volume=1.0, mode="replace_music_keep_voice",
+        song_gain=0.25, original_gain=1.0, duration=10.0, song_input=2, speed=1.0, voice_input=1,
+    )
+    voice = next(item for item in filters if item.endswith("[voiceout]"))
+    assert "volume=0.000000[voiceout]" in voice

@@ -3221,6 +3221,9 @@ def _smart_speech_emoji_filters(plan: list[tuple[Path, float, float, int, int, i
     return ";".join(filters)
 
 
+VOICE_NARRATION_TARGET_LUFS = -18.0
+
+
 def _music_audio_filters(*, source_audio: bool, muted: bool, source_volume: float, mode: str, song_gain: float, original_gain: float, duration: float, song_input: int | None, speed: float, voice_input: int | None = None) -> tuple[list[str], str, bool]:
     """Build the soundtrack graph; the voice-preservation mode uses its isolated input."""
     speed = min(1.5, max(0.75, float(speed)))
@@ -3231,8 +3234,12 @@ def _music_audio_filters(*, source_audio: bool, muted: bool, source_volume: floa
         if voice_input is None:
             raise MediaError("The isolated narration stem is unavailable; the original audio was not restored")
         voice_gain = 0.0 if muted else min(2.0, max(0.0, float(source_volume)))
+        # Separated narration sits well below a mastered song, so normalise it to a
+        # speech loudness target before the Output volume and the song mix. The song
+        # keeps its own fixed level; only the narration default is raised.
         filters.append(
             f"[{voice_input}:a:0]asetpts=PTS-STARTPTS,aresample=48000,atrim=duration={duration:.6f},"
+            f"loudnorm=I={VOICE_NARRATION_TARGET_LUFS:.1f}:TP=-1.5:LRA=11,"
             f"volume={voice_gain:.6f}[voiceout]"
         )
         if song_input is None:
@@ -3243,7 +3250,9 @@ def _music_audio_filters(*, source_audio: bool, muted: bool, source_volume: floa
         )
         filters.append(
             "[voiceout][songout]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,"
-            "alimiter=limit=0.95:level=false:latency=1,"
+            # Normalised narration plus the song can overshoot; keep about 1 dB of headroom
+            # so AAC encoding does not decode above full scale.
+            "alimiter=limit=0.89:level=false:latency=1,"
             f"atrim=duration={duration:.6f},asetpts=PTS-STARTPTS[mixedout]"
         )
         return filters, "mixedout", True

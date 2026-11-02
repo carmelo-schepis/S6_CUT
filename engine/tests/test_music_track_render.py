@@ -221,17 +221,27 @@ def test_replace_music_keep_voice_preserves_stem_and_excludes_original(
     silent, song = _fixtures(tmp_path, settings)
     source = _with_original_tone(silent, tmp_path / "with-original.mp4", settings)
     voice = _voice_tone(tmp_path / "isolated-voice.wav", settings)
-    output = tmp_path / f"preserved-{renderer}-{gain}.mp4"
     render = render_clip if renderer == "complex" else render_fast_clip
     kwargs = {"words": [], "visuals": [], "overlays": []} if renderer == "complex" else {}
-    render(
-        source, output, start=.2, end=1.4, aspect="16:9", settings=settings, has_audio=True,
-        subtitles_enabled=False, music_track=song, music_voice_track=voice,
-        music_audio_mode="replace_music_keep_voice", music_song_gain=gain, **kwargs,
-    )
+
+    def render_at(level: float, name: str) -> Path:
+        output = tmp_path / name
+        render(
+            source, output, start=.2, end=1.4, aspect="16:9", settings=settings, has_audio=True,
+            subtitles_enabled=False, music_track=song, music_voice_track=voice,
+            music_audio_mode="replace_music_keep_voice", music_song_gain=level, **kwargs,
+        )
+        return output
+
+    output = render_at(gain, f"preserved-{renderer}-{gain}.mp4")
     assert _tone_amplitude(output, 440, settings) < .01
     assert _tone_amplitude(output, 880, settings) > .05
-    assert _tone_amplitude(output, 660, settings) / _tone_amplitude(output, 880, settings) == pytest.approx(gain, abs=.03)
+    # Narration is loudness-normalised before the mix, so the song/narration ratio is
+    # judged against a full-level (gain 1.0) render: it must scale linearly with the gain.
+    reference = render_at(1.0, f"reference-{renderer}.mp4")
+    reference_ratio = _tone_amplitude(reference, 660, settings) / _tone_amplitude(reference, 880, settings)
+    ratio = _tone_amplitude(output, 660, settings) / _tone_amplitude(output, 880, settings)
+    assert ratio == pytest.approx(gain * reference_ratio, abs=.03)
 
 
 @pytest.mark.parametrize("renderer", ["complex", "fast"])
