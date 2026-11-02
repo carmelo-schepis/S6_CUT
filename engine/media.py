@@ -739,7 +739,19 @@ def download_youtube_audio(
                "--output", str(target.with_suffix(".%(ext)s")),
                "--progress-template", "download:%(progress.status)s|%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s|%(progress._percent_str)s", url]
     command[-1:-1] = ["--extractor-args", YOUTUBE_EXTRACTOR_ARGS[0], "--extractor-args", YOUTUBE_EXTRACTOR_ARGS[1]]
-    _run_ytdlp_download(command, target.parent, settings, progress_callback=progress_callback, cancellation_callback=cancellation_callback)
+    try:
+        _run_ytdlp_download(command, target.parent, settings, progress_callback=progress_callback, cancellation_callback=cancellation_callback)
+    except (TranscriptionCancelled, DownloadStalled):
+        raise
+    except MediaError as exc:
+        # Same fallback as the video import: the mweb client can be refused
+        # for an audio stream (HTTP 403) that android/web still serves.
+        if "HTTP Error 403" not in str(exc):
+            raise
+        _cleanup_partials(target.parent)
+        retry = command.copy()
+        retry[-1:-1] = ["--extractor-args", "youtube:player_client=android,web,web_music"]
+        _run_ytdlp_download(retry, target.parent, settings, progress_callback=progress_callback, cancellation_callback=cancellation_callback)
     if not target.is_file():
         candidates = sorted(target.parent.glob(target.stem + ".*.mp3"))
         if candidates:
