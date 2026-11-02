@@ -581,6 +581,11 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
   if (!project) return <div className="page"><EmptyState headingLevel={1} icon={<SlidersHorizontal size={30} />} title="No project selected" action={<Button variant="primary" onClick={onGoProjects}>Choose a project</Button>}>Open a project to review its clips, score decisions, storyboard, and export state.</EmptyState></div>;
   const sourceLabel = project.sourceTitle || project.sourceName;
   const musicTrack = job?.musicTrack || project.musicTrack;
+  const musicAudioMode = job?.musicAudioMode || project.musicAudioMode;
+  const musicSongGain = job?.musicSongGain ?? project.musicSongGain ?? 0.25;
+  const musicAudioSummary = musicAudioMode === "replace_music_keep_voice"
+    ? musicTrack ? "Keep voice, replace background music · song at " + Math.round(musicSongGain * 100) + "%" : "Keep voice, replace background music · voice only"
+    : musicTrack ? musicAudioMode === "mix_original" ? "Original audio + song · song at " + Math.round(musicSongGain * 100) + "%" : "Song only" : "";
   // The one-line progress band shows until the job reaches a terminal state; in
   // those states the header carries the status chip instead. Exactly one of the
   // two renders.
@@ -593,7 +598,7 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
       {(job?.capExplanation || project.capExplanation) && <p>{job?.capExplanation || project.capExplanation}</p>}
     </section>}
     <div className="workspace-commandbar">
-      <div className="workspace-project-context"><div className="workspace-project-meta"><h1 className="workspace-project-name" title={project.name}>{project.name}</h1><button type="button" ref={detailsToggleRef} className="workspace-meta-toggle" aria-expanded={detailsOpen} aria-controls="workspace-project-details" onClick={() => setDetailsOpen((open) => !open)}><span className="workspace-secondary-meta">{project.mode === "clip" ? "Clip mode" : "Legacy video"} · {editorialStyleLabel(project.style, project.sourceProfile)}{project.sourceProfile === "music" ? " · Music / sung vocals" : ""}{project.mode === "clip" && project.contentFormat === "long" ? " · 16:9 landscape" : ""}{job ? ` · ${job.processingMode} processing` : ""} · {folderName(project.libraryFolderId, folders, project)}</span><ChevronDown size={14} aria-hidden="true" className="workspace-meta-chevron" /></button></div></div>
+      <div className="workspace-project-context"><div className="workspace-project-meta"><h1 className="workspace-project-name" title={project.name}>{project.name}</h1><button type="button" ref={detailsToggleRef} className="workspace-meta-toggle" aria-expanded={detailsOpen} aria-controls="workspace-project-details" onClick={() => setDetailsOpen((open) => !open)}><span className="workspace-secondary-meta">{project.mode === "clip" ? "Clip mode" : "Legacy video"} · {editorialStyleLabel(project.style, project.sourceProfile)}{project.sourceProfile === "music" ? " · Music / sung vocals" : ""}{project.mode === "clip" && project.contentFormat === "long" ? " · 16:9 landscape" : ""}{job ? ` · ${job.processingMode} processing` : ""} · {folderName(project.libraryFolderId, folders, project)}{musicAudioSummary ? " · " + musicAudioSummary : ""}</span><ChevronDown size={14} aria-hidden="true" className="workspace-meta-chevron" /></button></div></div>
       <div className="workspace-controls">
         {job && !showBand && <StatusBadge state={job.state} label={job.stageLabel} />}
         {project.mode === "clip" && job && ["active", "queued", "recovered"].includes(job.state) && <Button disabled={busy} onClick={() => act("pause")}><Pause size={15} /> Pause</Button>}
@@ -607,7 +612,7 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
     <div id="workspace-project-details" className="workspace-project-details" hidden={!detailsOpen} onKeyDown={(event) => { if (event.key === "Escape") { setDetailsOpen(false); detailsToggleRef.current?.focus(); } }}>
       <div className="workspace-detail-row"><span className="workspace-detail-label">Source</span><span className="workspace-source-meta" title={sourceLabel}>{sourceLabel}</span></div>
       {musicTrack && <div className="workspace-detail-row"><span className="workspace-detail-label">Song</span><span className="workspace-detail-value">{musicTrack.title} · {musicTrack.speed === 1 ? "standard speed" : `${musicTrack.speed}× speed`}</span></div>}
-      {musicTrack && <div className="workspace-detail-row"><span className="workspace-detail-label">Audio</span><span className="workspace-detail-value">{(job?.musicAudioMode || project.musicAudioMode) === "mix_original" ? `Original audio + song · song at ${Math.round((job?.musicSongGain ?? project.musicSongGain ?? 0.25) * 100)}%` : "Song only"}</span></div>}
+      {musicAudioSummary && <div className="workspace-detail-row"><span className="workspace-detail-label">Audio</span><span className="workspace-detail-value">{musicAudioSummary}</span></div>}
       {folders.length > 0 && <div className="workspace-folder-field"><label htmlFor="workspace-business-folder">Business folder</label><select id="workspace-business-folder" value={project.libraryFolderId || folders.find((folder) => folder.system)?.id || ""} disabled={busy} onChange={(event) => void changeFolder(event.target.value)}>{folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></div>}
     </div>
 

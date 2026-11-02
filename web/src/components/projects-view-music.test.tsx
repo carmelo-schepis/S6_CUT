@@ -207,7 +207,7 @@ describe("Music presentation creation controls", () => {
     const mix = screen.getByRole("button", { name: "Original audio + song" });
     expect(only).toBeDisabled();
     expect(mix).toBeDisabled();
-    expect(screen.getByText("Add a song to choose how audio is combined.")).toBeVisible();
+    expect(screen.getByText("Add a song to choose how audio is combined. Keep voice works without a replacement song.")).toBeVisible();
     fireEvent.change(screen.getByLabelText("Background song MP3"), { target: { files: [new File(["song"], "song.mp3", { type: "audio/mpeg" })] } });
     expect(only).toBeEnabled();
     expect(mix).toBeEnabled();
@@ -226,6 +226,37 @@ describe("Music presentation creation controls", () => {
     fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
     await waitFor(() => expect(createClipJob).toHaveBeenCalledTimes(1));
     expect(vi.mocked(createClipJob).mock.calls[0][0]).toMatchObject({ sourceProfile: "music", musicAudioMode: "mix_original", musicSongGain: 0.1 });
+  });
+
+  it("allows voice replacement without a song and reuses the gain slider when a song is added", async () => {
+    vi.mocked(createClipJob).mockResolvedValue({ project: { ...project, sourceProfile: "music" }, job: undefined as never });
+    render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    fireEvent.click(mode("Music"));
+    fireEvent.click(screen.getByRole("button", { name: "Background song" }));
+    const keepVoice = screen.getByRole("button", { name: "Keep voice, replace background music" });
+    expect(keepVoice).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(keepVoice);
+    expect(keepVoice).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("Keep the voice without a replacement song.")).toBeVisible();
+    expect(screen.getByRole("slider", { name: "Background song volume" })).toBeDisabled();
+    chooseFile();
+    fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
+    await waitFor(() => expect(createClipJob).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(createClipJob).mock.calls[0][0]).toMatchObject({
+      sourceProfile: "music", musicAudioMode: "replace_music_keep_voice", musicSongGain: 0.25,
+    });
+    expect(vi.mocked(createClipJob).mock.calls[0][0].musicTrackFile).toBeUndefined();
+
+    fireEvent.change(screen.getByLabelText("Background song MP3"), { target: { files: [new File(["replacement"], "replacement.mp3", { type: "audio/mpeg" })] } });
+    const volume = screen.getByRole("slider", { name: "Background song volume" });
+    expect(volume).toHaveValue("25");
+    expect(volume).toBeEnabled();
+    fireEvent.change(volume, { target: { value: "0" } });
+    fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
+    await waitFor(() => expect(createClipJob).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(createClipJob).mock.calls[1][0]).toMatchObject({
+      sourceProfile: "music", musicAudioMode: "replace_music_keep_voice", musicSongGain: 0,
+    });
   });
 
   it("forces short vertical music output and resets captions when switching from long-form Clip mode", () => {

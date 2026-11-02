@@ -190,6 +190,7 @@ class YouTubeMetadataUpdate(ApiModel):
 class MusicAudioMode(StrEnum):
     SONG_ONLY = "song_only"
     MIX_ORIGINAL = "mix_original"
+    REPLACE_MUSIC_KEEP_VOICE = "replace_music_keep_voice"
 
 
 class MusicTrackSnapshot(ApiModel):

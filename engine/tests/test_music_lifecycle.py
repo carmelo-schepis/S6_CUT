@@ -14,9 +14,10 @@ from engine.config import Settings
 from engine.database import Database
 from engine.jobs import JobManager
 from engine.library import LibraryRules
-from engine.models import CaptionCue, Clip, Job, MusicTrackSnapshot, Project
+from engine.models import CaptionCue, Clip, Job, MusicTrackSnapshot, Project, ScoreBreakdown
 from engine.providers import ProfileService
 from engine.security import SecretVault
+from engine.selection import Candidate
 
 
 @pytest.fixture()
@@ -91,7 +92,7 @@ def test_reviewed_music_finishes_and_exports_after_retention(cluster, prune_work
     queue_review(database, client)
     manager._process('job')
     finished = database.get_job('job')
-    assert finished.state == 'complete', finished.error
+    assert finished.state == 'complete', (finished.error, [(clip.state, clip.error) for clip in finished.clips], [(step.id, step.status, step.detail) for step in finished.steps])
     assert not any(step.status in {'pending', 'active'} for step in finished.steps)
     assert finished.clips[0].blob_id != original.blob_id
     assert finished.clips[0].library_asset_id == original.library_asset_id
@@ -209,3 +210,79 @@ def test_export_manifest_adds_resolved_music_presentation_keys(cluster):
         resolved = json.loads(export.read('Soundtrack lifecycle/manifest.json'))['outputs'][0]
     assert resolved['music_presentation'] == {'subtitle_theme': 'warm', 'lyric_animation': 'legacy', 'hook_text_format': 'plain'}
     assert resolved['music_top_text'] is None
+
+
+def test_music_track_preparation_heartbeats_while_render_step_remains_active(cluster, monkeypatch):
+    database, manager, _, _, _ = cluster
+    job = database.get_job('job')
+    private = database.get_job_private('job')
+    words = [
+        {'text': f'word{index}.', 'start': float(index), 'end': float(index) + 0.8}
+        for index in range(30)
+    ]
+    score = ScoreBreakdown(
+        hook=80, coherence=80, ending=80, energy=70, practical_value=75,
+        visual_potential=80, completeness=85, penalties=0, total=80,
+        explanation='fixture',
+    )
+    candidate = Candidate(0.0, 8.8, words[:9], score)
+    monkeypatch.setattr(jobs_module, 'select_candidates', lambda *_args, **_kwargs: [candidate])
+    monkeypatch.setattr(jobs_module, 'transcription_cache_key', lambda *_args, **_kwargs: 'heartbeat-cache')
+
+    def render(_source, output, **_kwargs):
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b'rendered')
+
+    monkeypatch.setattr(jobs_module, 'render_clip', render)
+
+    def publish(current_job, current_clip, _output, _private):
+        complete = current_clip.model_copy(update={'state': 'complete', 'blob_id': 'heartbeat-output'})
+        current_job.clips = [complete if item.id == complete.id else item for item in current_job.clips]
+        return current_job, complete, None
+
+    monkeypatch.setattr(manager, '_publish_output', publish)
+    job.state, job.stage, job.stage_label, job.progress = 'queued', 'queued', 'Queued', 0
+    job.source_profile = 'music'
+    job.clips = []
+    job.steps = manager._smart_steps(source_profile='music')
+    job.last_heartbeat_at = '2000-01-01T00:00:00+00:00'
+    private['transcript'] = {'language': 'en', 'words': words, 'segments': [{'start': 0, 'end': 29, 'text': 'timed words'}]}
+    private['transcript_cache_key'] = 'heartbeat-cache'
+    database.save_job(job, private)
+    project = database.get_project(job.project_id)
+    project.state = 'queued'
+    database.save_project(project)
+
+    original_monotonic = jobs_module.time.monotonic
+    observed = {}
+
+    def prepare(_song, target, _speed, _settings, *, cancellation_callback, **_kwargs):
+        before = database.get_job('job')
+        active_before = next(step for step in before.steps if step.id == 'render')
+        assert active_before.status == 'active'
+        original_started_at = active_before.started_at
+        assert cancellation_callback() is False
+        heartbeat_before = before.last_heartbeat_at
+
+        monkeypatch.setattr(jobs_module.time, 'monotonic', lambda: original_monotonic() + 6.0)
+        assert cancellation_callback() is False
+        after = database.get_job('job')
+        active_after = next(step for step in after.steps if step.id == 'render')
+        assert active_after.status == 'active'
+        assert active_after.started_at == original_started_at
+        assert after.last_heartbeat_at != heartbeat_before
+        observed.update(started_at=original_started_at, heartbeat_at=after.last_heartbeat_at)
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b'prepared-song')
+        return target
+
+    monkeypatch.setattr(media, 'prepare_music_track', prepare)
+    manager._process('job')
+
+    finished = database.get_job('job')
+    render_step = next(step for step in finished.steps if step.id == 'render')
+    assert finished.state == 'complete', (finished.error, [(clip.state, clip.error) for clip in finished.clips], [(step.id, step.status, step.detail) for step in finished.steps])
+    assert render_step.status == 'complete'
+    assert render_step.started_at == observed['started_at']
+    assert finished.last_heartbeat_at == observed['heartbeat_at']

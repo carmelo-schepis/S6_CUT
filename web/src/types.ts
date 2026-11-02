@@ -29,6 +29,8 @@ export const batchModeSchema = z.enum(["standard", "high_volume"]);
 export type BatchMode = z.infer<typeof batchModeSchema>;
 export const sourceProfileSchema = z.enum(["speech", "music"]);
 export type SourceProfile = z.infer<typeof sourceProfileSchema>;
+export const musicAudioModeSchema = z.enum(["song_only", "mix_original", "replace_music_keep_voice"]);
+export type MusicAudioMode = z.infer<typeof musicAudioModeSchema>;
 export const musicThemeSchema = z.enum(["clean", "warm", "serif", "reference_white_sans", "reference_yellow_sans", "reference_white_serif", "condensed_black", "condensed_white", "handwritten_stack", "karaoke_focus", "soft_glow", "lyric_plate"]);
 export type MusicTheme = z.infer<typeof musicThemeSchema>;
 export const musicLyricAnimationSchema = z.enum(["legacy", "slow_fade", "line_crossfade", "word_build"]);
@@ -168,7 +170,7 @@ export const clipSchema = z.object({
   musicTopText: z.string().max(100).nullable().optional(),
   musicTreatment: z.enum(["color", "grayscale"]).nullable().optional(),
   musicTrack: musicTrackSchema.nullable().optional(),
-  musicAudioMode: z.enum(["song_only", "mix_original"]).optional(),
+  musicAudioMode: musicAudioModeSchema.optional(),
   musicSongGain: z.number().min(0).max(2).optional(),
   musicOriginalAudioGain: z.number().min(0).max(2).optional(),
   downloadUrl: z.string().nullable().optional(),
@@ -272,7 +274,7 @@ export const jobSchema = z.object({
   editingPresentation: editingPresentationSchema.nullable().optional(),
   musicTopText: z.string().max(100).nullable().optional(),
   musicTrack: musicTrackSchema.nullable().optional(),
-  musicAudioMode: z.enum(["song_only", "mix_original"]).optional(),
+  musicAudioMode: musicAudioModeSchema.optional(),
   musicSongGain: z.number().min(0).max(2).optional(),
   musicOriginalAudioGain: z.number().min(0).max(2).optional(),
   hookTextEnabled: z.boolean().optional(),
@@ -326,7 +328,7 @@ export const projectSchema = z.object({
   contentFormat: contentFormatSchema.default("short"),
   sourceProfile: sourceProfileSchema.optional(),
   musicTrack: musicTrackSchema.nullable().optional(),
-  musicAudioMode: z.enum(["song_only", "mix_original"]).optional(),
+  musicAudioMode: musicAudioModeSchema.optional(),
   musicSongGain: z.number().min(0).max(2).optional(),
   musicOriginalAudioGain: z.number().min(0).max(2).optional(),
   latestJobId: z.string().nullable().optional(),

@@ -1,6 +1,17 @@
 from __future__ import annotations
 
-from engine.selection import group_music_lyric_lines, select_music_candidates
+import gzip
+import json
+from pathlib import Path
+from types import SimpleNamespace
+
+from engine import selection
+from engine.selection import group_music_lyric_lines, select_candidates, select_music_candidates
+
+
+RECORDED_CASES = json.loads(gzip.decompress(
+    (Path(__file__).parent / "fixtures" / "music-narration-overlap-cases.json.gz").read_bytes()
+))
 
 
 def _words(line_count: int = 8) -> list[dict[str, object]]:
@@ -130,3 +141,171 @@ def test_music_candidates_never_return_subsecond_or_under_minimum_windows() -> N
     assert select_music_candidates(words, "serious", 1, 0, 5) == []
     selected = select_music_candidates(_words(4), "serious", 5, 3, 12)
     assert all(item.end - item.start >= 3 for item in selected)
+
+
+def test_strict_speech_selection_maximizes_valid_nonoverlapping_count(monkeypatch):
+    words = []
+    for base, prefix in ((0.0, "first"), (8.0, "second")):
+        for index in range(5):
+            start = base + index * 1.6
+            text = f"{prefix} {index}"
+            if index == 4:
+                text += "."
+            words.append({"text": text, "start": start, "end": start + 0.3})
+        words[-1]["end"] = base + 8.0
+
+    monkeypatch.setattr(
+        selection, "_score",
+        lambda segment, _style, _target: SimpleNamespace(
+            total=100.0 if float(segment[-1]["end"]) - float(segment[0]["start"]) > 12 else 20.0
+        ),
+    )
+
+    selected = select_candidates(words, "serious", 2, 8, 16, strict_bounds=True)
+
+    assert [(item.start, item.end) for item in selected] == [(0.0, 8.0), (8.0, 16.0)]
+
+
+def test_strict_speech_selection_splits_punctuation_free_runs_into_bounded_clips():
+    words = [
+        {"text": f"word{index}", "start": index * 0.75, "end": index * 0.75 + 0.25}
+        for index in range(40)
+    ]
+
+    selected = select_candidates(words, "serious", 3, 8, 10, strict_bounds=True)
+
+    assert len(selected) == 3
+    assert all(8 <= item.end - item.start <= 10 for item in selected)
+    assert all(left.end <= right.start for left, right in zip(selected, selected[1:]))
+
+
+def test_strict_speech_selection_combines_many_short_sentences():
+    words = [
+        {"text": f"word{index}.", "start": float(index), "end": index + 0.8}
+        for index in range(60)
+    ]
+
+    selected = select_candidates(words, "serious", 2, 20, 30, strict_bounds=True)
+
+    assert len(selected) == 2
+    assert all(20 <= item.end - item.start <= 30 for item in selected)
+    assert selected[0].end <= selected[1].start
+
+
+def test_strict_speech_selection_does_not_use_short_chunk_fallback():
+    words = [{"text": "Only short speech.", "start": 0.0, "end": 4.0}]
+
+    assert select_candidates(words, "serious", 1, 8, 12, strict_bounds=True) == []
+
+
+def test_strict_selection_never_repeats_the_recorded_overlapping_windows():
+    """The two saved Music jobs selected overlapping windows; strict bounds must not.
+
+    Job b9922a63 selected 41.02-83.44 and 68.70-125.26, overlapping by 14.74s
+    (34.7% of the shorter clip, inside the ordinary 35% overlap policy). Both
+    jobs must regain five distinct 20-120s windows inside the source timeline.
+    """
+    for case in RECORDED_CASES:
+        words = selection._timed_words(case["words"])
+        # Production requests the enlarged pool, then takes the first `count`.
+        ordinary_pool_size = min(30, max(case["count"], case["count"] * 3))
+        ordinary = select_candidates(
+            words, case["style"], ordinary_pool_size, case["minimum"], case["maximum"],
+        )
+        ordinary_windows = sorted((round(item.start, 2), round(item.end, 2)) for item in ordinary[:case["count"]])
+        saved = sorted((float(a), float(b)) for a, b in case["saved_windows"])
+        assert ordinary_windows == saved  # the deployed pool reproduces the recorded defect
+
+        strict = select_candidates(
+            words, case["style"], case["count"], case["minimum"], case["maximum"],
+            strict_bounds=True,
+        )
+        windows = [(item.start, item.end) for item in strict]
+        assert len(windows) == case["count"]
+        assert windows == sorted(windows)
+        assert all(case["minimum"] <= end - start <= case["maximum"] for start, end in windows)
+        assert all(end <= case["source_duration"] + 1e-6 for _, end in windows)
+        assert all(left[1] <= right[0] for left, right in zip(windows, windows[1:]))
+        assert windows != [tuple(window) for window in saved]
+
+
+def test_strict_selection_is_deterministic_across_calls():
+    case = RECORDED_CASES[0]
+    words = selection._timed_words(case["words"])
+    first = select_candidates(words, case["style"], case["count"], 20.0, 120.0, strict_bounds=True)
+    second = select_candidates(words, case["style"], case["count"], 20.0, 120.0, strict_bounds=True)
+    assert first == second
+
+
+def test_strict_selection_returns_truthful_shortfall_without_padding():
+    case = RECORDED_CASES[0]
+    words = selection._timed_words(case["words"])[:120]
+    selected = select_candidates(words, case["style"], 5, 20.0, 120.0, strict_bounds=True)
+    windows = [(item.start, item.end) for item in selected]
+    assert all(20.0 <= end - start <= 120.0 for start, end in windows)
+    assert all(left[1] <= right[0] for left, right in zip(windows, windows[1:]))
+    assert len(windows) < 5
+
+
+def test_strict_speech_selection_filters_unusable_timestamps_without_mutating_input():
+    invalid = [
+        {"text": "nan", "start": float("nan"), "end": 4.0},
+        {"text": "negative", "start": -1.0, "end": 1.0},
+        {"text": "zero", "start": 2.0, "end": 2.0},
+        {"text": "missing", "end": 5.0},
+        {"text": "infinite", "start": 6.0, "end": float("inf")},
+    ]
+    valid = [
+        {"text": f"spoken{index}.", "start": float(index * 2), "end": index * 2 + 1.5}
+        for index in range(20)
+    ]
+    noisy = [valid[0], *invalid[:2], *valid[1:5], *invalid[2:], *valid[5:]]
+    before = list(noisy)
+
+    expected = select_candidates(valid, "serious", 3, 8, 12, strict_bounds=True)
+    actual = select_candidates(noisy, "serious", 3, 8, 12, strict_bounds=True)
+
+    assert [(item.start, item.end) for item in actual] == [(item.start, item.end) for item in expected]
+    assert noisy == before
+    assert all(8 <= item.end - item.start <= 12 for item in actual)
+
+
+def test_strict_selection_excludes_reserved_completed_windows_before_optimizing():
+    words = [
+        {"text": f"sentence {index} has spoken content.", "start": index * 10.0, "end": index * 10.0 + 9.0}
+        for index in range(12)
+    ]
+    completed = ((0.0, 29.0),)
+
+    selected = select_candidates(
+        words, "serious", 2, 18, 30, strict_bounds=True, reserved_windows=completed,
+    )
+
+    assert len(selected) == 2
+    assert all(item.end <= start or item.start >= end for item in selected for start, end in completed)
+    assert all(left.end <= right.start for left, right in zip(selected, selected[1:]))
+
+
+def test_strict_selection_uses_real_word_boundaries_when_short_sentences_overshoot_maximum():
+    # Timing shape from the 35s KeepVoice acceptance transcript: 44 usable
+    # words in three clean sentences spanning 9.68-26.92s, with sentence
+    # spans 6.00s, 4.96s, 5.14s and short pauses between them.
+    sentence_shapes = [(9.68, 15.68, 16), (16.16, 21.12, 14), (21.78, 26.92, 14)]
+    words = []
+    for sentence_index, (start, end, count) in enumerate(sentence_shapes):
+        for index in range(count):
+            word_start = start + (end - start) * index / count
+            word_end = start + (end - start) * (index + 1) / count
+            text = f"spoken{sentence_index}_{index}"
+            if index == count - 1:
+                text += "."
+            words.append({"text": text, "start": word_start, "end": word_end})
+
+    selected = select_candidates(words, "educational", 1, 8, 10, strict_bounds=True)
+
+    assert len(words) == 44
+    assert len(selected) == 1
+    assert 8 <= selected[0].end - selected[0].start <= 10
+    assert selected[0].start in {start for start, _, _ in sentence_shapes}
+    assert selected[0].words[0]["text"] == "spoken0_0"
+    assert all(left.end <= right.start for left, right in zip(selected, selected[1:]))
