@@ -4,6 +4,7 @@
  * The runner is intentionally resource-gated: run from tmux on linuxpc, after the
  * active benchmark/container check, with one engine container capped at 3 GiB. */
 import { spawn, execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { resolve, join } from 'node:path';
@@ -93,7 +94,8 @@ try {
 
 // Provision only after preflight/fixture validation. The engine receives its
 // standard runtime configuration; no fake transcript or downloader environment.
-let created = false;
+let engineStarted = false;
+let webStarted = false;
 let networkCreated = false;
 let potCreated = false;
 try {
@@ -112,9 +114,16 @@ try {
   if (!potHealthy) throw new Error('Isolated YouTube proof-of-origin provider did not become healthy.');
   const port = await freePort();
   const dataUser = ['--user', `${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}`];
+  // Track each container as soon as it starts so cleanup removes it even when
+  // the next container fails to start.
   await run('docker', ['run', '-d', '--name', engine, ...dataUser, '--network', network, '--network-alias', 'engine', '--memory=3g', '--memory-swap=4g', '--cpus=3', '--pids-limit=512', '--mount', `type=bind,source=${bindData},target=/app/data`, '--tmpfs', '/tmp:rw,size=512m', '-v', `${root}/engine:/app/engine:ro`, '-v', `${artifacts}:/qa:ro`, engineImage]);
-  await run('docker', ['run', '-d', '--name', web, '--network', network, '--memory=256m', '-p', `127.0.0.1:${port}:8080`, '-v', `${root}/web/dist:/usr/share/nginx/html:ro`, '-v', `${root}/docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro`, webImage]);
-  created = true;
+  engineStarted = true;
+  // Mount the local bundle only when it was built. Otherwise the prepared web
+  // image keeps its own UI; an empty bind mount would hide it.
+  const localDist = join(root, 'web/dist');
+  const distMount = existsSync(join(localDist, 'index.html')) ? ['-v', `${localDist}:/usr/share/nginx/html:ro`] : [];
+  await run('docker', ['run', '-d', '--name', web, '--network', network, '--memory=256m', '-p', `127.0.0.1:${port}:8080`, ...distMount, '-v', `${root}/docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro`, webImage]);
+  webStarted = true;
   const url = `http://127.0.0.1:${port}`;
   let healthy = false;
   for (let attempt = 0; attempt < 180; attempt++) {
@@ -141,12 +150,13 @@ try {
   });
   passed = true;
 } finally {
-  if (created) {
+  if (engineStarted || webStarted) {
     for (const name of [engine, web]) {
       try { await writeFile(join(artifacts, `${name}.log`), redactSignedUrls(inspect('docker', ['logs', name]))); } catch (error) { await writeFile(join(artifacts, `${name}.log`), redactSignedUrls(String(error))); }
     }
-    await run('docker', ['rm', '-f', web, engine]).catch(() => {});
   }
+  // Always attempt both names: a partial start can leave the engine running.
+  await run('docker', ['rm', '-f', web, engine]).catch(() => {});
   if (potCreated) await run('docker', ['rm', '-f', pot]).catch(() => {});
   if (networkCreated) await run('docker', ['network', 'rm', network]).catch(() => {});
   if (browserTemp) await run('cp', ['-a', browserTemp, join(artifacts, 'playwright')]).catch(() => {});

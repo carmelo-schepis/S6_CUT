@@ -1602,7 +1602,10 @@ class JobManager:
                 self._save(job, private)
 
         try:
-            result = separate_voice(source, target, self.settings, cancellation_callback=cancelled, progress_callback=progress)
+            result = separate_voice(
+                source, target, self.settings, cancellation_callback=cancelled, progress_callback=progress,
+                timeline_duration=float(metadata["duration"]),
+            )
             if not result.is_file() or not validate_voice_stem(result, float(metadata["duration"]), self.settings):
                 raise MediaError("Voice separation returned an empty or invalid narration stem")
             private["music_voice_stem"] = {

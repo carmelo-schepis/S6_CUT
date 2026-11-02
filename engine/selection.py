@@ -148,7 +148,9 @@ def select_candidates(
             offset = start_index
             while offset < end_index:
                 end = offset + 1
-                while end < end_index:
+                # The leftover of an overlong sentence may need the words of
+                # the following sentence to reach the minimum length.
+                while end < len(words):
                     duration = float(words[end]["end"]) - float(words[offset]["start"])
                     if duration > maximum:
                         break

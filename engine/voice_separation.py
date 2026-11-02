@@ -224,10 +224,10 @@ def _get_model(model_dir: Path) -> Any:
         return _MODEL
 
 
-def _probe_audio(source: Path, ffprobe: str) -> tuple[float, int]:
+def _probe_audio(source: Path, ffprobe: str) -> tuple[float, int, float]:
     command = [
         ffprobe, "-v", "error", "-select_streams", "a:0", "-show_entries",
-        "stream=duration,channels,sample_rate", "-of", "json", str(source),
+        "stream=duration,channels,sample_rate,start_time", "-of", "json", str(source),
     ]
     try:
         result = subprocess.run(command, check=True, capture_output=True, text=True, timeout=30)
@@ -242,7 +242,12 @@ def _probe_audio(source: Path, ffprobe: str) -> tuple[float, int]:
             duration = float(subprocess.run(duration_cmd, check=True, capture_output=True, text=True, timeout=30).stdout.strip())
         if not np.isfinite(duration) or duration <= 0 or channels not in (1, 2):
             raise VoiceSeparationError("Source audio must have a positive duration and one or two channels")
-        return duration, channels
+        # FFmpeg decodes an audio stream from its own start, so a stream that
+        # begins later than the video needs that much leading silence.
+        start = float(stream.get("start_time") or 0)
+        if not np.isfinite(start) or start < 0:
+            start = 0.0
+        return duration, channels, start
     except VoiceSeparationError:
         raise
     except (OSError, ValueError, KeyError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
@@ -340,13 +345,26 @@ def separate_voice(
     settings: Any,
     cancellation_callback: Callable[[], bool] | None = None,
     progress_callback: Callable[[float], None] | None = None,
+    timeline_duration: float | None = None,
 ) -> Path:
-    """Write an isolated Spleeter vocals WAV atomically and return its path."""
+    """Write an isolated Spleeter vocals WAV atomically and return its path.
+
+    The stem covers ``timeline_duration`` seconds of the video timeline: the
+    audio start offset is padded with silence, a shorter audio stream is padded
+    at the end, and a longer one is truncated. Without a timeline the stem
+    covers the audio stream itself.
+    """
     source_path, target_path = Path(source), Path(target)
     if not source_path.is_file() or source_path.stat().st_size <= 0:
         raise VoiceSeparationError(f"Source audio is missing or empty: {source_path}")
     target_path.parent.mkdir(parents=True, exist_ok=True)
-    duration, channels = _probe_audio(source_path, settings.ffprobe)
+    duration, channels, lead_seconds = _probe_audio(source_path, settings.ffprobe)
+    if timeline_duration is None:
+        timeline_duration = duration + lead_seconds
+    if not np.isfinite(float(timeline_duration)) or float(timeline_duration) <= 0:
+        raise VoiceSeparationError("Voice stem timeline must have a positive duration")
+    timeline_frames = round(float(timeline_duration) * MODEL_SAMPLE_RATE)
+    written_frames = 0
     model_dir = _download_model(Path(settings.data_path) / "models", cancellation_callback)
     model = _get_model(model_dir)
 
@@ -374,6 +392,19 @@ def separate_voice(
             wav.setnchannels(channels)
             wav.setsampwidth(2)
             wav.setframerate(MODEL_SAMPLE_RATE)
+
+            def write_timeline(samples: np.ndarray) -> None:
+                nonlocal written_frames
+                room = timeline_frames - written_frames
+                if room <= 0:
+                    return
+                clipped = samples[:room]
+                _write_pcm16(wav, clipped, channels)
+                written_frames += clipped.shape[0]
+
+            lead_frames = min(timeline_frames, round(lead_seconds * MODEL_SAMPLE_RATE))
+            if lead_frames:
+                write_timeline(np.zeros((lead_frames, 2), dtype=np.float32))
             carry = np.empty((0, 2), dtype=np.float32)
             eof = False
             while True:
@@ -414,7 +445,7 @@ def separate_voice(
                 # the current core begins after that context.
                 start = context_frames
                 vocals = _infer(model, window, required_frames=start + core_count)
-                _write_pcm16(wav, vocals[start:start + core_count], channels)
+                write_timeline(vocals[start:start + core_count])
                 expected_frames += core_count
                 if progress_callback is not None:
                     progress_callback(min(0.99, expected_frames / (duration * MODEL_SAMPLE_RATE)))
@@ -423,6 +454,8 @@ def separate_voice(
                     break
                 previous_context = carry[max(0, core_count - context_frames):core_count]
                 carry = carry[core_count:]
+            if written_frames < timeline_frames:
+                write_timeline(np.zeros((timeline_frames - written_frames, 2), dtype=np.float32))
 
         if process.stdout:
             process.stdout.close()
@@ -440,7 +473,7 @@ def separate_voice(
                 f"({output_duration:.3f}s decoded, {duration:.3f}s reported)"
             )
         _cancelled(cancellation_callback)
-        _validate_output(partial, expected_frames, channels, settings.ffprobe)
+        _validate_output(partial, written_frames, channels, settings.ffprobe)
         os.replace(partial, target_path)
         if progress_callback is not None:
             progress_callback(1.0)
