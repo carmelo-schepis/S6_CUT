@@ -176,7 +176,7 @@ test("navigation follows the desktop's breakpoints: top bar on phones, the sideb
   }
 });
 
-test("a running job spans the page evenly: no empty column, one edge for every status, the rail through the icons", async ({ page }, testInfo) => {
+test("a running job spans the page evenly: no empty column, one edge for every status, no connector, icons on one centre line", async ({ page }, testInfo) => {
   test.skip(!isStatusViewProject(testInfo.project.name), "iOS only");
   await stubApi(page, { running: [musicJob()], downloads: [] });
   await page.goto("/#/jobs", { waitUntil: "domcontentloaded" });
@@ -191,7 +191,6 @@ test("a running job spans the page evenly: no empty column, one edge for every s
     const right = rect(content).right - parseFloat(style.paddingRight);
     const textLeft = (element: Element) => { const range = document.createRange(); range.selectNodeContents(element); return range.getBoundingClientRect().left; };
     const list = document.querySelector(".m-work .process-checklist")!;
-    const rail = rect(list).left + parseFloat(getComputedStyle(list, "::before").left) + 0.5;
     const steps = [...document.querySelectorAll(".m-work .checklist-step")];
     const skipped = steps.find((step) => step.classList.contains("status-skipped"))!;
     const visible = (element: Element | null) => Boolean(element) && getComputedStyle(element!).display !== "none";
@@ -202,7 +201,8 @@ test("a running job spans the page evenly: no empty column, one edge for every s
       statusRights: steps.map((step) => step.querySelector(".checklist-status-text")).filter(visible).map((status) => rect(status).right),
       countRight: rect(document.querySelector(".m-work .m-toggle > span")).right,
       finishedRight: rect(document.querySelector(".m-done-main")).right,
-      railOffsets: steps.map((step) => { const icon = rect(step.querySelector(".checklist-icon")); return Math.abs(icon.left + icon.width / 2 - rail); }),
+      connector: getComputedStyle(list, "::before").content,
+      iconCentres: steps.map((step) => { const icon = rect(step.querySelector(".checklist-icon")); return icon.left + icon.width / 2; }),
       detailIndent: textLeft(skipped.querySelector(".checklist-detail-text")!) - textLeft(skipped.querySelector(".checklist-label")!),
       overflow: document.documentElement.scrollWidth - window.innerWidth,
     };
@@ -210,8 +210,9 @@ test("a running job spans the page evenly: no empty column, one edge for every s
   // "In progress" and "Skipped" end on the content's right edge, with the step count and the finished jobs below.
   expect(layout.statusRights).toHaveLength(2);
   for (const edge of [...layout.statusRights, layout.countRight, layout.finishedRight]) expect(Math.abs(edge - layout.right)).toBeLessThanOrEqual(1);
-  // The rail runs through every step icon, and a step's detail starts under its label.
-  for (const offset of layout.railOffsets) expect(offset).toBeLessThanOrEqual(1);
+  // No connector line, every step icon shares one centre line, and a step's detail starts under its label.
+  expect(layout.connector).toBe("none");
+  for (const centre of layout.iconCentres) expect(Math.abs(centre - layout.iconCentres[0])).toBeLessThanOrEqual(1);
   expect(Math.abs(layout.detailIndent)).toBeLessThanOrEqual(1);
   if (page.viewportSize()!.width >= 1024) {
     // Wide: the summary and the steps side by side in two equal columns that fill the page.

@@ -1179,15 +1179,6 @@ main { min-width: 0; }
   margin: 0;
   padding: 8px;
 }
-.process-checklist::before {
-  position: absolute;
-  top: calc(8px + 9px);
-  bottom: calc(8px + 9px);
-  left: calc(8px + 9px);
-  width: 1px;
-  background: var(--border);
-  content: "";
-}
 .checklist-step {
   position: relative;
   display: flex;
@@ -1216,7 +1207,7 @@ main { min-width: 0; }
   color: var(--text-primary);
   background: var(--surface-1);
 }
-.checklist-icon svg { width: 11px; height: 11px; }
+.checklist-icon svg { width: 12px; height: 12px; }
 .checklist-step-body {
   min-width: 0;
   flex: 1 1 auto;
@@ -1845,8 +1836,8 @@ main { min-width: 0; }
   border-radius: var(--ws-panel-radius);
   /* The 2px left accent bar was the loudest edge on the page and it ran the
      full height of a panel that is mostly finished work. The panel is a
-     hairline card like every other surface; the in-flight row carries the
-     accent instead. */
+     hairline card like every other surface; the in-flight row is marked by its
+     surface tint instead. */
   border-left: 0;
   overflow: hidden;
 }
@@ -1876,15 +1867,6 @@ main { min-width: 0; }
   padding: 0;
 }
 
-/* The connector rail is redrawn against the new padding. It stops at the first
-   and last icon rather than running past them into the panel edges. */
-.process-checklist::before {
-  /* Half a row: 4px of row padding plus half of the 16px icon. */
-  top: 12px;
-  bottom: 12px;
-  left: calc(var(--space-4) + 8px);
-}
-
 .checklist-step {
   gap: var(--space-3);
   padding: var(--space-1) var(--space-4);
@@ -1906,12 +1888,10 @@ main { min-width: 0; }
 }
 
 .checklist-step.status-active {
-  /* The single row that is actually happening. One surface step up plus the
-     approved selection accent — the same accent a selected tab uses, because
-     this is the same idea: the row the system is currently on. */
+  /* The single row that is actually happening. One surface step up is the
+     whole mark: the spinner and "In progress" carry the rest. */
   background: var(--surface-2);
   border-color: var(--border);
-  box-shadow: inset 2px 0 var(--selector-highlight);
 }
 
 /* Stepped from the status tokens rather than restated as literals, so a change
@@ -2108,7 +2088,6 @@ main { min-width: 0; }
   .source-content,
   .inspector-content { padding-inline: var(--space-3); }
   .checklist-step { padding-inline: var(--space-3); }
-  .process-checklist::before { left: calc(var(--space-3) + 8px); }
 }
 
 /* ===========================================================================
@@ -2983,7 +2962,6 @@ input[type="checkbox"]:checked::before {
   border-top: 1px solid var(--box-edge-top);
 }
 .checklist-panel.is-collapsible .process-checklist[hidden] { display: none; }
-.checklist-panel.is-collapsible .process-checklist::before { top: calc(var(--space-2) + 12px); left: calc(var(--space-3) + 8px); }
 .checklist-panel.is-collapsible .checklist-step {
   padding-inline: var(--space-3);
   font-size: var(--ws-meta-size);

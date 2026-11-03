@@ -360,6 +360,68 @@ test.describe("workspace focus pass", () => {
     expect(harness.failedRequests).toEqual([]);
   });
 
+  test("steps: no connector line, no active-row bar, every glyph centred on a whole pixel", async ({ page }) => {
+    test.setTimeout(90_000);
+    const harness = await setup(page, "running");
+    for (const [width, height] of [[1440, 900], [390, 844]] as const) {
+      await page.setViewportSize({ width, height });
+      await openWorkspace(page);
+      if ((await stepsToggle(page).getAttribute("aria-expanded")) !== "true") await stepsToggle(page).click();
+      await expect(stepList(page)).toBeVisible();
+      for (const status of ["complete", "skipped", "active", "pending"]) {
+        await expect(page.locator(`.checklist-step.status-${status}`).first(), `${width}px has a ${status} row`).toBeVisible();
+      }
+      const measured = await page.evaluate(() => {
+        const list = document.querySelector("ol.process-checklist")!;
+        const rows = [...list.querySelectorAll<HTMLElement>(".checklist-step")];
+        return {
+          connector: getComputedStyle(list, "::before").content,
+          rows: rows.map((row) => {
+            const icon = row.querySelector<HTMLElement>(".checklist-icon")!;
+            const svg = icon.querySelector("svg")!.getBoundingClientRect();
+            const iconBox = icon.getBoundingClientRect();
+            const label = row.querySelector(".checklist-label")!.getBoundingClientRect();
+            const status = row.querySelector(".checklist-status-text")!.getBoundingClientRect();
+            return {
+              status: [...row.classList].find((name) => name.startsWith("status-")) ?? "",
+              boxShadow: getComputedStyle(row).boxShadow,
+              background: getComputedStyle(row).backgroundColor,
+              iconCentreX: iconBox.left + iconBox.width / 2,
+              svgCentreOffsetX: Math.abs(svg.left + svg.width / 2 - (iconBox.left + iconBox.width / 2)),
+              svgCentreOffsetY: Math.abs(svg.top + svg.height / 2 - (iconBox.top + iconBox.height / 2)),
+              // The spinner rotates, which widens its bounding box, so read the layout width. clientWidth excludes the 1px border: this is the free space inside the disc.
+              spareX: icon.clientWidth - parseFloat(getComputedStyle(icon.querySelector("svg")!).width),
+              labelLeft: label.left,
+              statusLeft: status.left,
+            };
+          }),
+        };
+      });
+      expect(measured.connector, `${width}px connector`).toBe("none");
+      const complete = measured.rows.find((row) => row.status === "status-complete")!;
+      const active = measured.rows.find((row) => row.status === "status-active")!;
+      expect(active.boxShadow, `${width}px active row bar`).toBe("none");
+      expect(active.background, `${width}px active row tint`).not.toBe(complete.background);
+      const centres = measured.rows.map((row) => row.iconCentreX);
+      for (const centre of centres) expect(Math.abs(centre - centres[0]), `${width}px icon column`).toBeLessThanOrEqual(0.5);
+      for (const row of measured.rows) {
+        expect(row.svgCentreOffsetX, `${width}px ${row.status} glyph x`).toBeLessThanOrEqual(0.5);
+        expect(row.svgCentreOffsetY, `${width}px ${row.status} glyph y`).toBeLessThanOrEqual(0.5);
+        // An even spare width splits into whole pixels on each side, so the glyph sits on the pixel grid.
+        expect(Number.isInteger(row.spareX) && row.spareX % 2 === 0, `${width}px ${row.status} spare ${row.spareX}`).toBe(true);
+      }
+      if (width === 1440) {
+        for (const row of measured.rows) {
+          expect(Math.abs(row.labelLeft - measured.rows[0].labelLeft), "label column").toBeLessThanOrEqual(1);
+          expect(Math.abs(row.statusLeft - measured.rows[0].statusLeft), "status column").toBeLessThanOrEqual(1);
+        }
+      }
+      await shot(page, `steps-centred-${width}`);
+    }
+    expect(harness.errors).toEqual([]);
+    expect(harness.failedRequests).toEqual([]);
+  });
+
   test("long elapsed: step icons clear the edge, elapsed reads in full, the bar is the logo gradient", async ({ page }) => {
     test.setTimeout(120_000);
     activeElapsedMs = 42 * 60_000 + 10_000;
