@@ -108,11 +108,32 @@ def test_duplicate_copies_the_endpoint():
     assert copy.ollama_url == OLLAMA_URL and copy.ollama_model == "qwen2.5:0.5b"
 
 
-def test_missing_model_name_defaults_and_latest_suffix_is_removed():
+def test_missing_model_name_is_auto_detected_and_latest_suffix_is_removed():
     profile_id = save_profile(ollama_url=OLLAMA_URL, ollama_model="")
-    assert profiles.db.get_profile(profile_id)[0].ollama_model == "llama3.2"
+    assert profiles.db.get_profile(profile_id)[0].ollama_model is None
     profile_id = save_profile(ollama_url=OLLAMA_URL, ollama_model="llama3.2:latest")
     assert profiles.db.get_profile(profile_id)[0].ollama_model == "llama3.2"
+
+
+def test_endpoint_only_profile_selects_and_tests_smallest_chat_model():
+    profile_id = save_profile(ollama_url=OLLAMA_URL)
+
+    def server(method, url, kwargs):
+        if method == "GET":
+            return FakeResponse(200, {"models": [
+                {"name": "embeddinggemma:latest", "capabilities": ["embedding"], "details": {"parameter_size": "300M"}},
+                {"name": "qwen3:8b", "capabilities": ["completion", "thinking"], "details": {"parameter_size": "8.2B"}},
+                {"name": "qwen3:1.7b", "capabilities": ["completion", "thinking"], "details": {"parameter_size": "1.7B"}},
+            ]})
+        Recorder.calls.append((method, url, kwargs))
+        return FakeResponse(200, {"message": {"content": json.dumps({"ok": True})}})
+
+    Recorder.responder = server
+    tested = asyncio.run(profiles.test(profile_id))
+    assert tested.ollama_status == "connected"
+    assert tested.ollama_model == "qwen3:1.7b"
+    chat = next(kwargs["json"] for method, _, kwargs in Recorder.calls if method == "POST")
+    assert chat["model"] == "qwen3:1.7b" and chat["think"] is False
 
 
 def test_ollama_json_uses_native_chat_and_never_reaches_openrouter():

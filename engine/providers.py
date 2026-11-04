@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from decimal import Decimal, InvalidOperation
 import uuid
 from typing import Any
@@ -23,7 +24,6 @@ class ProviderError(RuntimeError):
 MASKED_SECRET_MARKER = "••••"
 # Ollama silently truncates prompts longer than num_ctx, so this must exceed the largest prompt.
 OLLAMA_NUM_CTX = 16384
-OLLAMA_DEFAULT_MODEL = "llama3.2"
 OLLAMA_UNREACHABLE = "Could not reach Ollama at this address. From Docker use http://host.docker.internal:11434. On Linux, start Ollama with OLLAMA_HOST=0.0.0.0."
 LEGACY_SECRET_KEY = "elevenlabsKey"
 
@@ -173,7 +173,7 @@ class ProfileService:
         ollama_url = previous_ollama_url if value.ollama_url is None else (value.ollama_url or None)
         if ollama_url:
             requested_model = value.ollama_model if value.ollama_model is not None else (previous_ollama_model or "")
-            ollama_model = requested_model.strip().removesuffix(":latest") or OLLAMA_DEFAULT_MODEL
+            ollama_model = requested_model.strip().removesuffix(":latest") or None
         else:
             ollama_model = None
         ollama_unchanged = bool(previous_profile and ollama_url and ollama_url == previous_ollama_url and ollama_model == previous_ollama_model)
@@ -292,17 +292,24 @@ class ProfileService:
             raise ProviderError("malformed_response", "Ollama returned an unreadable model list.") from exc
         if not isinstance(entries, list):
             raise ProviderError("malformed_response", "Ollama returned an unreadable model list.")
-        models: dict[str, OpenRouterModel] = {}
+        models: dict[str, tuple[float, OpenRouterModel]] = {}
         for entry in entries:
             name = entry.get("name") if isinstance(entry, dict) else None
             if not isinstance(name, str) or not name.strip():
                 continue
+            capabilities = entry.get("capabilities")
+            if isinstance(capabilities, list) and capabilities and "completion" not in capabilities:
+                continue
             model_id = name.strip().removesuffix(":latest")
-            models[model_id] = OpenRouterModel(
+            details = entry.get("details") if isinstance(entry.get("details"), dict) else {}
+            size = re.fullmatch(r"\s*([\d.]+)\s*([KMGTPE]?B?)\s*", str(details.get("parameter_size") or ""), re.I)
+            scale = {"": 1e12, "K": 1e3, "KB": 1e3, "M": 1e6, "MB": 1e6, "B": 1e9, "G": 1e9, "GB": 1e9, "T": 1e12, "TB": 1e12, "P": 1e15, "PB": 1e15}
+            order = float(size.group(1)) * scale[size.group(2).upper()] if size else 1e12
+            models[model_id] = (order, OpenRouterModel(
                 id=model_id, name=model_id, context_length=OLLAMA_NUM_CTX, output_modalities=["text"],
                 supported_parameters=["response_format"], free=True, pricing={"prompt": "0", "completion": "0"},
-            )
-        return [models[model_id] for model_id in sorted(models)]
+            ))
+        return [item for _, item in sorted(models.values(), key=lambda pair: (pair[0], pair[1].id))]
 
     async def _ollama_chat(self, base_url: str, model: str, messages: list[dict[str, str]], schema: dict[str, Any], *, temperature: float, max_tokens: int) -> tuple[dict[str, Any], dict[str, Any]]:
         """One native /api/chat call with a JSON schema. The response body is never echoed into errors."""
@@ -340,7 +347,12 @@ class ProfileService:
 
     async def _ollama_json(self, messages: list[dict[str, str]], schema: dict[str, Any], *, model_id: str | None, temperature: float, max_tokens: int | None, include_usage: bool) -> dict[str, Any] | tuple[dict[str, Any], dict[str, Any]]:
         profile = self._selected_ollama_profile()
-        model = model_id or profile.ollama_model or OLLAMA_DEFAULT_MODEL
+        model = model_id or profile.ollama_model
+        if not model:
+            models = await self.ollama_models(profile.ollama_url)
+            if not models:
+                raise ProviderError("unavailable", "No text-generation models are available on this Ollama server.")
+            model = models[0].id
         if model_id:
             models = await self.ollama_models(profile.ollama_url)
             if not any(item.id == model_id for item in models):
@@ -419,13 +431,17 @@ class ProfileService:
             profile.ollama_status, profile.ollama_message = "configured", "Ready to test"
             try:
                 models = await self.ollama_models(profile.ollama_url)
-                model_id = profile.ollama_model or OLLAMA_DEFAULT_MODEL
-                if not any(item.id == model_id for item in models):
+                model_id = profile.ollama_model
+                if model_id and not any(item.id == model_id for item in models):
                     profile.ollama_status, profile.ollama_message = "unavailable", ollama_model_missing(model_id)
+                elif not models:
+                    profile.ollama_status, profile.ollama_message = "unavailable", "No text-generation models are available on this Ollama server."
                 else:
+                    model_id = model_id or models[0].id
                     schema = {"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"], "additionalProperties": False}
                     result, _ = await self._ollama_chat(profile.ollama_url, model_id, [{"role": "user", "content": 'Return exactly the JSON object {"ok":true}.'}], schema, temperature=0, max_tokens=20)
                     if result.get("ok") is True:
+                        profile.ollama_model = model_id
                         profile.ollama_status, profile.ollama_message = "connected", "Connected; Ollama text generation succeeded"
                     else:
                         profile.ollama_status, profile.ollama_message = "malformed_response", "Ollama returned an unreadable text-generation response"
