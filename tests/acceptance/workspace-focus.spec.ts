@@ -391,6 +391,8 @@ test.describe("workspace focus pass", () => {
               iconCentreX: iconBox.left + iconBox.width / 2,
               svgCentreOffsetX: Math.abs(svg.left + svg.width / 2 - (iconBox.left + iconBox.width / 2)),
               svgCentreOffsetY: Math.abs(svg.top + svg.height / 2 - (iconBox.top + iconBox.height / 2)),
+              // Independent of the glyph: the disc must sit on its row's vertical centre. This is what still checks the active row, whose glyph is hidden.
+              discOffsetY: Math.abs(iconBox.top + iconBox.height / 2 - (row.getBoundingClientRect().top + row.getBoundingClientRect().height / 2)),
               // Read the layout width, not the rotated box. clientWidth excludes the 1px border: this is the free space inside the disc. The active disc has no glyph, so it has no spare width to check.
               spareX: getComputedStyle(icon.querySelector("svg")!).display === "none" ? null : icon.clientWidth - parseFloat(getComputedStyle(icon.querySelector("svg")!).width),
               labelLeft: label.left,
@@ -412,6 +414,7 @@ test.describe("workspace focus pass", () => {
       for (const row of measured.rows) {
         expect(row.svgCentreOffsetX, `${width}px ${row.status} glyph x`).toBeLessThanOrEqual(0.5);
         expect(row.svgCentreOffsetY, `${width}px ${row.status} glyph y`).toBeLessThanOrEqual(0.5);
+        expect(row.discOffsetY, `${width}px ${row.status} disc on its row's centre line`).toBeLessThanOrEqual(0.5);
         // An even spare width splits into whole pixels on each side, so the glyph sits on the pixel grid.
         if (row.spareX !== null) expect(Number.isInteger(row.spareX) && row.spareX % 2 === 0, `${width}px ${row.status} spare ${row.spareX}`).toBe(true);
       }
