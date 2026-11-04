@@ -378,7 +378,9 @@ test.describe("workspace focus pass", () => {
           connector: getComputedStyle(list, "::before").content,
           rows: rows.map((row) => {
             const icon = row.querySelector<HTMLElement>(".checklist-icon")!;
-            const svg = icon.querySelector("svg")!.getBoundingClientRect();
+            // The active step's glyph is hidden and the disc itself turns, so the disc is measured there.
+            const glyphEl = getComputedStyle(icon.querySelector("svg")!).display === "none" ? icon : icon.querySelector("svg")!;
+            const svg = glyphEl.getBoundingClientRect();
             const iconBox = icon.getBoundingClientRect();
             const label = row.querySelector(".checklist-label")!.getBoundingClientRect();
             const status = row.querySelector(".checklist-status-text")!.getBoundingClientRect();
@@ -389,8 +391,8 @@ test.describe("workspace focus pass", () => {
               iconCentreX: iconBox.left + iconBox.width / 2,
               svgCentreOffsetX: Math.abs(svg.left + svg.width / 2 - (iconBox.left + iconBox.width / 2)),
               svgCentreOffsetY: Math.abs(svg.top + svg.height / 2 - (iconBox.top + iconBox.height / 2)),
-              // The spinner rotates, which widens its bounding box, so read the layout width. clientWidth excludes the 1px border: this is the free space inside the disc.
-              spareX: icon.clientWidth - parseFloat(getComputedStyle(icon.querySelector("svg")!).width),
+              // Read the layout width, not the rotated box. clientWidth excludes the 1px border: this is the free space inside the disc. The active disc has no glyph, so it has no spare width to check.
+              spareX: getComputedStyle(icon.querySelector("svg")!).display === "none" ? null : icon.clientWidth - parseFloat(getComputedStyle(icon.querySelector("svg")!).width),
               labelLeft: label.left,
               statusLeft: status.left,
             };
@@ -402,13 +404,16 @@ test.describe("workspace focus pass", () => {
       const active = measured.rows.find((row) => row.status === "status-active")!;
       expect(active.boxShadow, `${width}px active row bar`).toBe("none");
       expect(active.background, `${width}px active row tint`).not.toBe(complete.background);
+      // The whole circle is the loader: the disc animates and its glyph is hidden.
+      const loader = await page.locator(".checklist-step.status-active .checklist-icon").evaluate((el) => ({ animation: getComputedStyle(el).animationName, glyph: getComputedStyle(el.querySelector("svg")!).display }));
+      expect(loader, `${width}px active disc is the loader`).toEqual({ animation: "checklist-spin", glyph: "none" });
       const centres = measured.rows.map((row) => row.iconCentreX);
       for (const centre of centres) expect(Math.abs(centre - centres[0]), `${width}px icon column`).toBeLessThanOrEqual(0.5);
       for (const row of measured.rows) {
         expect(row.svgCentreOffsetX, `${width}px ${row.status} glyph x`).toBeLessThanOrEqual(0.5);
         expect(row.svgCentreOffsetY, `${width}px ${row.status} glyph y`).toBeLessThanOrEqual(0.5);
         // An even spare width splits into whole pixels on each side, so the glyph sits on the pixel grid.
-        expect(Number.isInteger(row.spareX) && row.spareX % 2 === 0, `${width}px ${row.status} spare ${row.spareX}`).toBe(true);
+        if (row.spareX !== null) expect(Number.isInteger(row.spareX) && row.spareX % 2 === 0, `${width}px ${row.status} spare ${row.spareX}`).toBe(true);
       }
       if (width === 1440) {
         for (const row of measured.rows) {

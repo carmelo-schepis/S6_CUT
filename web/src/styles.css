@@ -1264,7 +1264,14 @@ main { min-width: 0; }
   border-color: var(--brand-border);
   background: var(--theme-primary-soft);
 }
-.checklist-step.status-active .checklist-icon svg { animation: checklist-spin .9s linear infinite; }
+/* The active step's whole circle is the loader. The disc turns around its own
+   centre and carries two opposite arcs; the glyph inside it is hidden, so
+   nothing in the circle can sit off-centre while it turns. */
+.checklist-step.status-active .checklist-icon svg { display: none; }
+.checklist-step.status-active .checklist-icon {
+  border-color: var(--selector-highlight) transparent var(--selector-highlight) transparent;
+  animation: checklist-spin .9s linear infinite;
+}
 .checklist-step.status-active .checklist-label,
 .checklist-step.status-active .checklist-status-text { color: var(--text); }
 .checklist-step.status-complete {
@@ -1302,7 +1309,7 @@ main { min-width: 0; }
 }
 .checklist-step.status-failed .checklist-label,
 .checklist-step.status-failed .checklist-status-text { color: var(--text-primary); }
-.checklist-panel.is-paused .checklist-step.status-active .checklist-icon svg { animation: none; }
+.checklist-panel.is-paused .checklist-step.status-active .checklist-icon { animation: none; }
 @keyframes checklist-spin { to { transform: rotate(360deg); } }
 @keyframes checklist-pop {
   from { transform: scale(.5); opacity: .4; }
@@ -1667,7 +1674,7 @@ main { min-width: 0; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
   .processing-state, .workspace-offline::before { animation: none !important; }
-  .checklist-step.status-active .checklist-icon svg, .checklist-step.status-complete.checkmark-new .checklist-icon svg { animation: none !important; }
+  .checklist-step.status-active .checklist-icon, .checklist-step.status-complete.checkmark-new .checklist-icon svg { animation: none !important; }
   .checklist-step.status-active {
     border-color: var(--brand-border);
     background: var(--theme-primary-soft);
@@ -1889,7 +1896,7 @@ main { min-width: 0; }
 
 .checklist-step.status-active {
   /* The single row that is actually happening. One surface step up is the
-     whole mark: the spinner and "In progress" carry the rest. */
+     tint; the turning circle and "In progress" carry the rest. */
   background: var(--surface-2);
   border-color: var(--border);
 }
@@ -1898,7 +1905,6 @@ main { min-width: 0; }
    to --success or --error reaches the ledger with them. */
 .checklist-step.status-complete .checklist-icon { border-color: color-mix(in srgb, var(--success) 45%, transparent); }
 .checklist-step.status-failed .checklist-icon { border-color: color-mix(in srgb, var(--error) 45%, transparent); }
-.checklist-step.status-active .checklist-icon { border-color: var(--selector-highlight); }
 
 /* Above the mobile breakpoint the status travels in its own aligned column, so
    "Complete", "Skipped" and "In progress" share a left edge down all twelve
