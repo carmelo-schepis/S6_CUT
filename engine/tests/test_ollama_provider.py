@@ -17,6 +17,7 @@ from engine.library import LibraryRules
 from engine.models import Clip, Job, ProfileInput, Project, ProviderProfile, normalise_ollama_url
 from engine.providers import ProfileService
 from engine.security import SecretVault
+from test_youtube_metadata import _completed_job, _persist_job
 
 OLLAMA_URL = "http://ollama.test:11434"
 SCHEMA = {"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"], "additionalProperties": False}
@@ -293,3 +294,37 @@ def test_profiles_saved_before_this_feature_still_load():
     old = {"id": "old", "name": "Old", "text_model_id": "m", "selected": True, "persistence": "encrypted", "openrouter_configured": False, "status": "local only", "capabilities": [], "fallbacks": {}}
     loaded = ProviderProfile.model_validate_json(json.dumps(old))
     assert loaded.ollama_url is None and loaded.ollama_status == "not_configured"
+
+
+def _regenerate(reply):
+    save_profile(ollama_url=OLLAMA_URL, ollama_model="llama3.2", openrouter_key="sk-or-test-secret")
+    job = _completed_job()
+    job.execution_policy = "ollama"
+    job.clips[0].transcript_excerpt = "A sufficiently long, grounded transcript excerpt for this completed clip."
+    _persist_job(job, {"execution_policy": "ollama"})
+    Recorder.responder = reply
+    try:
+        response = TestClient(app_module.app).post(f"/api/v1/jobs/{job.id}/clips/{job.clips[0].id}/youtube-metadata")
+        return response, app_module.db.get_job(job.id).clips[0]
+    finally:
+        app_module.db.delete_project(job.project_id)
+
+
+def test_regenerating_clip_metadata_on_an_ollama_job_stays_on_ollama():
+    def reply(method, url, kwargs):
+        if method == "GET":
+            return default_responder(method, url, kwargs)
+        clip_id = kwargs["json"]["format"]["properties"]["clip_id"]["enum"][0]
+        content = {"clip_id": clip_id, "title": "How a small garden feeds a whole family", "description": "A grounded look at growing vegetables in a small garden and what it takes.".ljust(130, ".")}
+        return FakeResponse(200, {"message": {"content": json.dumps(content)}, "prompt_eval_count": 10, "eval_count": 5})
+
+    response, clip = _regenerate(reply)
+    assert response.status_code == 200, response.text
+    assert clip.title == "How a small garden feeds a whole family"
+    assert {url.split("/api/")[0] for _, url, _ in Recorder.calls} == {OLLAMA_URL}
+
+
+def test_regenerating_with_a_missing_model_gives_the_pull_hint():
+    response, _ = _regenerate(lambda method, url, kwargs: FakeResponse(200, {"models": []}))
+    assert response.status_code == 409
+    assert "ollama pull llama3.2" in response.json()["detail"]

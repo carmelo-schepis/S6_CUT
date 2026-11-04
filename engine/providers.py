@@ -9,7 +9,7 @@ from typing import Any
 import httpx
 
 from .database import Database
-from .models import OpenRouterModel, ProfileInput, ProviderProfile, normalise_ollama_url, now_iso
+from .models import OpenRouterModel, ProfileInput, ProviderProfile, now_iso
 from .security import SecretVault, mask_secret
 
 
@@ -65,6 +65,10 @@ def openrouter_base_url() -> str:
     if os.getenv("S6_TEST_MODE", "").strip() == "1" and override.startswith("http://"):
         return override
     return "https://openrouter.ai/api/v1"
+
+
+def ollama_model_missing(model: str) -> str:
+    return f'Model "{model}" is not on this Ollama server. Run: ollama pull {model}'
 
 
 def provider_runtime_message(error: Exception, service: str) -> str:
@@ -204,7 +208,7 @@ class ProfileService:
         secrets = self.secrets(profile_id)
         return self.save(ProfileInput(
             name=f"{profile.name} copy", text_model_id=profile.text_model_id, youtube_metadata_model_id=profile.youtube_metadata_model_id, auto_seo_titles=profile.auto_seo_titles, openrouter_key=secrets.get("openrouterKey"),
-            ollama_url=profile.ollama_url or "", ollama_model=profile.ollama_model,
+            ollama_url=profile.ollama_url, ollama_model=profile.ollama_model,
             persistence=profile.persistence, selected=False,
         ))
 
@@ -340,7 +344,7 @@ class ProfileService:
         if model_id:
             models = await self.ollama_models(profile.ollama_url)
             if not any(item.id == model_id for item in models):
-                raise ProviderError("unavailable", f'Model "{model_id}" is not on this Ollama server. Run: ollama pull {model_id}')
+                raise ProviderError("unavailable", ollama_model_missing(model_id))
         result, usage = await self._ollama_chat(profile.ollama_url or "", model, messages, schema, temperature=temperature, max_tokens=max_tokens or 2000)
         return (result, usage) if include_usage else result
 
@@ -417,7 +421,7 @@ class ProfileService:
                 models = await self.ollama_models(profile.ollama_url)
                 model_id = profile.ollama_model or OLLAMA_DEFAULT_MODEL
                 if not any(item.id == model_id for item in models):
-                    profile.ollama_status, profile.ollama_message = "unavailable", f'Model "{model_id}" is not on this Ollama server. Run: ollama pull {model_id}'
+                    profile.ollama_status, profile.ollama_message = "unavailable", ollama_model_missing(model_id)
                 else:
                     schema = {"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"], "additionalProperties": False}
                     result, _ = await self._ollama_chat(profile.ollama_url, model_id, [{"role": "user", "content": 'Return exactly the JSON object {"ok":true}.'}], schema, temperature=0, max_tokens=20)

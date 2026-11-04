@@ -36,7 +36,7 @@ def _reply(body: dict) -> dict:
         # Titles must be unique across batches and the Library, so derive them from the clip ID.
         return {"clips": [{"clip_id": cid, "title": f"Ollama highlight {cid[:8]}", "description": "A short grounded summary of the spoken moment."} for cid in ids]}
     if "clip_id" in required:
-        cid = (re.findall(r'"clip_id": ?"([^"]+)"', user) or ["unknown"])[0]
+        cid = fmt["properties"]["clip_id"]["enum"][0]
         return {"clip_id": cid, "title": f"Ollama highlight {cid[:8]}", "description": "A short grounded summary of the spoken moment."}
     return {}
 
@@ -63,6 +63,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(400, {"error": "bad json"})
         if self.path != "/api/chat":
             return self._json(404, {"error": "not found"})
+        if str(body.get("model")) not in {entry["name"].removesuffix(":latest") for entry in MODELS}:
+            return self._json(404, {"error": "model not found"})
         content = _reply(body)
         with open(LOG, "a", encoding="utf-8") as handle:
             handle.write(json.dumps({"required": (body.get("format") or {}).get("required"), "model": body.get("model"), "think": body.get("think"), "num_ctx": (body.get("options") or {}).get("num_ctx")}) + "\n")

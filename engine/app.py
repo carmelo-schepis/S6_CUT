@@ -28,7 +28,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from . import __version__
 from .config import settings
 from .database import Database, MAX_FOLDER_DEPTH, MetadataGenerationClaimError, UNSORTED_FOLDER_ID
-from .jobs import JobManager, ProjectDeletingError, QueueFullError, RetiredScriptJobError, SwitchFastError, can_retry_import, resolve_batch_target, uses_fast_pipeline
+from .jobs import JobManager, ProjectDeletingError, QueueFullError, RetiredScriptJobError, SwitchFastError, can_retry_import, job_provider_name, resolve_batch_target, uses_fast_pipeline
 from .library import LibraryRules
 from .media import _SUBTITLE_PRESETS, MUSIC_TRANSCRIPTION_PROFILE_VERSION, WHISPER_LANGUAGE_CODES, MediaError, available, caption_font_mismatches, probe, probe_audio, validate_audio_track, validate_video_upload
 from .models import (
@@ -37,7 +37,7 @@ from .models import (
     OpenRouterModel, ProviderProfile, SelectionInput, ShortsJobInput, SubscribeAnimationConfig, MusicPresentationConfig, EditingPresentationConfig, YouTubeMetadataUpdate, now_iso,
 )
 from .editing_presets import validate_editing_request
-from .providers import ProfileService, ProviderError
+from .providers import ProfileService, ProviderError, ollama_model_missing
 from .security import MediaSigner, SecretVault, confined, safe_filename, validate_youtube_url
 from .seo_titles import SEO_PROMPT_VERSION, SEO_TITLE_RULES, normalize_seo_description, normalize_seo_title, source_context_title
 from .source_preview import PREVIEW_NAME, ensure_preview, has_preview, read_info_title
@@ -493,7 +493,7 @@ async def create_clip_job(
     if execution_policy == "ollama" and not profiles.ollama_available():
         raise HTTPException(422, "Add an Ollama endpoint in Settings first.")
     # The chosen job provider decides readiness: Ollama when selected, otherwise the OpenRouter profile.
-    provider_ready = profiles.ollama_available() if execution_policy == "ollama" else smart_available
+    provider_ready = execution_policy == "ollama" or smart_available
     # Auto keeps local transcription available when the optional provider is absent.
     mode = "smart" if source_profile == "music" else resolve_processing_mode(processing_mode, provider_ready)
     selected_profile = next((profile for profile in profiles.db.list_profiles() if profile.selected), None)
@@ -1069,7 +1069,7 @@ async def generate_youtube_metadata(job_id: str, clip_id: str, regenerate: bool 
     if job.mode != "clip":
         raise HTTPException(409, "YouTube metadata generation is available only for Clip jobs")
     if job.processing_mode == "fast" or job.content_format != "short":
-        raise HTTPException(409, "OpenRouter metadata generation is unavailable for Fast or Long form jobs")
+        raise HTTPException(409, f"{job_provider_name(job)} metadata generation is unavailable for Fast or Long form jobs")
     private = db.get_job_private(job_id)
     generation_state = private.setdefault("youtube_metadata_generation", {})
     if not isinstance(generation_state, dict):
@@ -1127,8 +1127,9 @@ async def generate_youtube_metadata(job_id: str, clip_id: str, regenerate: bool 
         raise HTTPException(503, exc.safe_message) from exc
     model = next((item for item in available_models if item.id == model_id), None)
     if not model or not model.pricing:
-        _record_youtube_metadata_failure(job_id, clip_id, clip.youtube_metadata_revision, "The selected metadata model is unavailable or has unknown pricing.", excerpt)
-        raise HTTPException(409, "The selected metadata model is unavailable or has unknown pricing")
+        missing = ollama_model_missing(model_id) if job.execution_policy == "ollama" else "The selected metadata model is unavailable or has unknown pricing."
+        _record_youtube_metadata_failure(job_id, clip_id, clip.youtube_metadata_revision, missing, excerpt)
+        raise HTTPException(409, missing.rstrip("."))
     if "response_format" not in model.supported_parameters:
         _record_youtube_metadata_failure(job_id, clip_id, clip.youtube_metadata_revision, "The selected metadata model does not support structured JSON output.", excerpt)
         raise HTTPException(409, "The selected metadata model does not support structured JSON output")
@@ -1247,7 +1248,7 @@ async def generate_youtube_metadata(job_id: str, clip_id: str, regenerate: bool 
     except (ValueError, TypeError, KeyError) as exc:
         reason = "Provider returned invalid metadata; transcript-based description is shown."
         _record_youtube_metadata_failure(job_id, clip_id, snapshot_revision, reason, excerpt)
-        raise HTTPException(502, "OpenRouter returned invalid YouTube metadata; the playable clip was preserved") from exc
+        raise HTTPException(502, f"{job_provider_name(job)} returned invalid YouTube metadata; the playable clip was preserved") from exc
 
 
 @app.post("/api/v1/jobs/{job_id}/source-only-rerender", response_model=Job, status_code=status.HTTP_202_ACCEPTED)

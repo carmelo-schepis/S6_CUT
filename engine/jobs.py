@@ -31,7 +31,7 @@ from .models import (
 from .seo_titles import SEO_PROMPT_VERSION, SEO_TITLE_RULES, fallback_clip_title, normalize_seo_description, normalize_seo_title, project_name_is_auto, source_context_title
 from .editing_presets import manifest_summary, normalize_editing_presentation, sanitize_for_uncaptioned_path
 from .hook_text import HOOK_TEXT_RULES, hook_text_clips, hook_text_schema, local_hook_text, normalize_hook_text
-from .providers import ProfileService, ProviderError, provider_runtime_message
+from .providers import ProfileService, ProviderError, ollama_model_missing, provider_runtime_message
 from .security import confined, redact, safe_archive_title, safe_filename
 from .selection import Candidate, _score, _timed_words, candidate_quality, clip_from_candidate, select_candidates, select_music_candidates
 
@@ -159,7 +159,7 @@ def _semantic_clip_title(project_name: str, clip: Clip) -> str:
     return f"{project_name} — {phrase} · Cut {clip.index:02d}"[:200]
 
 
-def _openrouter_fallback_warning(error: Exception, service: str = "OpenRouter") -> str:
+def _openrouter_fallback_warning(error: Exception, service: str) -> str:
     reason = " ".join(redact(provider_runtime_message(error, service)).split()).strip(" .")
     return f"{service} API failed: {reason}. Continuing with deterministic local planning."
 
@@ -2242,7 +2242,7 @@ class JobManager:
             models = asyncio.run(self.profiles.openrouter_models(ollama=job_uses_ollama(job)))
             selected = next((item for item in models if item.id == model_id), None)
             if not selected or not selected.pricing:
-                raise ProviderError("unavailable", "The selected metadata model is unavailable or has unknown pricing.")
+                raise ProviderError("unavailable", ollama_model_missing(model_id) if job_uses_ollama(job) else "The selected metadata model is unavailable or has unknown pricing.")
             try:
                 input_rate = float(selected.pricing["prompt"]) * 1_000_000
                 output_rate = float(selected.pricing["completion"]) * 1_000_000
