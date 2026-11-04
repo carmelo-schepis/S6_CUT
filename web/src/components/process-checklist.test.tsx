@@ -68,19 +68,19 @@ describe("ProcessChecklist – checkmark only for complete", () => {
     render(<ProcessChecklist steps={[pending, active, complete, skipped, failed]} />);
     const items = screen.getAllByRole("listitem");
     // pending
-    expect(items[0].querySelector(".lucide-circle")).toBeInTheDocument();
-    expect(items[0].querySelector(".lucide-check")).toBeNull();
+    expect(items[0].querySelector('[data-step-icon="pending"]')).toBeInTheDocument();
+    expect(items[0].querySelector('[data-step-icon="complete"]')).toBeNull();
     // active
-    expect(items[1].querySelector(".lucide-loader-circle")).toBeInTheDocument();
-    expect(items[1].querySelector(".lucide-check")).toBeNull();
+    expect(items[1].querySelector('[data-step-icon="active"]')).toBeInTheDocument();
+    expect(items[1].querySelector('[data-step-icon="complete"]')).toBeNull();
     // complete
-    expect(items[2].querySelector(".lucide-check")).toBeInTheDocument();
+    expect(items[2].querySelector('[data-step-icon="complete"]')).toBeInTheDocument();
     // skipped
-    expect(items[3].querySelector(".lucide-minus")).toBeInTheDocument();
-    expect(items[3].querySelector(".lucide-check")).toBeNull();
+    expect(items[3].querySelector('[data-step-icon="skipped"]')).toBeInTheDocument();
+    expect(items[3].querySelector('[data-step-icon="complete"]')).toBeNull();
     // failed — checks for any icon svg and no checkmark
-    expect(items[4].querySelector(".checklist-icon svg")).toBeInTheDocument();
-    expect(items[4].querySelector(".lucide-check")).toBeNull();
+    expect(items[4].querySelector('[data-step-icon="failed"]')).toBeInTheDocument();
+    expect(items[4].querySelector('[data-step-icon="complete"]')).toBeNull();
   });
 
   it("never infers completion from a full item count when status is still active", () => {
@@ -90,9 +90,42 @@ describe("ProcessChecklist – checkmark only for complete", () => {
     };
     render(<ProcessChecklist steps={[fullItems]} />);
     const row = screen.getByRole("listitem");
-    expect(row.querySelector(".lucide-check")).toBeNull();
-    expect(row.querySelector(".lucide-loader-circle")).toBeInTheDocument();
+    expect(row.querySelector('[data-step-icon="complete"]')).toBeNull();
+    expect(row.querySelector('[data-step-icon="active"]')).toBeInTheDocument();
     expect(screen.getByText("5 of 5")).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------
+describe("ProcessChecklist – one drawing per step and one-shot motion", () => {
+  it("draws each state as one ring at cx=8 cy=8 r=7, with no mark on pending", () => {
+    render(<ProcessChecklist steps={[pending, active, complete, skipped, failed]} />);
+    for (const item of screen.getAllByRole("listitem")) {
+      const rings = item.querySelectorAll(".step-ring");
+      expect(rings).toHaveLength(1);
+      expect(rings[0]).toHaveAttribute("cx", "8");
+      expect(rings[0]).toHaveAttribute("cy", "8");
+      expect(rings[0]).toHaveAttribute("r", "7");
+    }
+    expect(screen.getAllByRole("listitem")[0].querySelector(".step-mark")).toBeNull();
+  });
+
+  it("plays the complete tick once when it arrives live, and never on mount", () => {
+    const live: ProcessingStep = { id: "live", label: "Clips rendered", status: "active", startedAt: "2026-08-13T00:00:00Z" };
+    const { container, rerender } = render(<ProcessChecklist steps={[live]} />);
+    expect(container.querySelector(".checkmark-new")).toBeNull();
+    rerender(<ProcessChecklist steps={[{ ...live, status: "complete", completedAt: "2026-08-13T00:01:00Z" }]} />);
+    expect(container.querySelector(".checkmark-new")).toBeInTheDocument();
+  });
+
+  it("settles a skipped or failed step in once when it arrives live, and never on mount", () => {
+    const live: ProcessingStep = { id: "live", label: "OpenRouter planning", status: "active", startedAt: "2026-08-13T00:00:00Z" };
+    const mounted = render(<ProcessChecklist steps={[failed]} />);
+    expect(mounted.container.querySelector(".settle-new")).toBeNull();
+    mounted.unmount();
+    const { container, rerender } = render(<ProcessChecklist steps={[live]} />);
+    rerender(<ProcessChecklist steps={[{ ...live, status: "failed", detail: "Provider request failed [redacted]" }]} />);
+    expect(container.querySelector(".settle-new")).toBeInTheDocument();
   });
 });
 
@@ -131,7 +164,7 @@ describe("ProcessChecklist – paused state", () => {
     const row = screen.getByRole("listitem");
     expect(row).toHaveTextContent("Clips rendered");
     expect(row).toHaveTextContent("Paused");
-    expect(row.querySelector(".lucide-check")).toBeNull();
+    expect(row.querySelector('[data-step-icon="complete"]')).toBeNull();
   });
 
   it("does not tick elapsed when paused", () => {
@@ -145,7 +178,7 @@ describe("ProcessChecklist – paused state", () => {
     const pausedNoStart: ProcessingStep = { id: "a", label: "Cut points planned", status: "active" };
     render(<ProcessChecklist steps={[pausedNoStart]} jobState="paused" />);
     expect(screen.getByText("Paused")).toBeInTheDocument();
-    expect(screen.getByRole("listitem").querySelector(".lucide-loader-circle")).toBeInTheDocument();
+    expect(screen.getByRole("listitem").querySelector('[data-step-icon="paused"]')).toBeInTheDocument();
   });
 });
 

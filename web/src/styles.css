@@ -1193,21 +1193,18 @@ main { min-width: 0; }
   border-radius: var(--radius-control);
   line-height: 16px;
 }
+/* One drawing per step (see the step indicator rules below): the box is a plain
+   16px slot, so no status is ever drawn inside a second ring. */
 .checklist-icon {
   position: relative;
   z-index: 1;
-  flex: 0 0 18px;
-  width: 18px;
-  height: 18px;
-  display: grid;
-  place-items: center;
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  display: block;
   box-sizing: border-box;
-  border: 1px solid var(--border-strong);
-  border-radius: 50%;
   color: var(--text-primary);
-  background: var(--surface-1);
 }
-.checklist-icon svg { width: 12px; height: 12px; }
 .checklist-step-body {
   min-width: 0;
   flex: 1 1 auto;
@@ -1259,31 +1256,52 @@ main { min-width: 0; }
   border-color: var(--brand-border);
   background: var(--surface-2);
 }
-.checklist-step.status-active .checklist-icon {
-  color: var(--theme-primary-hover);
-  border-color: var(--brand-border);
-  background: var(--theme-primary-soft);
+/* Step indicators: each state is one drawing, and a ring never sits inside
+   another ring. The ring is an SVG circle in every state, so its edge and its
+   mark share one coordinate system and stay concentric on every display. */
+.step-indicator { display: block; width: 16px; height: 16px; overflow: visible; }
+.step-indicator .step-ring { fill: none; stroke: var(--border-strong); stroke-width: 1.5; }
+.step-indicator .step-mark,
+.step-indicator .step-arc { fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+.step-indicator[data-step-icon="complete"] { color: var(--success); }
+.step-indicator[data-step-icon="complete"] .step-ring { stroke: var(--success); fill: color-mix(in srgb, var(--success) 16%, transparent); }
+.step-indicator[data-step-icon="skipped"] { color: var(--text-muted); }
+.step-indicator[data-step-icon="failed"] { color: var(--error); }
+.step-indicator[data-step-icon="failed"] .step-ring { stroke: var(--error); fill: color-mix(in srgb, var(--error) 16%, transparent); }
+.step-indicator[data-step-icon="paused"] { color: var(--text-primary); }
+
+/* The active step's loader: a dim track, a logo-coloured comet sweeping round it,
+   and a white dot that pulses in the middle. The comet is CSS because its ring
+   mask is a conic gradient, which SVG cannot draw. */
+.step-active { position: relative; }
+.step-active .step-ring-svg { position: absolute; inset: 0; width: 16px; height: 16px; overflow: visible; }
+.step-active .step-ring { fill: none; stroke: var(--border-strong); stroke-width: 1.5; }
+.step-comet {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent 0 20%, var(--logo-crimson) 55%, var(--logo-peach) 88%, #fff 100%);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 1.75px), #000 calc(100% - 1.75px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 1.75px), #000 calc(100% - 1.75px));
+  animation: step-comet-spin 1.1s linear infinite;
 }
-/* The active step's whole circle is the loader. The disc turns around its own
-   centre and carries two opposite arcs; the glyph inside it is hidden, so
-   nothing in the circle can sit off-centre while it turns. */
-.checklist-step.status-active .checklist-icon svg { display: none; }
-.checklist-step.status-active .checklist-icon {
-  border-color: var(--selector-highlight) transparent var(--selector-highlight) transparent;
-  animation: checklist-spin .9s linear infinite;
+.step-dot {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #fff;
+  animation: step-dot-beat 1.1s ease-in-out infinite;
 }
+
 .checklist-step.status-active .checklist-label,
 .checklist-step.status-active .checklist-status-text { color: var(--text); }
 .checklist-step.status-complete {
   border-color: transparent;
   background: transparent;
 }
-.checklist-step.status-complete .checklist-icon {
-  color: var(--success);
-  border-color: rgba(76,183,130,.52);
-  background: rgba(76,183,130,.2);
-}
-.checklist-step.status-complete.checkmark-new .checklist-icon svg { animation: checklist-pop .3s ease-out; }
 .checklist-step.status-complete .checklist-label,
 .checklist-step.status-complete .checklist-status-text { color: var(--text-primary); }
 .checklist-step.status-skipped {
@@ -1291,29 +1309,37 @@ main { min-width: 0; }
   background: var(--surface-2);
   opacity: .78;
 }
-.checklist-step.status-skipped .checklist-icon {
-  color: var(--text-primary);
-  border-color: var(--border-strong);
-  background: var(--surface-3);
-}
 .checklist-step.status-skipped .checklist-label,
 .checklist-step.status-skipped .checklist-status-text { color: var(--text-primary); }
 .checklist-step.status-failed {
   border-color: rgba(242,56,85,.45);
   background: rgba(242,56,85,.13);
 }
-.checklist-step.status-failed .checklist-icon {
-  color: var(--error);
-  border-color: rgba(242,56,85,.55);
-  background: rgba(242,56,85,.2);
-}
 .checklist-step.status-failed .checklist-label,
 .checklist-step.status-failed .checklist-status-text { color: var(--text-primary); }
-.checklist-panel.is-paused .checklist-step.status-active .checklist-icon { animation: none; }
-@keyframes checklist-spin { to { transform: rotate(360deg); } }
-@keyframes checklist-pop {
-  from { transform: scale(.5); opacity: .4; }
-  to { transform: scale(1); opacity: 1; }
+
+/* One-shots, played only for a change that arrives while the page is open
+   (see freshlyCompleted and freshlySettled in process-checklist.tsx). */
+.checklist-step.checkmark-new .step-mark { animation: step-draw .35s ease-out both; }
+.checklist-step.checkmark-new .step-indicator { animation: step-pop .35s ease-out; }
+.checklist-step.settle-new .step-indicator { animation: step-settle .35s ease-out both; }
+@keyframes step-draw {
+  from { stroke-dasharray: 12; stroke-dashoffset: 12; }
+  to { stroke-dasharray: 12; stroke-dashoffset: 0; }
+}
+@keyframes step-pop {
+  0% { transform: scale(.8); }
+  60% { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+@keyframes step-settle {
+  from { opacity: 0; transform: scale(.6); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes step-comet-spin { to { transform: rotate(360deg); } }
+@keyframes step-dot-beat {
+  0%, 100% { transform: scale(.7); opacity: .6; }
+  50% { transform: scale(1); opacity: 1; }
 }
 .checklist-panel.compact .process-checklist { padding: 8px; gap: 2px; }
 .checklist-panel.compact .checklist-step { padding: 2px 8px; }
@@ -1674,7 +1700,8 @@ main { min-width: 0; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
   .processing-state, .workspace-offline::before { animation: none !important; }
-  .checklist-step.status-active .checklist-icon, .checklist-step.status-complete.checkmark-new .checklist-icon svg { animation: none !important; }
+  .step-comet, .step-dot, .checklist-step .step-indicator, .checklist-step .step-mark { animation: none !important; }
+  .step-dot { opacity: 1; }
   .checklist-step.status-active {
     border-color: var(--brand-border);
     background: var(--theme-primary-soft);
@@ -1901,10 +1928,6 @@ main { min-width: 0; }
   border-color: var(--border);
 }
 
-/* Stepped from the status tokens rather than restated as literals, so a change
-   to --success or --error reaches the ledger with them. */
-.checklist-step.status-complete .checklist-icon { border-color: color-mix(in srgb, var(--success) 45%, transparent); }
-.checklist-step.status-failed .checklist-icon { border-color: color-mix(in srgb, var(--error) 45%, transparent); }
 
 /* Above the mobile breakpoint the status travels in its own aligned column, so
    "Complete", "Skipped" and "In progress" share a left edge down all twelve

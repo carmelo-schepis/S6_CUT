@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { AlertTriangle, Check, ChevronDown, Circle, LoaderCircle, Minus } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { formatSeconds, statesCount } from "../status-format";
 import type { JobState, ProcessingStep } from "../types";
 
@@ -7,19 +7,40 @@ function formatElapsed(startedAt: string, now: number) {
   return formatSeconds(Math.max(0, (now - new Date(startedAt).getTime()) / 1000));
 }
 
-function stepIcon(status: ProcessingStep["status"]) {
-  switch (status) {
-    case "complete":
-      return <Check size={12} />;
-    case "active":
-      return <LoaderCircle size={12} />;
-    case "skipped":
-      return <Minus size={12} />;
-    case "failed":
-      return <AlertTriangle size={12} />;
-    default:
-      return <Circle size={12} />;
+/**
+ * One drawing per step: the ring and its mark share a single 16px box, so no
+ * status ever sits inside a second ring. Each state is one SVG with the ring at
+ * cx=8 cy=8 r=7. The active step is the exception: a conic-gradient comet and a
+ * pulsing dot are CSS on top of the same ring (see the checklist section of
+ * styles.css), because the comet's mask cannot be drawn in SVG.
+ */
+function StepIndicator({ status, paused }: { status: ProcessingStep["status"]; paused: boolean }) {
+  if (status === "active" && !paused) {
+    return (
+      <span className="step-indicator step-active" data-step-icon="active">
+        <svg className="step-ring-svg" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+          <circle className="step-ring" cx="8" cy="8" r="7" />
+        </svg>
+        <span className="step-comet" />
+        <span className="step-dot" />
+      </span>
+    );
   }
+  const state = status === "active" ? "paused" : status;
+  return (
+    <svg className="step-indicator" data-step-icon={state} viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <circle className="step-ring" cx="8" cy="8" r="7" />
+      {state === "complete" && <path className="step-mark" d="M4.9 8.3 7 10.4l4.1-4.6" />}
+      {state === "skipped" && <path className="step-mark" d="M5.25 8h5.5" />}
+      {state === "failed" && <path className="step-mark" d="M8 4.75v3.75M8 11.25v.01" />}
+      {state === "paused" && (
+        <>
+          <circle className="step-arc" cx="8" cy="8" r="7" strokeDasharray="11 33" transform="rotate(-90 8 8)" />
+          <path className="step-mark" d="M6.5 5.8v4.4M9.5 5.8v4.4" />
+        </>
+      )}
+    </svg>
+  );
 }
 
 function itemProgress(step: ProcessingStep) {
@@ -73,6 +94,8 @@ export function ProcessChecklist({ steps, jobState, compact = false, label = "Sh
   // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
   const [announcement, setAnnouncement] = useState("");
   const [freshlyCompleted, setFreshlyCompleted] = useState<Set<string>>(() => new Set());
+  // Skipped and failed steps settle in once, the first time they arrive live.
+  const [freshlySettled, setFreshlySettled] = useState<Set<string>>(() => new Set());
   // A finished run folds to one line; the steps stay one click away.
   const [stepsOpen, setStepsOpen] = useState(false);
   // Collapsible panels use a tri-state: null means "no choice yet", so the
@@ -88,6 +111,7 @@ export function ProcessChecklist({ steps, jobState, compact = false, label = "Sh
     if (stepsChanged || stateChanged) {
       const messages: string[] = [];
       const newCompletes = new Set<string>();
+      const newSettles = new Set<string>();
       if (stepsChanged) {
         for (const step of steps) {
           const before = prev.steps.find((item) => item.id === step.id);
@@ -99,8 +123,10 @@ export function ProcessChecklist({ steps, jobState, compact = false, label = "Sh
                 newCompletes.add(step.id);
               } else if (step.status === "failed") {
                 messages.push(`${step.label} failed`);
+                newSettles.add(step.id);
               } else if (step.status === "skipped") {
                 messages.push(`${step.label} skipped`);
+                newSettles.add(step.id);
               } else if (step.status === "active") {
                 messages.push(progress ? `${step.label} ${progress}` : step.label);
               }
@@ -109,6 +135,8 @@ export function ProcessChecklist({ steps, jobState, compact = false, label = "Sh
             }
           } else if (step.status === "complete") {
             newCompletes.add(step.id);
+          } else if (step.status === "failed" || step.status === "skipped") {
+            newSettles.add(step.id);
           }
         }
       }
@@ -121,6 +149,13 @@ export function ProcessChecklist({ steps, jobState, compact = false, label = "Sh
         setFreshlyCompleted((current) => {
           const next = new Set(current);
           for (const id of newCompletes) next.add(id);
+          return next;
+        });
+      }
+      if (newSettles.size) {
+        setFreshlySettled((current) => {
+          const next = new Set(current);
+          for (const id of newSettles) next.add(id);
           return next;
         });
       }
@@ -161,8 +196,8 @@ export function ProcessChecklist({ steps, jobState, compact = false, label = "Sh
           const progress = itemProgress(step);
           const shownProgress = quiet && (active || step.status === "complete") ? null : compact && statesCount(step.detail, step.currentItem) ? null : progress;
           return (
-            <li key={step.id} className={`checklist-step status-${step.status}${active ? " active-row" : ""}${step.status === "complete" && freshlyCompleted.has(step.id) ? " checkmark-new" : ""}`} aria-current={active ? "step" : undefined} data-step-id={step.id} data-testid={`progress-step-${step.id}`}>
-              <span className="checklist-icon" aria-hidden="true">{stepIcon(step.status)}</span>
+            <li key={step.id} className={`checklist-step status-${step.status}${active ? " active-row" : ""}${step.status === "complete" && freshlyCompleted.has(step.id) ? " checkmark-new" : ""}${(step.status === "skipped" || step.status === "failed") && freshlySettled.has(step.id) ? " settle-new" : ""}`} aria-current={active ? "step" : undefined} data-step-id={step.id} data-testid={`progress-step-${step.id}`}>
+              <span className="checklist-icon" aria-hidden="true"><StepIndicator status={step.status} paused={paused} /></span>
               <div className="checklist-step-body">
                 <span className="checklist-label" title={step.label}>{step.label}</span>
                 <span className="checklist-step-meta">
