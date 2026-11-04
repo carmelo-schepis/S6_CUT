@@ -9,12 +9,13 @@ vi.mock("../api", () => {
   return { readableError, listProfiles: vi.fn(), listOpenRouterModels: vi.fn(), saveProfile: vi.fn(), testProfile: vi.fn(), deleteProfile: vi.fn(), duplicateProfile: vi.fn(), purgeLibraryContent: vi.fn() };
 });
 
-import { deleteProfile, listOpenRouterModels, listProfiles, purgeLibraryContent, saveProfile, testProfile } from "../api";
+import { deleteProfile, duplicateProfile, listOpenRouterModels, listProfiles, purgeLibraryContent, saveProfile, testProfile } from "../api";
 const mockListProfiles = vi.mocked(listProfiles);
 const mockListModels = vi.mocked(listOpenRouterModels);
 const mockSaveProfile = vi.mocked(saveProfile);
 const mockTestProfile = vi.mocked(testProfile);
 const mockDeleteProfile = vi.mocked(deleteProfile);
+const mockDuplicateProfile = vi.mocked(duplicateProfile);
 const mockPurgeLibraryContent = vi.mocked(purgeLibraryContent);
 let unsubscribeLibraryChange: ReturnType<typeof onLibraryChanged> = () => {};
 
@@ -28,13 +29,21 @@ function renderView() { return render(<SettingsView health={health} onHealthRefr
 
 describe("SettingsView", () => {
   afterEach(() => unsubscribeLibraryChange());
-  beforeEach(() => { mockListProfiles.mockReset(); mockListModels.mockReset(); mockSaveProfile.mockReset(); mockTestProfile.mockReset(); mockDeleteProfile.mockReset(); mockPurgeLibraryContent.mockReset(); mockListModels.mockResolvedValue([]); });
-  it("renders the retained OpenRouter text-provider status", async () => {
+  beforeEach(() => { mockListProfiles.mockReset(); mockListModels.mockReset(); mockSaveProfile.mockReset(); mockTestProfile.mockReset(); mockDeleteProfile.mockReset(); mockDuplicateProfile.mockReset(); mockPurgeLibraryContent.mockReset(); mockListModels.mockResolvedValue([]); });
+  it("renders a neutral provider section with OpenRouter identity and status", async () => {
     mockListProfiles.mockResolvedValue([connectedProfile]); renderView();
     const article = await screen.findByRole("article");
-    expect(within(article).getByText("OpenRouter key")).toBeInTheDocument();
-    expect(within(article).getByText("Text generation")).toBeInTheDocument();
-    expect(within(article).getAllByText(/OpenRouter key|Text generation/)).toHaveLength(2);
+    expect(screen.getByRole("heading", { name: "Text providers" })).toBeInTheDocument();
+    expect(screen.getByText("Configure OpenRouter or your own Ollama server. Choose a provider for each job on Projects.")).toBeInTheDocument();
+    expect(within(article).getByRole("heading", { name: "OpenRouter" })).toBeInTheDocument();
+    expect(within(article).getByText("Saved key")).toBeInTheDocument();
+    expect(within(article).getByText("OpenRouter", { selector: ".connection-result span" })).toBeInTheDocument();
+    expect(within(article).getByText("Credential storage:")).toBeInTheDocument();
+    expect(within(article).getByText("Encrypted")).toBeInTheDocument();
+    expect(within(article).getByRole("region", { name: "Ollama" })).toHaveTextContent("Not configured");
+    expect(within(article).getByRole("region", { name: "Ollama" })).toHaveTextContent("No endpoint saved.");
+    expect(within(article).getByRole("region", { name: "Ollama" }).querySelector(".connection-result")).toBeNull();
+    expect(article.querySelector(":scope > .status")).toBeNull();
   });
   it("shows, refreshes, and persists the independent title and description model", async () => {
     mockListProfiles.mockResolvedValue([connectedProfile]);
@@ -94,13 +103,47 @@ describe("SettingsView", () => {
     mockTestProfile.mockResolvedValue(withOllama);
     renderView();
     const rows = await screen.findAllByRole("article");
-    expect(within(rows[0]).getByText(/http:\/\/ollama\.test:11434 · llama3\.2/)).toBeInTheDocument();
+    expect(within(rows[0]).getByText("Endpoint")).toBeInTheDocument();
+    expect(within(rows[0]).getByText("http://ollama.test:11434")).toBeInTheDocument();
+    expect(within(rows[0]).getByText("llama3.2")).toBeInTheDocument();
     expect(rows[0].querySelectorAll(".connection-result")).toHaveLength(2);
     expect(rows[1].querySelectorAll(".connection-result")).toHaveLength(1);
     fireEvent.click(within(rows[0]).getByRole("button", { name: `Edit ${withOllama.name}` }));
     fireEvent.change(screen.getByRole("textbox", { name: /Ollama endpoint/ }), { target: { value: "" } });
     fireEvent.click(screen.getByRole("button", { name: "Save and test connection" }));
     await waitFor(() => expect(mockSaveProfile).toHaveBeenCalledWith(expect.objectContaining({ ollamaUrl: "" }), withOllama.id));
+  });
+
+  it("keeps Ollama-only profiles visually separate from the unused OpenRouter model", async () => {
+    const ollamaOnly: ProviderProfile = { ...baseProfile, selected: true, ollamaUrl: "http://ollama.test:11434", ollamaModel: "gemma3:1b", ollamaStatus: "connected", ollamaMessage: "Connected; Ollama text generation succeeded" };
+    mockListProfiles.mockResolvedValue([ollamaOnly]);
+    renderView();
+    const article = await screen.findByRole("article");
+    const openRouterSection = within(article).getByRole("region", { name: "OpenRouter" });
+    const ollamaSection = within(article).getByRole("region", { name: "Ollama" });
+    expect(within(openRouterSection).getByText("Not configured")).toBeInTheDocument();
+    expect(within(openRouterSection).getByText(/No API key saved\./)).toBeInTheDocument();
+    expect(within(openRouterSection).queryByText(ollamaOnly.textModelId, { exact: true })).not.toBeInTheDocument();
+    expect(within(ollamaSection).getByText("http://ollama.test:11434")).toBeInTheDocument();
+    expect(within(ollamaSection).getByText("gemma3:1b")).toBeInTheDocument();
+    expect(within(ollamaSection).getByText(/Connected; Ollama text generation succeeded/)).toBeInTheDocument();
+    expect(article.querySelectorAll(".connection-result")).toHaveLength(2);
+  });
+
+  it("does not show Checking for an unconfigured provider while testing a profile", async () => {
+    const ollamaOnly: ProviderProfile = { ...baseProfile, ollamaUrl: "http://ollama.test:11434", ollamaModel: "gemma3:1b", ollamaStatus: "configured" };
+    mockListProfiles.mockResolvedValue([ollamaOnly]);
+    let finishTest: ((value: ProviderProfile) => void) | undefined;
+    mockTestProfile.mockReturnValue(new Promise((resolve) => { finishTest = resolve; }));
+    renderView();
+    const article = await screen.findByRole("article");
+    fireEvent.click(within(article).getByRole("button", { name: "Test" }));
+    await screen.findByRole("button", { name: "Checking…" });
+    const openRouterSection = within(article).getByRole("region", { name: "OpenRouter" });
+    const ollamaSection = within(article).getByRole("region", { name: "Ollama" });
+    expect(openRouterSection).not.toHaveTextContent("Checking now…");
+    expect(ollamaSection).toHaveTextContent("Checking now…");
+    finishTest?.(ollamaOnly);
   });
 
   it("saves the text-provider selection, then tests the profile", async () => {
@@ -135,8 +178,9 @@ describe("SettingsView", () => {
     expect(libraryChanged).toHaveBeenCalledTimes(1);
   });
   it("tests, deletes, and refreshes profiles", async () => {
-    mockListProfiles.mockResolvedValue([baseProfile]); mockTestProfile.mockResolvedValue(baseProfile); mockDeleteProfile.mockResolvedValue(undefined); globalThis.confirm = vi.fn(() => true);
-    renderView(); await screen.findByText("Minimal"); fireEvent.click(screen.getByRole("button", { name: "Test" })); await waitFor(() => expect(mockTestProfile).toHaveBeenCalledWith("p2"));
+    mockListProfiles.mockResolvedValue([baseProfile]); mockTestProfile.mockResolvedValue(baseProfile); mockDeleteProfile.mockResolvedValue(undefined); mockDuplicateProfile.mockResolvedValue(baseProfile); globalThis.confirm = vi.fn(() => true);
+    renderView(); const article = await screen.findByRole("article"); fireEvent.click(within(article).getByRole("button", { name: "Test" })); await waitFor(() => expect(mockTestProfile).toHaveBeenCalledWith("p2"));
+    fireEvent.click(within(article).getByRole("button", { name: "Duplicate Minimal" })); await waitFor(() => expect(mockDuplicateProfile).toHaveBeenCalledWith("p2"));
     fireEvent.click(screen.getByRole("button", { name: "Delete Minimal" })); await waitFor(() => expect(mockDeleteProfile).toHaveBeenCalledWith("p2"));
   });
 });
