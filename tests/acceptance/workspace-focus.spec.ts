@@ -360,8 +360,8 @@ test.describe("workspace focus pass", () => {
     expect(harness.failedRequests).toEqual([]);
   });
 
-  test("steps: no connector line, no active-row bar, every glyph centred on a whole pixel", async ({ page }) => {
-    test.setTimeout(90_000);
+  test("steps: no connector, no active bar, one drawing per step, the comet turns and reduced motion stops it", async ({ page }) => {
+    test.setTimeout(120_000);
     const harness = await setup(page, "running");
     for (const [width, height] of [[1440, 900], [390, 844]] as const) {
       await page.setViewportSize({ width, height });
@@ -378,23 +378,26 @@ test.describe("workspace focus pass", () => {
           connector: getComputedStyle(list, "::before").content,
           rows: rows.map((row) => {
             const icon = row.querySelector<HTMLElement>(".checklist-icon")!;
-            // The active step's glyph is hidden and the disc itself turns, so the disc is measured there.
-            const glyphEl = getComputedStyle(icon.querySelector("svg")!).display === "none" ? icon : icon.querySelector("svg")!;
-            const svg = glyphEl.getBoundingClientRect();
+            const drawing = icon.querySelector<HTMLElement>("[data-step-icon]");
+            const ring = row.querySelector<SVGCircleElement>(".step-ring");
             const iconBox = icon.getBoundingClientRect();
+            const rowBox = row.getBoundingClientRect();
             const label = row.querySelector(".checklist-label")!.getBoundingClientRect();
             const status = row.querySelector(".checklist-status-text")!.getBoundingClientRect();
             return {
               status: [...row.classList].find((name) => name.startsWith("status-")) ?? "",
+              state: drawing?.dataset.stepIcon ?? "",
+              drawings: icon.querySelectorAll("[data-step-icon]").length,
+              rings: row.querySelectorAll(".step-ring").length,
+              ringCx: ring?.getAttribute("cx") ?? "",
+              ringCy: ring?.getAttribute("cy") ?? "",
+              ringR: ring?.getAttribute("r") ?? "",
+              marks: row.querySelectorAll(".step-mark").length,
               boxShadow: getComputedStyle(row).boxShadow,
               background: getComputedStyle(row).backgroundColor,
               iconCentreX: iconBox.left + iconBox.width / 2,
-              svgCentreOffsetX: Math.abs(svg.left + svg.width / 2 - (iconBox.left + iconBox.width / 2)),
-              svgCentreOffsetY: Math.abs(svg.top + svg.height / 2 - (iconBox.top + iconBox.height / 2)),
-              // Independent of the glyph: the disc must sit on its row's vertical centre. This is what still checks the active row, whose glyph is hidden.
-              discOffsetY: Math.abs(iconBox.top + iconBox.height / 2 - (row.getBoundingClientRect().top + row.getBoundingClientRect().height / 2)),
-              // Read the layout width, not the rotated box. clientWidth excludes the 1px border: this is the free space inside the disc. The active disc has no glyph, so it has no spare width to check.
-              spareX: getComputedStyle(icon.querySelector("svg")!).display === "none" ? null : icon.clientWidth - parseFloat(getComputedStyle(icon.querySelector("svg")!).width),
+              // The disc must sit on its row's vertical centre line. This is independent of the drawing, so a shifted disc fails here.
+              discOffsetY: Math.abs(iconBox.top + iconBox.height / 2 - (rowBox.top + rowBox.height / 2)),
               labelLeft: label.left,
               statusLeft: status.left,
             };
@@ -406,17 +409,15 @@ test.describe("workspace focus pass", () => {
       const active = measured.rows.find((row) => row.status === "status-active")!;
       expect(active.boxShadow, `${width}px active row bar`).toBe("none");
       expect(active.background, `${width}px active row tint`).not.toBe(complete.background);
-      // The whole circle is the loader: the disc animates and its glyph is hidden.
-      const loader = await page.locator(".checklist-step.status-active .checklist-icon").evaluate((el) => ({ animation: getComputedStyle(el).animationName, glyph: getComputedStyle(el.querySelector("svg")!).display }));
-      expect(loader, `${width}px active disc is the loader`).toEqual({ animation: "checklist-spin", glyph: "none" });
       const centres = measured.rows.map((row) => row.iconCentreX);
       for (const centre of centres) expect(Math.abs(centre - centres[0]), `${width}px icon column`).toBeLessThanOrEqual(0.5);
       for (const row of measured.rows) {
-        expect(row.svgCentreOffsetX, `${width}px ${row.status} glyph x`).toBeLessThanOrEqual(0.5);
-        expect(row.svgCentreOffsetY, `${width}px ${row.status} glyph y`).toBeLessThanOrEqual(0.5);
+        // One drawing and one ring per step: nothing sits inside a second ring.
+        expect(row.drawings, `${width}px ${row.status} drawings`).toBe(1);
+        expect(row.rings, `${width}px ${row.status} rings`).toBe(1);
+        expect([row.ringCx, row.ringCy, row.ringR], `${width}px ${row.status} ring geometry`).toEqual(["8", "8", "7"]);
+        if (row.state === "pending") expect(row.marks, `${width}px pending has no mark`).toBe(0);
         expect(row.discOffsetY, `${width}px ${row.status} disc on its row's centre line`).toBeLessThanOrEqual(0.5);
-        // An even spare width splits into whole pixels on each side, so the glyph sits on the pixel grid.
-        if (row.spareX !== null) expect(Number.isInteger(row.spareX) && row.spareX % 2 === 0, `${width}px ${row.status} spare ${row.spareX}`).toBe(true);
       }
       if (width === 1440) {
         for (const row of measured.rows) {
@@ -424,8 +425,23 @@ test.describe("workspace focus pass", () => {
           expect(Math.abs(row.statusLeft - measured.rows[0].statusLeft), "status column").toBeLessThanOrEqual(1);
         }
       }
-      await shot(page, `steps-centred-${width}`);
+      // The comet turns about its own centre: its transform changes over time, and its centre does not move.
+      const comet = page.locator(".checklist-step.status-active .step-comet");
+      const turnA = await comet.evaluate((el) => getComputedStyle(el).transform);
+      await expect.poll(() => comet.evaluate((el) => getComputedStyle(el).transform), `${width}px comet turns`).not.toBe(turnA);
+      const centreA = await comet.boundingBox();
+      await expect.poll(async () => { const box = await comet.boundingBox(); return box ? Math.abs(box.x + box.width / 2 - (centreA!.x + centreA!.width / 2)) : 99; }).toBeLessThanOrEqual(0.5);
+      await page.emulateMedia({ reducedMotion: "reduce" });
+      expect(await comet.evaluate((el) => getComputedStyle(el).animationName), `${width}px reduced motion stops the comet`).toBe("none");
+      await page.emulateMedia({ reducedMotion: "no-preference" });
+      await shot(page, `steps-indicators-${width}`);
     }
+    // Paused: the active row shows the paused drawing, with no comet.
+    harness.setPhase("paused");
+    await openWorkspace(page);
+    if ((await stepsToggle(page).getAttribute("aria-expanded")) !== "true") await stepsToggle(page).click();
+    await expect(page.locator(".checklist-step.status-active [data-step-icon='paused']")).toHaveCount(1);
+    await expect(page.locator(".step-comet")).toHaveCount(0);
     expect(harness.errors).toEqual([]);
     expect(harness.failedRequests).toEqual([]);
   });
