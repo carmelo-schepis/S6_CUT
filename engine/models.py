@@ -319,7 +319,7 @@ class Job(ApiModel):
     total_items: int = Field(default=0, ge=0)
     style: Style
     processing_mode: ProcessingMode = "smart"
-    execution_policy: Literal["auto", "engine_only"] = "auto"
+    execution_policy: Literal["auto", "engine_only", "ollama"] = "auto"
     content_format: ContentFormat = "short"
     source_profile: Literal["speech", "music"] = "speech"
     # Automatic personal-library video composition is deliberately opt-in.
@@ -571,14 +571,49 @@ class ProjectFolderUpdate(ApiModel):
     move_existing_assets: bool = False
 
 
+def normalise_ollama_url(value: str) -> str:
+    """Return a clean Ollama base URL, or "" to clear it. Raises ValueError otherwise.
+
+    Credentials, query strings and fragments are rejected so nothing sensitive is stored.
+    A trailing /api or /v1 is removed because the engine appends /api/chat itself.
+    """
+    from urllib.parse import urlsplit
+
+    text = value.strip()
+    if not text:
+        return ""
+    if "://" not in text:
+        text = f"http://{text}"
+    parts = urlsplit(text)
+    if parts.scheme not in {"http", "https"} or not parts.hostname:
+        raise ValueError("Ollama endpoint must be an http or https address")
+    if "@" in parts.netloc or parts.query or parts.fragment:
+        raise ValueError("Ollama endpoint must not contain credentials, a query or a fragment")
+    parts.port  # raises ValueError for an invalid port
+    path = parts.path.rstrip("/")
+    while path.endswith(("/api", "/v1")):
+        path = path.rsplit("/", 1)[0]
+    return f"{parts.scheme}://{parts.netloc}{path}"
+
+
 class ProfileInput(ApiModel):
     name: str = Field(min_length=1, max_length=100)
     text_model_id: str = Field(default="openai/gpt-4.1-mini", max_length=200)
     youtube_metadata_model_id: str | None = Field(default=None, max_length=200)
     auto_seo_titles: bool | None = None
     openrouter_key: str | None = Field(default=None, max_length=500)
+    # None keeps the saved value; "" clears it. The URL is not a secret.
+    ollama_url: str | None = Field(default=None, max_length=500)
+    ollama_model: str | None = Field(default=None, max_length=200)
     persistence: Literal["session", "encrypted"] = "encrypted"
     selected: bool = False
+
+    @field_validator("ollama_url")
+    @classmethod
+    def _normalise_ollama_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return normalise_ollama_url(value)
 
 
 ProviderConnectionStatus = Literal[
@@ -611,6 +646,11 @@ class ProviderProfile(ApiModel):
     text_status: ProviderConnectionStatus = "not_configured"
     text_message: str | None = None
     text_last_checked_at: str | None = None
+    ollama_url: str | None = None
+    ollama_model: str | None = None
+    ollama_status: ProviderConnectionStatus = "not_configured"
+    ollama_message: str | None = None
+    ollama_last_checked_at: str | None = None
     status: str
     capabilities: list[str]
     fallbacks: dict[str, str]

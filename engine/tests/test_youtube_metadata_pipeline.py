@@ -49,7 +49,7 @@ def test_auto_generation_requires_exact_distinct_ids_and_preserves_fallback(monk
     batch = job.clips[:2]
     job.clips = batch
     db.save_job(job, private)
-    monkeypatch.setattr(manager.profiles, "openrouter_models", lambda: _resolved([
+    monkeypatch.setattr(manager.profiles, "openrouter_models", lambda *_args, **_kwargs: _resolved([
         OpenRouterModel(id="google/gemini-2.5-flash-lite", name="Gemini Flash Lite", context_length=4096,
                        pricing={"prompt": "0.0000001", "completion": "0.0000004"},
                        supported_parameters=["response_format"])
@@ -76,7 +76,7 @@ def test_one_missing_or_repeated_title_keeps_only_that_clip_on_its_fallback(monk
     db, manager, job, private = _runtime(tmp_path)
     job.clips = job.clips[:2]
     db.save_job(job, private)
-    monkeypatch.setattr(manager.profiles, "openrouter_models", lambda: _resolved([
+    monkeypatch.setattr(manager.profiles, "openrouter_models", lambda *_args, **_kwargs: _resolved([
         OpenRouterModel(id="google/gemini-2.5-flash-lite", name="Gemini Flash Lite", context_length=4096,
                        pricing={"prompt": "0.0000001", "completion": "0.0000004"},
                        supported_parameters=["response_format"])
@@ -95,7 +95,7 @@ def test_one_missing_or_repeated_title_keeps_only_that_clip_on_its_fallback(monk
 def test_auto_generation_batches_stable_ids_persists_and_reuses_successes(monkeypatch, tmp_path):
     db, manager, job, private = _runtime(tmp_path)
     request_batches = []
-    monkeypatch.setattr(manager.profiles, "openrouter_models", lambda: _resolved([
+    monkeypatch.setattr(manager.profiles, "openrouter_models", lambda *_args, **_kwargs: _resolved([
         OpenRouterModel(id="google/gemini-2.5-flash-lite", name="Gemini Flash Lite", context_length=4096,
                        pricing={"prompt": "0.0000001", "completion": "0.0000004"},
                        supported_parameters=["response_format"])
@@ -140,7 +140,7 @@ def test_auto_generation_skips_when_budget_is_exhausted_and_requires_priced_supp
         called = True
         return None
 
-    monkeypatch.setattr(manager.profiles, "openrouter_models", lambda: _resolved([
+    monkeypatch.setattr(manager.profiles, "openrouter_models", lambda *_args, **_kwargs: _resolved([
         OpenRouterModel(id="google/gemini-2.5-flash-lite", name="Gemini Flash Lite", context_length=4096,
                        pricing={"prompt": "0.0000001", "completion": "0.0000004"},
                        supported_parameters=["response_format"])

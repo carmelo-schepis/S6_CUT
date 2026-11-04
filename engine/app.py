@@ -420,7 +420,7 @@ async def create_clip_job(
     name: Annotated[str | None, Form()] = None,
     style: Annotated[Literal["funny", "serious", "educational", "hype"], Form()] = "educational",
     processing_mode: Annotated[Literal["fast", "smart", "auto"], Form()] = "auto",
-    execution_policy: Annotated[Literal["auto", "engine_only"], Form()] = "auto",
+    execution_policy: Annotated[Literal["auto", "engine_only", "ollama"], Form()] = "auto",
     source_profile: Annotated[Literal["speech", "music"], Form()] = "speech",
     count: Annotated[int, Form(ge=1, le=500)] = 5,
     batch_mode: Annotated[Literal["standard", "high_volume"], Form()] = "standard",
@@ -490,14 +490,18 @@ async def create_clip_job(
     effective_target: int | None = None
     cap_explanation: str | None = None
     smart_available = profiles.smart_available()
+    if execution_policy == "ollama" and not profiles.ollama_available():
+        raise HTTPException(422, "Add an Ollama endpoint in Settings first.")
+    # The chosen job provider decides readiness: Ollama when selected, otherwise the OpenRouter profile.
+    provider_ready = profiles.ollama_available() if execution_policy == "ollama" else smart_available
     # Auto keeps local transcription available when the optional provider is absent.
-    mode = "smart" if source_profile == "music" else resolve_processing_mode(processing_mode, smart_available)
+    mode = "smart" if source_profile == "music" else resolve_processing_mode(processing_mode, provider_ready)
     selected_profile = next((profile for profile in profiles.db.list_profiles() if profile.selected), None)
     if youtube_metadata is None:
         # Not specified by the client: SEO titles follow the profile's
         # "Auto-write SEO titles" setting for eligible Smart short jobs.
         youtube_metadata = bool(
-            selected_profile and selected_profile.auto_seo_titles and smart_available
+            selected_profile and selected_profile.auto_seo_titles and provider_ready
             and content_format == "short" and mode == "smart" and processing_mode != "fast" and batch_mode != "high_volume"
         )
     if youtube_metadata:
@@ -505,7 +509,7 @@ async def create_clip_job(
             raise HTTPException(422, "YouTube metadata is unavailable in Fast or Long form jobs.")
         # The metadata model is an independent Settings profile preference. A
         # job snapshots it so a later profile edit cannot rewrite queued work.
-        youtube_metadata_model_id = selected_profile.youtube_metadata_model_id if selected_profile else None
+        youtube_metadata_model_id = (selected_profile.ollama_model if execution_policy == "ollama" else selected_profile.youtube_metadata_model_id) if selected_profile else None
     manual_hook_text = manual_hook_text.strip()
     if manual_hook_text and not hook_text:
         raise HTTPException(422, "Enable Hook text before entering custom hook text.")
@@ -541,13 +545,13 @@ async def create_clip_job(
         "aspect_ratio": aspect_ratio, "content_format": content_format, "processing_mode": mode,
         "execution_policy": execution_policy,
         "transcription_language": "en",
-        "provider_available": execution_policy == "auto" and smart_available,
+        "provider_available": execution_policy != "engine_only" and provider_ready,
         "presentation": presentation,
         "reaction_policy": {"version": 1, "name": "ironic_v1"} if source_profile == "speech" and burn_subtitles else None,
         "burn_subtitles": True if source_profile == "music" else burn_subtitles, "embed_subtitles": embed_subtitles,
         "hook_text": {"enabled": hook_text, "status": "pending" if hook_text else "disabled", **({"manual_text": manual_hook_text} if manual_hook_text else {})},
         "youtube_metadata": {"enabled": youtube_metadata, "model_id": youtube_metadata_model_id, "status": "pending" if youtube_metadata else "disabled"},
-        "use_openrouter": execution_policy == "auto" and mode == "smart" and smart_available and source_profile == "speech" and batch_mode == "standard",
+        "use_openrouter": execution_policy != "engine_only" and mode == "smart" and provider_ready and source_profile == "speech" and batch_mode == "standard",
         "library_folder_id": library_folder_id, "library_overlays_enabled": library_overlays_enabled,
         "subscribe_animation": _subscribe_animation_request(subscribe_animation).model_dump(),
     }
@@ -629,7 +633,7 @@ async def create_clip_job(
         cap_explanation = "Effective target will be confirmed after YouTube download and FFprobe validation."
     project = Project(id=project_id, name=_project_name(name, Path(source_name).stem), name_is_auto=not _project_name(name, ""), mode="clip", style=style, state="queued", source_name=source_name, source_kind=source_kind, requested_count=count, batch_mode=batch_mode, effective_target=effective_target, cap_explanation=cap_explanation, content_format=content_format, source_profile=source_profile, music_track=music_track_snapshot, music_audio_mode=music_audio_mode if source_profile == "music" else "song_only", music_song_gain=float(private.get("music_song_gain", 1.0)), music_original_audio_gain=float(private.get("music_original_audio_gain", 1.0)), latest_job_id=job_id, library_folder_id=library_folder_id)
     high_volume_smart_landscape = batch_mode == "high_volume" and content_format == "long" and mode == "smart"
-    steps = manager._fast_steps() if uses_fast_pipeline(mode, content_format) and not high_volume_smart_landscape else manager._smart_steps(bool(private["use_openrouter"]), source_profile, include_hook_text=hook_text, preserve_voice=music_audio_mode == "replace_music_keep_voice")
+    steps = manager._fast_steps() if uses_fast_pipeline(mode, content_format) and not high_volume_smart_landscape else manager._smart_steps(bool(private["use_openrouter"]), source_profile, include_hook_text=hook_text, preserve_voice=music_audio_mode == "replace_music_keep_voice", provider_name="Ollama" if execution_policy == "ollama" else "OpenRouter")
     music_step = next((step for step in steps if step.id == "music_track"), None)
     if music_step:
         if music_track_snapshot is None:
@@ -1113,11 +1117,11 @@ async def generate_youtube_metadata(job_id: str, clip_id: str, regenerate: bool 
     if type(calls) is not int or calls < 0 or calls >= 5:
         raise HTTPException(429, "This job has reached its five-request YouTube metadata generation limit")
     profile = next((item for item in db.list_profiles() if item.selected), None)
-    model_id = job.youtube_metadata_model_id or (profile.youtube_metadata_model_id if profile else None)
+    model_id = job.youtube_metadata_model_id or ((profile.ollama_model if job.execution_policy == "ollama" else profile.youtube_metadata_model_id) if profile else None)
     if not model_id:
         raise HTTPException(409, "Choose a title and description model in Settings")
     try:
-        available_models = await profiles.openrouter_models()
+        available_models = await profiles.openrouter_models(ollama=job.execution_policy == "ollama")
     except ProviderError as exc:
         _record_youtube_metadata_failure(job_id, clip_id, clip.youtube_metadata_revision, exc.safe_message, excerpt)
         raise HTTPException(503, exc.safe_message) from exc
@@ -1196,7 +1200,7 @@ async def generate_youtube_metadata(job_id: str, clip_id: str, regenerate: bool 
             [{"role": "system", "content": system}, {"role": "user", "content": user}], schema,
             require_saved_profile=True, model_id=model_id, temperature=0.2, max_tokens=200,
             provider={"require_parameters": True, "max_price": {"prompt": 0.10, "completion": 0.40}},
-            reasoning={"enabled": False}, include_usage=True,
+            reasoning={"enabled": False}, include_usage=True, ollama=job.execution_policy == "ollama",
         )
         if not result or not isinstance(result, tuple):
             raise ProviderError("not_configured", "Connect and test the selected OpenRouter profile before generating metadata")

@@ -76,6 +76,33 @@ describe("SettingsView", () => {
     expect(await screen.findByText("New OpenRouter profile")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("sk-or-v1-…")).toHaveAttribute("type", "password");
   });
+  it("never sends Ollama fields from Use profile, so the saved endpoint is kept", async () => {
+    mockListProfiles.mockResolvedValue([{ ...baseProfile, ollamaUrl: "http://ollama.test:11434", ollamaModel: "llama3.2", ollamaStatus: "connected" }]);
+    mockSaveProfile.mockResolvedValue(baseProfile);
+    renderView();
+    fireEvent.click(await screen.findByRole("button", { name: "Use profile" }));
+    await waitFor(() => expect(mockSaveProfile).toHaveBeenCalled());
+    const [payload] = mockSaveProfile.mock.calls[0];
+    expect(payload).not.toHaveProperty("ollamaUrl");
+    expect(payload).not.toHaveProperty("ollamaModel");
+  });
+
+  it("shows the Ollama result only for a profile with an endpoint, and an empty field clears it", async () => {
+    const withOllama: ProviderProfile = { ...connectedProfile, ollamaUrl: "http://ollama.test:11434", ollamaModel: "llama3.2", ollamaStatus: "timeout_offline", ollamaMessage: "Could not reach Ollama at this address." };
+    mockListProfiles.mockResolvedValue([withOllama, baseProfile]);
+    mockSaveProfile.mockResolvedValue(withOllama);
+    mockTestProfile.mockResolvedValue(withOllama);
+    renderView();
+    const rows = await screen.findAllByRole("article");
+    expect(within(rows[0]).getByText(/http:\/\/ollama\.test:11434 · llama3\.2/)).toBeInTheDocument();
+    expect(rows[0].querySelectorAll(".connection-result")).toHaveLength(2);
+    expect(rows[1].querySelectorAll(".connection-result")).toHaveLength(1);
+    fireEvent.click(within(rows[0]).getByRole("button", { name: `Edit ${withOllama.name}` }));
+    fireEvent.change(screen.getByRole("textbox", { name: /Ollama endpoint/ }), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save and test connection" }));
+    await waitFor(() => expect(mockSaveProfile).toHaveBeenCalledWith(expect.objectContaining({ ollamaUrl: "" }), withOllama.id));
+  });
+
   it("saves the text-provider selection, then tests the profile", async () => {
     mockListProfiles.mockResolvedValue([]);
     const saved = { ...baseProfile, id: "new", openrouterConfigured: true, openrouterMasked: "sk-…safe" };

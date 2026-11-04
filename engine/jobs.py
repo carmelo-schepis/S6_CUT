@@ -159,9 +159,9 @@ def _semantic_clip_title(project_name: str, clip: Clip) -> str:
     return f"{project_name} — {phrase} · Cut {clip.index:02d}"[:200]
 
 
-def _openrouter_fallback_warning(error: Exception) -> str:
-    reason = " ".join(redact(provider_runtime_message(error, "OpenRouter")).split()).strip(" .")
-    return f"OpenRouter API failed: {reason}. Continuing with deterministic local planning."
+def _openrouter_fallback_warning(error: Exception, service: str = "OpenRouter") -> str:
+    reason = " ".join(redact(provider_runtime_message(error, service)).split()).strip(" .")
+    return f"{service} API failed: {reason}. Continuing with deterministic local planning."
 
 
 def resolve_batch_target(requested: int, batch_mode: str, source_duration: float) -> tuple[int, str | None]:
@@ -312,6 +312,15 @@ def job_processing_mode(job: Job, private: dict[str, Any]) -> ProcessingMode:
 def job_allows_provider(job: Job, private: dict[str, Any]) -> bool:
     """Either durable copy can veto cloud use, including after checkpoint recovery."""
     return job.execution_policy != "engine_only" and private.get("execution_policy") != "engine_only"
+
+
+def job_uses_ollama(job: Job) -> bool:
+    """True when the user chose the Ollama endpoint for this job instead of OpenRouter."""
+    return job.execution_policy == "ollama"
+
+
+def job_provider_name(job: Job) -> str:
+    return "Ollama" if job_uses_ollama(job) else "OpenRouter"
 
 
 def job_content_format(job: Job, private: dict[str, Any]) -> ContentFormat:
@@ -920,9 +929,9 @@ class JobManager:
             ProcessingStep(id="ready", label="Project ready"),
         ]
 
-    def _smart_steps(self, use_openrouter: bool = False, source_profile: str = "speech", include_hook_text: bool = False, preserve_voice: bool = False) -> list[ProcessingStep]:
+    def _smart_steps(self, use_openrouter: bool = False, source_profile: str = "speech", include_hook_text: bool = False, preserve_voice: bool = False, provider_name: str = "OpenRouter") -> list[ProcessingStep]:
         music = source_profile == "music"
-        provider_step = ProcessingStep(id="openrouter", label="Provider bypassed for music profile" if music else "OpenRouter planning")
+        provider_step = ProcessingStep(id="openrouter", label="Provider bypassed for music profile" if music else f"{provider_name} planning")
         if not use_openrouter:
             timestamp = now_iso()
             provider_step.status = "skipped"
@@ -1002,7 +1011,7 @@ class JobManager:
         if job.steps or job.state == "complete":
             return
         as_of = job.updated_at
-        job.steps = self._fast_steps() if job_uses_fast_pipeline(job, private) else self._smart_steps(bool(private.get("use_openrouter")), job.source_profile, include_hook_text=job.hook_text_enabled, preserve_voice=job.music_audio_mode.value == "replace_music_keep_voice")
+        job.steps = self._fast_steps() if job_uses_fast_pipeline(job, private) else self._smart_steps(bool(private.get("use_openrouter")), job.source_profile, provider_name=job_provider_name(job), include_hook_text=job.hook_text_enabled, preserve_voice=job.music_audio_mode.value == "replace_music_keep_voice")
         self._restore_proven_steps(job, private, as_of)
         self._save(job, private)
 
@@ -1032,7 +1041,7 @@ class JobManager:
         """
         if job_uses_fast_pipeline(job, private):
             return {step.id for step in self._fast_steps()}
-        return {step.id for step in self._smart_steps(bool(private.get("use_openrouter")), job.source_profile, include_hook_text=job.hook_text_enabled, preserve_voice=job.music_audio_mode.value == "replace_music_keep_voice")}
+        return {step.id for step in self._smart_steps(bool(private.get("use_openrouter")), job.source_profile, provider_name=job_provider_name(job), include_hook_text=job.hook_text_enabled, preserve_voice=job.music_audio_mode.value == "replace_music_keep_voice")}
 
     def _repair_step_shape(self, job: Job, private: dict[str, Any]) -> None:
         """Rebuild a checklist persisted in the wrong shape for its pipeline.
@@ -1052,7 +1061,7 @@ class JobManager:
         if {step.id for step in job.steps} == self._required_step_ids(job, private):
             return
         as_of = job.updated_at
-        job.steps = self._fast_steps() if job_uses_fast_pipeline(job, private) else self._smart_steps(bool(private.get("use_openrouter")), job.source_profile, include_hook_text=job.hook_text_enabled, preserve_voice=job.music_audio_mode.value == "replace_music_keep_voice")
+        job.steps = self._fast_steps() if job_uses_fast_pipeline(job, private) else self._smart_steps(bool(private.get("use_openrouter")), job.source_profile, provider_name=job_provider_name(job), include_hook_text=job.hook_text_enabled, preserve_voice=job.music_audio_mode.value == "replace_music_keep_voice")
         # Replays nothing: published clips keep the render counters they earned.
         self._restore_proven_steps(job, private, as_of)
         self._save(job, private)
@@ -1831,7 +1840,7 @@ class JobManager:
         return report
 
     def _local_planning_fallback(self, job: Job, private: dict[str, Any], pool: list[Candidate], error: Exception):
-        warning = _openrouter_fallback_warning(error)
+        warning = _openrouter_fallback_warning(error, job_provider_name(job))
         if warning not in job.warnings:
             job.warnings.append(warning)
         self.fail_step(job, "openrouter", detail=warning, private=private)
@@ -1865,7 +1874,7 @@ class JobManager:
             chosen = pool[:requested]
             self.complete_step(job, "local_planning", detail=f"{len(chosen)} candidates planned locally", private=private)
             return chosen
-        self.start_step(job, "openrouter", detail="Reviewing deterministic candidate excerpts", label="Planning clips with OpenRouter", progress=33, private=private)
+        self.start_step(job, "openrouter", detail="Reviewing deterministic candidate excerpts", label=f"Planning clips with {job_provider_name(job)}", progress=33, private=private)
         excerpts = [
             {"index": index, "start": candidate.start, "end": candidate.end, "text": " ".join(str(word["text"]) for word in candidate.words)[:800]}
             for index, candidate in enumerate(pool)
@@ -1878,6 +1887,7 @@ class JobManager:
                     "properties": {"indexes": {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": len(pool) - 1}, "minItems": 1, "maxItems": requested}},
                     "required": ["indexes"], "additionalProperties": False,
                 },
+                ollama=job_uses_ollama(job),
             ))
         except Exception as exc:
             # Only the optional provider call is guarded here. Cancellation and
@@ -1886,12 +1896,12 @@ class JobManager:
             return self._local_planning_fallback(job, private, pool, exc)
         indexes = result.get("indexes") if isinstance(result, dict) else None
         if not isinstance(indexes, list) or not indexes or len(indexes) > requested:
-            return self._local_planning_fallback(job, private, pool, ValueError("OpenRouter returned a malformed planning response"))
+            return self._local_planning_fallback(job, private, pool, ValueError(f"{job_provider_name(job)} returned a malformed planning response"))
         if any(type(index) is not int or not 0 <= index < len(pool) for index in indexes):
-            return self._local_planning_fallback(job, private, pool, ValueError("OpenRouter returned invalid candidate indexes"))
+            return self._local_planning_fallback(job, private, pool, ValueError(f"{job_provider_name(job)} returned invalid candidate indexes"))
         unique = list(dict.fromkeys(indexes))
         if not unique:
-            return self._local_planning_fallback(job, private, pool, ValueError("OpenRouter returned no usable candidate indexes"))
+            return self._local_planning_fallback(job, private, pool, ValueError(f"{job_provider_name(job)} returned no usable candidate indexes"))
         selected_indexes = set(unique)
         chosen = [pool[index] for index in unique[:requested]]
         # The provider is an ordering enhancement, not a reason to silently
@@ -1900,7 +1910,7 @@ class JobManager:
         if len(chosen) < min(requested, len(pool)):
             chosen.extend(candidate for index, candidate in enumerate(pool) if index not in selected_indexes and len(chosen) < requested)
         self.complete_step(job, "openrouter", detail=f"AI planning completed for {len(chosen)} candidates", private=private)
-        self.skip_step(job, "local_planning", detail="OpenRouter planning succeeded", private=private)
+        self.skip_step(job, "local_planning", detail=f"{job_provider_name(job)} planning succeeded", private=private)
         return chosen
 
     def _verify_music_boundaries(
@@ -2080,7 +2090,7 @@ class JobManager:
         try:
             result = asyncio.run(self.profiles.openrouter_json(
                 [{"role": "system", "content": HOOK_TEXT_RULES}, {"role": "user", "content": hook_text_clips(excerpts)}],
-                hook_text_schema(len(excerpts)), temperature=0.8,
+                hook_text_schema(len(excerpts)), temperature=0.8, ollama=job_uses_ollama(job),
             ))
             hooks = result.get("hooks") if isinstance(result, dict) else None
             if not isinstance(hooks, list):
@@ -2108,7 +2118,7 @@ class JobManager:
             elif invalid_items:
                 reason = "some hook items were missing or invalid"
         except Exception as exc:
-            reason = " ".join(redact(provider_runtime_message(exc, "OpenRouter")).split()).strip(" .") or "provider request failed"
+            reason = " ".join(redact(provider_runtime_message(exc, job_provider_name(job))).split()).strip(" .") or "provider request failed"
             for clip in job.clips:
                 clip.hook_text = None
         local_count = 0
@@ -2229,7 +2239,7 @@ class JobManager:
             return
 
         try:
-            models = asyncio.run(self.profiles.openrouter_models())
+            models = asyncio.run(self.profiles.openrouter_models(ollama=job_uses_ollama(job)))
             selected = next((item for item in models if item.id == model_id), None)
             if not selected or not selected.pricing:
                 raise ProviderError("unavailable", "The selected metadata model is unavailable or has unknown pricing.")
@@ -2243,7 +2253,7 @@ class JobManager:
             if "response_format" not in selected.supported_parameters:
                 raise ProviderError("unavailable", "The selected metadata model does not advertise structured JSON output support.")
         except Exception as exc:
-            self._metadata_generation_fallback(job, private, pending, provider_runtime_message(exc, "OpenRouter"))
+            self._metadata_generation_fallback(job, private, pending, provider_runtime_message(exc, job_provider_name(job)))
             return
 
         prompt_version = SEO_PROMPT_VERSION
@@ -2296,7 +2306,7 @@ class JobManager:
                     [{"role": "system", "content": system}, {"role": "user", "content": user}], schema,
                     require_saved_profile=True, model_id=model_id, temperature=0.4, max_tokens=estimated_output,
                     provider={"require_parameters": True, "max_price": {"prompt": 0.10, "completion": 0.40}},
-                    reasoning={"enabled": False}, include_usage=True,
+                    reasoning={"enabled": False}, include_usage=True, ollama=job_uses_ollama(job),
                 ))
                 if not result or not isinstance(result, tuple):
                     raise ProviderError("not_configured", "Connect and test the selected OpenRouter profile before generating metadata.")
@@ -2353,7 +2363,7 @@ class JobManager:
                     state[clip.id] = {"status": "generated", "cache_key": cache_key, "model": model_id, "updated_at": time.time()}
                 self._save(job, private)
             except Exception as exc:
-                failed_reason = " ".join(redact(provider_runtime_message(exc, "OpenRouter")).split()).strip(" .") or "Provider request failed"
+                failed_reason = " ".join(redact(provider_runtime_message(exc, job_provider_name(job))).split()).strip(" .") or "Provider request failed"
                 break
         remaining = [entry for entry in pending if entry[0].youtube_metadata_status != "generated"]
         if remaining:
@@ -3395,7 +3405,7 @@ class JobManager:
         new_job = Job(
             id=new_id, project_id=job.project_id, library_folder_id=job.library_folder_id,
             source_blob_id=job.source_blob_id, mode="clip", content_format=job.content_format, processing_mode="fast",
-            execution_policy="auto" if job_allows_provider(job, private) else "engine_only",
+            execution_policy=job.execution_policy if job_allows_provider(job, private) else "engine_only",
             requested_count=job.requested_count, batch_mode=job.batch_mode, effective_target=job.effective_target,
             cap_explanation=job.cap_explanation, state="queued", stage="queued", stage_label="Queued on this machine",
             progress=0, style=job.style, burn_subtitles=bool(new_private.get("burn_subtitles", job.burn_subtitles)), steps=self._fast_steps(),

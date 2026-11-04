@@ -48,6 +48,14 @@ describe("versioned UI contracts", () => {
     expect(job.hookTextEnabled).toBe(true);
   });
 
+  it("parses an Ollama job and an Ollama profile, and legacy profiles without the fields", () => {
+    const job = jobSchema.parse({ schemaVersion: 1, id: "j", projectId: "p", mode: "clip", state: "active", stage: "planning", stageLabel: "Planning", progress: 1, style: "serious", executionPolicy: "ollama", warnings: [], error: null, clips: [], beats: [], steps: [], createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" });
+    expect(job.executionPolicy).toBe("ollama");
+    const legacy = { id: "p", name: "P", textModelId: "m", selected: true, persistence: "encrypted", openrouterConfigured: false, status: "local only", capabilities: [], fallbacks: {} };
+    expect(profileSchema.parse(legacy).ollamaUrl).toBeUndefined();
+    expect(profileSchema.parse({ ...legacy, ollamaUrl: "http://h:11434", ollamaModel: "llama3.2", ollamaStatus: "connected", ollamaMessage: null, ollamaLastCheckedAt: null }).ollamaStatus).toBe("connected");
+  });
+
   it("parses optional YouTube metadata fields while preserving legacy responses", () => {
     const legacy = clipSchema.parse({ id: "old", index: 1, state: "complete", start: 0, end: 5, duration: 5, openingLine: "Source line", selected: true, fallbackUsed: false, provenance: [] });
     const current = clipSchema.parse({ id: "new", index: 1, state: "complete", start: 0, end: 5, duration: 5, openingLine: "Source line", title: "A title", youtubeDescription: "A description", selected: true, fallbackUsed: false, provenance: [] });

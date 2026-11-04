@@ -56,7 +56,17 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
   const [maxDuration, setMaxDuration] = useState(60);
   const [aspectRatio, setAspectRatio] = useState("9:16");
   const [processingMode, setProcessingMode] = useState<ProcessingMode>("auto");
-  const [executionPolicy, setExecutionPolicy] = useState<"auto" | "engine_only">("auto");
+  const [executionPolicy, setExecutionPolicy] = useState<"auto" | "engine_only" | "ollama">("auto");
+  // Ollama exists only while the selected profile has an endpoint; otherwise fall back to Auto.
+  const ollamaReady = Boolean(selectedProfile?.ollamaUrl);
+  const effectivePolicy = executionPolicy === "ollama" && !ollamaReady ? "auto" : executionPolicy;
+  // Forget an Ollama choice once its endpoint is removed, so re-adding one does not silently reselect it.
+  const [previousOllamaReady, setPreviousOllamaReady] = useState(ollamaReady);
+  if (previousOllamaReady !== ollamaReady) {
+    setPreviousOllamaReady(ollamaReady);
+    if (!ollamaReady && executionPolicy === "ollama") setExecutionPolicy("auto");
+  }
+  const metadataModelLabel = effectivePolicy === "ollama" ? `${selectedProfile?.ollamaModel || "your Ollama model"} on Ollama` : (selectedProfile?.youtubeMetadataModelId || "the configured Settings model");
   const [sourceProfile, setSourceProfile] = useState<SourceProfile>("speech");
   // Speech and Music keep separate editorial choices; Music shows lyric-focused options.
   const style = sourceProfile === "music" ? musicStyle : speechStyle;
@@ -178,7 +188,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
           url: sourceType === "url" ? url.trim() : undefined,
           name: projectName.trim() || undefined, style, count: requestedCount, minDuration, maxDuration,
           aspectRatio: contentFormat === "long" ? "16:9" : aspectRatio,
-          contentFormat, batchMode, executionPolicy,
+          contentFormat, batchMode, executionPolicy: effectivePolicy,
           processingMode: sourceProfile === "music" ? "smart" : processingMode,
           sourceProfile, burnSubtitles: fastMode ? false : burnSubtitles,
           ...(sourceProfile === "speech" && speechHookTextEnabled ? { hookText: true } : {}),
@@ -234,7 +244,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
       : sourceProfile === "speech" && processingMode === "fast" ? "Fast mode does not support metadata generation. Choose Auto or Smart."
         : null;
   // Mirrors the engine's own default: Smart-capable short, standard batches.
-  const youtubeMetadataDefault = hasSelectedProvider && selectedProfile?.autoSeoTitles !== false && batchMode !== "high_volume";
+  const youtubeMetadataDefault = (hasSelectedProvider || effectivePolicy === "ollama") && selectedProfile?.autoSeoTitles !== false && batchMode !== "high_volume";
   const youtubeMetadataActive = metadataDisabledReason === null && (youtubeMetadataChoice ?? youtubeMetadataDefault);
   const musicConfigurationMessage = sourceProfile === "music" && contentFormat !== "short"
     ? "Music / sung vocals is currently available for short clips only. Choose Short form to continue."
@@ -277,7 +287,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
         </div>
       </div>
 
-      {providersLoaded && !hasSelectedProvider && !providerCalloutDismissed && <div className="provider-callout"><Sparkles size={17} /><div><strong>Add optional AI providers</strong><span>OpenRouter can improve Smart planning. Local modes stay available.</span></div><div className="provider-callout-actions"><Button onClick={onConfigureProviders}>Configure providers</Button><Button variant="ghost" onClick={() => {
+      {providersLoaded && !hasSelectedProvider && !ollamaReady && !providerCalloutDismissed && <div className="provider-callout"><Sparkles size={17} /><div><strong>Add optional AI providers</strong><span>OpenRouter can improve Smart planning. Local modes stay available.</span></div><div className="provider-callout-actions"><Button onClick={onConfigureProviders}>Configure providers</Button><Button variant="ghost" onClick={() => {
         setProviderCalloutDismissed(true);
         try { localStorage.setItem(PROVIDER_CALLOUT_DISMISSED_KEY, "true"); } catch { /* Storage can be unavailable in hardened browsers. */ }
       }}>Continue locally</Button></div></div>}
@@ -345,10 +355,11 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
 
             <FieldGroup title="Execution">
               <div className="segmented mode-tabs" aria-label="Execution policy">
-                <button type="button" aria-pressed={executionPolicy === "auto"} className={executionPolicy === "auto" ? "active" : ""} onClick={() => setExecutionPolicy("auto")}>Auto · API with local fallback</button>
-                <button type="button" aria-pressed={executionPolicy === "engine_only"} className={executionPolicy === "engine_only" ? "active" : ""} onClick={() => setExecutionPolicy("engine_only")}>Engine only</button>
+                <button type="button" aria-pressed={effectivePolicy === "auto"} className={effectivePolicy === "auto" ? "active" : ""} onClick={() => setExecutionPolicy("auto")}>Auto · API with local fallback</button>
+                <button type="button" aria-pressed={effectivePolicy === "engine_only"} className={effectivePolicy === "engine_only" ? "active" : ""} onClick={() => setExecutionPolicy("engine_only")}>Engine only</button>
+                {ollamaReady && <button type="button" aria-pressed={effectivePolicy === "ollama"} className={effectivePolicy === "ollama" ? "active" : ""} onClick={() => setExecutionPolicy("ollama")}>Ollama</button>}
               </div>
-              <p className="form-hint">{executionPolicy === "engine_only" ? "All processing stays on this machine; no API calls are made." : "Uses a connected API for supported text features and falls back to local processing."}</p>
+              <p className="form-hint">{effectivePolicy === "engine_only" ? "All processing stays on this machine; no API calls are made." : effectivePolicy === "ollama" ? "Uses your Ollama server for supported text features and falls back to local processing. OpenRouter is not used." : "Uses a connected API for supported text features and falls back to local processing."}</p>
             </FieldGroup>
           </>
           {sourceProfile === "speech" && <div className="create-option-list">
@@ -426,7 +437,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
           {musicHookTextEnabled && <Field label="Top text" hint="Optional · displayed in the upper black area. Up to 100 characters."><input aria-label="Top text" value={musicTopText} maxLength={100} onChange={(event) => setMusicTopText(event.target.value)} placeholder="Leave blank to omit" /></Field>}
           {musicHookTextEnabled && <MusicHookFormatPicker value={musicHookFormat} onChange={setMusicHookFormat} />}
           {speechHookTextEnabled && <Field label="Hook text to display" hint="Up to 150 characters. Your text will be shown on each clip."><textarea aria-label="Hook text to display" rows={2} maxLength={150} value={manualHookText} onChange={(event) => setManualHookText(event.target.value)} placeholder="Leave blank to generate a hook from the transcript" /></Field>}
-          <label className="subtitle-toggle"><input type="checkbox" aria-label="Write SEO titles with AI (YouTube metadata)" data-testid="youtube-metadata-toggle" checked={youtubeMetadataActive} disabled={metadataDisabledReason !== null} onChange={(event) => setYoutubeMetadataChoice(event.target.checked)} /> <span><strong>Generate YouTube metadata</strong><small>{metadataDisabledReason ?? (processingMode === "fast" ? "Fast mode has no transcript. Choose Auto or Smart." : executionPolicy === "engine_only" ? "Uses transcript-based local descriptions and deterministic titles." : `${youtubeMetadataDefault ? "On by default (Settings › Auto-write SEO titles)" : "Off by default"}. Uses ${selectedProfile?.youtubeMetadataModelId || "the configured Settings model"} when available, with local fallback. Editable and separate from burned-in text.`)}</small></span></label>
+          <label className="subtitle-toggle"><input type="checkbox" aria-label="Write SEO titles with AI (YouTube metadata)" data-testid="youtube-metadata-toggle" checked={youtubeMetadataActive} disabled={metadataDisabledReason !== null} onChange={(event) => setYoutubeMetadataChoice(event.target.checked)} /> <span><strong>Generate YouTube metadata</strong><small>{metadataDisabledReason ?? (processingMode === "fast" ? "Fast mode has no transcript. Choose Auto or Smart." : executionPolicy === "engine_only" ? "Uses transcript-based local descriptions and deterministic titles." : `${youtubeMetadataDefault ? "On by default (Settings › Auto-write SEO titles)" : "Off by default"}. Uses ${metadataModelLabel} when available, with local fallback. Editable and separate from burned-in text.`)}</small></span></label>
 
           <div className="create-option-list">
             {sourceProfile === "music" && <OptionRow id="song" title="Background song" summary={musicTrackSummary} open={openRows.has("song")} onToggle={() => toggleRow("song")}>

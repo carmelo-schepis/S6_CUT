@@ -213,7 +213,7 @@ type ClipJobInput = {
   contentFormat?: ContentFormat;
   batchMode?: BatchMode;
   processingMode?: ProcessingMode;
-  executionPolicy?: "auto" | "engine_only";
+  executionPolicy?: "auto" | "engine_only" | "ollama";
   /** Serialized as the engine's snake_case multipart field; responses use sourceProfile. */
   sourceProfile?: SourceProfile;
   burnSubtitles?: boolean;
