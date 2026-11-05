@@ -1,6 +1,6 @@
 # Third-party notices
 
-S6_CUT project code is licensed under the Zero-Clause BSD License (0BSD), which does not require an author name or attribution notice. See [`LICENSE`](LICENSE). Third-party assets and packages retain their own licences below.
+S6_CUT project code is licensed under the MIT License. See [`LICENSE`](LICENSE). Third-party assets and packages retain their own licences below.
 
 This repository uses third-party packages installed from the locked npm/Python dependency manifests and system packages installed by the container images; their upstream licences apply.
 
