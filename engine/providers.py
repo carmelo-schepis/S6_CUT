@@ -10,7 +10,7 @@ from typing import Any
 import httpx
 
 from .database import Database
-from .models import OpenRouterModel, ProfileInput, ProviderProfile, now_iso
+from .models import OpenRouterModel, ProfileInput, ProviderModelScan, ProviderProfile, normalise_ollama_url, now_iso
 from .security import SecretVault, mask_secret
 
 
@@ -379,6 +379,10 @@ class ProfileService:
         key = secrets.get("openrouterKey")
         if not key:
             raise ProviderError("not_configured", "OpenRouter is not configured. Test the selected profile in Settings.")
+        return await self._fetch_openrouter_models(key, output_modalities)
+
+    async def _fetch_openrouter_models(self, key: str, output_modalities: str | None) -> list[OpenRouterModel]:
+        """One provider call for the model list. Callers choose the key; nothing is cached."""
         params = {"output_modalities": output_modalities} if output_modalities else None
         try:
             async with httpx.AsyncClient(timeout=12, follow_redirects=False) as client:
@@ -468,6 +472,36 @@ class ProfileService:
         profile.capabilities = (["OpenRouter text generation"] if text_connected else []) + (["Ollama text generation"] if ollama_connected else [])
         self.db.save_profile(profile)
         return profile
+
+    async def scan_models(self, value: ProviderModelScan) -> list[OpenRouterModel]:
+        """Fresh model list for one provider, from the typed credential or the saved profile.
+
+        Nothing is stored or cached. A typed key or endpoint is used for this call only, and the
+        environment key is never used, so the list matches the profile being edited.
+        """
+        profile: ProviderProfile | None = None
+        saved: dict[str, str] = {}
+        if value.profile_id is not None:
+            record = self.db.get_profile(value.profile_id)
+            if not record:
+                raise KeyError(value.profile_id)
+            profile = record[0]
+            saved = self.secrets(value.profile_id)
+        if value.provider == "ollama":
+            if profile is not None and not profile.ollama_enabled:
+                raise ProviderError("not_configured", OLLAMA_OFF_MESSAGE)
+            typed_url = (value.ollama_url or "").strip()
+            base_url = normalise_ollama_url(typed_url) if typed_url else (profile.ollama_url if profile else None)
+            if not base_url:
+                raise ProviderError("not_configured", "Add your Ollama endpoint to scan its models.")
+            return await self.ollama_models(base_url)
+        if profile is not None and not profile.openrouter_enabled:
+            raise ProviderError("not_configured", OPENROUTER_OFF_MESSAGE)
+        typed_key = (value.openrouter_key or "").strip()
+        key = typed_key if self._has_new_credential(typed_key) else saved.get("openrouterKey", "")
+        if not key:
+            raise ProviderError("not_configured", "Add your OpenRouter API key to scan its models.")
+        return await self._fetch_openrouter_models(key, "text")
 
     async def openrouter_json(self, messages: list[dict[str, str]], schema: dict[str, Any], *, require_saved_profile: bool = False, model_id: str | None = None, temperature: float = 0, max_tokens: int | None = None, provider: dict[str, Any] | None = None, reasoning: dict[str, Any] | None = None, include_usage: bool = False, ollama: bool = False) -> dict[str, Any] | tuple[dict[str, Any], dict[str, Any]] | None:
         if ollama:

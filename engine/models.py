@@ -636,6 +636,14 @@ class OpenRouterModel(ApiModel):
     pricing: dict[str, str] | None = None
 
 
+class ProviderModelScan(ApiModel):
+    """Body for a read-only model scan. A typed key or endpoint is used once and never stored."""
+    provider: Literal["openrouter", "ollama"]
+    profile_id: str | None = Field(default=None, max_length=100)
+    ollama_url: str | None = Field(default=None, max_length=500)
+    openrouter_key: str | None = Field(default=None, max_length=500)
+
+
 class ProviderProfile(ApiModel):
     id: str
     name: str

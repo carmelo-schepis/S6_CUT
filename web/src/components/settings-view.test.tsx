@@ -6,7 +6,7 @@ import { SettingsView } from "./settings-view";
 
 vi.mock("../api", () => {
   const readableError = (e: unknown) => e instanceof Error ? e.message : "Something went wrong. Try again.";
-  return { readableError, listProfiles: vi.fn(), listOpenRouterModels: vi.fn(), saveProfile: vi.fn(), testProfile: vi.fn(), deleteProfile: vi.fn(), duplicateProfile: vi.fn(), purgeLibraryContent: vi.fn() };
+  return { readableError, listProfiles: vi.fn(), listOpenRouterModels: vi.fn(), scanProviderModels: vi.fn(async () => []), saveProfile: vi.fn(), testProfile: vi.fn(), deleteProfile: vi.fn(), duplicateProfile: vi.fn(), purgeLibraryContent: vi.fn() };
 });
 
 import { deleteProfile, duplicateProfile, listOpenRouterModels, listProfiles, purgeLibraryContent, saveProfile, testProfile } from "../api";

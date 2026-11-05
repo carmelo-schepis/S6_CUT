@@ -3192,6 +3192,23 @@ input[type="checkbox"]:checked::before {
 @container (max-width: 680px) {
   .provider-boxes { grid-template-columns: minmax(0, 1fr); }
 }
+/* Model picker: a searchable dropdown that scans its provider every time it opens. */
+.model-picker { position: relative; min-width: 0; }
+.model-picker-control { position: relative; min-width: 0; }
+.model-picker-control input { padding-right: 40px; }
+.model-picker-chevron { position: absolute; top: 0; right: 0; bottom: 0; width: 38px; display: grid; place-items: center; border: 0; background: transparent; color: var(--text-muted); cursor: pointer; }
+.model-picker-chevron:hover { color: var(--text); }
+.model-picker-chevron:disabled { opacity: .5; cursor: default; }
+.model-picker-popup { position: absolute; z-index: 30; top: calc(100% + 4px); left: 0; right: 0; display: flex; flex-direction: column; gap: var(--space-2); max-height: min(360px, 50vh); padding: var(--space-2); overflow: hidden; border: 1px solid var(--control-border); border-radius: var(--radius-control); background: var(--surface-3); box-shadow: 0 8px 24px rgba(0, 0, 0, .45); }
+.model-picker-status { margin: 0; display: flex; align-items: center; gap: var(--space-1); color: var(--text-primary); }
+.model-picker-error { display: grid; gap: var(--space-2); justify-items: start; }
+.model-picker-error p { margin: 0; color: var(--text-primary); overflow-wrap: anywhere; }
+.model-picker-list { flex: 1 1 auto; min-height: 0; margin: 0; padding: 0; list-style: none; display: grid; align-content: start; gap: 2px; overflow-y: auto; }
+.model-picker-row { display: grid; gap: 2px; min-width: 0; padding: var(--space-2); border-radius: var(--radius-control); color: var(--text); cursor: pointer; }
+.model-picker-row:hover, .model-picker-row.is-active { background: var(--surface-4); }
+.model-picker-row small { color: var(--text-primary); overflow-wrap: anywhere; }
+.model-picker-name { display: flex; align-items: center; gap: var(--space-1); min-width: 0; overflow-wrap: anywhere; }
+.model-picker-name > svg { flex: 0 0 auto; color: var(--theme-primary); }
 .profile-form { margin-top: var(--space-6); padding: 0; }
 .provider-fieldset { padding: 0; margin: var(--space-6) 0 0; }
 .profile-security-note { padding: 0; background: transparent; color: var(--text-muted); }

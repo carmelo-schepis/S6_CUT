@@ -310,6 +310,19 @@ export async function listOpenRouterModels(outputModalities?: "text" | "speech")
   return openRouterModelSchema.array().parse(await request(`/openrouter/models${query}`));
 }
 
+export type ProviderModelScanInput = { provider: "openrouter" | "ollama"; profileId?: string; ollamaUrl?: string; openrouterKey?: string };
+
+/** Live model list for one provider. Read-only: the engine stores nothing and nothing here is cached. */
+export async function scanProviderModels(input: ProviderModelScanInput, signal?: AbortSignal): Promise<OpenRouterModel[]> {
+  return openRouterModelSchema.array().parse(await request("/provider-models/scan", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+    timeoutMs: READ_TIMEOUT_MS,
+    signal,
+  }));
+}
+
 export async function listJobs(): Promise<Job[]> {
   return jobSchema.array().parse(await request("/jobs", { timeoutMs: READ_TIMEOUT_MS }));
 }

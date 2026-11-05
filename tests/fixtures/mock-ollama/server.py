@@ -15,7 +15,18 @@ import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 LOG = os.environ.get("MOCK_OLLAMA_LOG", "/tmp/mock-ollama-calls.jsonl")
-MODELS = [{"name": "llama3.2:latest"}, {"name": "qwen2.5:0.5b:latest"}]
+DEFAULT_MODELS = [{"name": "llama3.2:latest"}, {"name": "qwen2.5:0.5b:latest"}]
+# Acceptance specs replace the advertised list by writing this file inside the container; each request rereads it.
+MODELS_FILE = os.environ.get("MOCK_OLLAMA_MODELS", "/tmp/mock-ollama-models.json")
+
+
+def _models() -> list[dict]:
+    try:
+        with open(MODELS_FILE, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return DEFAULT_MODELS
+    return data if isinstance(data, list) else DEFAULT_MODELS
 
 
 def _reply(body: dict) -> dict:
@@ -52,7 +63,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         if self.path == "/api/tags":
-            return self._json(200, {"models": MODELS})
+            return self._json(200, {"models": _models()})
         self._json(404, {"error": "not found"})
 
     def do_POST(self) -> None:  # noqa: N802
@@ -63,7 +74,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(400, {"error": "bad json"})
         if self.path != "/api/chat":
             return self._json(404, {"error": "not found"})
-        if str(body.get("model")) not in {entry["name"].removesuffix(":latest") for entry in MODELS}:
+        if str(body.get("model")) not in {entry["name"].removesuffix(":latest") for entry in _models()}:
             return self._json(404, {"error": "model not found"})
         content = _reply(body)
         with open(LOG, "a", encoding="utf-8") as handle:

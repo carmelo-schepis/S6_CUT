@@ -50,7 +50,12 @@ async function saveProfile(page: Page, name: string, fields: { key?: string; url
   await form.getByLabel("Profile name").fill(name);
   if (fields.key) await form.getByLabel(/^OpenRouter API key/).fill(fields.key);
   if (fields.url !== undefined) await form.getByLabel("Ollama endpoint").fill(fields.url);
-  if (fields.model) await form.getByLabel("Ollama model").fill(fields.model);
+  // Typing opens the live dropdown; close it so it cannot cover the Save button.
+  if (fields.model) {
+    // Target the combobox, not the label: the open listbox shares the same accessible name.
+    await form.getByRole("combobox", { name: "Ollama model" }).fill(fields.model);
+    await form.getByRole("combobox", { name: "Ollama model" }).press("Escape");
+  }
   await form.getByRole("button", { name: "Save and test connection" }).click();
 }
 

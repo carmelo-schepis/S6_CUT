@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowRight, Check, Copy, Cpu, Database, KeyRound, LockKeyhole, Network, Pencil, Plus, RefreshCw, Server, ShieldAlert, Trash2, X } from "lucide-react";
-import { deleteProfile, duplicateProfile, listOpenRouterModels, listProfiles, purgeLibraryContent, readableError, saveProfile, testProfile } from "../api";
+import { deleteProfile, duplicateProfile, listOpenRouterModels, listProfiles, purgeLibraryContent, readableError, saveProfile, scanProviderModels, testProfile } from "../api";
 import { emitLibraryChanged } from "../library-sync";
 import type { Health, LibraryPurgeResult, OpenRouterModel, ProviderProfile } from "../types";
 import { isOllamaOn, isOpenRouterOn } from "../types";
@@ -162,6 +162,11 @@ function ProfileProviderBoxes({ profile, testing, onChanged, onTest }: { profile
   const setError = (key: keyof typeof errors, message: string | undefined) => setErrors((current) => ({ ...current, [key]: message }));
   // Sends the identity fields every save needs, so a partial save never resets them.
   const identity = { name: profile.name, youtubeMetadataModelId: profile.youtubeMetadataModelId, persistence: profile.persistence, selected: profile.selected };
+  // Each scan uses what the box holds now: a typed key or endpoint, otherwise the saved one.
+  const scanOpenRouter = (signal: AbortSignal) => scanProviderModels({ provider: "openrouter", profileId: profile.id, openrouterKey: openRouterKey.trim() || undefined }, signal);
+  const scanOllama = (signal: AbortSignal) => scanProviderModels({ provider: "ollama", profileId: profile.id, ollamaUrl: urlDraft.trim() }, signal);
+  const openRouterScanBlocked = !openRouterKey.trim() && !openRouterConfigured ? "Add your OpenRouter API key to scan its models." : null;
+  const ollamaScanBlocked = !urlDraft.trim() && !profile.ollamaUrl ? "Add your Ollama endpoint to scan its models." : null;
 
   const saveOpenRouter = async () => {
     setSaving("openrouter"); setError("openrouter", undefined);
@@ -194,7 +199,7 @@ function ProfileProviderBoxes({ profile, testing, onChanged, onTest }: { profile
 
   return <div className="provider-boxes">
     <ProviderBox provider="OpenRouter" enabled={openRouterOn} busy={switching === "openrouter"} error={errors.openrouterSwitch ?? null} onEnabledChange={(enabled) => void setSwitch("openrouter", enabled)}>
-      <OpenRouterFields disabled={!openRouterOn || saving === "openrouter"} savedMasked={profile.openrouterMasked ?? null} apiKey={openRouterKey} onApiKeyChange={setOpenRouterKey} model={modelDraft} onModelChange={setOpenRouterModel} />
+      <OpenRouterFields disabled={!openRouterOn || saving === "openrouter"} savedMasked={profile.openrouterMasked ?? null} apiKey={openRouterKey} onApiKeyChange={setOpenRouterKey} model={modelDraft} onModelChange={setOpenRouterModel} savedModel={profile.textModelId} scan={scanOpenRouter} scanBlocked={openRouterScanBlocked} />
       {!openRouterOn
         ? <p className="provider-off">Off. Not used for new jobs. Saved settings are kept.</p>
         : <div className="provider-results"><ConnectionResult service="OpenRouter" status={testing && openRouterConfigured ? "checking" : openRouterConfigured ? profile.textStatus : "not_configured"} message={openRouterConfigured ? profile.textMessage : "No API key saved."} lastCheckedAt={openRouterConfigured ? profile.textLastCheckedAt : null} /></div>}
@@ -202,7 +207,7 @@ function ProfileProviderBoxes({ profile, testing, onChanged, onTest }: { profile
       <div className="provider-box-actions"><Button variant="primary" disabled={!openRouterOn || !openRouterDirty || !modelDraft.trim() || saving !== null || switching !== null} onClick={() => void saveOpenRouter()}>{saving === "openrouter" ? "Saving and testing…" : "Save and test"}</Button></div>
     </ProviderBox>
     <ProviderBox provider="Ollama" enabled={ollamaOn} busy={switching === "ollama"} error={errors.ollamaSwitch ?? null} onEnabledChange={(enabled) => void setSwitch("ollama", enabled)}>
-      <OllamaFields disabled={!ollamaOn || saving === "ollama"} url={urlDraft} onUrlChange={setOllamaUrl} model={ollamaModelDraft} onModelChange={setOllamaModel} />
+      <OllamaFields disabled={!ollamaOn || saving === "ollama"} url={urlDraft} onUrlChange={setOllamaUrl} model={ollamaModelDraft} onModelChange={setOllamaModel} savedModel={profile.ollamaModel ?? null} scan={scanOllama} scanBlocked={ollamaScanBlocked} />
       {!ollamaOn
         ? <p className="provider-off">Off. Not used for new jobs. Saved settings are kept.</p>
         : profile.ollamaUrl
@@ -223,6 +228,9 @@ function ProfileForm({ initial, onUseFastLocal, onCancel, onSaved }: { initial?:
   const [ollamaUrl, setOllamaUrl] = useState("");
   const [ollamaModel, setOllamaModel] = useState("");
   const [ollamaOn, setOllamaOn] = useState(true);
+  // Nothing is saved yet on a new profile, so a scan here uses only the typed key or endpoint.
+  const scanOpenRouter = (signal: AbortSignal) => scanProviderModels({ provider: "openrouter", openrouterKey: openrouterKey.trim() || undefined }, signal);
+  const scanOllama = (signal: AbortSignal) => scanProviderModels({ provider: "ollama", ollamaUrl: ollamaUrl.trim() }, signal);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const submit = async () => {
@@ -241,8 +249,8 @@ function ProfileForm({ initial, onUseFastLocal, onCancel, onSaved }: { initial?:
     <Field label="Profile name"><input value={name} onChange={(event) => setName(event.target.value)} placeholder="My OpenRouter profile" /></Field>
     <Field label="Secret storage" hint="Encrypted persists across restarts. Session-only is cleared when the engine stops."><select value={persistence} onChange={(event) => setPersistence(event.target.value as typeof persistence)}><option value="encrypted">Encrypted persistent</option><option value="session">This engine session only</option></select></Field>
   </div>{!initial && <div className="provider-boxes">
-    <ProviderBox provider="OpenRouter" enabled={openrouterOn} onEnabledChange={setOpenrouterOn}><OpenRouterFields disabled={!openrouterOn} savedMasked={null} apiKey={openrouterKey} onApiKeyChange={setOpenrouterKey} model={textModelId} onModelChange={setTextModelId} /></ProviderBox>
-    <ProviderBox provider="Ollama" enabled={ollamaOn} onEnabledChange={setOllamaOn}><OllamaFields disabled={!ollamaOn} url={ollamaUrl} onUrlChange={setOllamaUrl} model={ollamaModel} onModelChange={setOllamaModel} /></ProviderBox>
+    <ProviderBox provider="OpenRouter" enabled={openrouterOn} onEnabledChange={setOpenrouterOn}><OpenRouterFields disabled={!openrouterOn} savedMasked={null} apiKey={openrouterKey} onApiKeyChange={setOpenrouterKey} model={textModelId} onModelChange={setTextModelId} scan={scanOpenRouter} scanBlocked={openrouterKey.trim() ? null : "Add your OpenRouter API key to scan its models."} /></ProviderBox>
+    <ProviderBox provider="Ollama" enabled={ollamaOn} onEnabledChange={setOllamaOn}><OllamaFields disabled={!ollamaOn} url={ollamaUrl} onUrlChange={setOllamaUrl} model={ollamaModel} onModelChange={setOllamaModel} scan={scanOllama} scanBlocked={ollamaUrl.trim() ? null : "Add your Ollama endpoint to scan its models."} /></ProviderBox>
   </div>}{error && <p className="form-error" role="alert">{error}</p>}<div className="form-actions">{onUseFastLocal && <Button variant="ghost" onClick={onUseFastLocal}>Use local cutting without API</Button>}<Button onClick={onCancel}>Cancel</Button><Button variant="primary" disabled={busy || !name.trim() || (!initial && openrouterOn && !textModelId.trim())} onClick={submit}>{busy ? "Saving and testing…" : "Save and test connection"}</Button></div></div>;
 }
 

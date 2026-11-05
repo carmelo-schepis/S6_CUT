@@ -34,7 +34,7 @@ from .media import _SUBTITLE_PRESETS, MUSIC_TRANSCRIPTION_PROFILE_VERSION, WHISP
 from .models import (
     Asset, AssetDelete, AssetDeleteResult, AssetMove, AssetOrigin, AssetUpdate, AssetPage, CaptionCue, CaptionDownload, CaptionReviewInput, Clip, FolderCreate, FolderMove, FolderUpdate, Health, Job, LibraryPurgeInput, LibraryPurgeResult, SourceOnlyRegenerationRequest,
     LibraryFolder, MatchExplanation, MobileClip, MobileDownload, MobileJob, MobileOverview, RecentClipsPage, ContentFormat, ProcessingMode, ProfileInput, Project, ProjectFolderUpdate,
-    OpenRouterModel, ProviderProfile, SelectionInput, ShortsJobInput, SubscribeAnimationConfig, MusicPresentationConfig, EditingPresentationConfig, YouTubeMetadataUpdate, now_iso,
+    OpenRouterModel, ProviderModelScan, ProviderProfile, SelectionInput, ShortsJobInput, SubscribeAnimationConfig, MusicPresentationConfig, EditingPresentationConfig, YouTubeMetadataUpdate, now_iso,
 )
 from .editing_presets import validate_editing_request
 from .providers import ProfileService, ProviderError, ollama_model_missing
@@ -1528,6 +1528,11 @@ async def get_video_download(task_id: str) -> VideoDownloadTask:
     return _public_download(result)
 
 
+def _provider_status(category: str) -> int:
+    """HTTP status for a provider failure category; every provider route uses this map."""
+    return {"not_configured": 503, "invalid_credentials": 502, "insufficient_balance": 402, "rate_limited": 429, "timeout_offline": 503, "malformed_response": 502}.get(category, 502)
+
+
 @app.get("/api/v1/openrouter/models", response_model=list[OpenRouterModel], response_model_exclude_none=True)
 async def list_openrouter_models(output_modalities: Annotated[str | None, Query(alias="outputModalities")] = None) -> list[OpenRouterModel]:
     if output_modalities not in {None, "text"}:
@@ -1535,8 +1540,21 @@ async def list_openrouter_models(output_modalities: Annotated[str | None, Query(
     try:
         return await profiles.openrouter_models(output_modalities)
     except ProviderError as exc:
-        status_code = {"not_configured": 503, "invalid_credentials": 502, "insufficient_balance": 402, "rate_limited": 429, "timeout_offline": 503, "malformed_response": 502}.get(exc.category, 502)
+        status_code = _provider_status(exc.category)
         raise HTTPException(status_code, exc.safe_message) from exc
+
+
+@app.post("/api/v1/provider-models/scan", response_model=list[OpenRouterModel], response_model_exclude_none=True)
+async def scan_provider_models(value: ProviderModelScan) -> list[OpenRouterModel]:
+    """Read-only model list for one provider. Stores nothing; a typed key or endpoint is used once."""
+    try:
+        return await profiles.scan_models(value)
+    except KeyError as exc:
+        raise _not_found("Profile") from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except ProviderError as exc:
+        raise HTTPException(_provider_status(exc.category), exc.safe_message) from exc
 
 
 @app.get("/api/v1/profiles", response_model=list[ProviderProfile])
