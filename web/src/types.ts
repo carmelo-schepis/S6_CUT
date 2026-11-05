@@ -354,7 +354,7 @@ export const healthSchema = z.object({
   configuredWorkers: z.number().int().positive().optional(),
   activeWorkers: z.number(),
   queuedJobs: z.number(),
-  fallbacks: z.record(z.string()),
+  fallbacks: z.record(z.string(), z.string()),
 });
 export type Health = z.infer<typeof healthSchema>;
 
@@ -390,7 +390,7 @@ export const profileSchema = z.object({
   textLastCheckedAt: z.string().nullable().optional(),
   status: z.string(),
   capabilities: z.array(z.string()),
-  fallbacks: z.record(z.string()),
+  fallbacks: z.record(z.string(), z.string()),
 });
 export type ProviderProfile = z.infer<typeof profileSchema>;
 
@@ -457,7 +457,7 @@ export type AssetPage = z.infer<typeof assetPageSchema>;
 export const recentClipsPageSchema = z.object({ items: assetSchema.array(), page: z.number().int().positive(), pageSize: z.number().int().positive(), hasMore: z.boolean(), total: z.number().int().nonnegative() });
 export type RecentClipsPage = z.infer<typeof recentClipsPageSchema>;
 
-export const assetDeleteResultSchema = z.object({ deleted: z.array(z.string()), failed: z.record(z.string()) });
+export const assetDeleteResultSchema = z.object({ deleted: z.array(z.string()), failed: z.record(z.string(), z.string()) });
 
 export const libraryPurgeResultSchema = z.object({
   assetsDeleted: z.number().int().nonnegative(),
