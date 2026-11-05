@@ -1415,7 +1415,7 @@ main { min-width: 0; }
 .provider-results { display: grid; gap: 2px; margin-top: var(--space-2); }
 .connection-result { display: flex; align-items: center; gap: 5px; min-width: 0; }
 .connection-result span { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; color: var(--text-primary); font-weight: var(--type-emphasis-weight); }
-.connection-result small { min-width: 0; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.connection-result small { min-width: 0; color: var(--text-primary); overflow-wrap: anywhere; }
 .connection-result svg { flex: 0 0 auto; }
 .connection-result.ready span { color: var(--text-primary); }
 .connection-result.checking span { color: var(--text-primary); }
@@ -3153,6 +3153,62 @@ input[type="checkbox"]:checked::before {
 .settings-card { padding: 0; border-radius: 0; background: transparent; }
 .settings-card-head { padding-bottom: var(--space-6); }
 .profile-row, .profile-form, .provider-fieldset { padding-inline: 0; border-radius: 0; background: transparent; }
+.profiles-card { container-type: inline-size; }
+.profile-row { display: grid; grid-template-columns: minmax(0, 1fr); align-items: stretch; gap: var(--space-4); }
+.profile-row-header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: var(--space-3); min-width: 0; }
+.profile-identity { display: flex; align-items: flex-start; gap: var(--space-2); min-width: 0; flex: 1 1 240px; }
+.profile-info { flex: 1 1 auto; }
+.profile-info > .profile-name { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.profile-name strong { min-width: 0; overflow-wrap: anywhere; }
+.profile-storage { margin: var(--space-1) 0 0; }
+.profile-storage > div { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; color: var(--text-primary); }
+.profile-storage dt, .profile-storage dd { margin: 0; }
+.profile-storage dd { display: inline-flex; align-items: center; gap: 4px; }
+.profile-actions { flex-wrap: wrap; justify-content: flex-end; }
+/* Provider boxes: OpenRouter and Ollama each get one rounded box with its own switch. Space separates them, not rules. */
+.provider-boxes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; gap: var(--space-4); min-width: 0; margin-top: var(--space-4); }
+.provider-box { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; padding: var(--space-4); border: 1px solid var(--box-edge); border-top-color: var(--box-edge-top); border-radius: var(--box-radius); background: var(--box-bg); }
+.provider-box-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); min-width: 0; }
+.provider-box h3 { margin: 0; min-width: 0; color: var(--text); font-size: var(--type-heading-size); font-weight: var(--type-heading-weight); line-height: var(--type-heading-line); letter-spacing: var(--type-heading-tracking); overflow-wrap: anywhere; }
+.provider-box .field { min-width: 0; }
+.provider-box input:not([type="checkbox"]) { width: 100%; min-width: 0; }
+.provider-box-actions { display: flex; justify-content: flex-end; margin-top: auto; }
+.provider-results { display: grid; gap: 2px; min-width: 0; }
+.provider-results .connection-result { display: grid; align-items: start; gap: 2px; }
+.provider-results .connection-result small { display: block; }
+.provider-results .connection-result span { overflow-wrap: anywhere; }
+.provider-off, .provider-note { margin: 0; color: var(--text-primary); overflow-wrap: anywhere; }
+.provider-switch { position: relative; display: inline-flex; align-items: center; gap: var(--space-2); min-height: 44px; min-width: 44px; cursor: pointer; color: var(--text-primary); }
+.provider-switch input[type="checkbox"] { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; appearance: none; -webkit-appearance: none; }
+.provider-switch input[type="checkbox"]::before { content: none; }
+.provider-switch input[type="checkbox"]:disabled { cursor: default; }
+.provider-switch-track { position: relative; flex: 0 0 auto; pointer-events: none; width: 36px; height: 20px; border: 1px solid var(--control-border); border-radius: 999px; background: var(--surface-3); transition: background-color 150ms ease, border-color 150ms ease; }
+.provider-switch-track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--text-primary); transition: transform 150ms ease; }
+.provider-switch input:checked + .provider-switch-track { background: var(--theme-primary); border-color: var(--theme-primary); }
+.provider-switch input:checked + .provider-switch-track::after { transform: translateX(16px); background: var(--canvas); }
+.provider-switch input:focus-visible + .provider-switch-track { outline: 2px solid var(--selector-highlight-hover); outline-offset: 2px; }
+.provider-switch input:disabled + .provider-switch-track { opacity: .5; }
+.provider-switch-word { color: var(--text-primary); font-weight: var(--type-emphasis-weight); }
+@container (max-width: 680px) {
+  .provider-boxes { grid-template-columns: minmax(0, 1fr); }
+}
+/* Model picker: a searchable dropdown that scans its provider every time it opens. */
+.model-picker { position: relative; min-width: 0; }
+.model-picker-control { position: relative; min-width: 0; }
+.model-picker-control input { padding-right: 40px; }
+.model-picker-chevron { position: absolute; top: 0; right: 0; bottom: 0; width: 38px; display: grid; place-items: center; border: 0; background: transparent; color: var(--text-muted); cursor: pointer; }
+.model-picker-chevron:hover { color: var(--text); }
+.model-picker-chevron:disabled { opacity: .5; cursor: default; }
+.model-picker-popup { position: absolute; z-index: 30; top: calc(100% + 4px); left: 0; right: 0; display: flex; flex-direction: column; gap: var(--space-2); max-height: min(360px, 50vh); padding: var(--space-2); overflow: hidden; border: 1px solid var(--control-border); border-radius: var(--radius-control); background: var(--surface-3); box-shadow: 0 8px 24px rgba(0, 0, 0, .45); }
+.model-picker-status { margin: 0; display: flex; align-items: center; gap: var(--space-1); color: var(--text-primary); }
+.model-picker-error { display: grid; gap: var(--space-2); justify-items: start; }
+.model-picker-error p { margin: 0; color: var(--text-primary); overflow-wrap: anywhere; }
+.model-picker-list { flex: 1 1 auto; min-height: 0; margin: 0; padding: 0; list-style: none; display: grid; align-content: start; gap: 2px; overflow-y: auto; }
+.model-picker-row { display: grid; gap: 2px; min-width: 0; padding: var(--space-2); border-radius: var(--radius-control); color: var(--text); cursor: pointer; }
+.model-picker-row:hover, .model-picker-row.is-active { background: var(--surface-4); }
+.model-picker-row small { color: var(--text-primary); overflow-wrap: anywhere; }
+.model-picker-name { display: flex; align-items: center; gap: var(--space-1); min-width: 0; overflow-wrap: anywhere; }
+.model-picker-name > svg { flex: 0 0 auto; color: var(--theme-primary); }
 .profile-form { margin-top: var(--space-6); padding: 0; }
 .provider-fieldset { padding: 0; margin: var(--space-6) 0 0; }
 .profile-security-note { padding: 0; background: transparent; color: var(--text-muted); }

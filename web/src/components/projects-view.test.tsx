@@ -552,3 +552,57 @@ describe("Local execution selection", () => {
     })));
   });
 });
+
+describe("Ollama execution option", () => {
+  const localProfile: ProviderProfile = {
+    id: "local", name: "Local", textModelId: "openai/gpt-4.1-mini", selected: true, persistence: "encrypted",
+    openrouterConfigured: false, textStatus: "not_configured", status: "local only", capabilities: [], fallbacks: {},
+  };
+  const ollamaProfile: ProviderProfile = { ...localProfile, ollamaUrl: "http://host.docker.internal:11434", ollamaModel: "llama3.2", ollamaStatus: "connected" };
+
+  beforeEach(() => {
+    storedValues.clear();
+    mockCreateClipJob.mockReset();
+    mockCreateClipJob.mockResolvedValue({ project, job: undefinedJob });
+  });
+
+  it("hides the Ollama choice when the selected profile has no endpoint", () => {
+    render(<ProjectsView health={health} onCreated={vi.fn()} selectedProfile={localProfile} hasSelectedProvider={false} />);
+    openOptions();
+    expect(screen.queryByRole("button", { name: "Local model" })).not.toBeInTheDocument();
+  });
+
+  it("shows Ollama beside the other execution choices and submits it when chosen", async () => {
+    render(<ProjectsView health={health} onCreated={vi.fn()} selectedProfile={ollamaProfile} hasSelectedProvider={false} />);
+    openOptions();
+    const ollama = screen.getByRole("button", { name: "Local model" });
+    fireEvent.click(ollama);
+    expect(ollama).toHaveAttribute("aria-pressed", "true");
+    fireEvent.change(screen.getByLabelText("Choose video file"), { target: { files: [new File(["video"], "movie.mp4", { type: "video/mp4" })] } });
+    fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
+    await waitFor(() => expect(mockCreateClipJob).toHaveBeenCalledWith(expect.objectContaining({ executionPolicy: "ollama" })));
+  });
+
+  it("removes the choice and submits Auto once the endpoint is gone", async () => {
+    const { rerender } = render(<ProjectsView health={health} onCreated={vi.fn()} selectedProfile={ollamaProfile} hasSelectedProvider={false} />);
+    openOptions();
+    fireEvent.click(screen.getByRole("button", { name: "Local model" }));
+    rerender(<ProjectsView health={health} onCreated={vi.fn()} selectedProfile={localProfile} hasSelectedProvider={false} />);
+    expect(screen.queryByRole("button", { name: "Local model" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Auto · API with local fallback/ })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.change(screen.getByLabelText("Choose video file"), { target: { files: [new File(["video"], "movie.mp4", { type: "video/mp4" })] } });
+    fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
+    await waitFor(() => expect(mockCreateClipJob).toHaveBeenCalledWith(expect.objectContaining({ executionPolicy: "auto" })));
+  });
+
+  it("hides Ollama while its switch is off and returns to Auto, without reselecting it when switched back on", () => {
+    const { rerender } = render(<ProjectsView health={health} onCreated={vi.fn()} selectedProfile={ollamaProfile} hasSelectedProvider={false} />);
+    openOptions();
+    fireEvent.click(screen.getByRole("button", { name: "Local model" }));
+    rerender(<ProjectsView health={health} onCreated={vi.fn()} selectedProfile={{ ...ollamaProfile, ollamaEnabled: false }} hasSelectedProvider={false} />);
+    expect(screen.queryByRole("button", { name: "Local model" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Auto · API with local fallback/ })).toHaveAttribute("aria-pressed", "true");
+    rerender(<ProjectsView health={health} onCreated={vi.fn()} selectedProfile={{ ...ollamaProfile, ollamaEnabled: true }} hasSelectedProvider={false} />);
+    expect(screen.getByRole("button", { name: "Local model" })).toHaveAttribute("aria-pressed", "false");
+  });
+});

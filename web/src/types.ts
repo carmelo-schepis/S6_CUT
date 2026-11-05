@@ -260,7 +260,7 @@ export const jobSchema = z.object({
   totalItems: z.number().default(0),
   style: styleSchema,
   processingMode: processingModeSchema.default("smart"),
-  executionPolicy: z.enum(["auto", "engine_only"]).optional(),
+  executionPolicy: z.enum(["auto", "engine_only", "ollama"]).optional(),
   contentFormat: contentFormatSchema.default("short"),
   sourceProfile: sourceProfileSchema.optional(),
   libraryOverlaysEnabled: z.boolean().optional(),
@@ -388,11 +388,28 @@ export const profileSchema = z.object({
   textStatus: providerConnectionStatusSchema.default("not_configured"),
   textMessage: z.string().nullable().optional(),
   textLastCheckedAt: z.string().nullable().optional(),
+  ollamaUrl: z.string().nullable().optional(),
+  ollamaModel: z.string().nullable().optional(),
+  ollamaStatus: providerConnectionStatusSchema.optional(),
+  ollamaMessage: z.string().nullable().optional(),
+  ollamaLastCheckedAt: z.string().nullable().optional(),
+  // Optional so profiles saved before the switches existed still parse; a missing switch means on.
+  openrouterEnabled: z.boolean().optional(),
+  ollamaEnabled: z.boolean().optional(),
   status: z.string(),
   capabilities: z.array(z.string()),
   fallbacks: z.record(z.string(), z.string()),
 });
 export type ProviderProfile = z.infer<typeof profileSchema>;
+
+/** A provider is on unless its switch is explicitly off, so older profiles keep working. */
+export function isOpenRouterOn(profile: { openrouterEnabled?: boolean } | null | undefined): boolean {
+  return profile?.openrouterEnabled !== false;
+}
+
+export function isOllamaOn(profile: { ollamaEnabled?: boolean } | null | undefined): boolean {
+  return profile?.ollamaEnabled !== false;
+}
 
 export const assetOriginSchema = z.enum(["manual-import", "project-source", "generated-clip", "script-output"]);
 export type AssetOrigin = z.infer<typeof assetOriginSchema>;

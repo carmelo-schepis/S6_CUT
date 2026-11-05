@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from decimal import Decimal, InvalidOperation
 import uuid
 from typing import Any
@@ -9,7 +10,7 @@ from typing import Any
 import httpx
 
 from .database import Database
-from .models import OpenRouterModel, ProfileInput, ProviderProfile, now_iso
+from .models import OpenRouterModel, ProfileInput, ProviderModelScan, ProviderProfile, normalise_ollama_url, now_iso
 from .security import SecretVault, mask_secret
 
 
@@ -21,6 +22,11 @@ class ProviderError(RuntimeError):
 
 
 MASKED_SECRET_MARKER = "••••"
+# Ollama silently truncates prompts longer than num_ctx, so this must exceed the largest prompt.
+OLLAMA_NUM_CTX = 16384
+OPENROUTER_OFF_MESSAGE = "OpenRouter is turned off for this profile. Turn it on in Settings."
+OLLAMA_OFF_MESSAGE = "Ollama is turned off for this profile. Turn it on in Settings."
+OLLAMA_UNREACHABLE = "Could not reach Ollama at this address. From Docker use http://host.docker.internal:11434. On Linux, start Ollama with OLLAMA_HOST=0.0.0.0."
 LEGACY_SECRET_KEY = "elevenlabsKey"
 
 FALLBACKS = {
@@ -61,6 +67,10 @@ def openrouter_base_url() -> str:
     if os.getenv("S6_TEST_MODE", "").strip() == "1" and override.startswith("http://"):
         return override
     return "https://openrouter.ai/api/v1"
+
+
+def ollama_model_missing(model: str) -> str:
+    return f'Model "{model}" is not on this Ollama server. Run: ollama pull {model}'
 
 
 def provider_runtime_message(error: Exception, service: str) -> str:
@@ -144,7 +154,7 @@ class ProfileService:
     def smart_available(self) -> bool:
         """True only when the selected OpenRouter profile is configured and connected."""
         for profile in self.db.list_profiles():
-            if not profile.selected or not profile.openrouter_configured or profile.text_status != "connected":
+            if not profile.selected or not profile.openrouter_enabled or not profile.openrouter_configured or profile.text_status != "connected":
                 continue
             if self.secrets(profile.id).get("openrouterKey"):
                 return True
@@ -159,13 +169,30 @@ class ProfileService:
         text_unchanged = bool(previous_profile and not self._has_new_credential(value.openrouter_key) and value.text_model_id == previous_profile.text_model_id)
         metadata_model_id = value.youtube_metadata_model_id or (previous_profile.youtube_metadata_model_id if previous_profile else "google/gemini-2.5-flash-lite")
         auto_seo_titles = value.auto_seo_titles if value.auto_seo_titles is not None else (previous_profile.auto_seo_titles if previous_profile else True)
+        previous_ollama_url = previous_profile.ollama_url if previous_profile else None
+        previous_ollama_model = previous_profile.ollama_model if previous_profile else None
+        # None keeps the saved endpoint (other Settings actions do not send it); "" clears it.
+        ollama_url = previous_ollama_url if value.ollama_url is None else (value.ollama_url or None)
+        if ollama_url:
+            requested_model = value.ollama_model if value.ollama_model is not None else (previous_ollama_model or "")
+            ollama_model = requested_model.strip().removesuffix(":latest") or None
+        else:
+            ollama_model = None
+        ollama_unchanged = bool(previous_profile and ollama_url and ollama_url == previous_ollama_url and ollama_model == previous_ollama_model)
+        openrouter_enabled = value.openrouter_enabled if value.openrouter_enabled is not None else (previous_profile.openrouter_enabled if previous_profile else True)
+        ollama_enabled = value.ollama_enabled if value.ollama_enabled is not None else (previous_profile.ollama_enabled if previous_profile else True)
         profile = ProviderProfile(
             id=profile_id, name=value.name, text_model_id=value.text_model_id, youtube_metadata_model_id=metadata_model_id, auto_seo_titles=auto_seo_titles, selected=value.selected, persistence=value.persistence,
             openrouter_configured=bool(key), openrouter_masked=mask_secret(key),
             text_status=previous_profile.text_status if text_unchanged else ("configured" if key else "not_configured"),
             text_message=previous_profile.text_message if text_unchanged else ("Ready to test" if key else "Optional; deterministic local planning remains available"),
             text_last_checked_at=previous_profile.text_last_checked_at if text_unchanged else None,
-            status="configured" if key else "local only",
+            ollama_url=ollama_url, ollama_model=ollama_model,
+            openrouter_enabled=openrouter_enabled, ollama_enabled=ollama_enabled,
+            ollama_status=previous_profile.ollama_status if ollama_unchanged else ("configured" if ollama_url else "not_configured"),
+            ollama_message=previous_profile.ollama_message if ollama_unchanged else ("Ready to test" if ollama_url else None),
+            ollama_last_checked_at=previous_profile.ollama_last_checked_at if ollama_unchanged else None,
+            status="configured" if key or ollama_url else "local only",
             capabilities=["OpenRouter text generation"] if key else [],
             fallbacks=FALLBACKS,
         )
@@ -186,6 +213,8 @@ class ProfileService:
         secrets = self.secrets(profile_id)
         return self.save(ProfileInput(
             name=f"{profile.name} copy", text_model_id=profile.text_model_id, youtube_metadata_model_id=profile.youtube_metadata_model_id, auto_seo_titles=profile.auto_seo_titles, openrouter_key=secrets.get("openrouterKey"),
+            ollama_url=profile.ollama_url, ollama_model=profile.ollama_model,
+            openrouter_enabled=profile.openrouter_enabled, ollama_enabled=profile.ollama_enabled,
             persistence=profile.persistence, selected=False,
         ))
 
@@ -235,13 +264,125 @@ class ProfileService:
             output_modalities=modalities, supported_parameters=supported_parameters, free=free, pricing=normalized_prices or None,
         )
 
-    async def openrouter_models(self, output_modalities: str | None = None) -> list[OpenRouterModel]:
+    def ollama_available(self) -> bool:
+        """True when the selected profile has an Ollama endpoint saved (no test required)."""
+        profile = next((item for item in self.db.list_profiles() if item.selected), None)
+        return bool(profile and profile.ollama_url and profile.ollama_enabled)
+
+    def _selected_ollama_profile(self) -> ProviderProfile:
+        profile = next((item for item in self.db.list_profiles() if item.selected), None)
+        if not profile or not profile.ollama_url:
+            raise ProviderError("not_configured", "Ollama is not configured. Add an endpoint in Settings.")
+        if not profile.ollama_enabled:
+            raise ProviderError("not_configured", OLLAMA_OFF_MESSAGE)
+        return profile
+
+    async def ollama_models(self, base_url: str | None = None) -> list[OpenRouterModel]:
+        """List models from an Ollama server's /api/tags, in the shape the metadata gates expect.
+
+        Local models are free, so pricing is zero. The context length is the engine's num_ctx,
+        which is the real limit the engine sends.
+        """
+        if base_url is None:
+            base_url = self._selected_ollama_profile().ollama_url or ""
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(10, connect=5), follow_redirects=False) as client:
+                response = await client.get(f"{base_url}/api/tags")
+        except (httpx.TimeoutException, httpx.RequestError, httpx.InvalidURL) as exc:
+            raise ProviderError("timeout_offline", OLLAMA_UNREACHABLE) from exc
+        if response.status_code >= 400:
+            category, message = self._http_failure(response.status_code, "Ollama")
+            raise ProviderError(category, message)
+        try:
+            payload = response.json()
+            entries = payload.get("models") if isinstance(payload, dict) else None
+        except ValueError as exc:
+            raise ProviderError("malformed_response", "Ollama returned an unreadable model list.") from exc
+        if not isinstance(entries, list):
+            raise ProviderError("malformed_response", "Ollama returned an unreadable model list.")
+        models: dict[str, tuple[float, OpenRouterModel]] = {}
+        for entry in entries:
+            name = entry.get("name") if isinstance(entry, dict) else None
+            if not isinstance(name, str) or not name.strip():
+                continue
+            capabilities = entry.get("capabilities")
+            if isinstance(capabilities, list) and capabilities and "completion" not in capabilities:
+                continue
+            model_id = name.strip().removesuffix(":latest")
+            details = entry.get("details") if isinstance(entry.get("details"), dict) else {}
+            size = re.fullmatch(r"\s*([\d.]+)\s*([KMGTPE]?B?)\s*", str(details.get("parameter_size") or ""), re.I)
+            scale = {"": 1e12, "K": 1e3, "KB": 1e3, "M": 1e6, "MB": 1e6, "B": 1e9, "G": 1e9, "GB": 1e9, "T": 1e12, "TB": 1e12, "P": 1e15, "PB": 1e15}
+            order = float(size.group(1)) * scale[size.group(2).upper()] if size else 1e12
+            models[model_id] = (order, OpenRouterModel(
+                id=model_id, name=model_id, context_length=OLLAMA_NUM_CTX, output_modalities=["text"],
+                supported_parameters=["response_format"], free=True, pricing={"prompt": "0", "completion": "0"},
+            ))
+        return [item for _, item in sorted(models.values(), key=lambda pair: (pair[0], pair[1].id))]
+
+    async def _ollama_chat(self, base_url: str, model: str, messages: list[dict[str, str]], schema: dict[str, Any], *, temperature: float, max_tokens: int) -> tuple[dict[str, Any], dict[str, Any]]:
+        """One native /api/chat call with a JSON schema. The response body is never echoed into errors."""
+        num_predict = max(1, min(max_tokens, 2000))
+        # Ollama silently drops the oldest tokens past num_ctx, so refuse oversized prompts with a clear error.
+        approx_prompt_tokens = sum(len(str(message.get("content", ""))) for message in messages) // 3 + 1
+        if approx_prompt_tokens + num_predict > OLLAMA_NUM_CTX:
+            raise ProviderError("unavailable", "This project has too many clips for the Ollama context window. Choose fewer clips or another provider.")
+        payload = {
+            "model": model, "messages": messages, "stream": False, "think": False, "format": schema,
+            "options": {"temperature": temperature, "num_ctx": OLLAMA_NUM_CTX, "num_predict": num_predict},
+        }
+        try:
+            # Local models can take minutes to load, so the read timeout is long. One attempt only.
+            async with httpx.AsyncClient(timeout=httpx.Timeout(300, connect=10), follow_redirects=False) as client:
+                response = await client.post(f"{base_url}/api/chat", json=payload)
+        except (httpx.TimeoutException, httpx.RequestError, httpx.InvalidURL) as exc:
+            raise ProviderError("timeout_offline", OLLAMA_UNREACHABLE) from exc
+        if response.status_code >= 400:
+            category, message = self._http_failure(response.status_code, "Ollama")
+            raise ProviderError(category, message)
+        try:
+            body = response.json()
+            result = json.loads(body["message"]["content"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ProviderError("malformed_response", "Ollama returned a response that could not be validated.") from exc
+        if not isinstance(result, dict):
+            raise ProviderError("malformed_response", "Ollama returned a response that could not be validated.")
+        usage = {
+            "prompt_tokens": body.get("prompt_eval_count") if isinstance(body.get("prompt_eval_count"), int) else None,
+            "completion_tokens": body.get("eval_count") if isinstance(body.get("eval_count"), int) else None,
+            "cost": 0,
+        }
+        return result, usage
+
+    async def _ollama_json(self, messages: list[dict[str, str]], schema: dict[str, Any], *, model_id: str | None, temperature: float, max_tokens: int | None, include_usage: bool) -> dict[str, Any] | tuple[dict[str, Any], dict[str, Any]]:
+        profile = self._selected_ollama_profile()
+        model = model_id or profile.ollama_model
+        if not model:
+            models = await self.ollama_models(profile.ollama_url)
+            if not models:
+                raise ProviderError("unavailable", "No text-generation models are available on this Ollama server.")
+            model = models[0].id
+        if model_id:
+            models = await self.ollama_models(profile.ollama_url)
+            if not any(item.id == model_id for item in models):
+                raise ProviderError("unavailable", ollama_model_missing(model_id))
+        result, usage = await self._ollama_chat(profile.ollama_url or "", model, messages, schema, temperature=temperature, max_tokens=max_tokens or 2000)
+        return (result, usage) if include_usage else result
+
+    async def openrouter_models(self, output_modalities: str | None = None, *, ollama: bool = False) -> list[OpenRouterModel]:
+        if ollama:
+            return await self.ollama_models()
         profile, secrets = self.selected_secrets(include_environment=False)
+        if profile and not profile.openrouter_enabled:
+            raise ProviderError("not_configured", OPENROUTER_OFF_MESSAGE)
         if not profile or not profile.openrouter_configured or profile.text_status != "connected":
             raise ProviderError("not_configured", "OpenRouter is not configured. Test the selected profile in Settings.")
         key = secrets.get("openrouterKey")
         if not key:
             raise ProviderError("not_configured", "OpenRouter is not configured. Test the selected profile in Settings.")
+        return await self._fetch_openrouter_models(key, output_modalities)
+
+    async def _fetch_openrouter_models(self, key: str, output_modalities: str | None) -> list[OpenRouterModel]:
+        """One provider call for the model list. Callers choose the key; nothing is cached."""
         params = {"output_modalities": output_modalities} if output_modalities else None
         try:
             async with httpx.AsyncClient(timeout=12, follow_redirects=False) as client:
@@ -270,10 +411,13 @@ class ProfileService:
         profile, _ = record
         secrets = self.secrets(profile_id)
         key = secrets.get("openrouterKey")
-        profile.text_status = "not_configured" if not key else "configured"
-        profile.text_message = "Optional; deterministic local planning remains available" if not key else "Ready to test"
-        profile.text_last_checked_at = None
-        if key:
+        openrouter_on, ollama_on = profile.openrouter_enabled, profile.ollama_enabled
+        # A switched-off provider keeps its status, message and timestamp untouched.
+        if openrouter_on:
+            profile.text_status = "not_configured" if not key else "configured"
+            profile.text_message = "Optional; deterministic local planning remains available" if not key else "Ready to test"
+            profile.text_last_checked_at = None
+        if openrouter_on and key:
             async with httpx.AsyncClient(timeout=12, follow_redirects=False) as client:
                 try:
                     profile.text_status = "connected"
@@ -300,13 +444,73 @@ class ProfileService:
                     profile.text_status, profile.text_message = exc.category, exc.safe_message
                 except (httpx.TimeoutException, httpx.RequestError):
                     profile.text_status, profile.text_message = "timeout_offline", "OpenRouter is offline or timed out; local planning remains available"
-        profile.status = "connected" if profile.text_status == "connected" else ("configured" if key else "local only")
-        profile.capabilities = ["OpenRouter text generation"] if profile.text_status == "connected" else []
+        if profile.ollama_url and ollama_on:
+            profile.ollama_status, profile.ollama_message = "configured", "Ready to test"
+            try:
+                models = await self.ollama_models(profile.ollama_url)
+                model_id = profile.ollama_model
+                if model_id and not any(item.id == model_id for item in models):
+                    profile.ollama_status, profile.ollama_message = "unavailable", ollama_model_missing(model_id)
+                elif not models:
+                    profile.ollama_status, profile.ollama_message = "unavailable", "No text-generation models are available on this Ollama server."
+                else:
+                    model_id = model_id or models[0].id
+                    schema = {"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"], "additionalProperties": False}
+                    result, _ = await self._ollama_chat(profile.ollama_url, model_id, [{"role": "user", "content": 'Return exactly the JSON object {"ok":true}.'}], schema, temperature=0, max_tokens=20)
+                    if result.get("ok") is True:
+                        profile.ollama_model = model_id
+                        profile.ollama_status, profile.ollama_message = "connected", "Connected; Ollama text generation succeeded"
+                    else:
+                        profile.ollama_status, profile.ollama_message = "malformed_response", "Ollama returned an unreadable text-generation response"
+            except ProviderError as exc:
+                profile.ollama_status, profile.ollama_message = exc.category, exc.safe_message
+            profile.ollama_last_checked_at = now_iso()
+        text_connected = openrouter_on and profile.text_status == "connected"
+        ollama_connected = ollama_on and profile.ollama_status == "connected"
+        any_connected = text_connected or ollama_connected
+        profile.status = "connected" if any_connected else ("configured" if (openrouter_on and key) or (ollama_on and profile.ollama_url) else "local only")
+        profile.capabilities = (["OpenRouter text generation"] if text_connected else []) + (["Ollama text generation"] if ollama_connected else [])
         self.db.save_profile(profile)
         return profile
 
-    async def openrouter_json(self, messages: list[dict[str, str]], schema: dict[str, Any], *, require_saved_profile: bool = False, model_id: str | None = None, temperature: float = 0, max_tokens: int | None = None, provider: dict[str, Any] | None = None, reasoning: dict[str, Any] | None = None, include_usage: bool = False) -> dict[str, Any] | tuple[dict[str, Any], dict[str, Any]] | None:
+    async def scan_models(self, value: ProviderModelScan) -> list[OpenRouterModel]:
+        """Fresh model list for one provider, from the typed credential or the saved profile.
+
+        Nothing is stored or cached. A typed key or endpoint is used for this call only, and the
+        environment key is never used, so the list matches the profile being edited.
+        """
+        profile: ProviderProfile | None = None
+        saved: dict[str, str] = {}
+        if value.profile_id is not None:
+            record = self.db.get_profile(value.profile_id)
+            if not record:
+                raise KeyError(value.profile_id)
+            profile = record[0]
+            saved = self.secrets(value.profile_id)
+        if value.provider == "ollama":
+            if profile is not None and not profile.ollama_enabled:
+                raise ProviderError("not_configured", OLLAMA_OFF_MESSAGE)
+            typed_url = (value.ollama_url or "").strip()
+            base_url = normalise_ollama_url(typed_url) if typed_url else (profile.ollama_url if profile else None)
+            if not base_url:
+                raise ProviderError("not_configured", "Add your Ollama endpoint to scan its models.")
+            return await self.ollama_models(base_url)
+        if profile is not None and not profile.openrouter_enabled:
+            raise ProviderError("not_configured", OPENROUTER_OFF_MESSAGE)
+        typed_key = (value.openrouter_key or "").strip()
+        key = typed_key if self._has_new_credential(typed_key) else saved.get("openrouterKey", "")
+        if not key:
+            raise ProviderError("not_configured", "Add your OpenRouter API key to scan its models.")
+        return await self._fetch_openrouter_models(key, "text")
+
+    async def openrouter_json(self, messages: list[dict[str, str]], schema: dict[str, Any], *, require_saved_profile: bool = False, model_id: str | None = None, temperature: float = 0, max_tokens: int | None = None, provider: dict[str, Any] | None = None, reasoning: dict[str, Any] | None = None, include_usage: bool = False, ollama: bool = False) -> dict[str, Any] | tuple[dict[str, Any], dict[str, Any]] | None:
+        if ollama:
+            # Checked first so an Ollama job can never reach OpenRouter, even with a saved key.
+            return await self._ollama_json(messages, schema, model_id=model_id, temperature=temperature, max_tokens=max_tokens, include_usage=include_usage)
         profile, secrets = self.selected_secrets(include_environment=not require_saved_profile)
+        # Checked before any key is used, so the OPENROUTER_API_KEY fallback is blocked too.
+        if profile and not profile.openrouter_enabled:
+            raise ProviderError("not_configured", OPENROUTER_OFF_MESSAGE)
         if require_saved_profile and (not profile or profile.text_status != "connected"):
             return None
         key = secrets.get("openrouterKey")

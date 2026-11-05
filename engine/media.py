@@ -13,6 +13,7 @@ import selectors
 import threading
 import time
 import unicodedata
+import wave
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from functools import lru_cache
@@ -912,6 +913,59 @@ def _finite_or_none(value: Any) -> float | None:
     return number if math.isfinite(number) else None
 
 
+# Speech audio longer than this is transcribed in overlapping windows. One Faster-Whisper
+# call over a 2 h 13 min file was killed at the engine's 3 GiB limit inside model.transcribe():
+# 30 min peaked at 2.1 GB, while 15-minute windows peaked at 1.3 GB on the same audio.
+_WINDOW_THRESHOLD_SECONDS = 1200.0
+_WINDOW_SECONDS = 900.0
+_WINDOW_OVERLAP_SECONDS = 10.0
+
+
+def _windowed_speech_duration(path: Path, profile: str) -> float | None:
+    """Duration of canonical 16 kHz mono PCM speech that needs windowing, otherwise None."""
+    if profile != "speech":
+        return None
+    try:
+        with wave.open(str(path), "rb") as wav:
+            if (wav.getnchannels(), wav.getsampwidth(), wav.getframerate()) != (1, 2, 16000):
+                return None
+            duration = wav.getnframes() / wav.getframerate()
+    except (wave.Error, EOFError, OSError):
+        return None
+    return duration if duration > _WINDOW_THRESHOLD_SECONDS else None
+
+
+def _transcription_passes(path: Path, window_duration: float | None) -> Iterable[tuple[Any, float, float, float]]:
+    """Yield ``(audio, offset, keep_from, keep_to)`` for each Faster-Whisper call.
+
+    Each window holds one slice of PCM at a time, never the whole file. A word or
+    segment is kept only when its midpoint falls in that window's share of the
+    timeline, so the overlap at each seam is counted once.
+    """
+    if window_duration is None:
+        yield str(path), 0.0, 0.0, math.inf
+        return
+    import numpy as np
+    rate = 16000
+    start, index = 0.0, 0
+    with wave.open(str(path), "rb") as wav:
+        while True:
+            end = min(window_duration, start + _WINDOW_SECONDS + _WINDOW_OVERLAP_SECONDS)
+            wav.setpos(int(round(start * rate)))
+            pcm = wav.readframes(int(round((end - start) * rate)))
+            audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+            del pcm
+            last = end >= window_duration
+            keep_from = 0.0 if index == 0 else start + _WINDOW_OVERLAP_SECONDS / 2
+            keep_to = math.inf if last else start + _WINDOW_SECONDS + _WINDOW_OVERLAP_SECONDS / 2
+            yield audio, start, keep_from, keep_to
+            del audio
+            if last:
+                return
+            start += _WINDOW_SECONDS
+            index += 1
+
+
 def transcribe(
     path: Path,
     settings: Settings,
@@ -1002,12 +1056,14 @@ def transcribe(
     run_words = options["word_timestamps"]
     run_model = options["model"]
 
+    window_duration = _windowed_speech_duration(path, profile)
     total_duration = 0.0
     if progress_callback is not None:
         total_duration = _media_duration(path, settings)
         if cancellation_callback is not None and cancellation_callback():
             raise TranscriptionCancelled("Transcription cancelled before model load")
 
+    total_seconds = window_duration if window_duration is not None else total_duration
     model_load_started = time.monotonic()
     with _whisper_lock:
         model_key = f"{run_model}:{run_device}:{run_compute}"
@@ -1043,28 +1099,46 @@ def transcribe(
         })
     if options["language"] is not None:
         transcribe_kwargs["language"] = options["language"]
-    segments, info = model.transcribe(str(path), **transcribe_kwargs)
     words: list[dict[str, Any]] = []
     segment_records: list[dict[str, Any]] = []
-    for segment in segments:
+    info: Any = None
+    for audio, offset, keep_from, keep_to in _transcription_passes(path, window_duration):
         if cancellation_callback is not None and cancellation_callback():
             raise TranscriptionCancelled("Transcription cancelled during decoding")
-        segment_record = {"start": float(segment.start), "end": float(segment.end), "text": segment.text.strip()}
-        if profile == "music":
-            segment_record.update({
-                "avg_logprob": _finite_or_none(getattr(segment, "avg_logprob", None)),
-                "compression_ratio": _finite_or_none(getattr(segment, "compression_ratio", None)),
-                "no_speech_prob": _finite_or_none(getattr(segment, "no_speech_prob", None)),
-                "temperature": _finite_or_none(getattr(segment, "temperature", None)),
-            })
-        segment_records.append(segment_record)
-        for word in segment.words or []:
-            text = str(word.word).strip()
-            if text:
-                words.append({"text": text, "start": float(word.start), "end": float(word.end), "confidence": float(word.probability or 0)})
-        if progress_callback is not None and total_duration > 0:
-            fraction = min(1.0, max(0.0, float(segment.end) / total_duration))
-            progress_callback(fraction, f"Transcribing: {segment.text.strip()[:60]}")
+        if window_duration is not None and progress_callback is not None and total_seconds > 0:
+            progress_callback(min(1.0, max(0.0, offset / total_seconds)), "")
+        segments, pass_info = model.transcribe(audio, **transcribe_kwargs)
+        if info is None:
+            info = pass_info
+            # Later windows reuse the language the first window detected, so auto-detect cannot change mid-video.
+            if options["language"] is None and isinstance(getattr(info, "language", None), str):
+                transcribe_kwargs["language"] = info.language
+        for segment in segments:
+            if cancellation_callback is not None and cancellation_callback():
+                raise TranscriptionCancelled("Transcription cancelled during decoding")
+            seg_start, seg_end = offset + float(segment.start), offset + float(segment.end)
+            if keep_from <= (seg_start + seg_end) / 2 < keep_to:
+                segment_record = {"start": seg_start, "end": seg_end, "text": segment.text.strip()}
+                if profile == "music":
+                    segment_record.update({
+                        "avg_logprob": _finite_or_none(getattr(segment, "avg_logprob", None)),
+                        "compression_ratio": _finite_or_none(getattr(segment, "compression_ratio", None)),
+                        "no_speech_prob": _finite_or_none(getattr(segment, "no_speech_prob", None)),
+                        "temperature": _finite_or_none(getattr(segment, "temperature", None)),
+                    })
+                segment_records.append(segment_record)
+            for word in segment.words or []:
+                text = str(word.word).strip()
+                if not text:
+                    continue
+                word_start, word_end = offset + float(word.start), offset + float(word.end)
+                if keep_from <= (word_start + word_end) / 2 < keep_to:
+                    words.append({"text": text, "start": word_start, "end": word_end, "confidence": float(word.probability or 0)})
+            if progress_callback is not None and total_seconds > 0:
+                fraction = min(1.0, max(0.0, seg_end / total_seconds))
+                progress_callback(fraction, f"Transcribing: {segment.text.strip()[:60]}")
+    words.sort(key=lambda item: item["start"])
+    segment_records.sort(key=lambda item: item["start"])
     if not words:
         if profile == "music":
             raise MediaError("No sung words with usable timestamps were detected. Instrumentals, buried vocals, and unclear mixes may not produce lyric clips; no audio was padded or duplicated.")

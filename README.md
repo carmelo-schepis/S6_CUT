@@ -145,11 +145,14 @@ Copy `.env.example` to `.env`. Important values:
 
 The OpenRouter profile can be configured in Settings. Persistent secrets are encrypted with a locally generated instance key and are never returned by read APIs. Headless deployments may set `OPENROUTER_API_KEY` in `.env` or Docker secrets orchestration. Protect `.env` like any other credential file.
 
+An Ollama server can be used instead of OpenRouter for a single project. Add its endpoint and model in the same Settings profile. Projects then shows an **Ollama** execution choice; OpenRouter is not called for those jobs. From Docker, use `http://host.docker.internal:11434`. On Linux, start Ollama with `OLLAMA_HOST=0.0.0.0` so the container can reach it.
+
 ### Whisper performance tuning
 
 Smart-mode transcription runs locally with Faster-Whisper. The CPU-friendly defaults (`cpu` + `int8` + beam 1) keep memory low and decode fast; raise the model size or beam only when you need more accuracy and have CPU/RAM headroom:
 
 - `S6_WHISPER_MODEL=base` or `small` is the sweet spot on 8 GB hosts; `medium`/`large-v3` need noticeably more RAM and time.
+- Speech audio over 20 minutes is transcribed in 15-minute overlapping windows so memory stays flat on long videos; music is always one pass.
 - On an NVIDIA GPU, set `S6_WHISPER_DEVICE=cuda` with `S6_WHISPER_COMPUTE_TYPE=float16` for the fastest decode.
 - `S6_WHISPER_WORD_TIMESTAMPS=false` skips per-word alignment (faster) but disables word-timed captions; keep it `true` for captioned clips.
 
