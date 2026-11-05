@@ -188,10 +188,10 @@ test("Docker-served studio acceptance workflow", async ({ page, request }) => {
   await expect(page.getByText(/Trusted LAN only by default/)).toBeVisible();
   // Empty installs may open setup inline; existing installs keep the form
   // closed until requested. Either way, the API key remains masked.
-  if (await page.locator('input[type="password"]').count() === 0) {
+  if (await page.locator('.profile-form input[type="password"]').count() === 0) {
     await page.getByRole("button", { name: /New profile/ }).click();
   }
-  await expect(page.locator('input[type="password"]')).toHaveCount(1);
+  await expect(page.locator('.profile-form input[type="password"]')).toHaveCount(1);
   await capture(page, "settings-security");
 
   // Jobs navigation and API-backed job list remain usable after the workflow.

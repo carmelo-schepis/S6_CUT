@@ -24,6 +24,8 @@ class ProviderError(RuntimeError):
 MASKED_SECRET_MARKER = "••••"
 # Ollama silently truncates prompts longer than num_ctx, so this must exceed the largest prompt.
 OLLAMA_NUM_CTX = 16384
+OPENROUTER_OFF_MESSAGE = "OpenRouter is turned off for this profile. Turn it on in Settings."
+OLLAMA_OFF_MESSAGE = "Ollama is turned off for this profile. Turn it on in Settings."
 OLLAMA_UNREACHABLE = "Could not reach Ollama at this address. From Docker use http://host.docker.internal:11434. On Linux, start Ollama with OLLAMA_HOST=0.0.0.0."
 LEGACY_SECRET_KEY = "elevenlabsKey"
 
@@ -152,7 +154,7 @@ class ProfileService:
     def smart_available(self) -> bool:
         """True only when the selected OpenRouter profile is configured and connected."""
         for profile in self.db.list_profiles():
-            if not profile.selected or not profile.openrouter_configured or profile.text_status != "connected":
+            if not profile.selected or not profile.openrouter_enabled or not profile.openrouter_configured or profile.text_status != "connected":
                 continue
             if self.secrets(profile.id).get("openrouterKey"):
                 return True
@@ -177,6 +179,8 @@ class ProfileService:
         else:
             ollama_model = None
         ollama_unchanged = bool(previous_profile and ollama_url and ollama_url == previous_ollama_url and ollama_model == previous_ollama_model)
+        openrouter_enabled = value.openrouter_enabled if value.openrouter_enabled is not None else (previous_profile.openrouter_enabled if previous_profile else True)
+        ollama_enabled = value.ollama_enabled if value.ollama_enabled is not None else (previous_profile.ollama_enabled if previous_profile else True)
         profile = ProviderProfile(
             id=profile_id, name=value.name, text_model_id=value.text_model_id, youtube_metadata_model_id=metadata_model_id, auto_seo_titles=auto_seo_titles, selected=value.selected, persistence=value.persistence,
             openrouter_configured=bool(key), openrouter_masked=mask_secret(key),
@@ -184,6 +188,7 @@ class ProfileService:
             text_message=previous_profile.text_message if text_unchanged else ("Ready to test" if key else "Optional; deterministic local planning remains available"),
             text_last_checked_at=previous_profile.text_last_checked_at if text_unchanged else None,
             ollama_url=ollama_url, ollama_model=ollama_model,
+            openrouter_enabled=openrouter_enabled, ollama_enabled=ollama_enabled,
             ollama_status=previous_profile.ollama_status if ollama_unchanged else ("configured" if ollama_url else "not_configured"),
             ollama_message=previous_profile.ollama_message if ollama_unchanged else ("Ready to test" if ollama_url else None),
             ollama_last_checked_at=previous_profile.ollama_last_checked_at if ollama_unchanged else None,
@@ -209,6 +214,7 @@ class ProfileService:
         return self.save(ProfileInput(
             name=f"{profile.name} copy", text_model_id=profile.text_model_id, youtube_metadata_model_id=profile.youtube_metadata_model_id, auto_seo_titles=profile.auto_seo_titles, openrouter_key=secrets.get("openrouterKey"),
             ollama_url=profile.ollama_url, ollama_model=profile.ollama_model,
+            openrouter_enabled=profile.openrouter_enabled, ollama_enabled=profile.ollama_enabled,
             persistence=profile.persistence, selected=False,
         ))
 
@@ -261,12 +267,14 @@ class ProfileService:
     def ollama_available(self) -> bool:
         """True when the selected profile has an Ollama endpoint saved (no test required)."""
         profile = next((item for item in self.db.list_profiles() if item.selected), None)
-        return bool(profile and profile.ollama_url)
+        return bool(profile and profile.ollama_url and profile.ollama_enabled)
 
     def _selected_ollama_profile(self) -> ProviderProfile:
         profile = next((item for item in self.db.list_profiles() if item.selected), None)
         if not profile or not profile.ollama_url:
             raise ProviderError("not_configured", "Ollama is not configured. Add an endpoint in Settings.")
+        if not profile.ollama_enabled:
+            raise ProviderError("not_configured", OLLAMA_OFF_MESSAGE)
         return profile
 
     async def ollama_models(self, base_url: str | None = None) -> list[OpenRouterModel]:
@@ -364,6 +372,8 @@ class ProfileService:
         if ollama:
             return await self.ollama_models()
         profile, secrets = self.selected_secrets(include_environment=False)
+        if profile and not profile.openrouter_enabled:
+            raise ProviderError("not_configured", OPENROUTER_OFF_MESSAGE)
         if not profile or not profile.openrouter_configured or profile.text_status != "connected":
             raise ProviderError("not_configured", "OpenRouter is not configured. Test the selected profile in Settings.")
         key = secrets.get("openrouterKey")
@@ -397,10 +407,13 @@ class ProfileService:
         profile, _ = record
         secrets = self.secrets(profile_id)
         key = secrets.get("openrouterKey")
-        profile.text_status = "not_configured" if not key else "configured"
-        profile.text_message = "Optional; deterministic local planning remains available" if not key else "Ready to test"
-        profile.text_last_checked_at = None
-        if key:
+        openrouter_on, ollama_on = profile.openrouter_enabled, profile.ollama_enabled
+        # A switched-off provider keeps its status, message and timestamp untouched.
+        if openrouter_on:
+            profile.text_status = "not_configured" if not key else "configured"
+            profile.text_message = "Optional; deterministic local planning remains available" if not key else "Ready to test"
+            profile.text_last_checked_at = None
+        if openrouter_on and key:
             async with httpx.AsyncClient(timeout=12, follow_redirects=False) as client:
                 try:
                     profile.text_status = "connected"
@@ -427,7 +440,7 @@ class ProfileService:
                     profile.text_status, profile.text_message = exc.category, exc.safe_message
                 except (httpx.TimeoutException, httpx.RequestError):
                     profile.text_status, profile.text_message = "timeout_offline", "OpenRouter is offline or timed out; local planning remains available"
-        if profile.ollama_url:
+        if profile.ollama_url and ollama_on:
             profile.ollama_status, profile.ollama_message = "configured", "Ready to test"
             try:
                 models = await self.ollama_models(profile.ollama_url)
@@ -448,9 +461,11 @@ class ProfileService:
             except ProviderError as exc:
                 profile.ollama_status, profile.ollama_message = exc.category, exc.safe_message
             profile.ollama_last_checked_at = now_iso()
-        any_connected = "connected" in (profile.text_status, profile.ollama_status)
-        profile.status = "connected" if any_connected else ("configured" if key or profile.ollama_url else "local only")
-        profile.capabilities = (["OpenRouter text generation"] if profile.text_status == "connected" else []) + (["Ollama text generation"] if profile.ollama_status == "connected" else [])
+        text_connected = openrouter_on and profile.text_status == "connected"
+        ollama_connected = ollama_on and profile.ollama_status == "connected"
+        any_connected = text_connected or ollama_connected
+        profile.status = "connected" if any_connected else ("configured" if (openrouter_on and key) or (ollama_on and profile.ollama_url) else "local only")
+        profile.capabilities = (["OpenRouter text generation"] if text_connected else []) + (["Ollama text generation"] if ollama_connected else [])
         self.db.save_profile(profile)
         return profile
 
@@ -459,6 +474,9 @@ class ProfileService:
             # Checked first so an Ollama job can never reach OpenRouter, even with a saved key.
             return await self._ollama_json(messages, schema, model_id=model_id, temperature=temperature, max_tokens=max_tokens, include_usage=include_usage)
         profile, secrets = self.selected_secrets(include_environment=not require_saved_profile)
+        # Checked before any key is used, so the OPENROUTER_API_KEY fallback is blocked too.
+        if profile and not profile.openrouter_enabled:
+            raise ProviderError("not_configured", OPENROUTER_OFF_MESSAGE)
         if require_saved_profile and (not profile or profile.text_status != "connected"):
             return None
         key = secrets.get("openrouterKey")

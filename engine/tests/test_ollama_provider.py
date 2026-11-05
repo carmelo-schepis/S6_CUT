@@ -349,3 +349,124 @@ def test_regenerating_with_a_missing_model_gives_the_pull_hint():
     response, _ = _regenerate(lambda method, url, kwargs: FakeResponse(200, {"models": []}))
     assert response.status_code == 409
     assert "ollama pull llama3.2" in response.json()["detail"]
+
+
+OPENROUTER_MODEL = "openai/gpt-4.1-mini"
+
+
+def _openrouter_reply(method, url, kwargs):
+    if method == "GET" and url.endswith("/models"):
+        return FakeResponse(200, {"data": [{"id": OPENROUTER_MODEL, "architecture": {"output_modalities": ["text"]}, "supported_parameters": ["response_format"], "pricing": {"prompt": "0.0000001", "completion": "0.0000004"}}]})
+    if method == "POST" and url.endswith("/chat/completions"):
+        return FakeResponse(200, {"choices": [{"message": {"content": json.dumps({"ok": True})}}]})
+    raise AssertionError(f"unexpected request {method} {url}")
+
+
+def _openrouter_calls() -> int:
+    return sum(1 for _, url, _ in Recorder.calls if "openrouter" in url or "/chat/completions" in url or url.endswith("/models"))
+
+
+def test_profiles_saved_before_the_switches_load_with_both_on():
+    old = {"id": "old", "name": "Old", "text_model_id": "m", "selected": True, "persistence": "encrypted", "openrouter_configured": True, "status": "configured", "capabilities": [], "fallbacks": {}}
+    loaded = ProviderProfile.model_validate_json(json.dumps(old))
+    assert loaded.openrouter_enabled is True and loaded.ollama_enabled is True
+
+
+def test_omitted_switches_keep_the_saved_value_and_explicit_values_apply():
+    profile_id = save_profile(ollama_url=OLLAMA_URL, ollama_model="llama3.2", openrouter_enabled=False)
+    kept = profiles.save(ProfileInput(name="Ollama test", selected=True, auto_seo_titles=False), profile_id)
+    assert kept.openrouter_enabled is False and kept.ollama_enabled is True
+    back = profiles.save(ProfileInput(name="Ollama test", selected=True, openrouter_enabled=True), profile_id)
+    assert back.openrouter_enabled is True
+
+
+def test_switching_off_keeps_key_endpoint_model_and_status():
+    profile_id = save_profile(ollama_url=OLLAMA_URL, ollama_model="llama3.2", openrouter_key="sk-or-test-secret")
+    Recorder.responder = lambda method, url, kwargs: _openrouter_reply(method, url, kwargs) if "openrouter" in url else default_responder(method, url, kwargs)
+    tested = asyncio.run(profiles.test(profile_id))
+    assert tested.ollama_status == "connected"
+    off = profiles.save(ProfileInput(name="Ollama test", selected=True, openrouter_enabled=False, ollama_enabled=False), profile_id)
+    assert off.ollama_url == OLLAMA_URL and off.ollama_model == "llama3.2"
+    assert off.ollama_status == "connected" and off.ollama_message == tested.ollama_message
+    assert off.ollama_last_checked_at == tested.ollama_last_checked_at
+    assert profiles.secrets(profile_id)["openrouterKey"] == "sk-or-test-secret"
+    assert off.persistence == "encrypted" and off.selected is True
+
+
+def test_openrouter_off_blocks_smart_planning_models_and_json_even_with_the_environment_key(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-environment")
+    profile_id = save_profile(openrouter_key="sk-or-test-secret")
+    Recorder.responder = _openrouter_reply
+    tested = asyncio.run(profiles.test(profile_id))
+    assert tested.text_status == "connected" and profiles.smart_available() is True
+    profiles.save(ProfileInput(name="Ollama test", selected=True, openrouter_enabled=False), profile_id)
+    Recorder.calls = []
+    assert profiles.smart_available() is False
+    with pytest.raises(providers.ProviderError) as models:
+        asyncio.run(profiles.openrouter_models("text"))
+    assert models.value.safe_message == providers.OPENROUTER_OFF_MESSAGE
+    with pytest.raises(providers.ProviderError) as caught:
+        asyncio.run(profiles.openrouter_json([{"role": "user", "content": "hi"}], SCHEMA))
+    assert caught.value.category == "not_configured"
+    assert _openrouter_calls() == 0
+
+
+def test_openrouter_off_test_makes_no_openrouter_call_and_keeps_its_status():
+    profile_id = save_profile(openrouter_key="sk-or-test-secret")
+    Recorder.responder = _openrouter_reply
+    connected = asyncio.run(profiles.test(profile_id))
+    profiles.save(ProfileInput(name="Ollama test", selected=True, openrouter_enabled=False), profile_id)
+    Recorder.calls = []
+    tested = asyncio.run(profiles.test(profile_id))
+    assert _openrouter_calls() == 0
+    assert tested.text_status == connected.text_status and tested.text_message == connected.text_message
+    assert tested.text_last_checked_at == connected.text_last_checked_at
+    assert tested.status == "local only" and tested.capabilities == []
+
+
+def test_ollama_off_hides_the_endpoint_and_refuses_ollama_calls():
+    profile_id = save_profile(ollama_url=OLLAMA_URL, ollama_model="llama3.2", ollama_enabled=False)
+    assert profiles.ollama_available() is False
+    with pytest.raises(providers.ProviderError) as caught:
+        asyncio.run(profiles.openrouter_json([{"role": "user", "content": "hi"}], SCHEMA, ollama=True))
+    assert caught.value.safe_message == providers.OLLAMA_OFF_MESSAGE
+    assert Recorder.calls == []
+    assert profiles.db.get_profile(profile_id)[0].ollama_url == OLLAMA_URL
+
+
+def test_test_skips_a_switched_off_ollama_and_leaves_its_fields_alone():
+    profile_id = save_profile(ollama_url=OLLAMA_URL, ollama_model="llama3.2", ollama_enabled=False)
+    before = profiles.db.get_profile(profile_id)[0]
+    tested = asyncio.run(profiles.test(profile_id))
+    assert Recorder.calls == []
+    assert tested.ollama_status == before.ollama_status and tested.ollama_message == before.ollama_message
+    assert tested.ollama_last_checked_at is None and tested.ollama_model == "llama3.2"
+
+
+def test_a_connected_but_switched_off_provider_is_not_reported_as_connected():
+    profile_id = save_profile(ollama_url=OLLAMA_URL, ollama_model="llama3.2")
+    assert asyncio.run(profiles.test(profile_id)).status == "connected"
+    profiles.save(ProfileInput(name="Ollama test", selected=True, ollama_enabled=False), profile_id)
+    tested = asyncio.run(profiles.test(profile_id))
+    assert tested.ollama_status == "connected"
+    assert tested.status == "local only" and tested.capabilities == []
+
+
+def test_duplicate_keeps_both_switches():
+    profile_id = save_profile(ollama_url=OLLAMA_URL, openrouter_enabled=False, ollama_enabled=False)
+    copy = profiles.duplicate(profile_id)
+    assert copy.openrouter_enabled is False and copy.ollama_enabled is False
+    assert copy.ollama_url == OLLAMA_URL
+
+
+def test_switched_off_ollama_job_is_refused_with_the_new_message(monkeypatch):
+    response, saved = _create_job(monkeypatch, "ollama", smart=True, ollama=False)
+    assert response.status_code == 422
+    assert "Add or turn on an Ollama endpoint" in response.json()["detail"]
+    assert saved == {}
+
+
+def test_fallback_warning_for_a_switched_off_provider_names_that_provider():
+    from engine.jobs import _openrouter_fallback_warning
+    warning = _openrouter_fallback_warning(providers.ProviderError("not_configured", providers.OLLAMA_OFF_MESSAGE), "Ollama")
+    assert warning.startswith("Ollama API failed: Ollama is turned off") and "OpenRouter" not in warning

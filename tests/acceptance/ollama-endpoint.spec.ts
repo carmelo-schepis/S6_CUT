@@ -8,7 +8,7 @@
  */
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const run = promisify(execFile);
 const enabled = process.env.S6_RUN_OLLAMA === "1";
@@ -43,13 +43,28 @@ async function openSettings(page: Page) {
   await page.getByRole("button", { name: "Settings", exact: true }).click();
 }
 
+// Fields live in the new-profile form and in each card's boxes, so every lookup is scoped to the form.
 async function saveProfile(page: Page, name: string, fields: { key?: string; url?: string; model?: string }) {
   await page.getByRole("button", { name: "New profile" }).first().click();
-  await page.getByLabel("Profile name").fill(name);
-  if (fields.key) await page.getByLabel(/^OpenRouter API key/).fill(fields.key);
-  if (fields.url !== undefined) await page.getByLabel("Ollama endpoint").fill(fields.url);
-  if (fields.model) await page.getByLabel("Ollama model").fill(fields.model);
-  await page.getByRole("button", { name: "Save and test connection" }).click();
+  const form = page.locator(".profile-form");
+  await form.getByLabel("Profile name").fill(name);
+  if (fields.key) await form.getByLabel(/^OpenRouter API key/).fill(fields.key);
+  if (fields.url !== undefined) await form.getByLabel("Ollama endpoint").fill(fields.url);
+  if (fields.model) await form.getByLabel("Ollama model").fill(fields.model);
+  await form.getByRole("button", { name: "Save and test connection" }).click();
+}
+
+// Input values are not text, so endpoint checks read the box's field value.
+function endpointField(row: Locator) {
+  return row.getByRole("region", { name: "Ollama" }).getByLabel("Ollama endpoint");
+}
+
+function watchPage(page: Page) {
+  const consoleErrors: string[] = [];
+  const failed: string[] = [];
+  page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
+  page.on("response", (response) => { if (response.status() >= 400) failed.push(`${response.status()} ${response.url()}`); });
+  return { consoleErrors, failed };
 }
 
 async function openProjectOptions(page: Page) {
@@ -114,7 +129,7 @@ test("an Ollama job uses only Ollama even with a connected OpenRouter profile", 
   await expect(row).toContainText("Connected; text generation succeeded");
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await expect(row).toContainText(ollamaUrl);
+  await expect(endpointField(row)).toHaveValue(ollamaUrl);
 
   const openRouterBefore = await openRouterCalls();
   const ollamaBefore = (await ollamaCalls()).length;
@@ -176,7 +191,7 @@ test("bad addresses are refused and a missing model says how to pull it", async 
   for (const url of ["ftp://x", "http://user:pw@host", "http://h/?a=1"]) {
     await page.getByRole("button", { name: "New profile" }).first().click();
     await page.getByLabel("Profile name").fill(consoleCheck);
-    await page.getByLabel("Ollama endpoint").fill(url);
+    await page.locator(".profile-form").getByLabel("Ollama endpoint").fill(url);
     await page.getByRole("button", { name: "Save and test connection" }).click();
     await expect(page.locator(".profile-form .form-error")).toBeVisible();
     await page.getByRole("button", { name: "Cancel" }).click();
@@ -192,16 +207,16 @@ test("the choice is keyboard reachable, fits 390px, survives other saves and goe
   await openSettings(page);
   await saveProfile(page, name, { url: ollamaUrl, model: "llama3.2" });
   const row = page.getByRole("article").filter({ hasText: name });
-  await expect(row).toContainText(ollamaUrl);
+  await expect(endpointField(row)).toHaveValue(ollamaUrl);
 
   // These saves send no Ollama fields; the endpoint must survive both.
   await page.getByTestId("auto-seo-titles").click();
-  await expect(row).toContainText(ollamaUrl);
+  await expect(endpointField(row)).toHaveValue(ollamaUrl);
   await saveProfile(page, `Second ${runId}-${test.info().project.name.split(" ")[0]}`, {});
   await expect(row).not.toContainText("Active");
   await row.getByRole("button", { name: "Use profile" }).click();
   await expect(row).toContainText("Active");
-  await expect(row).toContainText(ollamaUrl);
+  await expect(endpointField(row)).toHaveValue(ollamaUrl);
 
   await page.setViewportSize({ width: 390, height: 844 });
   await openProjectOptions(page);
@@ -219,10 +234,9 @@ test("the choice is keyboard reachable, fits 390px, survives other saves and goe
   await page.screenshot({ path: test.info().outputPath("execution-390.png") });
 
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await row.getByRole("button", { name: `Edit ${name}` }).click();
-  await page.getByLabel("Ollama endpoint").fill("");
-  await page.getByRole("button", { name: "Save and test connection" }).click();
-  await expect(row).not.toContainText(ollamaUrl);
+  await endpointField(row).fill("");
+  await row.getByRole("region", { name: "Ollama" }).getByRole("button", { name: "Save and test" }).click();
+  await expect(endpointField(row)).toHaveValue("");
   await openProjectOptions(page);
   await expect(ollama).toHaveCount(0);
   await page.reload({ waitUntil: "domcontentloaded" });
@@ -238,4 +252,152 @@ test("a very long endpoint does not break the profile row at 390px", async ({ pa
   await saveProfile(page, name, { url: longHost, model: "llama3.2" });
   await expect(page.getByRole("article").filter({ hasText: name })).toContainText("Could not reach Ollama", { timeout: 30_000 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});
+
+test("an OpenRouter switch turned off survives a reload and stops every OpenRouter call", async ({ page }) => {
+  test.setTimeout(600_000);
+  const seen = watchPage(page);
+  const name = `Switch ${runId}-${test.info().project.name.split(" ")[0]}`;
+  await openSettings(page);
+  await saveProfile(page, name, { key: "sk-or-v1-mock", url: ollamaUrl, model: "llama3.2" });
+  const row = page.getByRole("article").filter({ hasText: name });
+  await expect(row).toContainText("Connected; text generation succeeded");
+  const openRouterBox = row.getByRole("region", { name: "OpenRouter" });
+  await openRouterBox.getByRole("switch", { name: "Use OpenRouter" }).click();
+  await expect(openRouterBox.getByRole("switch", { name: "Use OpenRouter" })).not.toBeChecked();
+  await expect(openRouterBox).toContainText("Off. Not used for new jobs. Saved settings are kept.");
+
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  const reloaded = page.getByRole("article").filter({ hasText: name });
+  const box = reloaded.getByRole("region", { name: "OpenRouter" });
+  await expect(box.getByRole("switch", { name: "Use OpenRouter" })).not.toBeChecked();
+  await expect(box.getByLabel(/^OpenRouter API key/)).toHaveValue("");
+  await expect(box.getByLabel(/^OpenRouter API key/)).toBeDisabled();
+
+  const openRouterBefore = await openRouterCalls();
+  await reloaded.getByRole("button", { name: "Test", exact: true }).click();
+  await expect(reloaded.getByRole("region", { name: "Ollama" })).toContainText("Connected; Ollama text generation succeeded", { timeout: 60_000 });
+  expect(await openRouterCalls()).toBe(openRouterBefore);
+
+  await box.getByRole("switch", { name: "Use OpenRouter" }).click();
+  await expect(box.getByRole("switch", { name: "Use OpenRouter" })).toBeChecked();
+  await expect(box).toContainText("Connected; text generation succeeded");
+  expect(seen.consoleErrors.filter((text) => !/Cross-Origin-Opener-Policy/.test(text))).toEqual([]);
+  expect(seen.failed).toEqual([]);
+});
+
+test("an Ollama switch hides the Projects choice, comes back with its endpoint, and works from the keyboard", async ({ page }) => {
+  const seen = watchPage(page);
+  const name = `OllamaSwitch ${runId}-${test.info().project.name.split(" ")[0]}`;
+  await openSettings(page);
+  await saveProfile(page, name, { url: ollamaUrl, model: "llama3.2" });
+  const row = page.getByRole("article").filter({ hasText: name });
+  await expect(row).toContainText("Connected; Ollama text generation succeeded");
+  await openProjectOptions(page);
+  await expect(page.getByRole("button", { name: "Ollama", exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  const ollamaSwitch = row.getByRole("region", { name: "Ollama" }).getByRole("switch", { name: "Use Ollama" });
+  // Reach the switch with the keyboard so the focus ring is the keyboard one, not a mouse-focus artefact.
+  await ollamaSwitch.focus();
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Shift+Tab");
+  await expect(ollamaSwitch).toBeFocused();
+  await page.keyboard.press("Space");
+  await expect(ollamaSwitch).not.toBeChecked();
+  await expect(page.locator(".provider-switch input:focus-visible + .provider-switch-track")).toHaveCount(1);
+  await expect(row.getByRole("region", { name: "Ollama" })).toContainText("Off. Not used for new jobs. Saved settings are kept.");
+  await openProjectOptions(page);
+  await expect(page.getByRole("button", { name: "Ollama", exact: true })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await row.getByRole("region", { name: "Ollama" }).getByRole("switch", { name: "Use Ollama" }).click();
+  await expect(row.getByRole("region", { name: "Ollama" }).getByRole("switch", { name: "Use Ollama" })).toBeChecked();
+  await expect(endpointField(row)).toHaveValue(ollamaUrl);
+  await expect(row).toContainText("Connected; Ollama text generation succeeded");
+  await openProjectOptions(page);
+  await expect(page.getByRole("button", { name: "Ollama", exact: true })).toBeVisible();
+  expect(seen.consoleErrors.filter((text) => !/Cross-Origin-Opener-Policy/.test(text))).toEqual([]);
+  expect(seen.failed).toEqual([]);
+});
+
+test("with both providers off, a Fast job still completes and no provider is called", async ({ page }) => {
+  test.setTimeout(1_200_000);
+  const seen = watchPage(page);
+  const name = `Both ${runId}-${test.info().project.name.split(" ")[0]}`;
+  await openSettings(page);
+  await saveProfile(page, name, { key: "sk-or-v1-mock", url: ollamaUrl, model: "llama3.2" });
+  const row = page.getByRole("article").filter({ hasText: name });
+  await row.getByRole("region", { name: "OpenRouter" }).getByRole("switch", { name: "Use OpenRouter" }).click();
+  await row.getByRole("region", { name: "Ollama" }).getByRole("switch", { name: "Use Ollama" }).click();
+  await expect(row.getByRole("region", { name: "OpenRouter" }).getByRole("switch", { name: "Use OpenRouter" })).not.toBeChecked();
+  await expect(row.getByRole("region", { name: "Ollama" }).getByRole("switch", { name: "Use Ollama" })).not.toBeChecked();
+
+  const openRouterBefore = await openRouterCalls();
+  const ollamaBefore = (await ollamaCalls()).length;
+  const projectName = `Both off clip ${runId}-${test.info().project.name.split(" ")[0]}`;
+  await openProjectOptions(page);
+  await expect(page.getByRole("button", { name: "Ollama", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Fast", exact: true }).click();
+  await page.getByRole("tab", { name: "YouTube" }).click();
+  await page.getByRole("textbox", { name: "YouTube URL" }).fill(youtubeUrl);
+  await page.getByLabel("Project name", { exact: true }).fill(projectName);
+  await page.getByRole("button", { name: /Create \d+ short clips?/i }).click();
+  const job = await waitForProjectJob(page, projectName);
+  expect(job.state).toBe("complete");
+  expect(await openRouterCalls()).toBe(openRouterBefore);
+  expect((await ollamaCalls()).length).toBe(ollamaBefore);
+  expect(seen.consoleErrors.filter((text) => !/Cross-Origin-Opener-Policy/.test(text))).toEqual([]);
+  expect(seen.failed).toEqual([]);
+});
+
+test("an Auto Smart job with OpenRouter switched off plans locally and never calls OpenRouter", async ({ page }) => {
+  test.setTimeout(1_200_000);
+  const seen = watchPage(page);
+  const name = `AutoOff ${runId}-${test.info().project.name.split(" ")[0]}`;
+  await openSettings(page);
+  await saveProfile(page, name, { key: "sk-or-v1-mock", url: ollamaUrl, model: "llama3.2" });
+  const row = page.getByRole("article").filter({ hasText: name });
+  await row.getByRole("region", { name: "OpenRouter" }).getByRole("switch", { name: "Use OpenRouter" }).click();
+  await expect(row.getByRole("region", { name: "OpenRouter" }).getByRole("switch", { name: "Use OpenRouter" })).not.toBeChecked();
+
+  const openRouterBefore = await openRouterCalls();
+  const projectName = `Auto off clip ${runId}-${test.info().project.name.split(" ")[0]}`;
+  await openProjectOptions(page);
+  await page.getByRole("button", { name: "Smart", exact: true }).click();
+  await page.getByRole("tab", { name: "YouTube" }).click();
+  await page.getByRole("textbox", { name: "YouTube URL" }).fill(youtubeUrl);
+  await page.getByLabel("Project name", { exact: true }).fill(projectName);
+  await page.getByRole("button", { name: /Create \d+ short clips?/i }).click();
+  const job = await waitForProjectJob(page, projectName);
+  expect(job.state).toBe("complete");
+  expect(await openRouterCalls()).toBe(openRouterBefore);
+  expect(seen.consoleErrors.filter((text) => !/Cross-Origin-Opener-Policy/.test(text))).toEqual([]);
+  expect(seen.failed).toEqual([]);
+});
+
+test("provider boxes fit at 1440px and 390px in each switch state, and are screenshotted for review", async ({ page }) => {
+  const name = `Look ${runId}-${test.info().project.name.split(" ")[0]}`;
+  await openSettings(page);
+  await saveProfile(page, name, { key: "sk-or-v1-mock", url: ollamaUrl, model: "llama3.2" });
+  const row = page.getByRole("article").filter({ hasText: name });
+  const openRouterSwitch = row.getByRole("region", { name: "OpenRouter" }).getByRole("switch", { name: "Use OpenRouter" });
+  const ollamaSwitch = row.getByRole("region", { name: "Ollama" }).getByRole("switch", { name: "Use Ollama" });
+  const states: [string, () => Promise<void>][] = [
+    ["both-on", async () => undefined],
+    ["openrouter-off", async () => { await openRouterSwitch.click(); await expect(openRouterSwitch).not.toBeChecked(); }],
+    ["both-off", async () => { await ollamaSwitch.click(); await expect(ollamaSwitch).not.toBeChecked(); }],
+  ];
+  for (const [state, apply] of states) {
+    await apply();
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      await expect(row.getByRole("region", { name: "Ollama" })).toBeVisible();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+      const box = await row.getByRole("region", { name: "Ollama" }).boundingBox();
+      expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(width);
+      await page.screenshot({ path: test.info().outputPath(`provider-boxes-${state}-${width}.png`), fullPage: true });
+    }
+  }
 });

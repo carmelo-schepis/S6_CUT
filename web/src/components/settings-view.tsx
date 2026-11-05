@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowRight, Check, Copy, Cpu, Database, Eye, EyeOff, KeyRound, LockKeyhole, Network, Pencil, Plus, RefreshCw, Server, ShieldAlert, Trash2, X } from "lucide-react";
+import { ArrowRight, Check, Copy, Cpu, Database, KeyRound, LockKeyhole, Network, Pencil, Plus, RefreshCw, Server, ShieldAlert, Trash2, X } from "lucide-react";
 import { deleteProfile, duplicateProfile, listOpenRouterModels, listProfiles, purgeLibraryContent, readableError, saveProfile, testProfile } from "../api";
 import { emitLibraryChanged } from "../library-sync";
 import type { Health, LibraryPurgeResult, OpenRouterModel, ProviderProfile } from "../types";
+import { isOllamaOn, isOpenRouterOn } from "../types";
 import { Button, Field, PageHeader, StatusBadge } from "./common";
+import { OllamaFields, OpenRouterFields, ProviderBox } from "./provider-boxes";
 
 export function SettingsView({ health, onHealthRefresh, onProfilesChanged, onSkipSetup = () => undefined }: { health: Health | null; onHealthRefresh: () => Promise<void>; onProfilesChanged?: (profiles: ProviderProfile[]) => void; onSkipSetup?: () => void }) {
   const [profiles, setProfiles] = useState<ProviderProfile[]>([]);
@@ -20,6 +22,8 @@ export function SettingsView({ health, onHealthRefresh, onProfilesChanged, onSki
   const [metadataModelsLoading, setMetadataModelsLoading] = useState(false);
   const [metadataModelError, setMetadataModelError] = useState<string | null>(null);
   const selectedProfile = profiles.find((profile) => profile.selected) || null;
+  // Model lookups need a connected OpenRouter; a switched-off one is never called.
+  const metadataAvailable = Boolean(selectedProfile && selectedProfile.textStatus === "connected" && isOpenRouterOn(selectedProfile));
   const purgeTriggerRef = useRef<HTMLButtonElement>(null);
   const purgeInputRef = useRef<HTMLInputElement>(null);
   const wasPurgeDialogOpen = useRef(false);
@@ -32,11 +36,11 @@ export function SettingsView({ health, onHealthRefresh, onProfilesChanged, onSki
     finally { setMetadataModelsLoading(false); }
   }, []);
   useEffect(() => {
-    if (selectedProfile?.textStatus !== "connected") return;
+    if (!metadataAvailable) return;
     let active = true;
     void listOpenRouterModels("text").then((models) => { if (active) setMetadataModels(models); }).catch((cause) => { if (active) setMetadataModelError(readableError(cause)); });
     return () => { active = false; };
-  }, [selectedProfile?.id, selectedProfile?.textStatus]);
+  }, [selectedProfile?.id, selectedProfile?.textStatus, metadataAvailable]);
   const setMetadataModel = async (modelId: string) => {
     if (!selectedProfile) return;
     setError(null);
@@ -94,29 +98,18 @@ export function SettingsView({ health, onHealthRefresh, onProfilesChanged, onSki
       <section className="settings-card profiles-card" id="provider-profiles"><div className="settings-card-head"><div><KeyRound size={18} /><div><h2>Text providers</h2><p>Configure OpenRouter or your own Ollama server. Choose a provider for each job on Projects.</p></div></div><div className="profile-head-actions"><StatusBadge state={profiles.some((profile) => profile.selected) ? "local" : "fallback"} label={profiles.length ? `${profiles.length} saved` : "Local modes only"} />{profiles.length > 0 && <Button onClick={() => { setSetupDismissed(false); setEditing("new"); }}><Plus size={13} /> Add profile</Button>}</div></div>
         {showSetupForm && <ProfileForm initial={editing === "new" || editing === null ? undefined : editing} onUseFastLocal={onSkipSetup} onCancel={() => { setEditing(null); if (!profiles.length) setSetupDismissed(true); }} onSaved={() => { setEditing(null); void load(); }} />}
         <div className="profile-list">{profiles.map((profile) => {
-          const openRouterConfigured = profile.openrouterConfigured || Boolean(profile.openrouterMasked);
           return <article key={profile.id} className="profile-row">
             <header className="profile-row-header">
               <div className="profile-identity"><div className="profile-mark"><KeyRound size={17} /></div><div className="profile-info"><div className="profile-name"><strong>{profile.name}</strong>{profile.selected && <span className="selected-label"><Check size={11} /> Active</span>}</div><dl className="profile-storage"><div><dt>Credential storage:</dt><dd><LockKeyhole size={11} aria-hidden="true" /> {profile.persistence === "encrypted" ? "Encrypted" : "Session only"}</dd></div></dl></div></div>
-              <div className="profile-actions">{!profile.selected && <Button onClick={() => select(profile)}>Use profile</Button>}<Button disabled={testingId === profile.id} onClick={() => test(profile.id)}>{testingId === profile.id ? "Checking…" : "Test"}</Button><button title="Edit" aria-label={`Edit ${profile.name}`} onClick={() => setEditing(profile)}><Pencil size={14} /></button><button title="Duplicate" aria-label={`Duplicate ${profile.name}`} onClick={() => duplicate(profile.id)}><Copy size={14} /></button><button title="Delete" aria-label={`Delete ${profile.name}`} onClick={() => remove(profile.id)}><Trash2 size={14} /></button></div>
+              <div className="profile-actions">{!profile.selected && <Button onClick={() => select(profile)}>Use profile</Button>}<Button disabled={testingId === profile.id || (!isOpenRouterOn(profile) && !isOllamaOn(profile))} onClick={() => test(profile.id)}>{testingId === profile.id ? "Checking…" : "Test"}</Button><button title="Edit" aria-label={`Edit ${profile.name}`} onClick={() => setEditing(profile)}><Pencil size={14} /></button><button title="Duplicate" aria-label={`Duplicate ${profile.name}`} onClick={() => duplicate(profile.id)}><Copy size={14} /></button><button title="Delete" aria-label={`Delete ${profile.name}`} onClick={() => remove(profile.id)}><Trash2 size={14} /></button></div>
             </header>
-            <div className="profile-provider-grid">
-              <section className="profile-provider" aria-labelledby={`openrouter-${profile.id}`}>
-                <h3 id={`openrouter-${profile.id}`}>OpenRouter</h3>
-                {openRouterConfigured ? <dl className="provider-details"><div><dt>Saved key</dt><dd>{profile.openrouterMasked || "Saved"}</dd></div><div><dt>Text model</dt><dd>{profile.textModelId}</dd></div></dl> : <dl className="provider-details"><div><dt>Configuration</dt><dd>Not configured</dd></div></dl>}
-                <div className="provider-results"><ConnectionResult service="OpenRouter" status={testingId === profile.id && openRouterConfigured ? "checking" : openRouterConfigured ? profile.textStatus : "not_configured"} message={openRouterConfigured ? profile.textMessage : "No API key saved."} lastCheckedAt={openRouterConfigured ? profile.textLastCheckedAt : null} /></div>
-              </section>
-              <section className="profile-provider" aria-labelledby={`ollama-${profile.id}`}>
-                <h3 id={`ollama-${profile.id}`}>Ollama</h3>
-                {profile.ollamaUrl ? <><dl className="provider-details"><div><dt>Endpoint</dt><dd>{profile.ollamaUrl}</dd></div><div><dt>Model</dt><dd>{profile.ollamaModel || "Auto-detect"}</dd></div></dl><div className="provider-results"><ConnectionResult service="Ollama" status={testingId === profile.id ? "checking" : profile.ollamaStatus ?? "not_configured"} message={profile.ollamaMessage} lastCheckedAt={profile.ollamaLastCheckedAt} /></div></> : <dl className="provider-details"><div><dt>Configuration</dt><dd>Not configured</dd></div><div><dt>Endpoint</dt><dd>No endpoint saved.</dd></div></dl>}
-              </section>
-            </div>
+            <ProfileProviderBoxes profile={profile} testing={testingId === profile.id} onChanged={load} onTest={test} />
           </article>;
         })}</div>
         {!profiles.length && !showSetupForm && <div className="settings-empty"><KeyRound size={22} /><div><strong>No text provider profile</strong><p>Local deterministic planning, captions, and text-card visuals remain available.</p></div>{onSkipSetup && <Button variant="ghost" onClick={onSkipSetup}>Continue with local cutting <ArrowRight size={13} /></Button>}</div>}
       </section>
-      <section className="settings-card metadata-model-card" aria-labelledby="metadata-model-heading"><div className="settings-card-head"><div><KeyRound size={18} /><div><h2 id="metadata-model-heading">Title and description model</h2><p>Independent from the general planning model; uses the selected OpenRouter profile credentials.</p></div></div><Button disabled={metadataModelsLoading || selectedProfile?.textStatus !== "connected"} onClick={() => void refreshMetadataModels()}><RefreshCw size={14} /> {metadataModelsLoading ? "Refreshing…" : "Refresh models"}</Button></div>
-        <Field label="YouTube title and description model" hint="Only models advertising structured output and priced at no more than $0.10/M input and $0.40/M output are eligible. No automatic paid-model substitution."><select aria-label="Title and description model" value={selectedProfile?.youtubeMetadataModelId || "google/gemini-2.5-flash-lite"} disabled={!selectedProfile || selectedProfile.textStatus !== "connected"} onChange={(event) => void setMetadataModel(event.target.value)}>
+      <section className="settings-card metadata-model-card" aria-labelledby="metadata-model-heading"><div className="settings-card-head"><div><KeyRound size={18} /><div><h2 id="metadata-model-heading">Title and description model</h2><p>Independent from the general planning model; uses the selected OpenRouter profile credentials.</p></div></div><Button disabled={metadataModelsLoading || !metadataAvailable} onClick={() => void refreshMetadataModels()}><RefreshCw size={14} /> {metadataModelsLoading ? "Refreshing…" : "Refresh models"}</Button></div>
+        <Field label="YouTube title and description model" hint="Only models advertising structured output and priced at no more than $0.10/M input and $0.40/M output are eligible. No automatic paid-model substitution."><select aria-label="Title and description model" value={selectedProfile?.youtubeMetadataModelId || "google/gemini-2.5-flash-lite"} disabled={!metadataAvailable} onChange={(event) => void setMetadataModel(event.target.value)}>
           {selectedProfile && !metadataModels.some((model) => model.id === selectedProfile.youtubeMetadataModelId) && <option value={selectedProfile.youtubeMetadataModelId}>{selectedProfile.youtubeMetadataModelId} · unavailable or not refreshed</option>}
           {metadataModels.map((model) => {
             const input = Number(model.pricing?.prompt) * 1_000_000;
@@ -127,6 +120,7 @@ export function SettingsView({ health, onHealthRefresh, onProfilesChanged, onSki
         </select></Field>
         <label className="check-row auto-seo-titles-toggle"><input type="checkbox" data-testid="auto-seo-titles" checked={selectedProfile?.autoSeoTitles ?? true} disabled={!selectedProfile || savingAutoSeo} onChange={(event) => void setAutoSeoTitles(event.target.checked)} /><span><strong>Auto-write SEO titles for new clips</strong><small>Smart short clips get an AI title and description when OpenRouter is connected.</small></span></label>
         {!selectedProfile && <p className="form-hint">Select and connect an OpenRouter profile first.</p>}
+        {selectedProfile && !isOpenRouterOn(selectedProfile) && <p className="form-hint">OpenRouter is off for this profile. Turn it on to change this model.</p>}
         {metadataModelError && <p className="form-error" role="alert">Could not refresh model availability: {metadataModelError}</p>}
         {selectedProfile && <p className="form-hint">Configured: {selectedProfile.youtubeMetadataModelId || "google/gemini-2.5-flash-lite"}. Generation is unavailable if the model is missing, unknown-priced, or above the hard cap.</p>}
       </section>
@@ -148,29 +142,108 @@ function ConnectionResult({ service, status, message, lastCheckedAt }: { service
 function formatCheckedAt(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? "recently" : date.toLocaleString([], { dateStyle: "short", timeStyle: "short" }); }
 function formatBytes(value: number) { if (value < 1024) return `${value} B`; const units = ["KB", "MB", "GB"]; let amount = value / 1024; for (const unit of units) { if (amount < 1024 || unit === units.at(-1)) return `${amount.toFixed(amount >= 10 ? 0 : 1)} ${unit}`; amount /= 1024; } return `${value} B`; }
 
+function ProfileProviderBoxes({ profile, testing, onChanged, onTest }: { profile: ProviderProfile; testing: boolean; onChanged: () => Promise<void>; onTest: (id: string) => Promise<void> }) {
+  const [openRouterKey, setOpenRouterKey] = useState("");
+  const [openRouterModel, setOpenRouterModel] = useState<string | null>(null);
+  const [ollamaUrl, setOllamaUrl] = useState<string | null>(null);
+  const [ollamaModel, setOllamaModel] = useState<string | null>(null);
+  const [saving, setSaving] = useState<"openrouter" | "ollama" | null>(null);
+  const [switching, setSwitching] = useState<"openrouter" | "ollama" | null>(null);
+  const [errors, setErrors] = useState<Partial<Record<"openrouter" | "ollama" | "openrouterSwitch" | "ollamaSwitch", string>>>({});
+  const openRouterOn = isOpenRouterOn(profile);
+  const ollamaOn = isOllamaOn(profile);
+  const openRouterConfigured = profile.openrouterConfigured || Boolean(profile.openrouterMasked);
+  // Drafts are null until typed, so a saved value keeps showing and a save in one box never touches the other.
+  const modelDraft = openRouterModel ?? profile.textModelId;
+  const urlDraft = ollamaUrl ?? profile.ollamaUrl ?? "";
+  const ollamaModelDraft = ollamaModel ?? profile.ollamaModel ?? "";
+  const openRouterDirty = openRouterKey !== "" || openRouterModel !== null;
+  const ollamaDirty = ollamaUrl !== null || ollamaModel !== null;
+  const setError = (key: keyof typeof errors, message: string | undefined) => setErrors((current) => ({ ...current, [key]: message }));
+  // Sends the identity fields every save needs, so a partial save never resets them.
+  const identity = { name: profile.name, youtubeMetadataModelId: profile.youtubeMetadataModelId, persistence: profile.persistence, selected: profile.selected };
+
+  const saveOpenRouter = async () => {
+    setSaving("openrouter"); setError("openrouter", undefined);
+    try {
+      await saveProfile({ ...identity, textModelId: modelDraft.trim(), openrouterKey: openRouterKey || undefined }, profile.id);
+      setOpenRouterKey(""); setOpenRouterModel(null);
+      await onChanged();
+      await onTest(profile.id);
+    } catch (cause) { setError("openrouter", readableError(cause)); }
+    finally { setSaving(null); }
+  };
+  const saveOllama = async () => {
+    setSaving("ollama"); setError("ollama", undefined);
+    try {
+      await saveProfile({ ...identity, textModelId: profile.textModelId, ollamaUrl: urlDraft.trim(), ollamaModel: ollamaModelDraft.trim() }, profile.id);
+      setOllamaUrl(null); setOllamaModel(null);
+      await onChanged();
+      await onTest(profile.id);
+    } catch (cause) { setError("ollama", readableError(cause)); }
+    finally { setSaving(null); }
+  };
+  // The switch saves on its own and makes no provider call. The reload after it shows the saved state on failure too.
+  const setSwitch = async (provider: "openrouter" | "ollama", enabled: boolean) => {
+    setSwitching(provider); setError(`${provider}Switch`, undefined);
+    try {
+      await saveProfile({ ...identity, textModelId: profile.textModelId, ...(provider === "openrouter" ? { openrouterEnabled: enabled } : { ollamaEnabled: enabled }) }, profile.id);
+    } catch (cause) { setError(`${provider}Switch`, readableError(cause)); }
+    finally { setSwitching(null); await onChanged(); }
+  };
+
+  return <div className="provider-boxes">
+    <ProviderBox provider="OpenRouter" enabled={openRouterOn} busy={switching === "openrouter"} error={errors.openrouterSwitch ?? null} onEnabledChange={(enabled) => void setSwitch("openrouter", enabled)}>
+      <OpenRouterFields disabled={!openRouterOn || saving === "openrouter"} savedMasked={profile.openrouterMasked ?? null} apiKey={openRouterKey} onApiKeyChange={setOpenRouterKey} model={modelDraft} onModelChange={setOpenRouterModel} />
+      {!openRouterOn
+        ? <p className="provider-off">Off. Not used for new jobs. Saved settings are kept.</p>
+        : <div className="provider-results"><ConnectionResult service="OpenRouter" status={testing && openRouterConfigured ? "checking" : openRouterConfigured ? profile.textStatus : "not_configured"} message={openRouterConfigured ? profile.textMessage : "No API key saved."} lastCheckedAt={openRouterConfigured ? profile.textLastCheckedAt : null} /></div>}
+      {errors.openrouter && <p className="form-error" role="alert">{errors.openrouter}</p>}
+      <div className="provider-box-actions"><Button variant="primary" disabled={!openRouterOn || !openRouterDirty || !modelDraft.trim() || saving !== null || switching !== null} onClick={() => void saveOpenRouter()}>{saving === "openrouter" ? "Saving and testing…" : "Save and test"}</Button></div>
+    </ProviderBox>
+    <ProviderBox provider="Ollama" enabled={ollamaOn} busy={switching === "ollama"} error={errors.ollamaSwitch ?? null} onEnabledChange={(enabled) => void setSwitch("ollama", enabled)}>
+      <OllamaFields disabled={!ollamaOn || saving === "ollama"} url={urlDraft} onUrlChange={setOllamaUrl} model={ollamaModelDraft} onModelChange={setOllamaModel} />
+      {!ollamaOn
+        ? <p className="provider-off">Off. Not used for new jobs. Saved settings are kept.</p>
+        : profile.ollamaUrl
+          ? <div className="provider-results"><ConnectionResult service="Ollama" status={testing ? "checking" : profile.ollamaStatus ?? "not_configured"} message={profile.ollamaMessage} lastCheckedAt={profile.ollamaLastCheckedAt} /></div>
+          : <p className="provider-note">No endpoint saved.</p>}
+      {errors.ollama && <p className="form-error" role="alert">{errors.ollama}</p>}
+      <div className="provider-box-actions"><Button variant="primary" disabled={!ollamaOn || !ollamaDirty || saving !== null || switching !== null} onClick={() => void saveOllama()}>{saving === "ollama" ? "Saving and testing…" : "Save and test"}</Button></div>
+    </ProviderBox>
+  </div>;
+}
+
 function ProfileForm({ initial, onUseFastLocal, onCancel, onSaved }: { initial?: ProviderProfile; onUseFastLocal?: () => void; onCancel: () => void; onSaved: () => void }) {
   const [name, setName] = useState(initial?.name || "My profile");
-  const [textModelId, setTextModelId] = useState(initial?.textModelId || "openai/gpt-4.1-mini");
-  const [youtubeMetadataModelId] = useState(initial?.youtubeMetadataModelId || "google/gemini-2.5-flash-lite");
-  const [openrouterKey, setOpenrouterKey] = useState("");
-  const [ollamaUrl, setOllamaUrl] = useState(initial?.ollamaUrl || "");
-  const [ollamaModel, setOllamaModel] = useState(initial?.ollamaModel || "");
   const [persistence, setPersistence] = useState<"encrypted" | "session">(initial?.persistence || "encrypted");
-  const [showKey, setShowKey] = useState(false);
+  const [textModelId, setTextModelId] = useState("openai/gpt-4.1-mini");
+  const [openrouterKey, setOpenrouterKey] = useState("");
+  const [openrouterOn, setOpenrouterOn] = useState(true);
+  const [ollamaUrl, setOllamaUrl] = useState("");
+  const [ollamaModel, setOllamaModel] = useState("");
+  const [ollamaOn, setOllamaOn] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const submit = async () => {
     setBusy(true); setError(null);
     try {
-      const saved = await saveProfile({ name, textModelId, youtubeMetadataModelId, openrouterKey: openrouterKey || undefined, ollamaUrl: ollamaUrl.trim(), ollamaModel: ollamaModel.trim(), persistence, selected: initial?.selected ?? true }, initial?.id);
+      const shared = { name, persistence, selected: initial?.selected ?? true };
+      // Editing sends only name and storage; omitted fields keep the saved key, endpoint, switches and model.
+      const payload = initial
+        ? { ...shared, textModelId: initial.textModelId }
+        : { ...shared, textModelId, youtubeMetadataModelId: "google/gemini-2.5-flash-lite", openrouterKey: openrouterKey || undefined, openrouterEnabled: openrouterOn, ollamaUrl: ollamaUrl.trim(), ollamaModel: ollamaModel.trim(), ollamaEnabled: ollamaOn };
+      const saved = await saveProfile(payload, initial?.id);
       await testProfile(saved.id); onSaved();
     } catch (cause) { setError(readableError(cause)); } finally { setBusy(false); }
   };
-  return <div className="profile-form"><div className="profile-form-title"><div><strong>{initial ? "Edit OpenRouter profile" : "New OpenRouter profile"}</strong><p>One backend-held credential supports optional text planning.</p></div><button type="button" onClick={onCancel} aria-label="Close provider form"><X size={16} /></button></div><div className="profile-security-note"><LockKeyhole size={14} /><span>Saved secrets are never loaded back into this form.</span></div><div className="profile-form-grid">
+  return <div className="profile-form"><div className="profile-form-title"><div><strong>{initial ? "Edit OpenRouter profile" : "New OpenRouter profile"}</strong><p>{initial ? "Rename this profile or change how its secrets are stored. Keys and endpoints are edited in each provider box." : "One profile can hold an OpenRouter key, an Ollama endpoint, or both."}</p></div><button type="button" onClick={onCancel} aria-label="Close provider form"><X size={16} /></button></div><div className="profile-security-note"><LockKeyhole size={14} /><span>Saved secrets are never loaded back into this form.</span></div><div className="profile-form-grid">
     <Field label="Profile name"><input value={name} onChange={(event) => setName(event.target.value)} placeholder="My OpenRouter profile" /></Field>
     <Field label="Secret storage" hint="Encrypted persists across restarts. Session-only is cleared when the engine stops."><select value={persistence} onChange={(event) => setPersistence(event.target.value as typeof persistence)}><option value="encrypted">Encrypted persistent</option><option value="session">This engine session only</option></select></Field>
-    <div className="provider-fieldset"><div><strong>OpenRouter</strong><span>Optional external provider for text planning. Local cutting remains available without it.</span></div><Field label="OpenRouter API key" hint={initial?.openrouterMasked ? `Saved value: ${initial.openrouterMasked}. Leave blank to keep it.` : "The raw key is never returned after saving."}><div className="secret-input"><input type={showKey ? "text" : "password"} autoComplete="new-password" value={openrouterKey} onChange={(event) => setOpenrouterKey(event.target.value)} placeholder="sk-or-v1-…" /><button type="button" onClick={() => setShowKey(!showKey)} aria-label={`${showKey ? "Hide" : "Show"} OpenRouter API key`}>{showKey ? <EyeOff size={15} /> : <Eye size={15} />}</button></div></Field><Field label="Text-generation model"><input value={textModelId} onChange={(event) => setTextModelId(event.target.value)} placeholder="openai/gpt-4.1-mini" /></Field></div>
-  <div className="provider-fieldset"><div><strong>Ollama</strong><span>Use your own Ollama server instead of OpenRouter. Leave blank to hide it on Projects.</span></div><Field label="Ollama endpoint" hint="Use your Ollama server's address. localhost means the S6_cut container."><input value={ollamaUrl} onChange={(event) => setOllamaUrl(event.target.value)} placeholder="http://host.docker.internal:11434" /></Field><Field label="Ollama model" hint="Leave blank to detect and test the smallest available chat model."><input value={ollamaModel} onChange={(event) => setOllamaModel(event.target.value)} placeholder="Auto-detect available model" /></Field></div></div>{error && <p className="form-error" role="alert">{error}</p>}<div className="form-actions">{onUseFastLocal && <Button variant="ghost" onClick={onUseFastLocal}>Use local cutting without API</Button>}<Button onClick={onCancel}>Cancel</Button><Button variant="primary" disabled={busy || !name.trim()} onClick={submit}>{busy ? "Saving and testing…" : "Save and test connection"}</Button></div></div>;
+  </div>{!initial && <div className="provider-boxes">
+    <ProviderBox provider="OpenRouter" enabled={openrouterOn} onEnabledChange={setOpenrouterOn}><OpenRouterFields disabled={!openrouterOn} savedMasked={null} apiKey={openrouterKey} onApiKeyChange={setOpenrouterKey} model={textModelId} onModelChange={setTextModelId} /></ProviderBox>
+    <ProviderBox provider="Ollama" enabled={ollamaOn} onEnabledChange={setOllamaOn}><OllamaFields disabled={!ollamaOn} url={ollamaUrl} onUrlChange={setOllamaUrl} model={ollamaModel} onModelChange={setOllamaModel} /></ProviderBox>
+  </div>}{error && <p className="form-error" role="alert">{error}</p>}<div className="form-actions">{onUseFastLocal && <Button variant="ghost" onClick={onUseFastLocal}>Use local cutting without API</Button>}<Button onClick={onCancel}>Cancel</Button><Button variant="primary" disabled={busy || !name.trim() || (!initial && openrouterOn && !textModelId.trim())} onClick={submit}>{busy ? "Saving and testing…" : "Save and test connection"}</Button></div></div>;
 }
 
 function Capability({ icon, name, ready, fallback }: { icon: React.ReactNode; name: string; ready: boolean; fallback: string }) {

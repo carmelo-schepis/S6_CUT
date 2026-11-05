@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assetSchema, beatSchema, clipSchema, jobSchema, profileSchema, projectSchema, titleSuggestionResponseSchema, musicPresentationSchema, editingPresentationSchema, processingModeSchema, processingStepSchema, sourceProfileSchema, musicAudioModeSchema } from "./types";
+import { isOllamaOn, isOpenRouterOn, assetSchema, beatSchema, clipSchema, jobSchema, profileSchema, projectSchema, titleSuggestionResponseSchema, musicPresentationSchema, editingPresentationSchema, processingModeSchema, processingStepSchema, sourceProfileSchema, musicAudioModeSchema } from "./types";
 
 const score = {
   hook: 80, coherence: 82, ending: 79, energy: 70, practicalValue: 75,
@@ -224,5 +224,17 @@ describe("versioned UI contracts", () => {
     const response = titleSuggestionResponseSchema.parse({ suggestions: [{ kind: "project", assetId: null, projectId: "p", currentTitle: "YouTube import — x", suggestedTitle: "Better", suggestedDescription: "", revision: null }], skipped: [{ assetId: "a", projectId: null, title: "T", reason: "Already reviewed" }], costUsd: 0, costKind: "estimated", model: null, requests: 0, aiAvailable: false, warning: null });
     expect(response.suggestions[0].kind).toBe("project");
     expect(response.skipped[0].reason).toBe("Already reviewed");
+  });
+});
+
+describe("provider switches", () => {
+  it("keeps both switches parsed, and treats a missing switch as on", () => {
+    const base = { id: "p", name: "P", textModelId: "m", selected: true, persistence: "encrypted", openrouterConfigured: true, status: "configured", capabilities: [], fallbacks: {} };
+    expect(profileSchema.parse({ ...base, openrouterEnabled: false, ollamaEnabled: true })).toMatchObject({ openrouterEnabled: false, ollamaEnabled: true });
+    expect(isOpenRouterOn(profileSchema.parse(base))).toBe(true);
+    expect(isOllamaOn(profileSchema.parse(base))).toBe(true);
+    expect(isOpenRouterOn({ openrouterEnabled: false })).toBe(false);
+    expect(isOllamaOn({ ollamaEnabled: false })).toBe(false);
+    expect(isOllamaOn(null)).toBe(true);
   });
 });

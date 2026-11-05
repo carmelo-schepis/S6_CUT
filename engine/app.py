@@ -491,7 +491,7 @@ async def create_clip_job(
     cap_explanation: str | None = None
     smart_available = profiles.smart_available()
     if execution_policy == "ollama" and not profiles.ollama_available():
-        raise HTTPException(422, "Add an Ollama endpoint in Settings first.")
+        raise HTTPException(422, "Add or turn on an Ollama endpoint in Settings first.")
     # The chosen job provider decides readiness: Ollama when selected, otherwise the OpenRouter profile.
     provider_ready = execution_policy == "ollama" or smart_available
     # Auto keeps local transcription available when the optional provider is absent.

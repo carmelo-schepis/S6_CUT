@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, Film, Plus, Sparkles, Zap } from "lucide-react";
 import { createClipJob, createFolder, listFolders, readableError } from "../api";
-import { DEFAULT_SUBSCRIBE_ANIMATION, type BatchMode, type ContentFormat, type Health, type LibraryFolder, type ProcessingMode, type Project, type ProviderProfile, type SourceProfile, type Style, type SubscribeAnimationConfig, type MusicTheme, type MusicLyricAnimation, type MusicHookTextFormat, type CaptionPreset, type VideoFilter, type HeadingStyle, type EmojiMode, type MusicAudioMode } from "../types";
+import { DEFAULT_SUBSCRIBE_ANIMATION, isOllamaOn, type BatchMode, type ContentFormat, type Health, type LibraryFolder, type ProcessingMode, type Project, type ProviderProfile, type SourceProfile, type Style, type SubscribeAnimationConfig, type MusicTheme, type MusicLyricAnimation, type MusicHookTextFormat, type CaptionPreset, type VideoFilter, type HeadingStyle, type EmojiMode, type MusicAudioMode } from "../types";
 import { Button, Field, FieldGroup, StepBadge, useSingleFlight } from "./common";
 import { VideoSourcePicker } from "./video-source-picker";
 import { OptionRow } from "./option-row";
@@ -58,7 +58,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
   const [processingMode, setProcessingMode] = useState<ProcessingMode>("auto");
   const [executionPolicy, setExecutionPolicy] = useState<"auto" | "engine_only" | "ollama">("auto");
   // Ollama exists only while the selected profile has an endpoint; otherwise fall back to Auto.
-  const ollamaReady = Boolean(selectedProfile?.ollamaUrl);
+  const ollamaReady = Boolean(selectedProfile?.ollamaUrl) && isOllamaOn(selectedProfile);
   const effectivePolicy = executionPolicy === "ollama" && !ollamaReady ? "auto" : executionPolicy;
   // Forget an Ollama choice once its endpoint is removed, so re-adding one does not silently reselect it.
   const [previousOllamaReady, setPreviousOllamaReady] = useState(ollamaReady);

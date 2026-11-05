@@ -3165,21 +3165,32 @@ input[type="checkbox"]:checked::before {
 .profile-storage dt, .profile-storage dd { margin: 0; }
 .profile-storage dd { display: inline-flex; align-items: center; gap: 4px; }
 .profile-actions { flex-wrap: wrap; justify-content: flex-end; }
-.profile-provider-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); min-width: 0; }
-.profile-provider { display: grid; align-content: start; gap: var(--space-2); min-width: 0; }
-.profile-provider + .profile-provider { padding-left: var(--space-4); border-left: 1px solid var(--border); }
-.profile-provider h3 { margin: 0; color: var(--text); font-size: var(--type-heading-size); font-weight: var(--type-heading-weight); line-height: var(--type-heading-line); letter-spacing: var(--type-heading-tracking); }
-.provider-details { display: grid; gap: var(--space-2); margin: 0; min-width: 0; }
-.provider-details > div { display: grid; gap: 2px; min-width: 0; }
-.provider-details dt { color: var(--text-muted); }
-.provider-details dd { display: block; margin: 0; min-width: 0; color: var(--text-primary); font-weight: var(--type-emphasis-weight); overflow-wrap: anywhere; }
-.profile-provider .provider-results { margin-top: 0; }
-.profile-provider .connection-result { display: grid; align-items: start; gap: 2px; }
-.profile-provider .connection-result small { display: block; }
-.profile-provider .connection-result span { overflow-wrap: anywhere; }
+/* Provider boxes: OpenRouter and Ollama each get one rounded box with its own switch. Space separates them, not rules. */
+.provider-boxes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: var(--space-4); min-width: 0; margin-top: var(--space-4); }
+.provider-box { display: grid; align-content: start; gap: var(--space-3); min-width: 0; padding: var(--space-4); border: 1px solid var(--box-edge); border-top-color: var(--box-edge-top); border-radius: var(--box-radius); background: var(--box-bg); }
+.provider-box-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); min-width: 0; }
+.provider-box h3 { margin: 0; min-width: 0; color: var(--text); font-size: var(--type-heading-size); font-weight: var(--type-heading-weight); line-height: var(--type-heading-line); letter-spacing: var(--type-heading-tracking); overflow-wrap: anywhere; }
+.provider-box .field { min-width: 0; }
+.provider-box input:not([type="checkbox"]) { width: 100%; min-width: 0; }
+.provider-box-actions { display: flex; justify-content: flex-end; }
+.provider-results { display: grid; gap: 2px; min-width: 0; }
+.provider-results .connection-result { display: grid; align-items: start; gap: 2px; }
+.provider-results .connection-result small { display: block; }
+.provider-results .connection-result span { overflow-wrap: anywhere; }
+.provider-off, .provider-note { margin: 0; color: var(--text-primary); overflow-wrap: anywhere; }
+.provider-switch { position: relative; display: inline-flex; align-items: center; gap: var(--space-2); min-height: 44px; min-width: 44px; cursor: pointer; color: var(--text-primary); }
+.provider-switch input[type="checkbox"] { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; appearance: none; -webkit-appearance: none; }
+.provider-switch input[type="checkbox"]::before { content: none; }
+.provider-switch input[type="checkbox"]:disabled { cursor: default; }
+.provider-switch-track { position: relative; flex: 0 0 auto; pointer-events: none; width: 36px; height: 20px; border: 1px solid var(--control-border); border-radius: 999px; background: var(--surface-3); transition: background-color 150ms ease, border-color 150ms ease; }
+.provider-switch-track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--text-primary); transition: transform 150ms ease; }
+.provider-switch input:checked + .provider-switch-track { background: var(--theme-primary); border-color: var(--theme-primary); }
+.provider-switch input:checked + .provider-switch-track::after { transform: translateX(16px); background: var(--canvas); }
+.provider-switch input:focus-visible + .provider-switch-track { outline: 2px solid var(--selector-highlight-hover); outline-offset: 2px; }
+.provider-switch input:disabled + .provider-switch-track { opacity: .5; }
+.provider-switch-word { color: var(--text-primary); font-weight: var(--type-emphasis-weight); }
 @container (max-width: 680px) {
-  .profile-provider-grid { grid-template-columns: minmax(0, 1fr); }
-  .profile-provider + .profile-provider { padding: var(--space-3) 0 0; border-left: 0; border-top: 1px solid var(--border); }
+  .provider-boxes { grid-template-columns: minmax(0, 1fr); }
 }
 .profile-form { margin-top: var(--space-6); padding: 0; }
 .provider-fieldset { padding: 0; margin: var(--space-6) 0 0; }

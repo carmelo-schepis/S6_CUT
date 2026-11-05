@@ -17,6 +17,7 @@ import { onLibraryChanged } from "./library-sync";
 import { usePoll } from "./use-poll";
 import { revealApp, revealWhenReady } from "./startup";
 import type { Health, Job, Project, ProviderProfile } from "./types";
+import { isOllamaOn, isOpenRouterOn } from "./types";
 
 type Page = "projects" | "library" | "workspace" | "shorts-editor" | "jobs" | "settings";
 
@@ -288,7 +289,7 @@ export function App() {
   const activityDescription = activity
     ? `${activity.remainingClips} clip${activity.remainingClips === 1 ? "" : "s"} remaining across ${activity.liveJobCount} active job${activity.liveJobCount === 1 ? "" : "s"}`
     : "";
-  const hasSelectedProvider = profiles.some((profile) => profile.selected && profile.openrouterConfigured && profile.textStatus === "connected");
+  const hasSelectedProvider = profiles.some((profile) => profile.selected && profile.openrouterConfigured && profile.textStatus === "connected" && isOpenRouterOn(profile));
   const openProviders = () => setPage("settings");
 
   if (iosViewer) return <Suspense fallback={null}><MobileApp /></Suspense>;
@@ -366,7 +367,7 @@ export function App() {
       <main id="main-content" tabIndex={-1}>
         {page === "projects" && <ProjectsView onReady={onProjectsReady} health={health} healthChecked={healthChecked} providersLoaded={profilesLoaded} hasSelectedProvider={hasSelectedProvider} selectedProfile={profiles.find((profile) => profile.selected) || null} onConfigureProviders={openProviders} onCreated={onCreated} onSelectLibraryAsset={openLibraryAsset} />}
         {page === "library" && <LibraryView selectedAssetId={selectedLibraryAssetId} />}
-        {page === "workspace" && <WorkspaceView key={`${workspaceProject?.id || "none"}:${workspaceProject?.latestJobId || "none"}`} project={workspaceProject} providersLoaded={profilesLoaded} hasSelectedProvider={hasSelectedProvider || Boolean(profiles.find((profile) => profile.selected)?.ollamaUrl)} onConfigureProviders={openProviders} onProjectUpdated={refresh} onGoProjects={() => setPage("projects")} />}
+        {page === "workspace" && <WorkspaceView key={`${workspaceProject?.id || "none"}:${workspaceProject?.latestJobId || "none"}`} project={workspaceProject} providersLoaded={profilesLoaded} hasSelectedProvider={hasSelectedProvider || Boolean(profiles.find((profile) => profile.selected && isOllamaOn(profile))?.ollamaUrl)} onConfigureProviders={openProviders} onProjectUpdated={refresh} onGoProjects={() => setPage("projects")} />}
         {page === "shorts-editor" && <ShortsEditorView onJobCreated={refresh} />}
         {page === "jobs" && <JobsView jobs={jobs} onRefresh={runJobs} onOpenProject={openProject} />}
         {page === "settings" && <SettingsView health={health} onHealthRefresh={refresh} onProfilesChanged={setProfiles} onSkipSetup={() => setPage("projects")} />}

@@ -605,6 +605,9 @@ class ProfileInput(ApiModel):
     # None keeps the saved value; "" clears it. The URL is not a secret.
     ollama_url: str | None = Field(default=None, max_length=500)
     ollama_model: str | None = Field(default=None, max_length=200)
+    # None keeps the saved switch; the stored JSON gains these keys, so no migration.
+    openrouter_enabled: bool | None = None
+    ollama_enabled: bool | None = None
     persistence: Literal["session", "encrypted"] = "encrypted"
     selected: bool = False
 
@@ -651,6 +654,8 @@ class ProviderProfile(ApiModel):
     ollama_status: ProviderConnectionStatus = "not_configured"
     ollama_message: str | None = None
     ollama_last_checked_at: str | None = None
+    openrouter_enabled: bool = True
+    ollama_enabled: bool = True
     status: str
     capabilities: list[str]
     fallbacks: dict[str, str]

@@ -594,4 +594,15 @@ describe("Ollama execution option", () => {
     fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
     await waitFor(() => expect(mockCreateClipJob).toHaveBeenCalledWith(expect.objectContaining({ executionPolicy: "auto" })));
   });
+
+  it("hides Ollama while its switch is off and returns to Auto, without reselecting it when switched back on", () => {
+    const { rerender } = render(<ProjectsView health={health} onCreated={vi.fn()} selectedProfile={ollamaProfile} hasSelectedProvider={false} />);
+    openOptions();
+    fireEvent.click(screen.getByRole("button", { name: "Ollama" }));
+    rerender(<ProjectsView health={health} onCreated={vi.fn()} selectedProfile={{ ...ollamaProfile, ollamaEnabled: false }} hasSelectedProvider={false} />);
+    expect(screen.queryByRole("button", { name: "Ollama" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Auto · API with local fallback/ })).toHaveAttribute("aria-pressed", "true");
+    rerender(<ProjectsView health={health} onCreated={vi.fn()} selectedProfile={{ ...ollamaProfile, ollamaEnabled: true }} hasSelectedProvider={false} />);
+    expect(screen.getByRole("button", { name: "Ollama" })).toHaveAttribute("aria-pressed", "false");
+  });
 });
