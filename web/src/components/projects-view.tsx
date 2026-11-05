@@ -357,7 +357,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
               <div className="segmented mode-tabs" aria-label="Execution policy">
                 <button type="button" aria-pressed={effectivePolicy === "auto"} className={effectivePolicy === "auto" ? "active" : ""} onClick={() => setExecutionPolicy("auto")}>Auto · API with local fallback</button>
                 <button type="button" aria-pressed={effectivePolicy === "engine_only"} className={effectivePolicy === "engine_only" ? "active" : ""} onClick={() => setExecutionPolicy("engine_only")}>Engine only</button>
-                {ollamaReady && <button type="button" aria-pressed={effectivePolicy === "ollama"} className={effectivePolicy === "ollama" ? "active" : ""} onClick={() => setExecutionPolicy("ollama")}>Ollama</button>}
+                {ollamaReady && <button type="button" aria-pressed={effectivePolicy === "ollama"} className={effectivePolicy === "ollama" ? "active" : ""} onClick={() => setExecutionPolicy("ollama")}>Local model</button>}
               </div>
               <p className="form-hint">{effectivePolicy === "engine_only" ? "All processing stays on this machine; no API calls are made." : effectivePolicy === "ollama" ? "Uses your Ollama server for supported text features and falls back to local processing. OpenRouter is not used." : "Uses a connected API for supported text features and falls back to local processing."}</p>
             </FieldGroup>

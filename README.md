@@ -152,6 +152,7 @@ An Ollama server can be used instead of OpenRouter for a single project. Add its
 Smart-mode transcription runs locally with Faster-Whisper. The CPU-friendly defaults (`cpu` + `int8` + beam 1) keep memory low and decode fast; raise the model size or beam only when you need more accuracy and have CPU/RAM headroom:
 
 - `S6_WHISPER_MODEL=base` or `small` is the sweet spot on 8 GB hosts; `medium`/`large-v3` need noticeably more RAM and time.
+- Speech audio over 20 minutes is transcribed in 15-minute overlapping windows so memory stays flat on long videos; music is always one pass.
 - On an NVIDIA GPU, set `S6_WHISPER_DEVICE=cuda` with `S6_WHISPER_COMPUTE_TYPE=float16` for the fastest decode.
 - `S6_WHISPER_WORD_TIMESTAMPS=false` skips per-word alignment (faster) but disables word-timed captions; keep it `true` for captioned clips.
 

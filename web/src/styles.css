@@ -3166,13 +3166,13 @@ input[type="checkbox"]:checked::before {
 .profile-storage dd { display: inline-flex; align-items: center; gap: 4px; }
 .profile-actions { flex-wrap: wrap; justify-content: flex-end; }
 /* Provider boxes: OpenRouter and Ollama each get one rounded box with its own switch. Space separates them, not rules. */
-.provider-boxes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: var(--space-4); min-width: 0; margin-top: var(--space-4); }
-.provider-box { display: grid; align-content: start; gap: var(--space-3); min-width: 0; padding: var(--space-4); border: 1px solid var(--box-edge); border-top-color: var(--box-edge-top); border-radius: var(--box-radius); background: var(--box-bg); }
+.provider-boxes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; gap: var(--space-4); min-width: 0; margin-top: var(--space-4); }
+.provider-box { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; padding: var(--space-4); border: 1px solid var(--box-edge); border-top-color: var(--box-edge-top); border-radius: var(--box-radius); background: var(--box-bg); }
 .provider-box-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); min-width: 0; }
 .provider-box h3 { margin: 0; min-width: 0; color: var(--text); font-size: var(--type-heading-size); font-weight: var(--type-heading-weight); line-height: var(--type-heading-line); letter-spacing: var(--type-heading-tracking); overflow-wrap: anywhere; }
 .provider-box .field { min-width: 0; }
 .provider-box input:not([type="checkbox"]) { width: 100%; min-width: 0; }
-.provider-box-actions { display: flex; justify-content: flex-end; }
+.provider-box-actions { display: flex; justify-content: flex-end; margin-top: auto; }
 .provider-results { display: grid; gap: 2px; min-width: 0; }
 .provider-results .connection-result { display: grid; align-items: start; gap: 2px; }
 .provider-results .connection-result small { display: block; }

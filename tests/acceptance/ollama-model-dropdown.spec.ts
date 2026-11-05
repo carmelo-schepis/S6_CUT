@@ -5,7 +5,7 @@
  */
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const run = promisify(execFile);
 const enabled = process.env.S6_RUN_OLLAMA === "1";
@@ -231,4 +231,32 @@ test("the dropdown captures each state for review at 1440px", async ({ page }, t
   await expect(box.getByRole("option", { name: /llama3\.2/ })).toBeVisible();
   await page.screenshot({ path: test.info().outputPath("ollama-dropdown-open-1440.png") });
   await field.press("Escape");
+});
+
+test("both provider boxes are equal height at 1440px, Save buttons line up when OpenRouter is on or off, and the stack fits 390px", async ({ page }, testInfo) => {
+  test.setTimeout(300_000);
+  const name = `Equal ${runId}-${testInfo.project.name.split(" ")[0]}`;
+  await setServerModels(null);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await openSettings(page);
+  const row = await createOllamaProfile(page, name);
+  const boxes = row.locator(".provider-box");
+  const saves = row.getByRole("button", { name: "Save and test" });
+  const box = async (locator: Locator) => (await locator.boundingBox()) ?? { x: 0, y: 0, width: 0, height: 0 };
+  const check = async (state: string) => {
+    const [openRouter, ollama] = [await box(boxes.nth(0)), await box(boxes.nth(1))];
+    expect(Math.abs(openRouter.height - ollama.height), `${state}: box heights`).toBeLessThanOrEqual(1);
+    const [saveOpenRouter, saveOllama] = [await box(saves.nth(0)), await box(saves.nth(1))];
+    expect(Math.abs(saveOpenRouter.y - saveOllama.y), `${state}: Save buttons`).toBeLessThanOrEqual(1);
+  };
+  await check("both on");
+  await row.getByRole("region", { name: "OpenRouter" }).getByRole("switch", { name: "Use OpenRouter" }).click();
+  await expect(row.getByRole("region", { name: "OpenRouter" }).getByRole("switch", { name: "Use OpenRouter" })).not.toBeChecked();
+  await check("OpenRouter off");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(boxes.nth(1)).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  const [first, second] = [await box(boxes.nth(0)), await box(boxes.nth(1))];
+  expect(second.y).toBeGreaterThanOrEqual(first.y + first.height - 1);
+  await page.setViewportSize({ width: 1440, height: 1000 });
 });
