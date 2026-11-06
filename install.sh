@@ -18,7 +18,7 @@
 #   S6_START_TIMEOUT  seconds to wait for startup (default: 300)
 #   S6_FORCE_RECREATE force recreate containers   (default: false)
 
-set -euo pipefail
+set -Eeuo pipefail
 
 INSTALL_DIR="${S6_INSTALL_DIR:-$HOME/s6_cut}"
 REPO_URL="${S6_REPO_URL:-https://github.com/carmelo-schepis/S6_CUT.git}"
@@ -182,12 +182,42 @@ prepare_environment() {
 
 start_containers() {
   CURRENT_STEP="building and starting the containers"
+  local engine_port output status assigned_port
+  local -a up_args=(-d)
+  engine_port="$(read_env S6_ENGINE_PORT 8001)"
+  if [[ "$FORCE_RECREATE" == "true" ]]; then
+    up_args+=(--force-recreate)
+  fi
+  output="$(mktemp)"
   step "Building S6_cut (the first build can take several minutes)..."
   step "Starting containers..."
-  if [[ "$FORCE_RECREATE" == "true" ]]; then
-    docker compose up -d --build --force-recreate
+  if docker compose up "${up_args[@]}" --build 2>&1 | tee "$output"; then
+    rm -f "$output"
   else
-    docker compose up -d --build
+    status=$?
+    # Only recover the default engine binding. An explicitly exported port or
+    # a custom .env port belongs to the user; unrelated failures must stay fatal.
+    if [[ "$engine_port" == "8001" && -z "${S6_ENGINE_PORT+x}" ]] &&
+      grep -Eq '127\.0\.0\.1:8001.*(address already in use|port is already allocated)' "$output"; then
+      rm -f "$output"
+      warn "Engine port 8001 is already in use; asking Docker for a free loopback port."
+      # Port 0 lets Docker allocate an available host port atomically. Internal
+      # engine:8001 networking is unchanged, and the built images are reused.
+      S6_ENGINE_PORT=0 docker compose up "${up_args[@]}" --no-build
+      assigned_port="$(S6_ENGINE_PORT=0 docker compose port engine 8001)"
+      assigned_port="${assigned_port##*:}"
+      if [[ ! "$assigned_port" =~ ^[0-9]+$ ]] ||
+        (( 10#$assigned_port < 1 || 10#$assigned_port > 65535 )); then
+        die "Could not determine Docker's assigned engine port. Run 'docker compose port engine 8001' to inspect it."
+      fi
+      # Append the override without rewriting existing configuration or secrets.
+      printf '\n# Installer-selected port: the default 8001 was occupied.\nS6_ENGINE_PORT=%s\n' "$assigned_port" >> .env
+      ok "Engine loopback port $assigned_port saved in .env"
+    else
+      rm -f "$output"
+      warn "If a published port is occupied, change S6_ENGINE_PORT or S6_PORT in $INSTALL_DIR/.env and re-run the installer."
+      return "$status"
+    fi
   fi
   ok "Containers started"
 }
