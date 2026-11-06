@@ -195,7 +195,7 @@ function Resolve-WebBinding {
 
     $UrlHost = if (-not $Address -or $Address -eq "0.0.0.0") { "localhost" } else { $Address }
     $HealthHost = if (-not $Address -or $Address -eq "0.0.0.0") { "127.0.0.1" } else { $Address }
-    return [PSCustomObject]@{ Port = $Port; UrlHost = $UrlHost; HealthHost = $HealthHost }
+    return [PSCustomObject]@{ Address = $Address; Port = $Port; UrlHost = $UrlHost; HealthHost = $HealthHost }
 }
 
 function Get-ResolvedComposePort {
@@ -215,6 +215,23 @@ function Get-ResolvedComposePort {
         Die "Docker Compose did not resolve $SettingName to a published host port."
     }
     return [PSCustomObject]@{ HostIp = [string]$Mapping.host_ip; Published = $Published }
+}
+
+# Compose keeps the published port and host IP in separate fields. Preserve the
+# documented legacy S6_PORT=IP:port input by splitting it into Compose variables.
+$WebBindingInput = [Environment]::GetEnvironmentVariable("S6_PORT", "Process")
+if ([string]::IsNullOrWhiteSpace($WebBindingInput) -and (Test-Path -LiteralPath ".env")) {
+    $EnvLine = Get-Content -LiteralPath ".env" |
+        Where-Object { $_ -match '^\s*S6_PORT\s*[:=]\s*(.*?)\s*$' } |
+        Select-Object -First 1
+    if ($EnvLine -match '^\s*S6_PORT\s*[:=]\s*(.*?)\s*$') {
+        $WebBindingInput = $Matches[1].Trim().Trim('"').Trim("'")
+    }
+}
+if ($WebBindingInput -match '^(?<address>(?:\d{1,3}\.){3}\d{1,3}):(?<port>\d{1,5})$') {
+    $Web = Resolve-WebBinding -Binding $WebBindingInput
+    [Environment]::SetEnvironmentVariable("S6_PORT", [string]$Web.Port, "Process")
+    [Environment]::SetEnvironmentVariable("S6_HOST_IP", $Web.Address, "Process")
 }
 
 # Ask Compose to resolve .env syntax, interpolation, defaults, and process-env
