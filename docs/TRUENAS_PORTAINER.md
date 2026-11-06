@@ -28,7 +28,7 @@ Start with one worker. Transcription and H.264 composition consume substantial C
 2. Put the repository and `.env` in the source dataset.
 3. In Apps, choose **Discover Apps → Custom App → Install via YAML** (wording varies by SCALE release).
 4. Use Compose YAML with an `include` pointing at the repository `compose.yaml`, or paste the resolved Compose definition.
-5. Confirm only the `web` service maps `${S6_PORT}:8080`; the engine has no host port.
+5. Confirm the `web` service maps `${S6_PORT}:8080` and the engine maps `${S6_ENGINE_PORT}:8001` to host loopback only (`127.0.0.1`), not to a network interface.
 6. Confirm the absolute data dataset maps to `/app/data`.
 7. Install, wait through the two-minute model/runtime health start period, and open the web portal.
 8. Create a small permitted test project before importing large media.
