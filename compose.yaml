@@ -25,12 +25,37 @@ services:
     cap_drop:
       - ALL
 
+  # Docker creates a missing bind source as root, and the engine runs as 10001.
+  # Hands over only what is not already the engine's. A failure here (for
+  # example root-squashed NFS) is not fatal: the engine then reports the problem.
+  data-init:
+    build:
+      context: .
+      dockerfile: engine/Dockerfile
+    restart: "no"
+    user: "0:0"
+    network_mode: none
+    entrypoint: ["sh", "-c", "find /app/data ! -user 10001 -exec chown -h 10001:10001 {} + || true"]
+    volumes:
+      - type: bind
+        source: ${S6_DATA_PATH:-./data}
+        target: /app/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_READ_SEARCH
+
   engine:
     build:
       context: .
       dockerfile: engine/Dockerfile
     restart: unless-stopped
     depends_on:
+      data-init:
+        condition: service_completed_successfully
       pot-provider:
         condition: service_healthy
     environment:
