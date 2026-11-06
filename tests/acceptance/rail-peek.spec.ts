@@ -16,6 +16,8 @@ test.describe("rail peek", () => {
     test(`at ${viewport.width}px a chosen page is never left under the peeking rail`, async ({ page }) => {
       await page.setViewportSize(viewport);
       await page.goto("/", { waitUntil: "domcontentloaded" });
+      await expect(page.locator("#startup-screen")).toHaveCount(0);
+      await expect(page.locator("#root")).not.toHaveAttribute("inert", "");
       const rail = page.locator(".app-rail");
       await expect(rail).toBeVisible();
       // The pointer starts at (0, 0), which is on the rail; start from the page.
@@ -44,6 +46,8 @@ test.describe("rail peek", () => {
   test("crossing the rail without resting does not open it", async ({ page }) => {
     await page.setViewportSize({ width: 1024, height: 768 });
     await page.goto("/", { waitUntil: "domcontentloaded" });
+    await expect(page.locator("#startup-screen")).toHaveCount(0);
+    await expect(page.locator("#root")).not.toHaveAttribute("inert", "");
     const rail = page.locator(".app-rail");
     await expect(rail).toBeVisible();
     await page.mouse.move(1000, 700);
@@ -60,6 +64,8 @@ test.describe("rail peek", () => {
   test("keyboard focus still opens the folded rail", async ({ page }) => {
     await page.setViewportSize({ width: 1024, height: 768 });
     await page.goto("/", { waitUntil: "domcontentloaded" });
+    await expect(page.locator("#startup-screen")).toHaveCount(0);
+    await expect(page.locator("#root")).not.toHaveAttribute("inert", "");
     await expect(page.locator(".app-rail")).toBeVisible();
     await page.mouse.move(1000, 700);
     await expect.poll(() => railWidth(page)).toBeLessThan(100);
