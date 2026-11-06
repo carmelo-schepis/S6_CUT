@@ -29,7 +29,7 @@ Open **<http://localhost:8080>** when the installer finishes. It downloads, buil
 
 The installer downloads S6_cut into `~/s6_cut`, creates `.env` on first run, builds the containers, and waits for the app to become ready. Existing installations are updated in place, and your configuration and data are preserved. No GitHub account or API key is required.
 
-On Linux/macOS, if the default engine port `8001` is occupied, the installer retries using a free loopback port and saves that port in `.env`. The frontend URL stays the same. Explicitly exported engine ports and custom `.env` ports are respected; resolve conflicts for those by changing `S6_ENGINE_PORT` yourself.
+On Linux/macOS, if the default engine port `8001` or frontend port `8080` is occupied, the installer retries using a free host port and saves it in `.env`. The engine remains loopback-only. Open the Frontend URL printed when installation finishes; it includes any newly assigned web port. Explicitly exported ports and custom `.env` ports are respected; resolve conflicts for those by changing `S6_ENGINE_PORT` or `S6_PORT` yourself.
 
 Git is optional: the installer uses your existing Git installation when available, or runs Git inside Docker automatically. Node.js, Python, FFmpeg, and the other application dependencies are installed inside the application containers.
 
