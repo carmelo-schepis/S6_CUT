@@ -190,7 +190,9 @@ start_containers() {
   web_binding="$(read_env S6_PORT 8080)"
   [[ "$engine_port" == "8001" && -z "${S6_ENGINE_PORT+x}" ]] && engine_default=true
   [[ "$web_binding" == "8080" && -z "${S6_PORT+x}" ]] && web_default=true
-  if [[ "$FORCE_RECREATE" == "true" ]]; then
+  # A container whose start failed comes back without its network attachment,
+  # so a stack left in the created state by an earlier attempt must be recreated.
+  if [[ "$FORCE_RECREATE" == "true" ]] || [[ -n "$(docker compose ps -aq --status created 2>/dev/null)" ]]; then
     up_args+=(--force-recreate)
   fi
   output="$(mktemp)"
