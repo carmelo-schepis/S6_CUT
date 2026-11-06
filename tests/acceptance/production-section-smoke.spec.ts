@@ -1,5 +1,33 @@
 import { expect, test } from "@playwright/test";
 
+function isExpectedRequestCancellation(resourceType: string, url: string, errorText: string): boolean {
+  if (!["net::ERR_ABORTED", "Load request cancelled"].includes(errorText)) return false;
+  if (resourceType === "media") return true;
+  return resourceType === "eventsource" && /^\/api\/v1\/jobs\/[^/]+\/events$/.test(new URL(url).pathname);
+}
+
+test("request cancellation classification", () => {
+  const jobUrl = "http://localhost/api/v1/jobs/123/events?watch=1";
+  const cases: [string, string, string, boolean][] = [
+    ["eventsource", jobUrl, "net::ERR_ABORTED", true],
+    ["eventsource", jobUrl, "Load request cancelled", true],
+    ["media", "http://localhost/video", "net::ERR_ABORTED", true],
+    ["media", "http://localhost/video", "Load request cancelled", true],
+    ["eventsource", jobUrl, "net::ERR_CONNECTION_RESET", false],
+    ["eventsource", jobUrl, "", false],
+    ["eventsource", "http://localhost/api/other", "net::ERR_ABORTED", false],
+    ["eventsource", "http://localhost/api/v1/jobs/id/events/extra", "net::ERR_ABORTED", false],
+    ["fetch", jobUrl, "net::ERR_ABORTED", false],
+    ["xhr", jobUrl, "Load request cancelled", false],
+    ["script", "http://localhost/app.js", "net::ERR_ABORTED", false],
+    ["fetch", "http://localhost/api/data", "Load request cancelled", false],
+    ["media", "http://localhost/video", "net::ERR_CONNECTION_RESET", false],
+  ];
+  for (const [resourceType, url, errorText, expected] of cases) {
+    expect(isExpectedRequestCancellation(resourceType, url, errorText), `${resourceType} ${url} ${errorText}`).toBe(expected);
+  }
+});
+
 const sections = [
   ["Projects", "Projects"],
   ["Library", "Library"],
@@ -19,11 +47,11 @@ test("production sections load without client or request failures", async ({ pag
   });
   page.on("pageerror", (error) => pageErrors.push(error.message));
   page.on("requestfailed", (request) => {
-    // Route changes intentionally tear down distant lazy media. Those aborted
-    // media fetches are covered separately by the bounded-preview regression;
-    // this smoke check reports real non-navigation transport failures.
-    const cancelledMedia = request.resourceType() === "media" && ["net::ERR_ABORTED", "Load request cancelled"].includes(request.failure()?.errorText || "");
-    if (!request.isNavigationRequest() && !cancelledMedia) requestFailures.push(`${request.method()} ${request.url()}: ${request.failure()?.errorText || "failed"}`);
+    // Section changes intentionally tear down lazy media and Workspace
+    // EventSource.close() subscriptions; other transport failures remain reportable.
+    const errorText = request.failure()?.errorText || "";
+    const expectedCancellation = isExpectedRequestCancellation(request.resourceType(), request.url(), errorText);
+    if (!request.isNavigationRequest() && !expectedCancellation) requestFailures.push(`${request.method()} ${request.url()}: ${request.failure()?.errorText || "failed"}`);
   });
   page.on("response", (response) => {
     if (response.status() >= 400 && response.request().resourceType() !== "document") badResponses.push(`${response.status()} ${response.url()}`);
