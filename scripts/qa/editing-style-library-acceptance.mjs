@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Bounded, isolated, real-import acceptance runner for the editing presentation
- * feature (docs/plans/youtube-editing-style-library.md).
+ * feature documented in docs/plans/youtube-editing-style-library-acceptance.md.
  *
  * What it does
  *   1. Validates user-supplied inputs (two explicit YouTube URLs + a manifest that
