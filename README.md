@@ -20,7 +20,7 @@ curl -fsSL https://raw.githubusercontent.com/carmelo-schepis/S6_CUT/main/install
 irm https://raw.githubusercontent.com/carmelo-schepis/S6_CUT/main/Install-S6_CUT.ps1 | iex
 ```
 
-Open **<http://localhost:8080>** when the installer finishes. It downloads, builds, and starts the complete app. The first build can take several minutes.
+Open the **Frontend** URL printed when the installer finishes (normally <http://127.0.0.1:8080>). If the default web port is occupied, the installer selects and prints a different port. It downloads, builds, and starts the complete app. The first build can take several minutes.
 
 **To update, paste the same command again.** Your settings and media are preserved.
 
