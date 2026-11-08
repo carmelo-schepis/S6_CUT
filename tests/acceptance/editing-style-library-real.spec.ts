@@ -1,6 +1,6 @@
 /**
  * Real-import acceptance for the editing presentation feature
- * (docs/plans/youtube-editing-style-library.md).
+ * documented in docs/plans/youtube-editing-style-library-acceptance.md.
  *
  * Only runs under scripts/qa/editing-style-library-acceptance.mjs, which supplies
  * an isolated Compose stack, the validated source manifest and a 60 minute live
