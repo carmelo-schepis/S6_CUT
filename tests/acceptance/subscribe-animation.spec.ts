@@ -238,6 +238,7 @@ test("Subscribe animation controls persist and affect real rendered/exported med
   await expect(defaultControl.getByRole("checkbox", { name: "Enable Subscribe animation" })).toBeChecked();
   await expect(defaultControl.getByRole("combobox", { name: "Subscribe animation timing" })).toHaveValue("5");
   await page.getByRole("button", { name: "Shorts Editor", exact: true }).click();
+  await page.getByText("Subscribe animation settings", { exact: true }).click();
   const editorControl = page.getByRole("group", { name: "Automatic Subscribe animation" });
   await expect(editorControl.getByRole("checkbox", { name: "Enable Subscribe animation" })).toBeChecked();
   await expect(editorControl.getByRole("combobox", { name: "Subscribe animation timing" })).toBeEnabled();
