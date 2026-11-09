@@ -14,12 +14,19 @@ import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { assertZipIntact, extractZip, openOptionRow, openWorkspaceForProject, zipNames } from "./support/workspace";
 import { verifyVideoOutput } from "../support/video-output";
+import { recordBrowserDiagnostics } from "./support/browser-diagnostics";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const fixture = process.env.S6_SUBSCRIBE_FIXTURE || path.join(root, "tests/fixtures/openrouter-fallback.mp4");
-const artifacts = path.join(root, "test-artifacts/subscribe-animation");
+const artifacts = path.join(path.resolve(process.env.S6_PLAYWRIGHT_ARTIFACTS || path.join(root, "test-artifacts")), "subscribe-animation");
 const expectedWidth = 1080;
 const expectedHeight = 1920;
+const browserDiagnostics = new WeakMap<Page, () => Promise<void>>();
+
+test.beforeEach(async ({ page }, testInfo) => {
+  browserDiagnostics.set(page, recordBrowserDiagnostics(page, testInfo));
+});
+test.afterEach(async ({ page }) => { await browserDiagnostics.get(page)?.(); });
 
 function requireDisposableTarget() {
   const url = process.env.S6_ACCEPTANCE_URL;
@@ -117,19 +124,28 @@ async function createAndRender(page: Page, options: {
   const createResponse = page.waitForResponse((response) => response.request().method() === "POST" && response.url().endsWith("/api/v1/jobs/clip"));
   await page.getByRole("button", { name: "Create 1 short clip" }).click();
   const submitted = await createResponse;
-  const created = await submitted.json() as { job: { contentFormat: string } };
+  const created = await submitted.json() as { job: { id: string; contentFormat: string } };
   expect(submitted.ok(), JSON.stringify(created)).toBeTruthy();
   expect(submitted.request().headers()["content-type"]).toContain("multipart/form-data");
   expect(created.job.contentFormat).toBe("short");
 
   await expect(page.getByRole("heading", { name: options.projectName })).toBeVisible({ timeout: 60_000 });
-  const tile = page.locator(".clip-tile.complete").first();
+  let clipId: string | null = null;
+  await expect.poll(async () => {
+    const response = await page.request.get(`/api/v1/jobs/${created.job.id}`);
+    if (!response.ok()) return null;
+    const current = await response.json() as { clips: { id: string; state: string }[] };
+    clipId = current.clips.find((clip) => clip.state === "complete")?.id ?? null;
+    return clipId;
+  }, { timeout: 15 * 60_000 }).not.toBeNull();
+  const tile = page.locator(`.clip-tile.complete[data-clip-id="${clipId}"]`);
   await expect(tile).toBeVisible({ timeout: 15 * 60_000 });
   await expect(tile.locator("a[download]")).toBeVisible();
   await tile.getByRole("button", { name: /Preview/ }).click();
-  const video = page.locator(".viewer-frame video");
+  const video = page.locator(`.viewer-frame video[data-clip-id="${clipId}"]`);
   const evidence = await verifyVideoOutput({
     video,
+    expectedClipId: clipId!,
     artifactDirectory: artifacts,
     artifactPrefix: options.subscribe,
     maximumDurationSeconds: 11,
@@ -195,8 +211,8 @@ async function makeLongFormFixture(testInfo: { outputPath(...segments: string[])
   return fixturePath;
 }
 
-async function sampleOutputAt(page: Page, time: number, screenshotPath: string) {
-  const video = page.locator(".viewer-frame video");
+async function sampleOutputAt(page: Page, time: number, screenshotPath: string, clipId: string) {
+  const video = page.locator(`.viewer-frame video[data-clip-id="${clipId}"]`);
   await video.evaluate(async (node: HTMLVideoElement, target) => {
     const bounded = Math.min(target, Math.max(0, node.duration - 0.05));
     if (Math.abs(node.currentTime - bounded) > 0.01) {
@@ -238,6 +254,7 @@ test("Subscribe animation controls persist and affect real rendered/exported med
   await expect(defaultControl.getByRole("checkbox", { name: "Enable Subscribe animation" })).toBeChecked();
   await expect(defaultControl.getByRole("combobox", { name: "Subscribe animation timing" })).toHaveValue("5");
   await page.getByRole("button", { name: "Shorts Editor", exact: true }).click();
+  await page.getByText("Subscribe animation settings", { exact: true }).click();
   const editorControl = page.getByRole("group", { name: "Automatic Subscribe animation" });
   await expect(editorControl.getByRole("checkbox", { name: "Enable Subscribe animation" })).toBeChecked();
   await expect(editorControl.getByRole("combobox", { name: "Subscribe animation timing" })).toBeEnabled();
@@ -285,9 +302,10 @@ test("Subscribe animation controls persist and affect real rendered/exported med
   // Reload/reopen verifies the project and persisted media remain reachable.
   await page.reload({ waitUntil: "domcontentloaded" });
   await openWorkspaceForProject(page, `Subscribe default ${tag}`);
-  await expect(page.locator(".clip-tile.complete")).toHaveCount(1, { timeout: 60_000 });
-  await page.locator(".clip-tile.complete").first().getByRole("button", { name: /Preview/ }).click();
-  await expect(page.locator(".viewer-frame video")).toBeVisible();
+  const defaultTile = page.locator(`.clip-tile.complete[data-clip-id="${on.clipId}"]`);
+  await expect(defaultTile).toBeVisible({ timeout: 60_000 });
+  await defaultTile.getByRole("button", { name: /Preview/ }).click();
+  await expect(page.locator(`.viewer-frame video[data-clip-id="${on.clipId}"]`)).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("subscribe-after-reload.png"), fullPage: true });
 
   // Lightweight contact sheet: open this file beside its frame PNGs to review
@@ -327,16 +345,24 @@ test("long-form exported scene replays the animation at midpoint and 30 seconds 
   const createResponse = page.waitForResponse((response) => response.request().method() === "POST" && response.url().endsWith("/api/v1/jobs/clip"));
   await page.getByRole("button", { name: "Create 1 landscape clip" }).click();
   const submitted = await createResponse;
-  const created = await submitted.json() as { job: { contentFormat: string } };
+  const created = await submitted.json() as { job: { id: string; contentFormat: string } };
   expect(submitted.ok(), JSON.stringify(created)).toBeTruthy();
   expect(submitted.request().headers()["content-type"]).toContain("multipart/form-data");
   expect(created.job.contentFormat).toBe("long");
 
   await expect(page.getByRole("heading", { name: projectName })).toBeVisible({ timeout: 60_000 });
-  const tile = page.locator(".clip-tile.complete").first();
+  let clipId: string | null = null;
+  await expect.poll(async () => {
+    const response = await page.request.get(`/api/v1/jobs/${created.job.id}`);
+    if (!response.ok()) return null;
+    const job = await response.json() as { clips: { id: string; state: string }[] };
+    clipId = job.clips.find((clip) => clip.state === "complete")?.id ?? null;
+    return clipId;
+  }, { timeout: 15 * 60_000 }).not.toBeNull();
+  const tile = page.locator(`.clip-tile.complete[data-clip-id="${clipId}"]`);
   await expect(tile).toBeVisible({ timeout: 15 * 60_000 });
   await tile.getByRole("button", { name: /Preview/ }).click();
-  const video = page.locator(".viewer-frame video");
+  const video = page.locator(`.viewer-frame video[data-clip-id="${clipId}"]`);
   await expect(video).toBeVisible();
   const metadata = await video.evaluate((node: HTMLVideoElement) => ({ duration: node.duration, width: node.videoWidth, height: node.videoHeight }));
   expect(metadata.width).toBe(1920);
@@ -348,11 +374,11 @@ test("long-form exported scene replays the animation at midpoint and 30 seconds 
 
   const evidenceDir = testInfo.outputPath("long-form-frames");
   await fs.mkdir(evidenceDir, { recursive: true });
-  const midMove = await sampleOutputAt(page, midpoint + 0.55, path.join(evidenceDir, "midpoint-pointer.png"));
-  const midClick = await sampleOutputAt(page, midpoint + 1.55, path.join(evidenceDir, "midpoint-subscribed.png"));
-  const endMove = await sampleOutputAt(page, endOccurrence + 0.55, path.join(evidenceDir, "end-pointer.png"));
-  const endClick = await sampleOutputAt(page, endOccurrence + 1.55, path.join(evidenceDir, "end-subscribed.png"));
-  const after = await sampleOutputAt(page, endOccurrence + 4.25, path.join(evidenceDir, "after-animation.png"));
+  const midMove = await sampleOutputAt(page, midpoint + 0.55, path.join(evidenceDir, "midpoint-pointer.png"), clipId!);
+  const midClick = await sampleOutputAt(page, midpoint + 1.55, path.join(evidenceDir, "midpoint-subscribed.png"), clipId!);
+  const endMove = await sampleOutputAt(page, endOccurrence + 0.55, path.join(evidenceDir, "end-pointer.png"), clipId!);
+  const endClick = await sampleOutputAt(page, endOccurrence + 1.55, path.join(evidenceDir, "end-subscribed.png"), clipId!);
+  const after = await sampleOutputAt(page, endOccurrence + 4.25, path.join(evidenceDir, "after-animation.png"), clipId!);
   expect(meanPixelDifference(midMove, endMove), "the second occurrence restarts from the same opening frame").toBeLessThan(2.5);
   expect(meanPixelDifference(midMove, midClick), "button/cursor state changes within the first occurrence").toBeGreaterThan(1);
   expect(meanPixelDifference(endMove, endClick), "button/cursor state changes within the second occurrence").toBeGreaterThan(1);

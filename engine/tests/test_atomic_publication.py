@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import tempfile
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -40,10 +39,6 @@ SAMPLE_WORDS = [
 # -------------------------------------------------------------------
 #  Fixture helpers
 # -------------------------------------------------------------------
-
-
-def _tmpdir() -> Path:
-    return Path(tempfile.mkdtemp(prefix="s6-cut-atomic-test-"))
 
 
 def _cluster(tmp_path: Path) -> tuple[Database, JobManager]:
@@ -173,7 +168,6 @@ def _assert_step_invariants(job: Job) -> None:
 
 
 def test_complete_clip_requires_linked_library_asset(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
     monkeypatch.setattr("engine.jobs.probe", _fake_probe)
     monkeypatch.setattr(media_module, "plan_fast_windows", _fake_plan)
@@ -205,7 +199,6 @@ def test_complete_clip_requires_linked_library_asset(monkeypatch: pytest.MonkeyP
 
 
 def test_smart_clip_publishes_through_same_atomic_boundary(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
     monkeypatch.setattr("engine.jobs.probe", _fake_probe)
     monkeypatch.setattr(media_module, "transcribe", _fake_transcribe)
@@ -235,7 +228,6 @@ def test_smart_clip_publishes_through_same_atomic_boundary(monkeypatch: pytest.M
 
 
 def test_failed_output_never_creates_asset(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
     monkeypatch.setattr("engine.jobs.probe", _fake_probe)
     monkeypatch.setattr(media_module, "plan_fast_windows", _fake_plan)
@@ -263,7 +255,6 @@ def test_failed_output_never_creates_asset(monkeypatch: pytest.MonkeyPatch, tmp_
 
 
 def test_progressive_publication_publishes_each_output_independently(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
     monkeypatch.setattr("engine.jobs.probe", _fake_probe)
     monkeypatch.setattr(media_module, "plan_fast_windows", _fake_plan)
@@ -315,7 +306,6 @@ def test_progressive_publication_publishes_each_output_independently(monkeypatch
 
 
 def test_selected_business_folder_single_asset_visible_in_all_and_folder(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
     monkeypatch.setattr("engine.jobs.probe", _fake_probe)
     monkeypatch.setattr(media_module, "plan_fast_windows", _fake_plan)
@@ -361,7 +351,6 @@ def test_selected_business_folder_single_asset_visible_in_all_and_folder(monkeyp
 
 
 def test_no_folder_selected_publishes_every_clip_to_unsorted_single_asset(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
     monkeypatch.setattr("engine.jobs.probe", _fake_probe)
     monkeypatch.setattr(media_module, "plan_fast_windows", _fake_plan)
@@ -392,7 +381,6 @@ def test_no_folder_selected_publishes_every_clip_to_unsorted_single_asset(monkey
 
 
 def test_five_clip_job_creates_exactly_five_linked_assets(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
     monkeypatch.setattr("engine.jobs.probe", _fake_probe)
     monkeypatch.setattr(media_module, "plan_fast_windows", _fake_plan)
@@ -419,7 +407,6 @@ def test_five_clip_job_creates_exactly_five_linked_assets(monkeypatch: pytest.Mo
 
 
 def test_retry_updates_existing_asset_with_new_blob_without_duplicates(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
     monkeypatch.setattr("engine.jobs.probe", _fake_probe)
     monkeypatch.setattr(media_module, "plan_fast_windows", _fake_plan)
@@ -484,7 +471,6 @@ def test_retry_updates_existing_asset_with_new_blob_without_duplicates(monkeypat
 
 
 def test_restart_and_reprocessing_never_duplicate_assets(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
     monkeypatch.setattr("engine.jobs.probe", _fake_probe)
     monkeypatch.setattr(media_module, "plan_fast_windows", _fake_plan)
@@ -542,7 +528,6 @@ def test_restart_and_reprocessing_never_duplicate_assets(monkeypatch: pytest.Mon
 
 
 def test_later_failed_clip_keeps_earlier_published_outputs_partial(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
     monkeypatch.setattr("engine.jobs.probe", _fake_probe)
     monkeypatch.setattr(media_module, "plan_fast_windows", _fake_plan)
@@ -587,7 +572,6 @@ def test_later_failed_clip_keeps_earlier_published_outputs_partial(monkeypatch: 
 
 
 def test_archived_selected_folder_falls_back_to_unsorted_with_warning(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
     monkeypatch.setattr("engine.jobs.probe", _fake_probe)
     monkeypatch.setattr(media_module, "plan_fast_windows", _fake_plan)
@@ -627,7 +611,6 @@ def test_archived_selected_folder_falls_back_to_unsorted_with_warning(monkeypatc
 
 
 def test_removed_selected_folder_publishes_to_visible_folder_with_warning(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
     monkeypatch.setattr("engine.jobs.probe", _fake_probe)
     monkeypatch.setattr(media_module, "plan_fast_windows", _fake_plan)
@@ -665,7 +648,6 @@ def test_removed_selected_folder_publishes_to_visible_folder_with_warning(monkey
 
 
 def test_checklist_counts_reflect_published_outputs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
     monkeypatch.setattr("engine.jobs.probe", _fake_probe)
     monkeypatch.setattr(media_module, "plan_fast_windows", _fake_plan)
@@ -732,7 +714,6 @@ def test_checklist_counts_reflect_published_outputs(monkeypatch: pytest.MonkeyPa
 
 
 def test_legacy_completed_clips_are_backfilled_exactly_once(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
     _project(test_db, "legacy-proj", count=2)
 
@@ -809,7 +790,6 @@ def test_legacy_completed_clips_are_backfilled_exactly_once(monkeypatch: pytest.
 
 def test_repair_publications_is_idempotent_on_startup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Simulate engine startup repair_publications scanning all jobs."""
-    tmp_path = _tmpdir()
     test_db, test_manager = _cluster(tmp_path)
     _project(test_db, "repair-proj", count=1)
 
