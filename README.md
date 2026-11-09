@@ -92,7 +92,18 @@ Only nginx publishes a port to your network. The FastAPI engine stays on the Com
 
 ## Local development
 
-Requirements: Node.js 24+, Python 3.12, and FFmpeg/FFprobe. Install the exact dependencies, then start the Vite UI and FastAPI engine together:
+Requirements: Node.js 24+, Python 3.12, and FFmpeg/FFprobe. Install the exact dependencies, then start the Vite UI and FastAPI engine together.
+
+**Linux / macOS:**
+
+```bash
+npm ci
+python3 -m venv .venv
+.venv/bin/python -m pip install -r engine/requirements-dev.lock
+npm run dev
+```
+
+**Windows (PowerShell):**
 
 ```powershell
 npm ci
