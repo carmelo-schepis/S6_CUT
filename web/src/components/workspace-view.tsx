@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { AlertTriangle, Captions, Check, ChevronDown, Clock, Copy, Download, Eye, FileText, Film, Pause, Play, RefreshCw, RotateCcw, RotateCw, SlidersHorizontal, Sparkles, Square, Volume2, Zap } from "lucide-react";
 import { changeProjectFolder, controlJob, createZip, generateYoutubeMetadata, getJob, jobEventsUrl, listAssets, listFolders, readableError, regenerateSourceOnly, retryClip, setClipSelection, updateYoutubeMetadata } from "../api";
 import { emitLibraryChanged } from "../library-sync";
@@ -77,10 +77,14 @@ function ClipThumb({ clip }: { clip: Clip }) {
 }
 
 export function WorkspaceView({ project, providersLoaded = true, hasSelectedProvider = true, onConfigureProviders = () => undefined, onProjectUpdated, onGoProjects }: { project: Project | null; providersLoaded?: boolean; hasSelectedProvider?: boolean; onConfigureProviders?: () => void; onProjectUpdated: () => Promise<void>; onGoProjects: () => void }) {
-  const [job, setJob] = useState<Job | null>(null);
+  const [loadedJob, setLoadedJob] = useState<Job | null>(null);
+  // Project navigation can render before this component's next job request
+  // resolves. Never expose a prior project's clips or preview in that gap.
+  const job = loadedJob?.id === project?.latestJobId && loadedJob?.projectId === project?.id ? loadedJob : null;
   // Until the first job response lands the view must not claim "0 clips" or
   // "Preparing project" — the job may already be rendering.
   const [jobFetched, setJobFetched] = useState(false);
+  const [engineUnavailableFor, setEngineUnavailableFor] = useState<string | null>(null);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
   const [sourceTab, setSourceTab] = useState<"transcript" | "media">("transcript");
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -100,7 +104,6 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
   const [boardFilter, setBoardFilter] = useState<"all" | "selected" | "failed">("all");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [waitingForEngine, setWaitingForEngine] = useState(false);
   const [subscriptionNonce, setSubscriptionNonce] = useState(0);
   const [providerCalloutDismissed, setProviderCalloutDismissed] = useState(false);
   const [stalledCalloutDismissed, setStalledCalloutDismissed] = useState(false);
@@ -158,6 +161,16 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
   // the Library screen depends on it for cross-view consistency
   const prevClipStates = useRef<Map<string, Clip["state"]>>(new Map());
   const jobRef = useRef<Job | null>(null);
+  const trackedJobId = useRef<string | null>(null);
+  const currentProjectRef = useRef(project);
+  useLayoutEffect(() => { currentProjectRef.current = project; }, [project]);
+  const storeJobIfCurrent = useCallback((next: Job): boolean => {
+    const currentProject = currentProjectRef.current;
+    if (currentProject?.id !== next.projectId || currentProject.latestJobId !== next.id) return false;
+    jobRef.current = next;
+    setLoadedJob(next);
+    return true;
+  }, []);
   const notifiedTerminal = useRef<string | null>(null);
   const singleFlight = useSingleFlight();
   const onProjectUpdatedRef = useRef(onProjectUpdated);
@@ -179,16 +192,19 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
   );
 
   useEffect(() => {
+    const projectId = project?.id;
     const jobId = project?.latestJobId;
-    if (!jobId) return;
+    if (!projectId || !jobId) return;
     const currentJobId = jobId;
     let disposed = false;
     let terminal = false;
     let polling = false;
     let backoff = 1000;
-    let lastUpdatedAt = jobRef.current?.updatedAt || "";
+    // Timestamps are only comparable within one job. The previous project's
+    // timestamp must not cause the new job's first snapshot to be discarded.
+    let lastUpdatedAt = jobRef.current?.id === currentJobId ? jobRef.current.updatedAt : "";
     const update = (next: Job) => {
-      if (disposed || next.id !== currentJobId || next.projectId !== project.id || (lastUpdatedAt && next.updatedAt < lastUpdatedAt)) return;
+      if (disposed || currentProjectRef.current?.id !== projectId || currentProjectRef.current.latestJobId !== currentJobId || next.id !== currentJobId || next.projectId !== projectId || (lastUpdatedAt && next.updatedAt < lastUpdatedAt)) return;
       lastUpdatedAt = next.updatedAt;
       const wasTerminal = terminal;
       terminal = isTerminalJob(next);
@@ -196,10 +212,14 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
         notifiedTerminal.current = next.id;
         void onProjectUpdatedRef.current();
       }
-      setWaitingForEngine(false);
+      setEngineUnavailableFor(null);
       setJobFetched(true);
       // Detect newly completed clips and emit library-changed signal
-      const prev = jobRef.current;
+      if (trackedJobId.current !== currentJobId) {
+        prevClipStates.current.clear();
+        trackedJobId.current = currentJobId;
+      }
+      const prev = jobRef.current?.id === currentJobId ? jobRef.current : null;
       if (prev) {
         for (const clip of next.clips) {
           const prevState = prevClipStates.current.get(clip.id);
@@ -214,8 +234,7 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
       for (const clip of next.clips) {
         prevClipStates.current.set(clip.id, clip.state);
       }
-      jobRef.current = next;
-      setJob(next);
+      storeJobIfCurrent(next);
       setSelectedClipId((current) => {
         const currentClip = next.clips.find((clip) => clip.id === current);
         if (currentClip?.state === "complete") return current;
@@ -223,7 +242,7 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
       });
     };
     function schedulePoll(delay: number) {
-      if (disposed || terminal || pollingRef.current) return;
+      if (disposed || currentProjectRef.current?.id !== projectId || currentProjectRef.current?.latestJobId !== currentJobId || terminal || pollingRef.current) return;
       pollingRef.current = window.setTimeout(() => { pollingRef.current = null; void fetchJob(); }, delay);
     }
     async function fetchJob() {
@@ -232,10 +251,10 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
         backoff = 1000;
         if (polling && !terminal) schedulePoll(2500);
       } catch {
-        if (disposed) return;
+        if (disposed || currentProjectRef.current?.id !== projectId || currentProjectRef.current?.latestJobId !== currentJobId) return;
         polling = true;
         setJobFetched(true);
-        setWaitingForEngine(true);
+        setEngineUnavailableFor(`${projectId}:${currentJobId}`);
         schedulePoll(backoff);
         backoff = Math.min(backoff * 2, 15_000);
       }
@@ -249,8 +268,9 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
       // Keep EventSource open so the browser can perform its native reconnect.
       // Polling remains an immediate durable-state fallback.
       if (!terminal) {
+        if (currentProjectRef.current?.id !== projectId || currentProjectRef.current.latestJobId !== currentJobId) return;
         polling = true;
-        setWaitingForEngine(true);
+        setEngineUnavailableFor(`${projectId}:${currentJobId}`);
         schedulePoll(backoff);
       }
     };
@@ -260,9 +280,13 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
       if (pollingRef.current) window.clearTimeout(pollingRef.current);
       pollingRef.current = null;
     };
-  }, [project?.id, project?.latestJobId, subscriptionNonce]);
+  }, [project?.id, project?.latestJobId, subscriptionNonce, storeJobIfCurrent]);
 
-  const jobLoaded = jobFetched || !project?.latestJobId;
+  const currentJobIdentity = project?.latestJobId ? `${project.id}:${project.latestJobId}` : null;
+  const waitingForEngine = currentJobIdentity !== null && engineUnavailableFor === currentJobIdentity;
+  const jobLoaded = !project?.latestJobId
+    || (jobFetched && job?.id === project.latestJobId)
+    || waitingForEngine;
 
   const selectedClip = useMemo(() => job?.clips.find((clip) => clip.id === selectedClipId) || null, [job, selectedClipId]);
   useEffect(() => {
@@ -289,6 +313,7 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
   const selectedMediaIdentity = selectedClip?.state === "complete" && selectedPreviewUrl
     ? `${selectedClip.id}:${selectedClip.blobId || selectedClip.outputName || selectedPreviewUrl.split("?")[0]}`
     : null;
+  const activePreviewSource = previewSource?.identity === selectedMediaIdentity ? previewSource : null;
 
   useEffect(() => {
     if (!selectedClip || selectedClip.state !== "complete" || !selectedPreviewUrl || !selectedMediaIdentity) {
@@ -455,8 +480,7 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
     setBusy(true);
     try {
       const next = await controlJob(job.id, action);
-      jobRef.current = next;
-      setJob(next);
+      if (!storeJobIfCurrent(next)) return;
       if (!isTerminalJob(next)) setSubscriptionNonce((value) => value + 1);
       await onProjectUpdated();
     } catch (cause) { setError(readableError(cause)); } finally { setBusy(false); }
@@ -465,7 +489,7 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
   const toggleClip = async (clip: Clip) => {
     if (!job) return;
     const next = job.clips.filter((item) => item.state === "complete" && (item.id === clip.id ? !item.selected : item.selected)).map((item) => item.id);
-    try { setJob(await setClipSelection(job.id, next)); } catch (cause) { setError(readableError(cause)); }
+    try { storeJobIfCurrent(await setClipSelection(job.id, next)); } catch (cause) { setError(readableError(cause)); }
   };
 
   const createSourceOnlyVersion = async () => {
@@ -485,7 +509,7 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
     setMetadataBusy(true); setMetadataStatus(null);
     try {
       const next = await generateYoutubeMetadata(job.id, requestedClipId, regenerate);
-      setJob(next);
+      if (!storeJobIfCurrent(next)) return;
       if (selectedClipIdRef.current === requestedClipId) {
         const generatedClip = next.clips.find((clip) => clip.id === requestedClipId);
         const title = generatedClip?.title || "";
@@ -506,7 +530,7 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
     setMetadataBusy(true); setMetadataStatus(null);
     try {
       const next = await updateYoutubeMetadata(job.id, requestedClipId, metadataTitle, metadataDescription, draft.clipId === requestedClipId ? draft.revision : selectedClip.youtubeMetadataRevision ?? 0);
-      setJob(next);
+      if (!storeJobIfCurrent(next)) return;
       if (selectedClipIdRef.current === requestedClipId) {
         const savedClip = next.clips.find((clip) => clip.id === requestedClipId);
         metadataDraftRef.current = { clipId: requestedClipId, revision: savedClip?.youtubeMetadataRevision ?? draft.revision, title: metadataTitle, description: metadataDescription, dirty: false };
@@ -528,7 +552,7 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
   const retryOneClip = async (clip: Clip) => {
     if (!job || clip.state !== "failed") return;
     setBusy(true);
-    try { setJob(await retryClip(job.id, clip.id)); } catch (cause) { setError(readableError(cause)); } finally { setBusy(false); }
+    try { storeJobIfCurrent(await retryClip(job.id, clip.id)); } catch (cause) { setError(readableError(cause)); } finally { setBusy(false); }
   };
 
   const changeFolder = async (folderId: string) => {
@@ -654,10 +678,11 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
         <div className="viewer-toolbar"><span>Output · {outputAspectRatio}</span>{creatorCredit && <span className="viewer-credit" role="note">{creatorCredit}</span>}{selectedClip?.state === "complete" && job && <Button disabled={regeneratingSourceOnly || !["complete", "partial", "failed", "cancelled_kept"].includes(job.state)} onClick={() => void createSourceOnlyVersion()}>{regeneratingSourceOnly ? "Creating…" : "Create source-only version"}</Button>}<div><IconButton label="Toggle safe areas" aria-pressed={safeAreasVisible} onClick={() => setSafeAreasVisible((value) => !value)}><Eye size={15} /></IconButton><IconButton label={previewMuted ? "Unmute preview" : "Mute preview"} aria-pressed={previewMuted} onClick={() => { const player = playerRef.current; if (player) player.muted = !player.muted; setPreviewMuted((value) => !value); }}><Volume2 size={15} /></IconButton></div></div>
         <div className="viewer-stage">
           <div className={`viewer-frame ${project.mode} ${safeAreasVisible ? "show-safe-areas" : ""}`} style={viewerFrameStyle} data-output-aspect-ratio={outputAspectRatio}>
-            {previewSource ? <><video
-              key={previewSource.identity}
+            {activePreviewSource ? <><video
+              key={activePreviewSource.identity}
               ref={playerRef}
-              src={previewSource.url}
+              src={activePreviewSource.url}
+              data-clip-id={selectedClip?.id}
               controls
               preload="auto"
               playsInline
@@ -705,7 +730,7 @@ export function WorkspaceView({ project, providersLoaded = true, hasSelectedProv
 
     <section className="board-panel panel">
       <div className="board-header"><div><strong>{project.mode === "clip" ? "Clip board" : "Legacy visual timeline"}</strong><span>{!jobLoaded ? "Loading…" : project.mode === "clip" ? `${job?.clips.length || 0} planned · ${job?.clips.filter((clip) => clip.state === "complete").length || 0} ready${savedCount ? ` · ${savedCount} saved to Library` : ""}` : `${job?.beats.length || 0} visual beats`}</span></div>{project.mode === "clip" && <div className="board-filters" role="group" aria-label="Filter clips">{([["all", "All", "All clips"], ["selected", "Selected", "Selected clips"], ["failed", "Failed", "Failed clips"]] as const).map(([filter, label, accessibleLabel]) => <button key={filter} type="button" className={boardFilter === filter ? "active" : ""} aria-label={accessibleLabel} aria-pressed={boardFilter === filter} onClick={() => setBoardFilter(filter)}>{label}</button>)}</div>}</div>
-      {project.mode === "clip" ? <div className="clip-board">{boardClips.map((clip) => <article key={clip.id} className={`clip-tile ${selectedClipId === clip.id ? "active" : ""} ${clip.state}`} onClick={() => setSelectedClipId(clip.id)}>
+      {project.mode === "clip" ? <div className="clip-board">{boardClips.map((clip) => <article key={clip.id} data-clip-id={clip.id} className={`clip-tile ${selectedClipId === clip.id ? "active" : ""} ${clip.state}`} onClick={() => setSelectedClipId(clip.id)}>
         <div className="clip-thumb"><span className="clip-number">{String(clip.index).padStart(2, "0")}</span>{clip.state === "complete" ? <><ClipThumb clip={clip} /><span className="score-ring">{clip.score ? Math.round(clip.score.total) : "–"}</span></> : clip.state === "failed" ? <AlertTriangle size={24} /> : <RefreshCw size={24} className="spin" />}</div>
         <div className="clip-tile-body"><strong className="clip-title" title={clip.title || `Cut ${String(clip.index).padStart(2, "0")}`}>{clip.title || `Cut ${String(clip.index).padStart(2, "0")}`}</strong><span className="clip-line" title={clip.youtubeDescription || clip.openingLine || undefined}>{clip.youtubeDescription || clip.openingLine || "Candidate clip"}</span><span className="clip-meta">{formatDuration(clip.duration)} · {formatDimensions(outputAspectRatio, clip.width, clip.height)} · {folderName(clip.folderId, folders, project)}</span>{clip.state === "complete" && clip.libraryAssetId && <span className="saved-badge"><Check size={11} /> Saved to Library</span>}{clip.state === "failed" && project.mode === "clip" ? <Button disabled={busy} onClick={(event) => { event.stopPropagation(); void retryOneClip(clip); }}><RefreshCw size={12} /> Retry clip</Button> : <div className="clip-actions"><Button className="clip-action" disabled={clip.state !== "complete"} onClick={(event) => { event.stopPropagation(); selectClipForPreview(clip); }}><Eye size={12} /> Preview</Button>{clip.state === "complete" && clip.downloadUrl && <a className="button button-secondary clip-action" href={clip.downloadUrl} download onClick={(event) => event.stopPropagation()}><Download size={12} /> Download</a>}<label onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={clip.selected} disabled={clip.state !== "complete"} onChange={() => toggleClip(clip)} /> Include in export</label></div>}</div>
       </article>)}{!boardClips.length && (jobLoaded ? <div className="board-placeholder" role="status">{job?.clips.length ? boardFilter === "failed" ? "No failed clips." : boardFilter === "selected" ? "No selected clips." : "No clips match this filter." : "Candidates appear here after local transcription and selection."}</div> : <><Skeleton rows={3} className="skeleton-tile" /><Skeleton rows={3} className="skeleton-tile" /><Skeleton rows={3} className="skeleton-tile" /></>)}</div>

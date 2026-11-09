@@ -9,10 +9,17 @@ import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { assertZipIntact, extractZip, openOptionRow, openWorkspaceForProject, zipNames } from "./support/workspace";
 import { verifyVideoOutput } from "../support/video-output";
+import { recordBrowserDiagnostics } from "./support/browser-diagnostics";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const fixture = process.env.S6_SUBSCRIBE_FIXTURE || path.join(root, "tests/fixtures/openrouter-fallback.mp4");
-const artifacts = path.join(root, "test-artifacts/subscribe-animation");
+const artifacts = path.join(path.resolve(process.env.S6_PLAYWRIGHT_ARTIFACTS || path.join(root, "test-artifacts")), "subscribe-animation");
+const browserDiagnostics = new WeakMap<Page, () => Promise<void>>();
+
+test.beforeEach(async ({ page }, testInfo) => {
+  browserDiagnostics.set(page, recordBrowserDiagnostics(page, testInfo));
+});
+test.afterEach(async ({ page }) => { await browserDiagnostics.get(page)?.(); });
 const dimensions = {
   "9:16": [1080, 1920],
   "16:9": [1920, 1080],
@@ -109,14 +116,23 @@ async function createAndRender(page: Page, options: { projectName: string; aspec
   const createResponse = page.waitForResponse((response) => response.request().method() === "POST" && response.url().endsWith("/api/v1/jobs/clip"));
   await page.getByRole("button", { name: "Create 1 short clip" }).click();
   const submitted = await createResponse;
-  expect(submitted.ok(), await submitted.text()).toBeTruthy();
+  const created = await submitted.json() as { job: { id: string } };
+  expect(submitted.ok(), JSON.stringify(created)).toBeTruthy();
   await expect(page.getByRole("heading", { name: options.projectName })).toBeVisible({ timeout: 60_000 });
-  const tile = page.locator(".clip-tile.complete").first();
+  let clipId: string | null = null;
+  await expect.poll(async () => {
+    const response = await page.request.get(`/api/v1/jobs/${created.job.id}`);
+    if (!response.ok()) return null;
+    const result = await response.json() as { clips: { id: string; state: string }[] };
+    clipId = result.clips.find((candidate) => candidate.state === "complete")?.id ?? null;
+    return clipId;
+  }, { timeout: 15 * 60_000 }).not.toBeNull();
+  const tile = page.locator(`.clip-tile.complete[data-clip-id="${clipId}"]`);
   await expect(tile).toBeVisible({ timeout: 15 * 60_000 });
   await tile.getByRole("button", { name: /Preview/ }).click();
   const [width, height] = dimensions[options.aspect];
   const prefix = `${options.aspect.replace(":", "-")}-${options.subscribe ? "enabled" : "disabled"}`;
-  const evidence = await verifyVideoOutput({ video: page.locator(".viewer-frame video"), artifactDirectory: artifacts, artifactPrefix: prefix, maximumDurationSeconds: 11, expectedWidth: width, expectedHeight: height });
+  const evidence = await verifyVideoOutput({ video: page.locator(`.viewer-frame video[data-clip-id="${clipId}"]`), expectedClipId: clipId!, artifactDirectory: artifacts, artifactPrefix: prefix, maximumDurationSeconds: 11, expectedWidth: width, expectedHeight: height });
   expect(evidence.playbackAdvanced).toBe(true);
   expect(evidence.duration).toBeGreaterThanOrEqual(7.5);
 
@@ -125,10 +141,10 @@ async function createAndRender(page: Page, options: { projectName: string; aspec
   const projects = await projectsResponse.json() as { id: string; name: string; latestJobId: string }[];
   const project = projects.find((item) => item.name === options.projectName);
   expect(project).toBeTruthy();
-  const jobResponse = await page.request.get(`/api/v1/jobs/${project!.latestJobId}`);
+  const jobResponse = await page.request.get(`/api/v1/jobs/${created.job.id}`);
   expect(jobResponse.ok()).toBeTruthy();
   const job = await jobResponse.json() as { id: string; clips: { id: string; start: number; end: number; duration: number; libraryAssetId?: string | null }[] };
-  const clip = job.clips[0];
+  const clip = job.clips.find((item) => item.id === clipId);
   expect(clip).toBeTruthy();
   const mediaDownload = page.waitForEvent("download");
   await tile.locator("a[download]").click();
@@ -185,9 +201,9 @@ test("Subscribe animation renders and exports at all supported aspect ratios", a
   // and mobile. Each screenshot comes from playback/seeking the finished MP4.
   const desktop = rendered[0];
   await openWorkspaceForProject(page, desktop.projectName);
-  const tile = page.locator(".clip-tile.complete").first();
+  const tile = page.locator(`.clip-tile.complete[data-clip-id="${desktop.clipId}"]`);
   await tile.getByRole("button", { name: /Preview/ }).click();
-  const video = page.locator(".viewer-frame video");
+  const video = page.locator(`.viewer-frame video[data-clip-id="${desktop.clipId}"]`);
   const begin = desktop.duration - 5;
   const phaseTimes = [begin + 0.65, begin + 1.18, begin + 2.0];
   const phases = ["Subscribe", "click", "Subscribed"];

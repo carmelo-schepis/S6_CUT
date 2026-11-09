@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import tempfile
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -20,11 +19,6 @@ from engine.media import MediaError
 from engine.models import Job, ProfileInput, Project
 from engine.providers import ProfileService
 from engine.security import SecretVault
-
-
-def _tmpdir() -> Path:
-    # pytest's own tmp_path is unavailable in this environment; use a fresh OS temp dir
-    return Path(tempfile.mkdtemp(prefix="s6-cut-fast-test-"))
 
 
 def _cluster(tmp_path: Path) -> tuple[Database, JobManager]:
@@ -108,8 +102,7 @@ def _fake_render(source: Path, output: Path, *, start: float, end: float, aspect
     output.write_bytes(b"rendered-fast-clip")
 
 
-def test_fast_renderer_receives_style_without_caption_words(monkeypatch: pytest.MonkeyPatch) -> None:
-    tmp_path = _tmpdir()
+def test_fast_renderer_receives_style_without_caption_words(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     test_db, test_manager = _cluster(tmp_path)
     monkeypatch.setattr("engine.jobs.probe", lambda *_args, **_kwargs: {"duration": 100.0, "width": 1920, "height": 1080, "video_codec": "h264", "audio": False, "audio_codec": None, "rotation": 0, "sample_aspect_ratio": 1.0})
     monkeypatch.setattr(media_module, "plan_fast_windows", _fake_plan)
@@ -141,8 +134,7 @@ def test_fast_renderer_receives_style_without_caption_words(monkeypatch: pytest.
     assert test_db.get_job(job.id).state == "complete"
 
 
-def test_fast_pipeline_skips_smart_components(monkeypatch: pytest.MonkeyPatch) -> None:
-    tmp_path = _tmpdir()
+def test_fast_pipeline_skips_smart_components(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     test_db, test_manager = _cluster(tmp_path)
     monkeypatch.setattr("engine.jobs.probe", _fake_probe)
     monkeypatch.setattr(media_module, "plan_fast_windows", _fake_plan)
@@ -186,8 +178,7 @@ def test_fast_pipeline_skips_smart_components(monkeypatch: pytest.MonkeyPatch) -
     assert all(asset.blob_id for asset in assets)
 
 
-def test_fast_mode_never_transcribes_when_captions_are_requested(monkeypatch: pytest.MonkeyPatch) -> None:
-    tmp_path = _tmpdir()
+def test_fast_mode_never_transcribes_when_captions_are_requested(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     test_db, test_manager = _cluster(tmp_path)
     monkeypatch.setattr("engine.jobs.probe", lambda *_: {
         "duration": 100.0, "width": 1080, "height": 1920, "video_codec": "h264",
@@ -215,8 +206,7 @@ def test_fast_mode_never_transcribes_when_captions_are_requested(monkeypatch: py
     assert "Fast mode skips caption transcription and rendering; choose Smart mode for captions." in processed.warnings
 
 
-def test_validated_youtube_source_and_outputs_register_once_across_recovery(monkeypatch: pytest.MonkeyPatch) -> None:
-    tmp_path = _tmpdir()
+def test_validated_youtube_source_and_outputs_register_once_across_recovery(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     test_db, test_manager = _cluster(tmp_path)
     source = tmp_path / "jobs" / "youtube-job" / "source" / "source-video.mp4"
     source.parent.mkdir(parents=True)
@@ -249,8 +239,7 @@ def test_validated_youtube_source_and_outputs_register_once_across_recovery(monk
     assert len(test_db.list_assets()) == 3
 
 
-def test_fast_allows_silent_source(monkeypatch: pytest.MonkeyPatch) -> None:
-    tmp_path = _tmpdir()
+def test_fast_allows_silent_source(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     test_db, test_manager = _cluster(tmp_path)
     monkeypatch.setattr("engine.jobs.probe", _fake_probe)
     monkeypatch.setattr(media_module, "plan_fast_windows", _fake_plan)
@@ -277,8 +266,7 @@ def test_fast_allows_silent_source(monkeypatch: pytest.MonkeyPatch) -> None:
     assert processed.state == "complete"
 
 
-def test_fast_partial_and_retry_only_failed(monkeypatch: pytest.MonkeyPatch) -> None:
-    tmp_path = _tmpdir()
+def test_fast_partial_and_retry_only_failed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     test_db, test_manager = _cluster(tmp_path)
     monkeypatch.setattr("engine.jobs.probe", _fake_probe)
     monkeypatch.setattr(media_module, "plan_fast_windows", _fake_plan)
@@ -337,8 +325,7 @@ def test_fast_partial_and_retry_only_failed(monkeypatch: pytest.MonkeyPatch) -> 
     assert rendered_starts == [0.0], f"Expected only clip 1 re-render, got {rendered_starts}"
 
 
-def test_fast_raises_on_empty_windows(monkeypatch: pytest.MonkeyPatch) -> None:
-    tmp_path = _tmpdir()
+def test_fast_raises_on_empty_windows(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     test_db, test_manager = _cluster(tmp_path)
     monkeypatch.setattr("engine.jobs.probe", _fake_probe)
     monkeypatch.setattr(media_module, "plan_fast_windows", lambda *a, **kw: ([], "source too short"))
@@ -354,8 +341,7 @@ def test_fast_raises_on_empty_windows(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "fast cut" in processed.stage_label.lower() or "not contain" in processed.error.lower()
 
 
-def test_fast_missing_media_capability_fails_clearly(monkeypatch: pytest.MonkeyPatch) -> None:
-    tmp_path = _tmpdir()
+def test_fast_missing_media_capability_fails_clearly(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     test_db, test_manager = _cluster(tmp_path)
     monkeypatch.setattr("engine.jobs.probe", _fake_probe)
     monkeypatch.delattr(media_module, "plan_fast_windows", raising=False)

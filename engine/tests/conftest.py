@@ -16,8 +16,12 @@ os.environ.setdefault("S6_MAX_QUEUED_JOBS", "12")
 
 @pytest.fixture()
 def tmp_path():
-    """Environment-safe per-test path cleaned after process handles close."""
-    return Path(tempfile.mkdtemp(prefix="case-", dir=_test_root))
+    """Environment-safe per-test path removed after test-owned handles close."""
+    path = Path(tempfile.mkdtemp(prefix="case-", dir=_test_root))
+    try:
+        yield path
+    finally:
+        shutil.rmtree(path, ignore_errors=True)
 
 
 @pytest.fixture(autouse=True)
