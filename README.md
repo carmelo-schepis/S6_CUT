@@ -142,7 +142,7 @@ Copy `.env.example` to `.env`. Important values:
 | `S6_PORT` | `8080` | Published web/portal port — the URL you open in a browser and the only port reachable from your network |
 | `S6_ENGINE_PORT` | `8001` | Engine API port, bound to the host loopback only (API docs and debugging) |
 | `S6_DATA_PATH` | `./data` | Persistent database, jobs, uploads, Library, cache, models, exports, and instance secrets |
-| `S6_WHISPER_MODEL` | `base` | CPU-friendly local Faster-Whisper model used only by explicit Smart clips |
+| `S6_WHISPER_MODEL` | `base` | CPU-friendly local Faster-Whisper model used for speech transcription and captions in Auto and Smart clips |
 | `S6_WHISPER_DEVICE` | `cpu` | Whisper device: `cpu`, `auto`, or `cuda` |
 | `S6_WHISPER_COMPUTE_TYPE` | `int8` | Whisper compute type: `int8`, `int8_float16`, `float16`, `float32`, or `auto` |
 | `S6_WHISPER_BEAM_SIZE` | `1` | Whisper beam size (1–8); lower beams decode faster on CPU |
