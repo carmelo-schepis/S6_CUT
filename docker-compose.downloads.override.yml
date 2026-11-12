@@ -5,5 +5,5 @@ services:
   engine:
     volumes:
       - type: bind
-        source: ${S6_DOWNLOADS_PATH:-./data}
+        source: ${S6_DOWNLOADS_PATH:-${S6_DATA_PATH:-./data}}
         target: /downloads
