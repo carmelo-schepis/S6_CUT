@@ -30,6 +30,7 @@ class InstallerPortConflictTests(unittest.TestCase):
                 'die() { echo "$*" >&2; exit 1; }',
                 "trap 'echo DIAGNOSTICS >&2' ERR",
                 '''docker() {
+                    if [[ "$2" == ps ]]; then return 0; fi
                     printf '%s | engine=%s\n' "$*" "${S6_ENGINE_PORT:-default}" >> calls
                     if [[ "$*" == "compose port engine 8001" ]]; then
                         echo "$ASSIGNED"; return 0
