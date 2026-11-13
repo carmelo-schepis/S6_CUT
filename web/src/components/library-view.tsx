@@ -483,18 +483,11 @@ function AssetPreview({ asset }: { asset: LibraryAsset }) {
 }
 
 function FolderTree({ folders, assets, selectedId, onSelect, onAdd, onRename, onMove, onArchive, onRemove }: { folders: LibraryFolder[]; assets: LibraryAsset[]; selectedId: string | null; onSelect: (id: string) => void; onAdd: (parentId: string) => void; onRename: (folder: LibraryFolder) => void; onMove: (folder: LibraryFolder) => void; onArchive: (folder: LibraryFolder) => void; onRemove: (folder: LibraryFolder) => void }) {
-  const render = (parentId: string | null, depth = 0) => folders.filter((folder) => (folder.parentId || null) === parentId).map((folder) => {
+  const render = (parentId: string | null) => folders.filter((folder) => (folder.parentId || null) === parentId).map((folder) => {
     const hasChildren = folders.some((item) => item.parentId === folder.id);
-    return <div key={folder.id} className="folder-node"><button role="treeitem" aria-selected={selectedId === folder.id} aria-level={depth + 1} aria-expanded={hasChildren ? true : undefined} tabIndex={selectedId === folder.id || (!selectedId && folder.system) ? 0 : -1} className={selectedId === folder.id ? "active" : ""} onClick={() => onSelect(folder.id)}><Folder size={14} /><span className="folder-name">{folder.name}</span><span>{assets.filter((asset) => asset.folderId === folder.id).length}</span></button>{!folder.system && <div className="folder-actions"><button aria-label={`Add subfolder to ${folder.name}`} onClick={() => onAdd(folder.id)}>+</button><button aria-label={`Rename ${folder.name}`} onClick={() => onRename(folder)}>Rename</button><button aria-label={`Move ${folder.name}`} onClick={() => onMove(folder)}>Move</button><button aria-label={`${folder.archived ? "Restore" : "Archive"} ${folder.name}`} onClick={() => onArchive(folder)}><Archive size={11} /></button><button aria-label={`Remove ${folder.name}`} onClick={() => onRemove(folder)}>×</button></div>}{hasChildren && <div role="group">{render(folder.id, depth + 1)}</div>}</div>;
+    return <li key={folder.id} className="folder-node"><button aria-current={selectedId === folder.id ? "true" : undefined} className={selectedId === folder.id ? "active" : ""} onClick={() => onSelect(folder.id)}><Folder size={14} /><span className="folder-name">{folder.name}</span><span>{assets.filter((asset) => asset.folderId === folder.id).length}</span></button>{!folder.system && <div className="folder-actions"><button aria-label={`Add subfolder to ${folder.name}`} onClick={() => onAdd(folder.id)}>+</button><button aria-label={`Rename ${folder.name}`} onClick={() => onRename(folder)}>Rename</button><button aria-label={`Move ${folder.name}`} onClick={() => onMove(folder)}>Move</button><button aria-label={`${folder.archived ? "Restore" : "Archive"} ${folder.name}`} onClick={() => onArchive(folder)}><Archive size={11} /></button><button aria-label={`Remove ${folder.name}`} onClick={() => onRemove(folder)}>×</button></div>}{hasChildren && <ul>{render(folder.id)}</ul>}</li>;
   });
-  const navigate = (event: KeyboardEvent<HTMLDivElement>) => {
-    const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="treeitem"]')];
-    const index = items.indexOf(document.activeElement as HTMLButtonElement);
-    if (index < 0) return;
-    const target = event.key === "ArrowDown" ? items[index + 1] : event.key === "ArrowUp" ? items[index - 1] : event.key === "Home" ? items[0] : event.key === "End" ? items.at(-1) : undefined;
-    if (target) { event.preventDefault(); target.focus(); }
-  };
-  return <div className="folder-tree" role="tree" aria-label="Media folders" onKeyDown={navigate}>{render(null)}</div>;
+  return <ul className="folder-tree" aria-label="Media folders">{render(null)}</ul>;
 }
 
 function ImportPanel({ folders, defaultFolderId, onDone }: { folders: LibraryFolder[]; defaultFolderId?: string; onDone: () => void }) {
