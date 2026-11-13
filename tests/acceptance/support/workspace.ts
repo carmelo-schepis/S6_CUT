@@ -236,11 +236,32 @@ export async function extractZip(zipPath: string, destination: string) {
 }
 
 /** Read clip boundaries from the job record; the workspace does not show them. */
-export async function jobBoundaries(projectName: string) {
-  const projects = await (await fetch(`${gateway}/api/v1/projects`)).json();
+type JsonResponse = {
+  ok: boolean | (() => boolean);
+  status: number | (() => number);
+  json(): Promise<unknown>;
+};
+
+async function responseJson(response: JsonResponse, label: string): Promise<unknown> {
+  const ok = typeof response.ok === "function" ? response.ok() : response.ok;
+  const status = typeof response.status === "function" ? response.status() : response.status;
+  if (!ok) throw new Error(`${label} failed (${status})`);
+  return response.json();
+}
+
+export async function jobBoundaries(projectName: string, page?: Page) {
+  const projectsResponse = page
+    ? await page.request.get(`${gateway}/api/v1/projects`)
+    : await fetch(`${gateway}/api/v1/projects`);
+  const projects: unknown = await responseJson(projectsResponse, "project lookup");
+  if (!Array.isArray(projects)) throw new Error("project lookup returned an invalid response");
   const project = projects.find((item: { name: string }) => item.name === projectName);
   if (!project) throw new Error(`project ${projectName} not found in the engine record`);
-  const jobs = await (await fetch(`${gateway}/api/v1/jobs`)).json();
+  const jobsResponse = page
+    ? await page.request.get(`${gateway}/api/v1/jobs`)
+    : await fetch(`${gateway}/api/v1/jobs`);
+  const jobs: unknown = await responseJson(jobsResponse, "job lookup");
+  if (!Array.isArray(jobs)) throw new Error("job lookup returned an invalid response");
   const job = jobs.find((item: { projectId: string }) => item.projectId === project.id);
   if (!job) throw new Error(`job for ${projectName} not found`);
   return { project, job };
@@ -266,7 +287,7 @@ export async function openOptionRow(page: Page, id: string) {
 
 /** Reopen a project from its durable job record rather than Projects list UI. */
 export async function openWorkspaceForProject(page: Page, projectName: string) {
-  const { job } = await jobBoundaries(projectName);
+  const { job } = await jobBoundaries(projectName, page);
   await page.getByRole("button", { name: "Jobs", exact: true }).click();
   const jobCard = page.locator(`.job-card[data-job-id="${job.id}"]`);
   const showAll = page.getByRole("button", { name: /^Show all \d+ jobs$/ });
@@ -350,7 +371,7 @@ export async function createClipProject(page: Page, options: {
 
 /** Collect everything the workspace shows about each finished clip. */
 export async function collectClips(page: Page, projectName: string, outputDir: string): Promise<ClipRecord[]> {
-  const { job } = await jobBoundaries(projectName);
+  const { job } = await jobBoundaries(projectName, page);
   const tiles = page.locator(".clip-tile.complete");
   const total = await tiles.count();
   const records: ClipRecord[] = [];

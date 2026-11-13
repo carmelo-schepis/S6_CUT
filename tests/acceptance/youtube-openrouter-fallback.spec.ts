@@ -75,7 +75,7 @@ test.describe("Smart planning survives an OpenRouter failure on a YouTube import
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        name: "E2E OpenRouter failure", modelId: "openai/gpt-4.1-mini",
+        name: "E2E OpenRouter failure", textModelId: "openai/gpt-4.1-mini",
         openrouterKey: profileKey, persistence: "encrypted", selected: true,
       }),
     });
