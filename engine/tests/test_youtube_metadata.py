@@ -212,7 +212,7 @@ def test_metadata_generation_preserves_concurrent_manual_edit(monkeypatch):
     job.youtube_metadata_model_id = "cheap/model"
     _persist_job(job, {"youtube_metadata": {"enabled": True, "model_id": "cheap/model"}})
 
-    async def models():
+    async def models(*_args, **_kwargs):
         return [OpenRouterModel(
             id="cheap/model", name="Cheap", pricing={"prompt": "0.0000001", "completion": "0.0000004"},
             supported_parameters=["response_format"],
@@ -246,7 +246,7 @@ def test_provider_failure_keeps_fallback_status_after_persistence(monkeypatch):
     job.youtube_metadata_model_id = "cheap/model"
     _persist_job(job, {"youtube_metadata": {"enabled": True, "model_id": "cheap/model"}})
 
-    async def models():
+    async def models(*_args, **_kwargs):
         return [OpenRouterModel(
             id="cheap/model", name="Cheap", pricing={"prompt": "0.0000001", "completion": "0.0000004"},
             supported_parameters=["response_format"],
@@ -282,7 +282,7 @@ def test_metadata_generation_uses_small_output_budget_and_caps_paid_calls(monkey
         calls.append((messages, schema, kwargs))
         return ({"clip_id": job.clips[0].id, "title": "Grounded title", "description": "Grounded description"}, {"prompt_tokens": 80, "completion_tokens": 40, "cost": 0.00001})
 
-    async def models():
+    async def models(*_args, **_kwargs):
         return [OpenRouterModel(
             id="cheap/model", name="Cheap", pricing={"prompt": "0.0000001", "completion": "0.0000004"},
             supported_parameters=["response_format"],

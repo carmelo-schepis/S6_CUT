@@ -76,8 +76,8 @@ test("rows start closed, show their values, and the create action sits in the fi
   expect(create, "create button is rendered").not.toBeNull();
   expect(create!.y + create!.height, "create button is inside the first 900px screen").toBeLessThanOrEqual(900);
   const panel = await page.locator(".create-panel").boundingBox();
-  // Measured 1756px against the 2780px baseline (-37%). Create is on the first screen.
-  expect(panel!.height, "create panel is much shorter than the 2780px baseline").toBeLessThanOrEqual(1800);
+  // Measured 1620px on the isolated stack (1544px on the owner stack) against the 2780px baseline. Create is on the first screen.
+  expect(panel!.height, "create panel is much shorter than the 2780px baseline").toBeLessThanOrEqual(1650);
   await page.screenshot({ path: path.join(evidence, "clip-rows-closed-1440.png") });
 });
 
@@ -110,6 +110,69 @@ test("keyboard order reaches the option rows only after the main controls, as th
   expect(order.rowCount).toBeGreaterThan(0);
   expect(order.rowsAfterInTabOrder, "rows come after the main controls in the Tab order").toBe(true);
   expect(order.rowsBelowControls, "rows sit below the main controls on screen").toBe(true);
+});
+
+test("Format and Processing mode share a row, and the step-2 sections read in DOM order", async ({ page }) => {
+  await openCreatePanel(page);
+  const layout = await page.evaluate(() => {
+    const sections = [...document.querySelectorAll<HTMLElement>(".style-step > section.field-group")];
+    const byLabel = (label: string) => sections.find((section) => section.getAttribute("aria-label") === label)!.getBoundingClientRect();
+    const format = byLabel("Format");
+    const processing = byLabel("Processing mode");
+    return {
+      domOrder: sections.map((section) => section.getAttribute("aria-label")),
+      tops: sections.map((section) => Math.round(section.getBoundingClientRect().top)),
+      format: { top: format.top, left: format.left },
+      processing: { top: processing.top, left: processing.left },
+      orders: [...document.querySelectorAll<HTMLElement>(".style-step > *")].map((child) => getComputedStyle(child).order),
+    };
+  });
+  expect(layout.domOrder).toEqual(["Editorial style", "Format", "Processing mode", "Batch size", "Execution"]);
+  expect(Math.abs(layout.format.top - layout.processing.top), "Format and Processing mode share a top edge").toBeLessThanOrEqual(1);
+  expect(layout.processing.left, "Processing mode sits in the column after Format").toBeGreaterThan(layout.format.left);
+  // Visual order equals DOM order: no section is placed above one that precedes it.
+  for (let index = 1; index < layout.tops.length; index += 1) expect(layout.tops[index], `${layout.domOrder[index]} sits below ${layout.domOrder[index - 1]}`).toBeGreaterThanOrEqual(layout.tops[index - 1] - 1);
+  expect(layout.orders.every((order) => order === "0"), "no step-2 child is reordered with CSS").toBe(true);
+});
+
+test("option row titles use the same size and weight as the field labels", async ({ page }) => {
+  await openCreatePanel(page);
+  const typography = await page.evaluate(() => {
+    const title = getComputedStyle(document.querySelector(".create-option-title")!);
+    const label = getComputedStyle(document.querySelector(".style-step .field-group-head h3")!);
+    return { title: [title.fontSize, title.fontWeight], label: [label.fontSize, label.fontWeight] };
+  });
+  expect(typography.title).toEqual(typography.label);
+});
+
+test("the Heading and Emoji notes sit at least 8px below their cards", async ({ page }) => {
+  await openCreatePanel(page);
+  await openOption(page, "Heading appearance");
+  await openOption(page, "Emoji reactions");
+  for (const picker of [".heading-style-picker", ".emoji-mode-picker"]) {
+    const gap = await page.locator(picker).evaluate((element) => {
+      const cards = element.querySelector(".heading-style-options")!.getBoundingClientRect();
+      const note = element.querySelector(".form-hint")!.getBoundingClientRect();
+      return note.top - cards.bottom;
+    });
+    expect(gap, `${picker} note clears its cards`).toBeGreaterThanOrEqual(8);
+  }
+});
+
+test("the open Subscribe row shows its value once and keeps the group name for screen readers", async ({ page }) => {
+  await openCreatePanel(page);
+  await openOption(page, "Subscribe animation");
+  const group = page.getByRole("group", { name: "Automatic Subscribe animation" });
+  await expect(group).toBeVisible();
+  const legend = await group.locator("> legend").boundingBox();
+  expect(legend, "legend is still in the accessibility tree").not.toBeNull();
+  expect(legend!.width, "legend takes no visible width").toBeLessThanOrEqual(1);
+  expect(legend!.height, "legend takes no visible height").toBeLessThanOrEqual(1);
+  const enabled = group.getByRole("checkbox", { name: "Enable Subscribe animation" });
+  await expect(enabled).toBeVisible();
+  const toggle = await page.getByRole("button", { name: "Subscribe animation", exact: true }).boundingBox();
+  const checkbox = await enabled.boundingBox();
+  expect(checkbox!.y - (toggle!.y + toggle!.height), "first control sits directly under the row").toBeLessThanOrEqual(12);
 });
 
 test("Music mode swaps the rows and shows the lyric and song values", async ({ page }) => {
@@ -189,6 +252,29 @@ test.describe.serial("a choice made in a collapsed row reaches the job", () => {
     expect(bands[1].top - bands[0].bottom, "callout to job strip").toBeCloseTo(16, 0);
     expect(bands[2].top - bands[1].bottom, "job strip to notes").toBeCloseTo(16, 0);
 
+    const callout = await page.locator(".workspace-page > .stalled-callout").evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      const text = element.querySelector(":scope > div:nth-child(2)")!.getBoundingClientRect();
+      const buttons = [...element.querySelectorAll("button")].map((button) => button.getBoundingClientRect());
+      return { box, text, buttons };
+    });
+    // Buttons always stay inside the callout, and the text keeps a readable column.
+    for (const button of callout.buttons) expect(button.left >= callout.box.left - 1 && button.right <= callout.box.right + 1, "button inside the callout").toBe(true);
+    expect(callout.text.width, "callout text column is readable").toBeGreaterThanOrEqual(200);
+    const viewportWidth = page.viewportSize()?.width ?? 1440;
+    if (viewportWidth <= 540) {
+      expect(callout.box.height, "phone callout stays short").toBeLessThanOrEqual(220);
+      for (const button of callout.buttons) expect(button.top, "phone buttons sit below the text").toBeGreaterThanOrEqual(callout.text.bottom - 1);
+      const bar = await page.locator(".workspace-page > .job-strip .progress-wrap").evaluate((element) => element.getBoundingClientRect().width);
+      const strip = await page.locator(".workspace-page > .job-strip").evaluate((element) => {
+        const style = getComputedStyle(element);
+        return element.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+      });
+      expect(Math.abs(bar - strip), "phone progress bar spans the job strip").toBeLessThanOrEqual(2);
+    } else if (viewportWidth >= 1024) {
+      expect(callout.box.height, "desktop callout stays one row").toBeLessThanOrEqual(100);
+      for (const button of callout.buttons) expect(button.top >= callout.text.top - 1 && button.bottom <= callout.text.bottom + 1, "desktop buttons align with the text").toBe(true);
+    }
     await expect(page.locator("body")).not.toContainText("263 of 9");
     await expect(page.locator(".workspace-page > .stalled-callout")).not.toContainText("—");
     await page.screenshot({ path: path.join(evidence, "workspace-status-bands.png") });

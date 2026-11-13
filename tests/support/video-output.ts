@@ -27,6 +27,7 @@ type VerifyVideoOutputOptions = {
   maximumDurationSeconds: number;
   expectedWidth?: number;
   expectedHeight?: number;
+  expectedClipId?: string;
   expectedOverlayRegion?: NormalizedRegion;
   expectedOverlayTimestamp?: number;
 };
@@ -56,6 +57,16 @@ async function waitUntilPlayable(video: Locator): Promise<void> {
       media.addEventListener("error", failed, { once: true });
     });
   });
+}
+
+function safeSourceIdentity(source: string): string {
+  try {
+    const url = new URL(source);
+    if (url.protocol === "blob:") return "blob:[redacted]";
+    return `${url.origin}${url.pathname}`;
+  } catch {
+    return "[unavailable]";
+  }
 }
 
 async function seekAndSample(video: Locator, timestamp: number, screenshotPath: string): Promise<FrameSample> {
@@ -115,7 +126,7 @@ async function seekAndSample(video: Locator, timestamp: number, screenshotPath: 
 }
 
 export async function verifyVideoOutput(options: VerifyVideoOutputOptions): Promise<VideoOutputEvidence> {
-  const { video, artifactDirectory, artifactPrefix, maximumDurationSeconds, expectedWidth, expectedHeight, expectedOverlayRegion, expectedOverlayTimestamp } = options;
+  const { video, artifactDirectory, artifactPrefix, maximumDurationSeconds, expectedWidth, expectedHeight, expectedClipId, expectedOverlayRegion, expectedOverlayTimestamp } = options;
   await fs.mkdir(artifactDirectory, { recursive: true });
   await expect(video).toBeVisible();
   await waitUntilPlayable(video);
@@ -129,8 +140,10 @@ export async function verifyVideoOutput(options: VerifyVideoOutputOptions): Prom
       readyState: media.readyState,
       error: media.error ? { code: media.error.code, message: media.error.message } : null,
       source: media.currentSrc,
+      clipId: media.dataset.clipId || null,
     };
   });
+  if (expectedClipId !== undefined) expect(metadata.clipId, "preview belongs to the submitted completed clip").toBe(expectedClipId);
   expect(metadata.error).toBeNull();
   expect(metadata.readyState).toBeGreaterThanOrEqual(2);
   expect(Number.isFinite(metadata.duration)).toBe(true);
@@ -141,10 +154,33 @@ export async function verifyVideoOutput(options: VerifyVideoOutputOptions): Prom
   if (expectedWidth !== undefined) expect(metadata.width).toBe(expectedWidth);
   if (expectedHeight !== undefined) expect(metadata.height).toBe(expectedHeight);
 
-  const mediaResponse = await video.evaluate(async (element) => {
-    const response = await fetch((element as HTMLVideoElement).currentSrc, { headers: { Range: "bytes=0-1023" } });
-    return { status: response.status, contentType: response.headers.get("content-type") || "" };
-  });
+  const assertSourceIdentity = async (stage: string) => {
+    const current = await video.evaluate((element) => ({
+      source: (element as HTMLVideoElement).currentSrc,
+      clipId: (element as HTMLVideoElement).dataset.clipId || null,
+      error: (element as HTMLVideoElement).error?.message || null,
+    }));
+    expect(current.clipId, `preview clip identity changed ${stage}`).toBe(metadata.clipId);
+    expect(current.source === metadata.source, `preview media source changed ${stage} (clip ${metadata.clipId || "unknown"}, ${safeSourceIdentity(current.source)})`).toBe(true);
+    expect(current.error, `preview media failed ${stage}`).toBeNull();
+  };
+  await assertSourceIdentity("before media request");
+  let mediaResponse: { status: number; contentType: string };
+  try {
+    mediaResponse = await video.evaluate(async (_element, source) => {
+      const response = await fetch(source, { headers: { Range: "bytes=0-1023" } });
+      return { status: response.status, contentType: response.headers.get("content-type") || "" };
+    }, metadata.source);
+  } catch (cause) {
+    const reason = cause instanceof Error ? cause.name : "unknown error";
+    const player = await video.evaluate((element) => {
+      const media = element as HTMLVideoElement;
+      return { source: media.currentSrc, readyState: media.readyState, networkState: media.networkState, error: media.error?.message || null };
+    }).catch(() => null);
+    const source = player ? safeSourceIdentity(player.source) : safeSourceIdentity(metadata.source);
+    throw new Error(`clip ${metadata.clipId || "unknown"} media fetch failed for ${source} (${reason}); player=${JSON.stringify(player ? { readyState: player.readyState, networkState: player.networkState, error: player.error } : "unavailable")}; signed URL omitted`);
+  }
+  await assertSourceIdentity("after media request");
   expect([200, 206]).toContain(mediaResponse.status);
   expect(mediaResponse.contentType).toMatch(/^video\//);
 
@@ -154,6 +190,7 @@ export async function verifyVideoOutput(options: VerifyVideoOutputOptions): Prom
     return media.currentTime;
   });
   await video.evaluate(async (element) => { await (element as HTMLVideoElement).play(); });
+  await assertSourceIdentity("after playback");
   await expect.poll(() => video.evaluate((element) => (element as HTMLVideoElement).currentTime), { timeout: 10_000 }).toBeGreaterThan(playbackStart + 0.25);
   const playbackEnd = await video.evaluate((element) => {
     const media = element as HTMLVideoElement;
@@ -170,7 +207,9 @@ export async function verifyVideoOutput(options: VerifyVideoOutputOptions): Prom
   const screenshots = labels.map((label) => path.join(artifactDirectory, `${artifactPrefix}-${label}.png`));
   const samples: FrameSample[] = [];
   for (let index = 0; index < requestedTimestamps.length; index += 1) {
+    await assertSourceIdentity(`before sample ${index + 1}`);
     samples.push(await seekAndSample(video, requestedTimestamps[index], screenshots[index]));
+    await assertSourceIdentity(`after sample ${index + 1}`);
   }
   for (const [index, sample] of samples.entries()) {
     expect(sample.variance, `frame at ${sample.time}s is blank or uniform`).toBeGreaterThan(20);

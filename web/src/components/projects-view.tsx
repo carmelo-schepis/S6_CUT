@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, Film, Plus, Sparkles, Zap } from "lucide-react";
 import { createClipJob, createFolder, listFolders, readableError } from "../api";
-import { DEFAULT_SUBSCRIBE_ANIMATION, type BatchMode, type ContentFormat, type Health, type LibraryFolder, type ProcessingMode, type Project, type ProviderProfile, type SourceProfile, type Style, type SubscribeAnimationConfig, type MusicTheme, type MusicLyricAnimation, type MusicHookTextFormat, type CaptionPreset, type VideoFilter, type HeadingStyle, type EmojiMode } from "../types";
+import { DEFAULT_SUBSCRIBE_ANIMATION, isOllamaOn, type BatchMode, type ContentFormat, type Health, type LibraryFolder, type ProcessingMode, type Project, type ProviderProfile, type SourceProfile, type Style, type SubscribeAnimationConfig, type MusicTheme, type MusicLyricAnimation, type MusicHookTextFormat, type CaptionPreset, type VideoFilter, type HeadingStyle, type EmojiMode, type MusicAudioMode } from "../types";
 import { Button, Field, FieldGroup, StepBadge, useSingleFlight } from "./common";
 import { VideoSourcePicker } from "./video-source-picker";
 import { OptionRow } from "./option-row";
 import { VideoOnlyDownload } from "./video-only-download";
 import { SubscribeAnimationControl } from "./subscribe-animation-control";
 import { RecentClips } from "./recent-clips";
+import { DEFAULT_MUSIC_EDITORIAL_STYLE, MUSIC_EDITORIAL_STYLES, SPEECH_EDITORIAL_STYLES } from "../editorial-styles";
 import { MUSIC_THEME_LABELS, MusicHookFormatPicker, MusicLyricAnimationPicker } from "./music-typography-controls";
 import { EmojiModeControls, HeadingStyleControls, SpeechSubtitleStyleControls, VideoFilterPicker } from "./speech-style-controls";
 import { CAPTION_PRESETS, DEFAULT_CAPTION_PRESET, DEFAULT_EMOJI_MODE, DEFAULT_HEADING_STYLE, DEFAULT_VIDEO_FILTER, EMOJI_MODES, HEADING_STYLES, VIDEO_FILTERS, labelOf, musicEditingPresentation, speechEditingPresentation } from "../editing-presets";
@@ -20,12 +21,6 @@ const isYouTubeUrl = (value: string) => {
   catch { return false; }
 };
 
-const styles: { id: Style; label: string; note: string }[] = [
-  { id: "funny", label: "Funny", note: "Punchlines & reactions" },
-  { id: "serious", label: "Serious", note: "Complete claims" },
-  { id: "educational", label: "Educational", note: "Clear explanations" },
-  { id: "hype", label: "Hype", note: "Hooks & high energy" },
-];
 
 export function ProjectsView({ health, healthChecked = true, providersLoaded = true, hasSelectedProvider = true, selectedProfile = null, onConfigureProviders = () => undefined, onCreated, onSelectLibraryAsset, onReady }: {
   onReady?: () => void;
@@ -44,7 +39,8 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
   const [file, setFile] = useState<File | null>(null);
   const [url, setUrl] = useState("");
   const [projectName, setProjectName] = useState("");
-  const [style, setStyle] = useState<Style>("educational");
+  const [speechStyle, setSpeechStyle] = useState<Style>("educational");
+  const [musicStyle, setMusicStyle] = useState<Style>(DEFAULT_MUSIC_EDITORIAL_STYLE);
   const [count, setCount] = useState(5);
   const [highVolumeCount, setHighVolumeCount] = useState("5");
   const [batchMode, setBatchMode] = useState<BatchMode>("standard");
@@ -60,8 +56,22 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
   const [maxDuration, setMaxDuration] = useState(60);
   const [aspectRatio, setAspectRatio] = useState("9:16");
   const [processingMode, setProcessingMode] = useState<ProcessingMode>("auto");
-  const [executionPolicy, setExecutionPolicy] = useState<"auto" | "engine_only">("auto");
+  const [executionPolicy, setExecutionPolicy] = useState<"auto" | "engine_only" | "ollama">("auto");
+  // Ollama exists only while the selected profile has an endpoint; otherwise fall back to Auto.
+  const ollamaReady = Boolean(selectedProfile?.ollamaUrl) && isOllamaOn(selectedProfile);
+  const effectivePolicy = executionPolicy === "ollama" && !ollamaReady ? "auto" : executionPolicy;
+  // Forget an Ollama choice once its endpoint is removed, so re-adding one does not silently reselect it.
+  const [previousOllamaReady, setPreviousOllamaReady] = useState(ollamaReady);
+  if (previousOllamaReady !== ollamaReady) {
+    setPreviousOllamaReady(ollamaReady);
+    if (!ollamaReady && executionPolicy === "ollama") setExecutionPolicy("auto");
+  }
+  const metadataModelLabel = effectivePolicy === "ollama" ? `${selectedProfile?.ollamaModel || "your Ollama model"} on Ollama` : (selectedProfile?.youtubeMetadataModelId || "the configured Settings model");
   const [sourceProfile, setSourceProfile] = useState<SourceProfile>("speech");
+  // Speech and Music keep separate editorial choices; Music shows lyric-focused options.
+  const style = sourceProfile === "music" ? musicStyle : speechStyle;
+  const setStyle = sourceProfile === "music" ? setMusicStyle : setSpeechStyle;
+  const editorialStyles = sourceProfile === "music" ? MUSIC_EDITORIAL_STYLES : SPEECH_EDITORIAL_STYLES;
   const [musicTheme, setMusicTheme] = useState<MusicTheme>("clean");
   const [musicLyricsLanguage, setMusicLyricsLanguage] = useState("en");
   const [musicLyricAnimation, setMusicLyricAnimation] = useState<MusicLyricAnimation>("legacy");
@@ -77,7 +87,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
   const musicTrackInput = useRef<HTMLInputElement>(null);
   const [musicTrackUrl, setMusicTrackUrl] = useState("");
   const [musicTrackSpeed, setMusicTrackSpeed] = useState("1");
-  const [musicAudioMode, setMusicAudioMode] = useState<"song_only" | "mix_original">("song_only");
+  const [musicAudioMode, setMusicAudioMode] = useState<MusicAudioMode>("song_only");
   const [musicSongVolume, setMusicSongVolume] = useState(25);
   const [sourceDuration, setSourceDuration] = useState<{ file: File; seconds: number } | null>(null);
   const [burnSubtitles, setBurnSubtitles] = useState(true);
@@ -178,7 +188,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
           url: sourceType === "url" ? url.trim() : undefined,
           name: projectName.trim() || undefined, style, count: requestedCount, minDuration, maxDuration,
           aspectRatio: contentFormat === "long" ? "16:9" : aspectRatio,
-          contentFormat, batchMode, executionPolicy,
+          contentFormat, batchMode, executionPolicy: effectivePolicy,
           processingMode: sourceProfile === "music" ? "smart" : processingMode,
           sourceProfile, burnSubtitles: fastMode ? false : burnSubtitles,
           ...(sourceProfile === "speech" && speechHookTextEnabled ? { hookText: true } : {}),
@@ -188,7 +198,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
           ...(editingPresentation ? { editingPresentation } : {}),
           subscribeAnimation, libraryFolderId: libraryFolderId || undefined, libraryOverlaysEnabled: libraryOverlaysEnabled && libraryOverlaysSupported,
           ...(sourceProfile === "music" ? { musicPresentation: { version: 1 as const, subtitleTheme: musicTheme, ...(musicLyricAnimation !== "legacy" ? { lyricAnimation: musicLyricAnimation } : {}), ...(musicHookTextEnabled && musicHookFormat !== "plain" ? { hookTextFormat: musicHookFormat } : {}) }, musicTopText: musicHookTextEnabled ? musicTopText : "", musicLyricsLanguage: musicLyricsLanguage || undefined } : {}),
-          ...(sourceProfile === "music" ? { musicTrackFile: musicTrackFile || undefined, musicTrackUrl: musicTrackUrl.trim() || undefined, musicTrackSpeed: Number(musicTrackSpeed), musicAudioMode, ...(musicAudioMode === "mix_original" ? { musicSongGain: musicSongVolume / 100 } : {}) } : {}),
+          ...(sourceProfile === "music" ? { musicTrackFile: musicTrackFile || undefined, musicTrackUrl: musicTrackUrl.trim() || undefined, musicTrackSpeed: Number(musicTrackSpeed), musicAudioMode, ...(musicAudioMode === "mix_original" || musicAudioMode === "replace_music_keep_voice" ? { musicSongGain: musicSongVolume / 100 } : {}) } : {}),
         });
       if (libraryFolderId) localStorage.setItem(RECENT_FOLDER_KEY, libraryFolderId);
       onCreated(result.project);
@@ -234,7 +244,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
       : sourceProfile === "speech" && processingMode === "fast" ? "Fast mode does not support metadata generation. Choose Auto or Smart."
         : null;
   // Mirrors the engine's own default: Smart-capable short, standard batches.
-  const youtubeMetadataDefault = hasSelectedProvider && selectedProfile?.autoSeoTitles !== false && batchMode !== "high_volume";
+  const youtubeMetadataDefault = (hasSelectedProvider || effectivePolicy === "ollama") && selectedProfile?.autoSeoTitles !== false && batchMode !== "high_volume";
   const youtubeMetadataActive = metadataDisabledReason === null && (youtubeMetadataChoice ?? youtubeMetadataDefault);
   const musicConfigurationMessage = sourceProfile === "music" && contentFormat !== "short"
     ? "Music / sung vocals is currently available for short clips only. Choose Short form to continue."
@@ -277,7 +287,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
         </div>
       </div>
 
-      {providersLoaded && !hasSelectedProvider && !providerCalloutDismissed && <div className="provider-callout"><Sparkles size={17} /><div><strong>Add optional AI providers</strong><span>OpenRouter can improve Smart planning. Local modes stay available.</span></div><div className="provider-callout-actions"><Button onClick={onConfigureProviders}>Configure providers</Button><Button variant="ghost" onClick={() => {
+      {providersLoaded && !hasSelectedProvider && !ollamaReady && !providerCalloutDismissed && <div className="provider-callout"><Sparkles size={17} /><div><strong>Add optional AI providers</strong><span>OpenRouter can improve Smart planning. Local modes stay available.</span></div><div className="provider-callout-actions"><Button onClick={onConfigureProviders}>Configure providers</Button><Button variant="ghost" onClick={() => {
         setProviderCalloutDismissed(true);
         try { localStorage.setItem(PROVIDER_CALLOUT_DISMISSED_KEY, "true"); } catch { /* Storage can be unavailable in hardened browsers. */ }
       }}>Continue locally</Button></div></div>}
@@ -301,7 +311,7 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
           <div className="step-label"><StepBadge step={2} /><span className="step-label-text">Choose the output</span></div>
           <FieldGroup title="Editorial style">
             <div className="style-grid">
-              {styles.map((item) => <button type="button" key={item.id} className={style === item.id ? "style-card active" : "style-card"} onClick={() => setStyle(item.id)} aria-pressed={style === item.id}>
+              {editorialStyles.map((item) => <button type="button" key={item.id} className={style === item.id ? "style-card active" : "style-card"} onClick={() => setStyle(item.id)} aria-pressed={style === item.id}>
                 <span className="style-card-title"><strong>{item.label}</strong><Check className="style-card-check" size={16} aria-hidden="true" /></span><small>{item.note}</small>
               </button>)}
             </div>
@@ -326,6 +336,13 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
                 }} />{highVolumeCount.trim() !== "" && !/^-?[0-9]+$/.test(highVolumeCount.trim()) && <span className="form-hint" aria-live="polite">Enter a whole number from 1 to 500.</span>}</div>}
               </Field>
             </FieldGroup>
+            {sourceProfile === "speech" && <FieldGroup title="Processing mode">
+              <div className="segmented mode-tabs processing-mode-tabs" aria-label="Processing mode">
+                <button type="button" aria-pressed={processingMode === "auto"} className={processingMode === "auto" ? "active" : ""} onClick={() => setProcessingMode("auto")}><Sparkles size={13} /> <span>Auto</span></button>
+                <button type="button" aria-pressed={processingMode === "fast"} className={processingMode === "fast" ? "active" : ""} onClick={() => { setProcessingMode("fast"); setBurnSubtitles(false); }}><Zap size={13} /> <span>Fast</span></button>
+                <button type="button" aria-pressed={processingMode === "smart"} className={processingMode === "smart" ? "active" : ""} onClick={() => setProcessingMode("smart")}><Sparkles size={13} /> <span>Smart</span></button>
+              </div>
+            </FieldGroup>}
             <FieldGroup title="Batch size" hint={batchMode === "standard" ? "Standard keeps the existing planning behavior and limit of 30." : "High-volume allows up to 500 requested cuts. If the source cannot satisfy the request, the engine explains its effective target."}>
               <div className="segmented mode-tabs" aria-label="Batch size">
                 <button type="button" aria-pressed={batchMode === "standard"} className={batchMode === "standard" ? "active" : ""} onClick={() => { const value = highVolumeCount.trim(); const next = value !== "" && /^[0-9]+$/.test(value) ? Number(value) : count; setCount(Math.min(30, Math.max(1, next))); setBatchMode("standard"); }}>Standard · up to 30</button>
@@ -338,18 +355,12 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
 
             <FieldGroup title="Execution">
               <div className="segmented mode-tabs" aria-label="Execution policy">
-                <button type="button" aria-pressed={executionPolicy === "auto"} className={executionPolicy === "auto" ? "active" : ""} onClick={() => setExecutionPolicy("auto")}>Auto · API with local fallback</button>
-                <button type="button" aria-pressed={executionPolicy === "engine_only"} className={executionPolicy === "engine_only" ? "active" : ""} onClick={() => setExecutionPolicy("engine_only")}>Engine only</button>
+                <button type="button" aria-pressed={effectivePolicy === "auto"} className={effectivePolicy === "auto" ? "active" : ""} onClick={() => setExecutionPolicy("auto")}>Auto · API with local fallback</button>
+                <button type="button" aria-pressed={effectivePolicy === "engine_only"} className={effectivePolicy === "engine_only" ? "active" : ""} onClick={() => setExecutionPolicy("engine_only")}>Engine only</button>
+                {ollamaReady && <button type="button" aria-pressed={effectivePolicy === "ollama"} className={effectivePolicy === "ollama" ? "active" : ""} onClick={() => setExecutionPolicy("ollama")}>Local model</button>}
               </div>
-              <p className="form-hint">{executionPolicy === "engine_only" ? "All processing stays on this machine; no API calls are made." : "Uses a connected API for supported text features and falls back to local processing."}</p>
+              <p className="form-hint">{effectivePolicy === "engine_only" ? "All processing stays on this machine; no API calls are made." : effectivePolicy === "ollama" ? "Uses your Ollama server for supported text features and falls back to local processing. OpenRouter is not used." : "Uses a connected API for supported text features and falls back to local processing."}</p>
             </FieldGroup>
-            {sourceProfile === "speech" && <FieldGroup title="Processing mode">
-              <div className="segmented mode-tabs processing-mode-tabs" aria-label="Processing mode">
-                <button type="button" aria-pressed={processingMode === "auto"} className={processingMode === "auto" ? "active" : ""} onClick={() => setProcessingMode("auto")}><Sparkles size={13} /> <span>Auto</span></button>
-                <button type="button" aria-pressed={processingMode === "fast"} className={processingMode === "fast" ? "active" : ""} onClick={() => { setProcessingMode("fast"); setBurnSubtitles(false); }}><Zap size={13} /> <span>Fast</span></button>
-                <button type="button" aria-pressed={processingMode === "smart"} className={processingMode === "smart" ? "active" : ""} onClick={() => setProcessingMode("smart")}><Sparkles size={13} /> <span>Smart</span></button>
-              </div>
-            </FieldGroup>}
           </>
           {sourceProfile === "speech" && <div className="create-option-list">
             <OptionRow id="subtitle" title="Subtitle style" summary={subtitleSummary} open={openRows.has("subtitle")} onToggle={() => toggleRow("subtitle")}>
@@ -426,15 +437,15 @@ export function ProjectsView({ health, healthChecked = true, providersLoaded = t
           {musicHookTextEnabled && <Field label="Top text" hint="Optional · displayed in the upper black area. Up to 100 characters."><input aria-label="Top text" value={musicTopText} maxLength={100} onChange={(event) => setMusicTopText(event.target.value)} placeholder="Leave blank to omit" /></Field>}
           {musicHookTextEnabled && <MusicHookFormatPicker value={musicHookFormat} onChange={setMusicHookFormat} />}
           {speechHookTextEnabled && <Field label="Hook text to display" hint="Up to 150 characters. Your text will be shown on each clip."><textarea aria-label="Hook text to display" rows={2} maxLength={150} value={manualHookText} onChange={(event) => setManualHookText(event.target.value)} placeholder="Leave blank to generate a hook from the transcript" /></Field>}
-          <label className="subtitle-toggle"><input type="checkbox" aria-label="Write SEO titles with AI (YouTube metadata)" data-testid="youtube-metadata-toggle" checked={youtubeMetadataActive} disabled={metadataDisabledReason !== null} onChange={(event) => setYoutubeMetadataChoice(event.target.checked)} /> <span><strong>Generate YouTube metadata</strong><small>{metadataDisabledReason ?? (processingMode === "fast" ? "Fast mode has no transcript. Choose Auto or Smart." : executionPolicy === "engine_only" ? "Uses transcript-based local descriptions and deterministic titles." : `${youtubeMetadataDefault ? "On by default (Settings › Auto-write SEO titles)" : "Off by default"}. Uses ${selectedProfile?.youtubeMetadataModelId || "the configured Settings model"} when available, with local fallback. Editable and separate from burned-in text.`)}</small></span></label>
+          <label className="subtitle-toggle"><input type="checkbox" aria-label="Write SEO titles with AI (YouTube metadata)" data-testid="youtube-metadata-toggle" checked={youtubeMetadataActive} disabled={metadataDisabledReason !== null} onChange={(event) => setYoutubeMetadataChoice(event.target.checked)} /> <span><strong>Generate YouTube metadata</strong><small>{metadataDisabledReason ?? (processingMode === "fast" ? "Fast mode has no transcript. Choose Auto or Smart." : executionPolicy === "engine_only" ? "Uses transcript-based local descriptions and deterministic titles." : `${youtubeMetadataDefault ? "On by default (Settings › Auto-write SEO titles)" : "Off by default"}. Uses ${metadataModelLabel} when available, with local fallback. Editable and separate from burned-in text.`)}</small></span></label>
 
           <div className="create-option-list">
             {sourceProfile === "music" && <OptionRow id="song" title="Background song" summary={musicTrackSummary} open={openRows.has("song")} onToggle={() => toggleRow("song")}>
               <p className="field-group-hint">Optional · upload an MP3 or paste a public YouTube song URL. Choose whether the song replaces or accompanies the video audio.</p>
               <label className="field"><span className="field-label">MP3 upload</span><input ref={musicTrackInput} aria-label="Background song MP3" type="file" accept="audio/mpeg,.mp3" onChange={(event) => { const next = event.target.files?.[0] || null; setMusicTrackFile(next); if (next) setMusicTrackUrl(""); }} /><small>{musicTrackFile?.name || "MP3 audio only"}</small>{musicTrackFile && <button type="button" className="button button-quiet" onClick={() => { setMusicTrackFile(null); if (musicTrackInput.current) musicTrackInput.current.value = ""; }}>Remove song</button>}</label>
               <Field label="YouTube song URL"><input aria-label="YouTube song URL" type="url" value={musicTrackUrl} onChange={(event) => { setMusicTrackUrl(event.target.value); if (event.target.value) { setMusicTrackFile(null); if (musicTrackInput.current) musicTrackInput.current.value = ""; } }} placeholder="https://www.youtube.com/watch?v=..." /></Field>
-              <div className="field"><span className="field-label">Audio</span><div role="group" aria-label="Music audio mode" className="segmented mode-tabs"><button type="button" aria-pressed={musicAudioMode === "song_only"} className={musicAudioMode === "song_only" ? "active" : ""} disabled={!musicTrackFile && !musicTrackUrl.trim()} onClick={() => setMusicAudioMode("song_only")}>Song only</button><button type="button" aria-pressed={musicAudioMode === "mix_original"} className={musicAudioMode === "mix_original" ? "active" : ""} disabled={!musicTrackFile && !musicTrackUrl.trim()} onClick={() => setMusicAudioMode("mix_original")}>Original audio + song</button></div>{!musicTrackFile && !musicTrackUrl.trim() && <small>Add a song to choose how audio is combined.</small>}{musicAudioMode === "mix_original" && <small>Original audio at full volume · song at {musicSongVolume}% volume</small>}</div>
-              {musicAudioMode === "mix_original" && <label className="field"><span className="field-label">Background song volume · {musicSongVolume}%</span><input type="range" aria-label="Background song volume" aria-describedby="music-song-volume-help" min="0" max="100" step="1" value={musicSongVolume} disabled={!musicTrackFile && !musicTrackUrl.trim()} onChange={(event) => setMusicSongVolume(Number(event.target.value))} /><small id="music-song-volume-help">For clearer voices, try 10–15%. Lower further for quiet speech or a loud song. 0% mutes the song. This level stays fixed throughout the clip.</small></label>}
+              <div className="field"><span className="field-label">Audio</span><div role="group" aria-label="Music audio mode" className="segmented mode-tabs"><button type="button" aria-pressed={musicAudioMode === "song_only"} className={musicAudioMode === "song_only" ? "active" : ""} disabled={!musicTrackFile && !musicTrackUrl.trim()} onClick={() => setMusicAudioMode("song_only")}>Song only</button><button type="button" aria-pressed={musicAudioMode === "mix_original"} className={musicAudioMode === "mix_original" ? "active" : ""} disabled={!musicTrackFile && !musicTrackUrl.trim()} onClick={() => setMusicAudioMode("mix_original")}>Original audio + song</button><button type="button" aria-pressed={musicAudioMode === "replace_music_keep_voice"} className={musicAudioMode === "replace_music_keep_voice" ? "active" : ""} onClick={() => setMusicAudioMode("replace_music_keep_voice")}>Keep voice, replace background music</button></div>{!musicTrackFile && !musicTrackUrl.trim() && <small>Add a song to choose how audio is combined. Keep voice works without a replacement song.</small>}{musicAudioMode === "mix_original" && <small>Original audio at full volume · song at {musicSongVolume}% volume</small>}{musicAudioMode === "replace_music_keep_voice" && <small>{musicTrackFile || musicTrackUrl.trim() ? `Keep the voice · replacement song at ${musicSongVolume}% volume` : "Keep the voice without a replacement song."}</small>}</div>
+              {(musicAudioMode === "mix_original" || musicAudioMode === "replace_music_keep_voice") && <label className="field"><span className="field-label">Background song volume · {musicSongVolume}%</span><input type="range" aria-label="Background song volume" aria-describedby="music-song-volume-help" min="0" max="100" step="1" value={musicSongVolume} disabled={!musicTrackFile && !musicTrackUrl.trim()} onChange={(event) => setMusicSongVolume(Number(event.target.value))} /><small id="music-song-volume-help">For clearer voices, try 10–15%. Lower further for quiet speech or a loud song. 0% mutes the replacement song. This level stays fixed throughout the clip.</small></label>}
               <Field label="Song speed"><select aria-label="Song speed" value={musicTrackSpeed} onChange={(event) => setMusicTrackSpeed(event.target.value)}><option value="1">Standard speed</option><option value="1.25">Speed up · 1.25×</option><option value="1.5">Sped-up · 1.5×</option><option value="0.85">Slow down · 0.85×</option><option value="0.75">Slowed · 0.75×</option></select></Field>
             </OptionRow>}
             <OptionRow id="subscribe" title="Subscribe animation" summary={subscribeSummary} open={openRows.has("subscribe")} onToggle={() => toggleRow("subscribe")}>

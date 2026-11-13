@@ -124,6 +124,14 @@ describe("WorkspaceView – page structure", () => {
 });
 
 // ---------------------------------------------------------------
+describe("WorkspaceView – persisted Music audio mode", () => {
+  it("distinguishes voice replacement with no replacement song", async () => {
+    mockGetJob.mockResolvedValue({ ...freshSmartJob, sourceProfile: "music", musicAudioMode: "replace_music_keep_voice" });
+    renderView({ project: { ...project, sourceProfile: "music", musicAudioMode: "replace_music_keep_voice" } });
+    expect(await screen.findByText("Keep voice, replace background music · voice only")).toBeInTheDocument();
+  });
+});
+
 describe("WorkspaceView – stalled smart detection", () => {
   beforeEach(() => {
     vi.spyOn(Date, "now").mockReturnValue(REFERENCE_NOW);
@@ -244,6 +252,8 @@ describe("WorkspaceView – processing checklist placement", () => {
     };
     mockGetJob.mockResolvedValue(withSteps);
     renderView();
+    // The progress box is a dropdown: closed until "Show steps" is clicked.
+    fireEvent.click(await screen.findByRole("button", { name: "Show steps" }));
     expect(await screen.findByRole("list", { name: "Short creation progress" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Short creation progress" })).toBeInTheDocument();
     expect(screen.getByText("Source received")).toBeInTheDocument();
@@ -259,6 +269,83 @@ describe("WorkspaceView – processing checklist placement", () => {
     renderView();
     expect(await screen.findAllByText("Planning with provider")).toBeTruthy();
     expect(document.querySelector(".checklist-panel")).toBeNull();
+  });
+
+  const runningWithSteps: Job = {
+    ...freshSmartJob,
+    steps: [
+      { id: "s1", label: "Source received", status: "complete", completedAt: "2026-08-13T00:00:00Z" },
+      { id: "s2", label: "Video validated", status: "active", startedAt: "2026-08-13T00:00:00Z" },
+    ],
+  };
+
+  it("puts the progress band inside the progress region, with no standalone band, when steps exist", async () => {
+    mockGetJob.mockResolvedValue(runningWithSteps);
+    renderView();
+    const region = await screen.findByRole("region", { name: "Short creation progress" });
+    expect(region.querySelector(".checklist-heading > .job-strip")).toHaveTextContent("Planning with provider");
+    expect(document.querySelectorAll(".job-strip")).toHaveLength(1);
+    expect(document.querySelector(".workspace-page > .job-strip")).toBeNull();
+    expect(region).toHaveTextContent("Step 2 of 2");
+    expect(screen.getByRole("button", { name: "Show steps" })).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("keeps the standalone band when the job has no steps", async () => {
+    mockGetJob.mockResolvedValue(freshSmartJob);
+    renderView();
+    await screen.findAllByText("Planning with provider");
+    expect(document.querySelector(".workspace-page > .job-strip")).not.toBeNull();
+    expect(document.querySelector(".checklist-panel")).toBeNull();
+  });
+
+  it("shows no status chip in the header while the band is showing", async () => {
+    mockGetJob.mockResolvedValue(runningWithSteps);
+    renderView();
+    await screen.findByRole("region", { name: "Short creation progress" });
+    expect(document.querySelector(".workspace-controls .status")).toBeNull();
+  });
+
+  it("shows a status chip in the header once the job is complete, and no band", async () => {
+    mockGetJob.mockResolvedValue({ ...runningWithSteps, state: "complete", stage: "done", stageLabel: "1 clip ready", progress: 100, steps: [{ id: "s1", label: "Source received", status: "complete", completedAt: "2026-08-13T00:00:00Z" }] });
+    renderView();
+    await waitFor(() => expect(document.querySelector(".workspace-controls .status")).toHaveTextContent("1 clip ready"));
+    expect(document.querySelector(".job-strip")).toBeNull();
+    expect(screen.getByText("1 of 1 complete")).toBeInTheDocument();
+  });
+
+  it("treats a partial run as finished: header chip, no band", async () => {
+    mockGetJob.mockResolvedValue({ ...runningWithSteps, state: "partial", stage: "done", stageLabel: "1 of 2 clips ready", progress: 100, steps: [{ id: "s1", label: "Source received", status: "complete", completedAt: "2026-08-13T00:00:00Z" }] });
+    renderView();
+    await waitFor(() => expect(document.querySelector(".workspace-controls .status")).toHaveTextContent("1 of 2 clips ready"));
+    expect(document.querySelector(".job-strip")).toBeNull();
+  });
+
+  it("opens the failed run's steps without a click", async () => {
+    mockGetJob.mockResolvedValue({ ...runningWithSteps, state: "failed", stage: "failed", stageLabel: "Failed", steps: [{ id: "s2", label: "Video validated", status: "failed", detail: "Bad file" }] });
+    renderView();
+    expect(await screen.findByRole("list", { name: "Short creation progress" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Hide steps" })).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("toggles the header details panel, which holds the Business folder picker", async () => {
+    mockListFolders.mockResolvedValue([
+      { id: "unsorted", name: "Unsorted", parentId: null, description: "", color: null, archived: false, system: true, createdAt: "2026-01-01", updatedAt: "2026-01-01" },
+      { id: "acme", name: "Acme Corp", parentId: null, description: "", color: null, archived: false, system: false, createdAt: "2026-01-01", updatedAt: "2026-01-01" },
+    ]);
+    mockGetJob.mockResolvedValue(runningWithSteps);
+    renderView();
+    const toggle = await screen.findByRole("button", { name: /Clip mode · serious/ });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).toHaveAttribute("aria-controls", "workspace-project-details");
+    const details = document.getElementById("workspace-project-details")!;
+    expect(details).toHaveAttribute("hidden");
+    await waitFor(() => expect(details.querySelector("#workspace-business-folder")).not.toBeNull());
+    expect(details.querySelector(".workspace-source-meta")).toHaveTextContent("test.mp4");
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(details).not.toHaveAttribute("hidden");
+    fireEvent.click(toggle);
+    expect(details).toHaveAttribute("hidden");
   });
 });
 
@@ -551,6 +638,95 @@ describe("WorkspaceView – output aspect ratio presentation", () => {
 
     expect(await screen.findByText("Output · 16:9")).toBeInTheDocument();
     expect(screen.getByText(/0:10 · 16:9 · dimensions unavailable/)).toBeInTheDocument();
+  });
+
+  it("shows the engine-offline state instead of waiting forever for the current job", async () => {
+    mockGetJob.mockRejectedValue(new Error("engine unavailable"));
+    renderView();
+
+    expect(await screen.findByText("Waiting for the local engine — progress is preserved.")).toBeInTheDocument();
+    expect(screen.queryByText("Loading…")).not.toBeInTheDocument();
+    expect(screen.queryByText("Loading project…")).not.toBeInTheDocument();
+  });
+
+  it("treats a project without a submitted job as loaded", () => {
+    renderView({ project: { ...project, latestJobId: null } });
+
+    expect(screen.queryByText("Loading…")).not.toBeInTheDocument();
+    expect(screen.queryByText("Loading project…")).not.toBeInTheDocument();
+    expect(screen.getByText("Candidates appear here after local transcription and selection.")).toBeInTheDocument();
+  });
+
+  it("hides the old project's clip and preview until the new job snapshot arrives", async () => {
+    TestEventSource.instances = [];
+    let resolveLandscape!: (job: Job) => void;
+    mockGetJob
+      .mockResolvedValueOnce(responsiveJob)
+      .mockImplementationOnce(() => new Promise<Job>((resolve) => { resolveLandscape = resolve; }));
+
+    const { rerender } = renderView();
+    expect(await screen.findByText("Output · 9:16")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    await waitFor(() => expect(document.querySelector(".viewer-stage video")).toBeInTheDocument());
+    const oldEvents = TestEventSource.instances.at(-1);
+
+    const landscapeProject: Project = {
+      ...project, id: "project-landscape", name: "Landscape project", latestJobId: "landscape-job",
+      contentFormat: "long",
+    };
+    rerender(<WorkspaceView project={landscapeProject} hasSelectedProvider providersLoaded onConfigureProviders={vi.fn()} onProjectUpdated={vi.fn(async () => undefined)} onGoProjects={vi.fn()} />);
+
+    expect(screen.getByRole("heading", { name: "Landscape project" })).toBeInTheDocument();
+    expect(screen.queryByText("Test — Cut 01")).not.toBeInTheDocument();
+    expect(document.querySelector(".viewer-stage video")).not.toBeInTheDocument();
+    expect(screen.getByText("Output · 16:9")).toBeInTheDocument();
+
+    await act(async () => {
+      oldEvents?.onmessage?.({ data: JSON.stringify(responsiveJob) } as MessageEvent);
+    });
+    expect(screen.queryByText("Test — Cut 01")).not.toBeInTheDocument();
+    expect(document.querySelector(".viewer-stage video")).not.toBeInTheDocument();
+
+    const landscapeJob: Job = {
+      ...responsiveJob, id: "landscape-job", projectId: landscapeProject.id, contentFormat: "long",
+      clips: [{ ...responsiveJob.clips[0], id: "landscape-clip", width: 1920, height: 1080, downloadUrl: "/landscape.mp4" }],
+    };
+    await act(async () => { resolveLandscape(landscapeJob); });
+    expect(await screen.findByText(/1920 × 1080 px/)).toBeInTheDocument();
+    await waitFor(() => expect(document.querySelector(".viewer-stage video")).toHaveAttribute("src", "/landscape.mp4"));
+  });
+
+  it("ignores a late clip-selection response from the previous project", async () => {
+    TestEventSource.instances = [];
+    let resolveSelection!: (job: Job) => void;
+    let resolveLandscape!: (job: Job) => void;
+    mockGetJob
+      .mockResolvedValueOnce(responsiveJob)
+      .mockImplementationOnce(() => new Promise<Job>((resolve) => { resolveLandscape = resolve; }));
+    vi.mocked(setClipSelection).mockImplementationOnce(() => new Promise<Job>((resolve) => { resolveSelection = resolve; }));
+
+    const { rerender } = renderView();
+    await waitFor(() => expect(document.querySelector('[data-clip-id="c1"]')).toBeInTheDocument());
+    fireEvent.click(screen.getByLabelText("Include in export"));
+    await waitFor(() => expect(setClipSelection).toHaveBeenCalledWith("j1", []));
+
+    const landscapeProject: Project = {
+      ...project, id: "project-landscape", name: "Landscape project", latestJobId: "landscape-job", contentFormat: "long",
+    };
+    rerender(<WorkspaceView project={landscapeProject} hasSelectedProvider providersLoaded onConfigureProviders={vi.fn()} onProjectUpdated={vi.fn(async () => undefined)} onGoProjects={vi.fn()} />);
+    const landscapeJob: Job = {
+      ...responsiveJob, id: "landscape-job", projectId: landscapeProject.id, contentFormat: "long",
+      clips: [{ ...responsiveJob.clips[0], id: "landscape-clip", width: 1920, height: 1080, downloadUrl: "/landscape.mp4" }],
+    };
+    await act(async () => { resolveLandscape(landscapeJob); });
+    expect(await screen.findByText(/1920 × 1080 px/)).toBeInTheDocument();
+
+    await act(async () => { resolveSelection({ ...responsiveJob, clips: [] }); });
+    expect(screen.getByRole("heading", { name: "Landscape project" })).toBeInTheDocument();
+    expect(document.querySelector('[data-clip-id="landscape-clip"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-clip-id="c1"]')).not.toBeInTheDocument();
+    expect(screen.getByText(/1920 × 1080 px/)).toBeInTheDocument();
+    expect(document.querySelector(".viewer-frame")).toHaveAttribute("data-output-aspect-ratio", "16:9");
   });
 });
 

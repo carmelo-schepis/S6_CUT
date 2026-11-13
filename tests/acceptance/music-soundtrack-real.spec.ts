@@ -5,7 +5,7 @@ import { test, expect } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { assertPlayback, checkPlayback, zipEntry } from './support/workspace';
+import { assertPlayback, checkPlayback, openOptionRow, zipEntry } from './support/workspace';
 
 const fixtures = process.env.S6_SOUNDTRACK_FIXTURES;
 const container = process.env.S6_SOUNDTRACK_CONTAINER;
@@ -72,8 +72,10 @@ for (const item of cases) {
     test.skip(testInfo.project.name.startsWith('iPhone') || testInfo.project.name.startsWith('iPad'), 'iOS provides a read-only status view');
     test.setTimeout(900_000);
     const name = `Soundtrack ${item.source} ${item.speed} ${Date.now()}`;
+    await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto('/');
     await expect(page.getByRole('heading', { name: 'Create a project' })).toBeVisible();
+    await expect(page.locator("#startup-screen")).toHaveCount(0, { timeout: 30_000 });
     const videoFixture = item.source === 'none' || (item.audioMode === 'mix_original' && !item.silentVideo) ? 'with-audio.mp4' : 'silent.mp4';
     await page.getByLabel('Choose video file').setInputFiles(path.join(fixtures!, videoFixture));
     await page.getByRole('button', { name: 'Music / sung vocals' }).click();
@@ -81,6 +83,7 @@ for (const item of cases) {
       await page.getByRole('button', { name: 'Fewer clips' }).click();
     }
     // The title deliberately matches a lyric: audio must never become a visual overlay.
+    await openOptionRow(page, "song");
     if (item.source === 'upload' || (item.source === 'none' && item.audioMode)) await page.getByLabel('Background song MP3').setInputFiles({ name: 'song.mp3', mimeType: 'audio/mpeg', buffer: await fs.readFile(path.join(fixtures!, 'short-song.mp3')) });
     if (item.source === 'youtube') await page.getByLabel('YouTube song URL').fill('https://music.youtube.com/watch?v=BaW_jenozKc');
     if (item.audioMode) {

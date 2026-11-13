@@ -85,6 +85,7 @@ def test_bundled_animation_asset_keeps_high_resolution_alpha_video_contract() ->
     metadata = probe(ANIMATION_ASSET, settings)
     assert (metadata["width"], metadata["height"]) == (ANIMATION_CANVAS_WIDTH, ANIMATION_CANVAS_HEIGHT)
     assert metadata["video_codec"] == "qtrle"
+    assert metadata["audio"] is False
     assert metadata["pixel_format"] == "argb"
     assert metadata["frame_rate"] == 30
     assert metadata["duration"] == pytest.approx(ANIMATION_DURATION_SECONDS, abs=.01)
@@ -181,7 +182,7 @@ def test_real_ffmpeg_animation_is_visible_motion_and_keeps_media_contracts(tmp_p
     assert abs((left + right) / 2 - width / 2) <= width * 0.02
     assert 0 <= top < bottom <= height and top < height * 0.20
 
-    # Pointer travel/click, sparkle, and subscribed state all stay within the
+    # Pointer travel/click, ripple, and subscribed state all stay within the
     # render canvas; disabled output remains unchanged at matching timestamps.
     for at in (2.45, 3.10, 3.60):
         on_frame = _full_frame(settings, enabled, at, width, height)
@@ -199,7 +200,7 @@ def test_real_ffmpeg_animation_is_visible_motion_and_keeps_media_contracts(tmp_p
     # click/subscribed state, and disappearance instead of merely nonblank frames.
     baseline_before = _frame_region(settings, disabled, 1.8)
     animation_early = _frame_region(settings, enabled, 2.45)
-    animation_late = _frame_region(settings, enabled, 2.95)
+    animation_late = _frame_region(settings, enabled, 3.18)
     subscribed = _frame_region(settings, enabled, 3.6)
     after = _frame_region(settings, enabled, 6.4)
     assert _mean_difference(baseline_before, animation_early) > 2
@@ -234,3 +235,29 @@ def test_smart_caption_render_composites_the_same_silent_animation(tmp_path: Pat
     assert off_meta["duration"] == pytest.approx(7, abs=.25)
     assert on_meta["audio"] and off_meta["audio"]
     assert _mean_difference(_frame_region(settings, enabled, 2.45), _frame_region(settings, disabled, 2.45)) > 1
+
+
+def test_all_animation_frames_keep_transparent_endpoints_and_safe_alpha_bounds() -> None:
+    """Inspect every decoded alpha pixel, including faint shadow fringes."""
+    import numpy as np
+    from engine.subscribe_animation import ANIMATION_VISIBLE_TOP, ANIMATION_VISIBLE_BOTTOM
+
+    settings = Settings.from_env()
+    _require_ffmpeg(settings)
+    result = subprocess.run(
+        [settings.ffmpeg, "-v", "error", "-i", str(ANIMATION_ASSET),
+         "-vf", "alphaextract", "-f", "rawvideo", "-pix_fmt", "gray", "pipe:1"],
+        check=True, capture_output=True,
+    )
+    alpha = np.frombuffer(result.stdout, dtype=np.uint8).reshape(
+        120, ANIMATION_CANVAS_HEIGHT, ANIMATION_CANVAS_WIDTH,
+    )
+    assert not alpha[0].any() and not alpha[-1].any()
+    assert alpha[10:99].max(axis=(1, 2)).min() > 240
+    for threshold in (0, 8, 24):
+        ys, xs = np.where(np.any(alpha > threshold, axis=0))
+        assert xs.min() > 0 and xs.max() < ANIMATION_CANVAS_WIDTH - 1
+        assert ys.min() >= ANIMATION_VISIBLE_TOP
+        assert ys.max() < ANIMATION_VISIBLE_BOTTOM
+        # Include shadows/cursor, while retaining the renderer's nominal sizing.
+        assert xs.max() - xs.min() + 1 <= ANIMATION_BUTTON_WIDTH * 1.04

@@ -109,6 +109,8 @@
   --logo-slate: #5a7898;
   --logo-peach: #d98f6c;
   --logo-gradient: linear-gradient(115deg, var(--logo-crimson), var(--logo-plum) 28%, var(--logo-navy) 52%, var(--logo-slate) 76%, var(--logo-peach));
+  /* The logo's colours repeated end to end, so a moving fill loops without a seam. */
+  --logo-flow-gradient: linear-gradient(90deg, var(--logo-crimson), var(--logo-plum), var(--logo-navy), var(--logo-plum), var(--logo-crimson));
   /* Back-compat aliases. The ramp used to be red and most rules still name it
      that way; keeping the names is what stops any rule bypassing the token
      layer. Additive, never a rename. */
@@ -788,8 +790,6 @@ main { min-width: 0; }
 .style-step { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; align-items: start; column-gap: var(--space-5); }
 .style-step > :is(.step-label, .field-group) { grid-column: 1 / -1; }
 .style-step > .field-group:has(.format-tabs), .style-step > .field-group:has(.processing-mode-tabs) { grid-column: auto; }
-.style-step > .field-group:has(.processing-mode-tabs) { order: 1; }
-.style-step > .field-group[aria-label="Batch size"] { order: 2; }
 .style-step > .field-group[aria-label="Batch size"] .mode-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .style-step:not(:has(.processing-mode-tabs)) > .field-group:has(.format-tabs) { grid-column: 1 / -1; }
 .style-step .style-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
@@ -988,6 +988,7 @@ main { min-width: 0; }
 .failure-strip .button { min-height: var(--control-height); }
 .stalled-callout {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-2) var(--space-3);
@@ -997,7 +998,7 @@ main { min-width: 0; }
   color: var(--text-primary);
 }
 .stalled-callout > svg { flex: 0 0 auto; color: var(--warning); }
-.stalled-callout > div:nth-child(2) { flex: 1; display: grid; gap: var(--space-1); min-width: 0; }
+.stalled-callout > div:nth-child(2) { flex: 1 1 240px; display: grid; gap: var(--space-1); min-width: 0; }
 .stalled-callout strong { color: var(--text-primary); font-size: var(--type-heading-size); font-weight: var(--type-heading-weight); line-height: var(--type-heading-line); letter-spacing: var(--type-heading-tracking); }
 .stalled-callout span { color: var(--text-primary); }
 .stalled-callout > div:last-child { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
@@ -1178,15 +1179,6 @@ main { min-width: 0; }
   margin: 0;
   padding: 8px;
 }
-.process-checklist::before {
-  position: absolute;
-  top: calc(8px + 9px);
-  bottom: calc(8px + 9px);
-  left: calc(8px + 9px);
-  width: 1px;
-  background: var(--border);
-  content: "";
-}
 .checklist-step {
   position: relative;
   display: flex;
@@ -1201,21 +1193,18 @@ main { min-width: 0; }
   border-radius: var(--radius-control);
   line-height: 16px;
 }
+/* One drawing per step (see the step indicator rules below): the box is a plain
+   16px slot, so no status is ever drawn inside a second ring. */
 .checklist-icon {
   position: relative;
   z-index: 1;
-  flex: 0 0 18px;
-  width: 18px;
-  height: 18px;
-  display: grid;
-  place-items: center;
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  display: block;
   box-sizing: border-box;
-  border: 1px solid var(--border-strong);
-  border-radius: 50%;
   color: var(--text-primary);
-  background: var(--surface-1);
 }
-.checklist-icon svg { width: 11px; height: 11px; }
 .checklist-step-body {
   min-width: 0;
   flex: 1 1 auto;
@@ -1267,24 +1256,52 @@ main { min-width: 0; }
   border-color: var(--brand-border);
   background: var(--surface-2);
 }
-.checklist-step.status-active .checklist-icon {
-  color: var(--theme-primary-hover);
-  border-color: var(--brand-border);
-  background: var(--theme-primary-soft);
+/* Step indicators: each state is one drawing, and a ring never sits inside
+   another ring. The ring is an SVG circle in every state, so its edge and its
+   mark share one coordinate system and stay concentric on every display. */
+.step-indicator { display: block; width: 16px; height: 16px; overflow: visible; }
+.step-indicator .step-ring { fill: none; stroke: var(--border-strong); stroke-width: 1.5; }
+.step-indicator .step-mark,
+.step-indicator .step-arc { fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+.step-indicator[data-step-icon="complete"] { color: var(--success); }
+.step-indicator[data-step-icon="complete"] .step-ring { stroke: var(--success); fill: color-mix(in srgb, var(--success) 16%, transparent); }
+.step-indicator[data-step-icon="skipped"] { color: var(--text-muted); }
+.step-indicator[data-step-icon="failed"] { color: var(--error); }
+.step-indicator[data-step-icon="failed"] .step-ring { stroke: var(--error); fill: color-mix(in srgb, var(--error) 16%, transparent); }
+.step-indicator[data-step-icon="paused"] { color: var(--text-primary); }
+
+/* The active step's loader: a dim track, a logo-coloured comet sweeping round it,
+   and a white dot that pulses in the middle. The comet is CSS because its ring
+   mask is a conic gradient, which SVG cannot draw. */
+.step-active { position: relative; }
+.step-active .step-ring-svg { position: absolute; inset: 0; width: 16px; height: 16px; overflow: visible; }
+.step-active .step-ring { fill: none; stroke: var(--border-strong); stroke-width: 1.5; }
+.step-comet {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent 0 20%, var(--logo-crimson) 55%, var(--logo-peach) 88%, #fff 100%);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 1.75px), #000 calc(100% - 1.75px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 1.75px), #000 calc(100% - 1.75px));
+  animation: step-comet-spin 1.1s linear infinite;
 }
-.checklist-step.status-active .checklist-icon svg { animation: checklist-spin .9s linear infinite; }
+.step-dot {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #fff;
+  animation: step-dot-beat 1.1s ease-in-out infinite;
+}
+
 .checklist-step.status-active .checklist-label,
 .checklist-step.status-active .checklist-status-text { color: var(--text); }
 .checklist-step.status-complete {
   border-color: transparent;
   background: transparent;
 }
-.checklist-step.status-complete .checklist-icon {
-  color: var(--success);
-  border-color: rgba(76,183,130,.52);
-  background: rgba(76,183,130,.2);
-}
-.checklist-step.status-complete.checkmark-new .checklist-icon svg { animation: checklist-pop .3s ease-out; }
 .checklist-step.status-complete .checklist-label,
 .checklist-step.status-complete .checklist-status-text { color: var(--text-primary); }
 .checklist-step.status-skipped {
@@ -1292,29 +1309,37 @@ main { min-width: 0; }
   background: var(--surface-2);
   opacity: .78;
 }
-.checklist-step.status-skipped .checklist-icon {
-  color: var(--text-primary);
-  border-color: var(--border-strong);
-  background: var(--surface-3);
-}
 .checklist-step.status-skipped .checklist-label,
 .checklist-step.status-skipped .checklist-status-text { color: var(--text-primary); }
 .checklist-step.status-failed {
   border-color: rgba(242,56,85,.45);
   background: rgba(242,56,85,.13);
 }
-.checklist-step.status-failed .checklist-icon {
-  color: var(--error);
-  border-color: rgba(242,56,85,.55);
-  background: rgba(242,56,85,.2);
-}
 .checklist-step.status-failed .checklist-label,
 .checklist-step.status-failed .checklist-status-text { color: var(--text-primary); }
-.checklist-panel.is-paused .checklist-step.status-active .checklist-icon svg { animation: none; }
-@keyframes checklist-spin { to { transform: rotate(360deg); } }
-@keyframes checklist-pop {
-  from { transform: scale(.5); opacity: .4; }
-  to { transform: scale(1); opacity: 1; }
+
+/* One-shots, played only for a change that arrives while the page is open
+   (see freshlyCompleted and freshlySettled in process-checklist.tsx). */
+.checklist-step.checkmark-new .step-mark { animation: step-draw .35s ease-out both; }
+.checklist-step.checkmark-new .step-indicator { animation: step-pop .35s ease-out; }
+.checklist-step.settle-new .step-indicator { animation: step-settle .35s ease-out both; }
+@keyframes step-draw {
+  from { stroke-dasharray: 12; stroke-dashoffset: 12; }
+  to { stroke-dasharray: 12; stroke-dashoffset: 0; }
+}
+@keyframes step-pop {
+  0% { transform: scale(.8); }
+  60% { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+@keyframes step-settle {
+  from { opacity: 0; transform: scale(.6); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes step-comet-spin { to { transform: rotate(360deg); } }
+@keyframes step-dot-beat {
+  0%, 100% { transform: scale(.7); opacity: .6; }
+  50% { transform: scale(1); opacity: 1; }
 }
 .checklist-panel.compact .process-checklist { padding: 8px; gap: 2px; }
 .checklist-panel.compact .checklist-step { padding: 2px 8px; }
@@ -1390,7 +1415,7 @@ main { min-width: 0; }
 .provider-results { display: grid; gap: 2px; margin-top: var(--space-2); }
 .connection-result { display: flex; align-items: center; gap: 5px; min-width: 0; }
 .connection-result span { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; color: var(--text-primary); font-weight: var(--type-emphasis-weight); }
-.connection-result small { min-width: 0; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.connection-result small { min-width: 0; color: var(--text-primary); overflow-wrap: anywhere; }
 .connection-result svg { flex: 0 0 auto; }
 .connection-result.ready span { color: var(--text-primary); }
 .connection-result.checking span { color: var(--text-primary); }
@@ -1675,7 +1700,8 @@ main { min-width: 0; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
   .processing-state, .workspace-offline::before { animation: none !important; }
-  .checklist-step.status-active .checklist-icon svg, .checklist-step.status-complete.checkmark-new .checklist-icon svg { animation: none !important; }
+  .step-comet, .step-dot, .checklist-step .step-indicator, .checklist-step .step-mark { animation: none !important; }
+  .step-dot { opacity: 1; }
   .checklist-step.status-active {
     border-color: var(--brand-border);
     background: var(--theme-primary-soft);
@@ -1844,8 +1870,8 @@ main { min-width: 0; }
   border-radius: var(--ws-panel-radius);
   /* The 2px left accent bar was the loudest edge on the page and it ran the
      full height of a panel that is mostly finished work. The panel is a
-     hairline card like every other surface; the in-flight row carries the
-     accent instead. */
+     hairline card like every other surface; the in-flight row is marked by its
+     surface tint instead. */
   border-left: 0;
   overflow: hidden;
 }
@@ -1875,15 +1901,6 @@ main { min-width: 0; }
   padding: 0;
 }
 
-/* The connector rail is redrawn against the new padding. It stops at the first
-   and last icon rather than running past them into the panel edges. */
-.process-checklist::before {
-  /* Half a row: 4px of row padding plus half of the 16px icon. */
-  top: 12px;
-  bottom: 12px;
-  left: calc(var(--space-4) + 8px);
-}
-
 .checklist-step {
   gap: var(--space-3);
   padding: var(--space-1) var(--space-4);
@@ -1905,19 +1922,12 @@ main { min-width: 0; }
 }
 
 .checklist-step.status-active {
-  /* The single row that is actually happening. One surface step up plus the
-     approved selection accent — the same accent a selected tab uses, because
-     this is the same idea: the row the system is currently on. */
+  /* The single row that is actually happening. One surface step up is the
+     tint; the turning circle and "In progress" carry the rest. */
   background: var(--surface-2);
   border-color: var(--border);
-  box-shadow: inset 2px 0 var(--selector-highlight);
 }
 
-/* Stepped from the status tokens rather than restated as literals, so a change
-   to --success or --error reaches the ledger with them. */
-.checklist-step.status-complete .checklist-icon { border-color: color-mix(in srgb, var(--success) 45%, transparent); }
-.checklist-step.status-failed .checklist-icon { border-color: color-mix(in srgb, var(--error) 45%, transparent); }
-.checklist-step.status-active .checklist-icon { border-color: var(--selector-highlight); }
 
 /* Above the mobile breakpoint the status travels in its own aligned column, so
    "Complete", "Skipped" and "In progress" share a left edge down all twelve
@@ -2107,7 +2117,6 @@ main { min-width: 0; }
   .source-content,
   .inspector-content { padding-inline: var(--space-3); }
   .checklist-step { padding-inline: var(--space-3); }
-  .process-checklist::before { left: calc(var(--space-3) + 8px); }
 }
 
 /* ===========================================================================
@@ -2730,18 +2739,19 @@ input[type="checkbox"]:checked::before {
 /* Option rows: the heavy pickers sit behind one line each, showing their
    current value. The list follows the key options and spans the column. */
 .create-option-list { display: grid; gap: var(--space-2); min-width: 0; grid-column: 1 / -1; }
-.style-step > .create-option-list { order: 3; }
 .create-option { min-width: 0; border-radius: var(--radius-lg); background: var(--control-translucent); }
 .create-option:hover { background: var(--control-translucent-hover); }
 .create-option:has(.create-option-toggle[aria-expanded="true"]) { background: var(--control-translucent-selected); box-shadow: inset 0 0 0 1px var(--control-border); }
 .create-option-toggle { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); width: 100%; min-height: 48px; margin: 0; padding: 0 var(--space-4); border: 0; border-radius: var(--radius-lg); background: transparent; color: var(--text); text-align: left; cursor: pointer; }
 .create-option-toggle:focus-visible { outline: 2px solid var(--selector-highlight); outline-offset: 2px; }
-.create-option-title { font-weight: var(--type-emphasis-weight); white-space: nowrap; }
+.create-option-title { font-size: var(--type-heading-size); font-weight: var(--type-heading-weight); white-space: nowrap; }
 .create-option-value { min-width: 0; overflow: hidden; color: var(--text-muted); text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 .create-option-chevron { color: var(--text-muted); transition: transform 160ms ease; }
 .create-option-toggle[aria-expanded="true"] .create-option-chevron { transform: rotate(180deg); }
 .create-option-panel { display: grid; gap: var(--space-4); padding: 0 var(--space-4) var(--space-4); }
 .create-option-panel[hidden] { display: none; }
+.heading-style-picker, .emoji-mode-picker { display: grid; gap: var(--space-2); }
+.create-option-panel .subscribe-animation-control > legend { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 @media (prefers-reduced-motion: reduce) { .create-option-chevron { transition: none; } }
 .recent-clips-section { margin-top: 96px; }
 
@@ -2831,7 +2841,8 @@ input[type="checkbox"]:checked::before {
 .workspace-page > .stalled-callout { background: color-mix(in srgb, var(--warning) 6%, var(--box-bg)); }
 .workspace-page > .job-strip { min-height: 56px; margin-bottom: 0; }
 .workspace-page > .job-strip .progress-wrap { width: clamp(160px, 36%, 440px); }
-.workspace-page > .job-strip .progress-track span { background: var(--text); }
+@media (max-width: 540px) { .workspace-page > .job-strip .progress-wrap { width: 100%; } }
+.workspace-page > .job-strip .progress-track span { background: var(--logo-flow-gradient); background-size: 200% 100%; animation: logo-flow 3s linear infinite; }
 .workspace-page > .job-strip .progress-wrap > span:last-child { min-width: 4ch; text-align: right; font-variant-numeric: tabular-nums; }
 /* The notes panel is one compact box: a count pill and a short list. */
 .workspace-page > .notice-panel { padding: var(--space-3) var(--box-pad); }
@@ -2850,6 +2861,182 @@ input[type="checkbox"]:checked::before {
 @media (max-width: 600px) {
   :root { --box-pad: var(--space-4); --box-radius: 16px; }
 }
+
+/* --- Workspace focus: quiet header, one progress dropdown ---------------- */
+/* EXCLUDED from the two typography roles on purpose (owner request,
+   2026-10-31): the Workspace should lead the eye to the three-pane workbench,
+   so the project meta line, the project details panel, the step rows and the
+   step count read as quiet, integrated text. They carry their own smaller
+   pair of sizes; the title, the progress band, the buttons and the workbench
+   keep the house roles. Line boxes stay whole pixels. */
+.workspace-page { --ws-meta-size: 12px; --ws-meta-line: 16px; }
+
+/* Header: the title and the actions share one row; one muted meta line (the
+   details toggle) sits under the title. The title keeps the flexible column,
+   so the actions never squeeze it. */
+.workspace-commandbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--space-4);
+  row-gap: var(--space-1);
+}
+.workspace-project-context, .workspace-project-meta { display: contents; }
+.workspace-project-name {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+.workspace-controls { grid-column: 2; grid-row: 1; flex-wrap: nowrap; }
+.workspace-meta-toggle {
+  grid-column: 1;
+  grid-row: 2;
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: var(--space-1) 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--ws-meta-size);
+  line-height: var(--ws-meta-line);
+  text-align: left;
+  cursor: pointer;
+}
+.workspace-meta-toggle:hover { color: var(--text); }
+.workspace-meta-toggle:focus-visible, .checklist-toggle-chevron:focus-visible { outline: 2px solid var(--selector-highlight); outline-offset: 2px; }
+.workspace-meta-toggle .workspace-secondary-meta {
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workspace-meta-chevron, .checklist-chevron { flex: 0 0 auto; transition: transform 160ms ease; }
+.workspace-meta-toggle[aria-expanded="true"] .workspace-meta-chevron,
+.checklist-toggle-chevron[aria-expanded="true"] .checklist-chevron { transform: rotate(180deg); }
+.workspace-commandbar .status { display: inline-flex; }
+
+/* Project details: an inline box under the header, kept mounted. */
+.workspace-project-details {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-1) var(--space-4);
+  width: fit-content;
+  max-width: min(100%, 560px);
+  margin-top: var(--box-gap);
+  padding: var(--space-3) var(--box-pad);
+  border: 1px solid var(--box-edge);
+  border-top-color: var(--box-edge-top);
+  border-radius: var(--box-radius);
+  background: var(--box-bg);
+  font-size: var(--ws-meta-size);
+  line-height: var(--ws-meta-line);
+}
+.workspace-project-details[hidden] { display: none; }
+.workspace-detail-row, .workspace-project-details .workspace-folder-field { display: contents; }
+.workspace-detail-label, .workspace-project-details .workspace-folder-field label {
+  color: var(--text-muted);
+  font-size: var(--ws-meta-size);
+  font-weight: inherit;
+  line-height: var(--ws-meta-line);
+}
+/* Values wrap rather than clip: a long song or source title is the reason the
+   details are open, so it must read in full. */
+.workspace-detail-value, .workspace-project-details .workspace-source-meta {
+  min-width: 0;
+  overflow: visible;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: var(--ws-meta-size);
+  line-height: var(--ws-meta-line);
+}
+.workspace-project-details .workspace-folder-field select { justify-self: start; max-width: 100%; }
+
+/* Progress dropdown: the band is the closed state. Inside the heading row it
+   gives up its own box and stretches; the panel is the box. */
+.checklist-panel.is-collapsible .checklist-heading { min-height: 36px; flex-wrap: nowrap; }
+.checklist-heading > .job-strip {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.checklist-heading > .job-strip .progress-wrap { width: clamp(160px, 36%, 440px); }
+.checklist-heading > .job-strip .progress-track span { background: var(--logo-flow-gradient); background-size: 200% 100%; animation: logo-flow 3s linear infinite; }
+.checklist-heading > .job-strip .progress-wrap > span:last-child { min-width: 4ch; text-align: right; font-variant-numeric: tabular-nums; }
+.checklist-panel.is-collapsible .checklist-count { flex: 0 0 auto; font-size: var(--ws-meta-size); line-height: var(--ws-meta-line); }
+.checklist-toggle-chevron { flex: 0 0 auto; display: inline-grid; place-items: center; width: var(--control-height-small); padding: 0; cursor: pointer; }
+.checklist-panel.is-collapsible .process-checklist {
+  margin-top: var(--space-2);
+  padding: var(--space-2) 0 0;
+  border-top: 1px solid var(--box-edge-top);
+}
+.checklist-panel.is-collapsible .process-checklist[hidden] { display: none; }
+.checklist-panel.is-collapsible .checklist-step {
+  padding-inline: var(--space-3);
+  font-size: var(--ws-meta-size);
+  line-height: var(--ws-meta-line);
+}
+.checklist-panel.is-collapsible :is(.checklist-label, .checklist-status-text, .checklist-detail, .checklist-elapsed, .checklist-progress, .checklist-step-meta) {
+  font-size: var(--ws-meta-size);
+  line-height: var(--ws-meta-line);
+}
+
+/* Item polish: the elapsed time reads in full, with air before the status. */
+.checklist-panel.is-collapsible .checklist-detail { flex: 0 0 auto; overflow: visible; }
+.checklist-panel.is-collapsible .checklist-elapsed { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.checklist-panel.is-collapsible .checklist-step-meta { gap: var(--space-3); }
+
+/* The band's bar moves through the logo's colours. The indeterminate segment
+   shares the same gradient, and reduced motion gets a still fill. */
+@keyframes logo-flow { to { background-position: -200% 0; } }
+.progress-wrap.indeterminate .progress-track span { background: var(--logo-flow-gradient); background-size: 200% 100%; animation: progress-indeterminate 1.4s ease-in-out infinite, logo-flow 3s linear infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .checklist-heading > .job-strip .progress-track span,
+  .workspace-page > .job-strip .progress-track span,
+  .progress-wrap.indeterminate .progress-track span { animation: none; background: var(--logo-gradient); background-size: auto; }
+}
+
+@media (max-width: 820px) {
+  .workspace-commandbar { grid-template-columns: minmax(0, 1fr); }
+  .workspace-controls { grid-column: 1; grid-row: 3; flex-wrap: wrap; justify-content: flex-start; margin-top: var(--space-2); }
+}
+@media (max-width: 540px) {
+  .workspace-project-name {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  /* The band's text takes row one; the bar, percentage, step count and
+     chevron share row two. */
+  .checklist-panel.is-collapsible .checklist-heading { flex-wrap: wrap; row-gap: var(--space-1); }
+  .checklist-heading > .job-strip { display: contents; }
+  .checklist-heading > .job-strip .job-strip-text { flex: 1 1 100%; }
+  .checklist-heading > .job-strip .progress-wrap { flex: 1 1 0; width: auto; min-width: 0; margin: 0; }
+  .checklist-panel.is-collapsible .checklist-count { margin-left: 0; }
+}
+@media (prefers-reduced-motion: reduce) { .workspace-meta-chevron, .checklist-chevron { transition: none; } }
 
 /* --- Editor boxes: the same boxes as the Workspace ---------------------- */
 /* The tools column, the monitor, the inspector, the Subscribe panel and the
@@ -2966,6 +3153,62 @@ input[type="checkbox"]:checked::before {
 .settings-card { padding: 0; border-radius: 0; background: transparent; }
 .settings-card-head { padding-bottom: var(--space-6); }
 .profile-row, .profile-form, .provider-fieldset { padding-inline: 0; border-radius: 0; background: transparent; }
+.profiles-card { container-type: inline-size; }
+.profile-row { display: grid; grid-template-columns: minmax(0, 1fr); align-items: stretch; gap: var(--space-4); }
+.profile-row-header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: var(--space-3); min-width: 0; }
+.profile-identity { display: flex; align-items: flex-start; gap: var(--space-2); min-width: 0; flex: 1 1 240px; }
+.profile-info { flex: 1 1 auto; }
+.profile-info > .profile-name { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.profile-name strong { min-width: 0; overflow-wrap: anywhere; }
+.profile-storage { margin: var(--space-1) 0 0; }
+.profile-storage > div { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; color: var(--text-primary); }
+.profile-storage dt, .profile-storage dd { margin: 0; }
+.profile-storage dd { display: inline-flex; align-items: center; gap: 4px; }
+.profile-actions { flex-wrap: wrap; justify-content: flex-end; }
+/* Provider boxes: OpenRouter and Ollama each get one rounded box with its own switch. Space separates them, not rules. */
+.provider-boxes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; gap: var(--space-4); min-width: 0; margin-top: var(--space-4); }
+.provider-box { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; padding: var(--space-4); border: 1px solid var(--box-edge); border-top-color: var(--box-edge-top); border-radius: var(--box-radius); background: var(--box-bg); }
+.provider-box-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); min-width: 0; }
+.provider-box h3 { margin: 0; min-width: 0; color: var(--text); font-size: var(--type-heading-size); font-weight: var(--type-heading-weight); line-height: var(--type-heading-line); letter-spacing: var(--type-heading-tracking); overflow-wrap: anywhere; }
+.provider-box .field { min-width: 0; }
+.provider-box input:not([type="checkbox"]) { width: 100%; min-width: 0; }
+.provider-box-actions { display: flex; justify-content: flex-end; margin-top: auto; }
+.provider-results { display: grid; gap: 2px; min-width: 0; }
+.provider-results .connection-result { display: grid; align-items: start; gap: 2px; }
+.provider-results .connection-result small { display: block; }
+.provider-results .connection-result span { overflow-wrap: anywhere; }
+.provider-off, .provider-note { margin: 0; color: var(--text-primary); overflow-wrap: anywhere; }
+.provider-switch { position: relative; display: inline-flex; align-items: center; gap: var(--space-2); min-height: 44px; min-width: 44px; cursor: pointer; color: var(--text-primary); }
+.provider-switch input[type="checkbox"] { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; appearance: none; -webkit-appearance: none; }
+.provider-switch input[type="checkbox"]::before { content: none; }
+.provider-switch input[type="checkbox"]:disabled { cursor: default; }
+.provider-switch-track { position: relative; flex: 0 0 auto; pointer-events: none; width: 36px; height: 20px; border: 1px solid var(--control-border); border-radius: 999px; background: var(--surface-3); transition: background-color 150ms ease, border-color 150ms ease; }
+.provider-switch-track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--text-primary); transition: transform 150ms ease; }
+.provider-switch input:checked + .provider-switch-track { background: var(--theme-primary); border-color: var(--theme-primary); }
+.provider-switch input:checked + .provider-switch-track::after { transform: translateX(16px); background: var(--canvas); }
+.provider-switch input:focus-visible + .provider-switch-track { outline: 2px solid var(--selector-highlight-hover); outline-offset: 2px; }
+.provider-switch input:disabled + .provider-switch-track { opacity: .5; }
+.provider-switch-word { color: var(--text-primary); font-weight: var(--type-emphasis-weight); }
+@container (max-width: 680px) {
+  .provider-boxes { grid-template-columns: minmax(0, 1fr); }
+}
+/* Model picker: a searchable dropdown that scans its provider every time it opens. */
+.model-picker { position: relative; min-width: 0; }
+.model-picker-control { position: relative; min-width: 0; }
+.model-picker-control input { padding-right: 40px; }
+.model-picker-chevron { position: absolute; top: 0; right: 0; bottom: 0; width: 38px; display: grid; place-items: center; border: 0; background: transparent; color: var(--text-muted); cursor: pointer; }
+.model-picker-chevron:hover { color: var(--text); }
+.model-picker-chevron:disabled { opacity: .5; cursor: default; }
+.model-picker-popup { position: absolute; z-index: 30; top: calc(100% + 4px); left: 0; right: 0; display: flex; flex-direction: column; gap: var(--space-2); max-height: min(360px, 50vh); padding: var(--space-2); overflow: hidden; border: 1px solid var(--control-border); border-radius: var(--radius-control); background: var(--surface-3); box-shadow: 0 8px 24px rgba(0, 0, 0, .45); }
+.model-picker-status { margin: 0; display: flex; align-items: center; gap: var(--space-1); color: var(--text-primary); }
+.model-picker-error { display: grid; gap: var(--space-2); justify-items: start; }
+.model-picker-error p { margin: 0; color: var(--text-primary); overflow-wrap: anywhere; }
+.model-picker-list { flex: 1 1 auto; min-height: 0; margin: 0; padding: 0; list-style: none; display: grid; align-content: start; gap: 2px; overflow-y: auto; }
+.model-picker-row { display: grid; gap: 2px; min-width: 0; padding: var(--space-2); border-radius: var(--radius-control); color: var(--text); cursor: pointer; }
+.model-picker-row:hover, .model-picker-row.is-active { background: var(--surface-4); }
+.model-picker-row small { color: var(--text-primary); overflow-wrap: anywhere; }
+.model-picker-name { display: flex; align-items: center; gap: var(--space-1); min-width: 0; overflow-wrap: anywhere; }
+.model-picker-name > svg { flex: 0 0 auto; color: var(--theme-primary); }
 .profile-form { margin-top: var(--space-6); padding: 0; }
 .provider-fieldset { padding: 0; margin: var(--space-6) 0 0; }
 .profile-security-note { padding: 0; background: transparent; color: var(--text-muted); }

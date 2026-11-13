@@ -26,6 +26,7 @@ import {
   type BatchMode,
   type ProcessingMode,
   type SourceProfile,
+  type MusicAudioMode,
   type MusicPresentationConfig,
   type EditingPresentationConfig,
   type Project,
@@ -212,7 +213,7 @@ type ClipJobInput = {
   contentFormat?: ContentFormat;
   batchMode?: BatchMode;
   processingMode?: ProcessingMode;
-  executionPolicy?: "auto" | "engine_only";
+  executionPolicy?: "auto" | "engine_only" | "ollama";
   /** Serialized as the engine's snake_case multipart field; responses use sourceProfile. */
   sourceProfile?: SourceProfile;
   burnSubtitles?: boolean;
@@ -227,7 +228,7 @@ type ClipJobInput = {
   musicTrackUrl?: string;
   musicTrackSpeed?: number;
   musicLyricsLanguage?: string;
-  musicAudioMode?: "song_only" | "mix_original";
+  musicAudioMode?: MusicAudioMode;
   musicSongGain?: number;
   hookText?: boolean;
   manualHookText?: string;
@@ -271,7 +272,7 @@ export async function createClipJob(input: ClipJobInput): Promise<{ project: Pro
     if (input.musicTrackUrl) form.set("music_track_url", input.musicTrackUrl);
     if (input.musicTrackSpeed !== undefined) form.set("music_track_speed", String(input.musicTrackSpeed));
     if (input.musicAudioMode !== undefined) form.set("music_audio_mode", input.musicAudioMode);
-    if (input.musicAudioMode === "mix_original" && input.musicSongGain !== undefined) form.set("music_song_gain", String(input.musicSongGain));
+    if ((input.musicAudioMode === "mix_original" || input.musicAudioMode === "replace_music_keep_voice") && input.musicSongGain !== undefined) form.set("music_song_gain", String(input.musicSongGain));
   }
   const value = await request<{ project: unknown; job: unknown }>("/jobs/clip", { method: "POST", body: form });
   return { project: projectSchema.parse(value.project), job: jobSchema.parse(value.job) };
@@ -307,6 +308,19 @@ export async function createShortsSourceJob(input: { file?: File; url?: string; 
 export async function listOpenRouterModels(outputModalities?: "text" | "speech"): Promise<OpenRouterModel[]> {
   const query = outputModalities ? `?outputModalities=${encodeURIComponent(outputModalities)}` : "";
   return openRouterModelSchema.array().parse(await request(`/openrouter/models${query}`));
+}
+
+export type ProviderModelScanInput = { provider: "openrouter" | "ollama"; profileId?: string; ollamaUrl?: string; openrouterKey?: string };
+
+/** Live model list for one provider. Read-only: the engine stores nothing and nothing here is cached. */
+export async function scanProviderModels(input: ProviderModelScanInput, signal?: AbortSignal): Promise<OpenRouterModel[]> {
+  return openRouterModelSchema.array().parse(await request("/provider-models/scan", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+    timeoutMs: READ_TIMEOUT_MS,
+    signal,
+  }));
 }
 
 export async function listJobs(): Promise<Job[]> {

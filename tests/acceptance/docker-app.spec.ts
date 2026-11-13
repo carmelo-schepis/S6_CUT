@@ -22,13 +22,17 @@ async function openClips(page: Page) {
 }
 
 async function waitForJob(page: Page, terminal = true) {
+  // While the job runs, its stage is the progress band text; the header status
+  // chip only appears once the job is terminal. Read whichever is on screen.
+  const band = page.locator(".workspace-page .job-strip strong");
   const status = page.locator(".workspace-commandbar .status");
   const observed: string[] = [];
   const deadline = Date.now() + 150_000;
   while (Date.now() < deadline) {
-    const value = (await status.textContent())?.trim() || "";
+    const chip = ((await status.first().textContent({ timeout: 1_000 }).catch(() => "")) || "").trim();
+    const value = chip || ((await band.first().textContent({ timeout: 1_000 }).catch(() => "")) || "").trim();
     if (value && observed.at(-1) !== value) observed.push(value);
-    if (!terminal || /ready|failed|stopped|complete|cancelled/i.test(value)) break;
+    if (!terminal || (chip && /ready|failed|stopped|complete|cancelled/i.test(chip))) break;
     await page.waitForTimeout(1_500);
   }
   await fs.appendFile(path.join(artifactDir, "progress.log"), `${new Date().toISOString()} ${JSON.stringify(observed)}\n`);
@@ -184,10 +188,10 @@ test("Docker-served studio acceptance workflow", async ({ page, request }) => {
   await expect(page.getByText(/Trusted LAN only by default/)).toBeVisible();
   // Empty installs may open setup inline; existing installs keep the form
   // closed until requested. Either way, the API key remains masked.
-  if (await page.locator('input[type="password"]').count() === 0) {
+  if (await page.locator('.profile-form input[type="password"]').count() === 0) {
     await page.getByRole("button", { name: /New profile/ }).click();
   }
-  await expect(page.locator('input[type="password"]')).toHaveCount(1);
+  await expect(page.locator('.profile-form input[type="password"]')).toHaveCount(1);
   await capture(page, "settings-security");
 
   // Jobs navigation and API-backed job list remain usable after the workflow.
@@ -211,7 +215,8 @@ test("Docker-served studio acceptance workflow", async ({ page, request }) => {
     await retryImport.click();
     // The response itself is the durable retry evidence: the same job must
     // immediately leave cancelled_kept and expose a new queued/active phase.
-    await expect(page.locator(".workspace-commandbar .status")).toContainText(/Retrying YouTube import|Downloading YouTube source|ready|failed/i, { timeout: 30_000 });
+    // A running import reads in the progress band; the header chip appears once the job is terminal.
+    await expect(page.locator(".workspace-page .job-strip, .workspace-commandbar .status")).toContainText(/Retrying YouTube import|Downloading YouTube source|ready|failed/i, { timeout: 30_000 });
     await expect(retryImport).not.toBeVisible();
     await expect(page.getByText(/Retrying YouTube import|Downloading YouTube source/).first()).toBeVisible({ timeout: 30_000 });
   }

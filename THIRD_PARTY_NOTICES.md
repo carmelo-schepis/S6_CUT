@@ -1,6 +1,6 @@
 # Third-party notices
 
-S6_CUT project code is licensed under the Zero-Clause BSD License (0BSD), which does not require an author name or attribution notice. See [`LICENSE`](LICENSE). Third-party assets and packages retain their own licences below.
+S6_CUT project code is licensed under the MIT License. See [`LICENSE`](LICENSE). Third-party assets and packages retain their own licences below.
 
 This repository uses third-party packages installed from the locked npm/Python dependency manifests and system packages installed by the container images; their upstream licences apply.
 
@@ -25,3 +25,7 @@ No source code was copied from the reference repositories during this build. The
 - Barlow, Montserrat, Lora, Bodoni Moda, and Roboto Condensed files are unmodified upstream assets. Font names and Reserved Font Names are untouched. See `third_party_provenance.json` for source URLs, pinned revisions, and checksums.
 
 The repository owner confirmed public redistribution rights on 2026-10-27 for the wallpapers, S6 logos and app icons, Help media, and test fixtures listed in `third_party_provenance.json`. Their original sources, creators, specific licences, attribution terms, and byte-for-byte matches to any claimed source are not documented, so this confirmation makes no claim about those details. Code licences do not grant rights to source media, downloaded media, models, voices, fonts, or the supplied S6_cut logo.
+
+## Music voice separation model
+
+`sherpa-onnx==2.0.1` is Apache-2.0 licensed. Spleeter two-stem ONNX weights are downloaded from the pinned sherpa-onnx release and verified by archive and file SHA-256 in `engine/voice_separation.py`. Spleeter code is MIT; its JOSS paper says pretrained models are MIT, while the current README does not separately clarify weight licensing. Treat the model-weight license as unresolved pending authoritative clarification.

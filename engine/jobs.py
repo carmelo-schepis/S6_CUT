@@ -31,7 +31,7 @@ from .models import (
 from .seo_titles import SEO_PROMPT_VERSION, SEO_TITLE_RULES, fallback_clip_title, normalize_seo_description, normalize_seo_title, project_name_is_auto, source_context_title
 from .editing_presets import manifest_summary, normalize_editing_presentation, sanitize_for_uncaptioned_path
 from .hook_text import HOOK_TEXT_RULES, hook_text_clips, hook_text_schema, local_hook_text, normalize_hook_text
-from .providers import ProfileService, ProviderError, provider_runtime_message
+from .providers import ProfileService, ProviderError, ollama_model_missing, provider_runtime_message
 from .security import confined, redact, safe_archive_title, safe_filename
 from .selection import Candidate, _score, _timed_words, candidate_quality, clip_from_candidate, select_candidates, select_music_candidates
 
@@ -47,6 +47,33 @@ def _music_transcription_duration(video_duration: float, has_selected_track: boo
         return video_duration
     return min(video_duration + _MUSIC_TRANSCRIPTION_CONTEXT_SECONDS, maximum_duration)
 
+
+
+def _validate_music_windows(
+    clips: list[Clip], planning_duration: float, minimum: float, maximum: float, *,
+    allow_identical: bool = True,
+) -> None:
+    """Validate music clip windows, rejecting non-finite persisted boundaries."""
+    if not all(math.isfinite(value) for value in (planning_duration, minimum, maximum)):
+        raise MediaError("Music boundary limits must be finite numbers")
+    windows: list[tuple[float, float]] = []
+    for clip in clips:
+        start, end = float(clip.start), float(clip.end)
+        if not math.isfinite(start) or not math.isfinite(end):
+            raise MediaError(f"Clip {clip.index} has a non-finite saved boundary; retry planning before rendering")
+        duration = end - start
+        if not math.isfinite(duration):
+            raise MediaError(f"Clip {clip.index} has an invalid saved duration; retry planning before rendering")
+        if start < -1e-6 or end > planning_duration + 1e-6 or duration < minimum - 1e-6 or duration > maximum + 1e-6:
+            raise MediaError(f"Clip {clip.index} falls outside the requested {minimum:g}-{maximum:g}s bounds or source timeline")
+        windows.append((start, end))
+    if not allow_identical and len(windows) != len(set(windows)):
+        raise MediaError("Keep voice clips must use distinct narration windows; completed outputs were kept.")
+    previous_end = 0.0
+    for start, end in sorted(set(windows)):
+        if start < previous_end - 1e-6:
+            raise MediaError(f"Clip starting at {start:.2f}s overlaps the previous window ending at {previous_end:.2f}s")
+        previous_end = end
 
 def _probe_detail(metadata: dict[str, Any]) -> str:
     details: list[str] = []
@@ -132,9 +159,9 @@ def _semantic_clip_title(project_name: str, clip: Clip) -> str:
     return f"{project_name} — {phrase} · Cut {clip.index:02d}"[:200]
 
 
-def _openrouter_fallback_warning(error: Exception) -> str:
-    reason = " ".join(redact(provider_runtime_message(error, "OpenRouter")).split()).strip(" .")
-    return f"OpenRouter API failed: {reason}. Continuing with deterministic local planning."
+def _openrouter_fallback_warning(error: Exception, service: str) -> str:
+    reason = " ".join(redact(provider_runtime_message(error, service)).split()).strip(" .")
+    return f"{service} API failed: {reason}. Continuing with deterministic local planning."
 
 
 def resolve_batch_target(requested: int, batch_mode: str, source_duration: float) -> tuple[int, str | None]:
@@ -285,6 +312,15 @@ def job_processing_mode(job: Job, private: dict[str, Any]) -> ProcessingMode:
 def job_allows_provider(job: Job, private: dict[str, Any]) -> bool:
     """Either durable copy can veto cloud use, including after checkpoint recovery."""
     return job.execution_policy != "engine_only" and private.get("execution_policy") != "engine_only"
+
+
+def job_uses_ollama(job: Job) -> bool:
+    """True when the user chose the Ollama endpoint for this job instead of OpenRouter."""
+    return job.execution_policy == "ollama"
+
+
+def job_provider_name(job: Job) -> str:
+    return "Ollama" if job_uses_ollama(job) else "OpenRouter"
 
 
 def job_content_format(job: Job, private: dict[str, Any]) -> ContentFormat:
@@ -893,9 +929,9 @@ class JobManager:
             ProcessingStep(id="ready", label="Project ready"),
         ]
 
-    def _smart_steps(self, use_openrouter: bool = False, source_profile: str = "speech", include_hook_text: bool = False) -> list[ProcessingStep]:
+    def _smart_steps(self, use_openrouter: bool = False, source_profile: str = "speech", include_hook_text: bool = False, preserve_voice: bool = False, provider_name: str = "OpenRouter") -> list[ProcessingStep]:
         music = source_profile == "music"
-        provider_step = ProcessingStep(id="openrouter", label="Provider bypassed for music profile" if music else "OpenRouter planning")
+        provider_step = ProcessingStep(id="openrouter", label="Provider bypassed for music profile" if music else f"{provider_name} planning")
         if not use_openrouter:
             timestamp = now_iso()
             provider_step.status = "skipped"
@@ -906,10 +942,10 @@ class JobManager:
             ProcessingStep(id="probe", label="Video validated"),
             *([ProcessingStep(id="music_track", label="Background song prepared")] if music else []),
             ProcessingStep(id="audio", label="Audio prepared"),
-            ProcessingStep(id="transcribe", label="Music words timed" if music else "Speech transcribed"),
+            ProcessingStep(id="transcribe", label="Narration words timed" if preserve_voice else "Music words timed" if music else "Speech transcribed"),
             provider_step,
-            ProcessingStep(id="local_planning", label="Lyric windows planned" if music else "Local planning fallback"),
-            ProcessingStep(id="select", label="Lyric windows selected" if music else "Complete moments selected"),
+            ProcessingStep(id="local_planning", label="Narration moments planned" if preserve_voice else "Lyric windows planned" if music else "Local planning fallback"),
+            ProcessingStep(id="select", label="Narration moments selected" if preserve_voice else "Lyric windows selected" if music else "Complete moments selected"),
             ProcessingStep(id="boundaries", label="Clip boundaries verified"),
             ProcessingStep(id="render", label="Clips rendered and saved"),
             ProcessingStep(id="verify", label="Outputs verified"),
@@ -975,16 +1011,16 @@ class JobManager:
         if job.steps or job.state == "complete":
             return
         as_of = job.updated_at
-        job.steps = self._fast_steps() if job_uses_fast_pipeline(job, private) else self._smart_steps(bool(private.get("use_openrouter")), job.source_profile, include_hook_text=job.hook_text_enabled)
+        job.steps = self._fast_steps() if job_uses_fast_pipeline(job, private) else self._smart_steps(bool(private.get("use_openrouter")), job.source_profile, provider_name=job_provider_name(job), include_hook_text=job.hook_text_enabled, preserve_voice=job.music_audio_mode.value == "replace_music_keep_voice")
         self._restore_proven_steps(job, private, as_of)
         self._save(job, private)
 
-    def _reset_steps_for_retry(self, job: Job) -> None:
+    def _reset_steps_for_retry(self, job: Job, *, recheck_boundaries: bool = False) -> None:
         """Retry resets only the render/output/project steps the retried work re-runs."""
         done = sum(1 for clip in job.clips if clip.state == "complete")
         total = len(job.clips)
         for step in job.steps:
-            if step.id in {"render", "verify", "ready"}:
+            if step.id in ({"render", "verify", "ready", "boundaries"} if recheck_boundaries else {"render", "verify", "ready"}):
                 step.status = "pending"
                 step.detail = "Retrying failed outputs"
                 step.started_at = None
@@ -1005,7 +1041,7 @@ class JobManager:
         """
         if job_uses_fast_pipeline(job, private):
             return {step.id for step in self._fast_steps()}
-        return {step.id for step in self._smart_steps(bool(private.get("use_openrouter")), job.source_profile, include_hook_text=job.hook_text_enabled)}
+        return {step.id for step in self._smart_steps(bool(private.get("use_openrouter")), job.source_profile, provider_name=job_provider_name(job), include_hook_text=job.hook_text_enabled, preserve_voice=job.music_audio_mode.value == "replace_music_keep_voice")}
 
     def _repair_step_shape(self, job: Job, private: dict[str, Any]) -> None:
         """Rebuild a checklist persisted in the wrong shape for its pipeline.
@@ -1025,7 +1061,7 @@ class JobManager:
         if {step.id for step in job.steps} == self._required_step_ids(job, private):
             return
         as_of = job.updated_at
-        job.steps = self._fast_steps() if job_uses_fast_pipeline(job, private) else self._smart_steps(bool(private.get("use_openrouter")), job.source_profile, include_hook_text=job.hook_text_enabled)
+        job.steps = self._fast_steps() if job_uses_fast_pipeline(job, private) else self._smart_steps(bool(private.get("use_openrouter")), job.source_profile, provider_name=job_provider_name(job), include_hook_text=job.hook_text_enabled, preserve_voice=job.music_audio_mode.value == "replace_music_keep_voice")
         # Replays nothing: published clips keep the render counters they earned.
         self._restore_proven_steps(job, private, as_of)
         self._save(job, private)
@@ -1036,21 +1072,27 @@ class JobManager:
             raise RetiredScriptJobError("Legacy jobs cannot be reconciled")
         self._init_steps(job, private)
         self._repair_step_shape(job, private)
-        if job.steps and any(clip.state == "queued" for clip in job.clips):
+        preserve_voice = job.source_profile == "music" and job.music_audio_mode.value == "replace_music_keep_voice"
+        if preserve_voice and job.clips and job.state == "recovered":
+            self._reset_steps_for_retry(job, recheck_boundaries=True)
+            self._save(job, private)
+        elif job.steps and any(clip.state == "queued" for clip in job.clips):
             render_step = next((step for step in job.steps if step.id == "render"), None)
             if render_step and render_step.status == "complete":
-                self._reset_steps_for_retry(job)
+                self._reset_steps_for_retry(job, recheck_boundaries=preserve_voice)
                 self._save(job, private)
 
     @staticmethod
-    def _transcript_detail(transcript: dict[str, Any], *, source_duration: float | None = None, music: bool = False) -> str:
+    def _transcript_detail(transcript: dict[str, Any], *, source_duration: float | None = None, music: bool = False, narration: bool = False) -> str:
         words = transcript.get("words") or []
         segments = transcript.get("segments") or []
         duration = max((float(word["end"]) for word in words if "end" in word), default=0.0)
-        if music:
+        if music or narration:
             total = source_duration if source_duration is not None else duration
             coverage = min(100.0, duration / total * 100) if total > 0 else 0.0
-            return f"{len(words)} word timings · decoded through {duration:.0f}s of {total:.0f}s ({coverage:.0f}% timeline); lyric coverage is not guaranteed"
+            subject = "narration" if narration else "music"
+            note = "" if narration else "; lyric coverage is not guaranteed"
+            return f"{len(words)} {subject} word timings · decoded through {duration:.0f}s of {total:.0f}s ({coverage:.0f}% timeline){note}"
         if segments:
             return f"{len(segments)} segments · {duration:.0f}s processed"
         return f"{len(words)} words · {duration:.0f}s processed"
@@ -1528,6 +1570,71 @@ class JobManager:
         else:
             self._process_clip_smart(job, private)
 
+
+    def _music_voice_stem(self, job: Job, private: dict[str, Any], source: Path, metadata: dict[str, Any]) -> Path:
+        if not metadata.get("audio"):
+            raise MediaError("Keep voice, replace background music requires an audio track in the source video")
+        from .voice_separation import MODEL_ID, SEPARATION_SETTINGS_ID, VoiceSeparationCancelled, separate_voice, validate_voice_stem
+
+        source_hash = str(private.get("source_hash") or sha256_file(source))
+        private["source_hash"] = source_hash
+        target = self.settings.data_path / "jobs" / job.id / "transcription" / (
+            f"voice-{source_hash[:24]}-{SEPARATION_SETTINGS_ID[:12]}.wav"
+        )
+        state = private.get("music_voice_stem")
+        if isinstance(state, dict):
+            path = Path(str(state.get("path") or ""))
+            if (
+                state.get("source_hash") == source_hash
+                and state.get("model_identity") == MODEL_ID
+                and state.get("settings_identity") == SEPARATION_SETTINGS_ID
+                and path == target and path.is_file()
+                and state.get("stem_hash") == sha256_file(path)
+                and validate_voice_stem(path, float(metadata["duration"]), self.settings)
+            ):
+                return path
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        step = self._step_by_id(job, "audio") if job.steps else None
+        step_live = step is not None and step.status in {"pending", "active"}
+        if step_live:
+            self.start_step(job, "audio", detail="Separating original narration from background music", label="Isolating original voice", progress=12, private=private)
+
+        def cancelled() -> bool:
+            return not self._cooperate(job)
+
+        def progress(fraction: float) -> None:
+            if step_live:
+                percent = min(99, max(0, int(float(fraction) * 100)))
+                self._apply_step(job, step, status="active", detail=f"Separating original voice ({percent}%)", current=percent, total=100)
+                self._sync_legacy(job, step, label="Isolating original voice", progress=12 + percent * 0.15)
+                self._save(job, private)
+
+        try:
+            result = separate_voice(
+                source, target, self.settings, cancellation_callback=cancelled, progress_callback=progress,
+                timeline_duration=float(metadata["duration"]),
+            )
+            if not result.is_file() or not validate_voice_stem(result, float(metadata["duration"]), self.settings):
+                raise MediaError("Voice separation returned an empty or invalid narration stem")
+            private["music_voice_stem"] = {
+                "path": str(target), "source_hash": source_hash,
+                "model_identity": MODEL_ID, "settings_identity": SEPARATION_SETTINGS_ID,
+                "stem_hash": sha256_file(result),
+            }
+            self._save(job, private)
+            return target
+        except Exception as exc:
+            if isinstance(exc, VoiceSeparationCancelled):
+                raise media_module.TranscriptionCancelled("Voice separation cancelled") from exc
+            if isinstance(exc, media_module.TranscriptionCancelled):
+                raise
+            if step_live:
+                self.fail_step(job, "audio", detail=f"Voice isolation failed: {redact(str(exc)) or 'check the source and local separation model'}", private=private)
+            if isinstance(exc, MediaError):
+                raise
+            raise MediaError(f"Could not isolate original narration: {redact(str(exc)) or 'check the source and local separation model'}") from exc
+
     def _process_caption_rerender(self, job: Job, private: dict[str, Any], request: dict[str, Any]) -> None:
         """Render a reviewed snapshot to a new immutable output before publishing it."""
         clip_id, revision, run_id = request.get("clip_id"), request.get("revision"), request.get("run_id")
@@ -1560,6 +1667,11 @@ class JobManager:
             source = self._source(job, private)
             metadata = probe_source(job, private, source, self.settings)
             music_track = self._music_track_source(job, private) if job.source_profile == "music" else None
+            music_voice_track = (
+                self._music_voice_stem(job, private, source, metadata)
+                if job.source_profile == "music" and job.music_audio_mode.value == "replace_music_keep_voice"
+                else None
+            )
             if music_track is not None:
                 speed = float(private.get("music_track_speed", 1.0))
                 music_track = _media_fn("prepare_music_track")(
@@ -1598,6 +1710,7 @@ class JobManager:
                 **_presentation_render_kwargs(render, private), **music_kwargs,
                 **_editing_render_kwargs(render, private, job.source_profile),
                 **({"music_track": music_track, "music_track_speed": 1.0} if music_track else {}),
+                **({"music_voice_track": music_voice_track} if music_voice_track else {}),
                 **({"music_audio_mode": job.music_audio_mode, "music_song_gain": job.music_song_gain, "music_original_audio_gain": job.music_original_audio_gain} if job.source_profile == "music" else {}),
             }
             render(source, output, **_compatible_render_kwargs(render, rerender_kwargs))
@@ -1646,10 +1759,14 @@ class JobManager:
 
     def _transcribe_with_stages(self, job: Job, audio: Path, duration: float, private: dict[str, Any]) -> dict[str, Any]:
         profile = job.source_profile
+        preserve_voice = profile == "music" and job.music_audio_mode.value == "replace_music_keep_voice"
+        # The isolated narration is spoken audio: decode it with the speech
+        # profile (speech model and VAD), not the sung-lyric profile.
+        decode_profile = "speech" if preserve_voice else profile
         language = private.get("transcription_language", "en")
         # Keep the legacy speech call shape for injected/test adapters; the
         # music branch must explicitly consult its separate selected model.
-        cached = media_module.is_whisper_model_cached(self.settings, profile=profile) if profile == "music" else media_module.is_whisper_model_cached(self.settings)
+        cached = media_module.is_whisper_model_cached(self.settings, profile=decode_profile) if decode_profile == "music" else media_module.is_whisper_model_cached(self.settings)
         model_label = "Preparing transcription model" if cached else "Downloading transcription model"
         self.start_step(job, "transcribe", detail=model_label, label=model_label, progress=16, private=private)
         started = time.monotonic()
@@ -1669,7 +1786,7 @@ class JobManager:
                 last_persist = now
 
         callback = self._transcription_progress(job, private, duration)
-        transcription_label = "Transcribing music without speech VAD" if profile == "music" else "Transcribing audio"
+        transcription_label = ("Transcribing isolated narration with speech VAD" if preserve_voice else "Transcribing music without speech VAD" if profile == "music" else "Transcribing audio")
         self.start_step(job, "transcribe", detail=transcription_label, label=transcription_label, progress=18, private=private)
         try:
             from .transcription import supervise
@@ -1680,14 +1797,15 @@ class JobManager:
                 transcript = media_module.transcribe(
                     audio, self.settings, progress_callback=callback,
                     cancellation_callback=lambda: not self._cooperate(job), word_timestamps=True,
-                    profile=profile, language=language,
+                    profile=decode_profile, language=language,
                 )
             else:
                 transcript = supervise(
                     audio, self.settings, progress=callback,
                     cancelled=lambda: not self._cooperate(job), heartbeat=heartbeat,
                     meaningful=lambda fraction: setattr(job, "transcription_processed_seconds", min(duration, duration * fraction)),
-                    source_seconds=duration, profile=profile, language=language,
+                    source_seconds=duration, profile=decode_profile, language=language,
+                    vad_filter=True if preserve_voice else None,
                 )
         finally:
             job.transcription_elapsed_seconds = time.monotonic() - started
@@ -1706,7 +1824,7 @@ class JobManager:
                 return
             last_fraction = fraction
             processed = min(duration, duration * fraction)
-            label = f"Transcribing music — {processed:.0f}s of {duration:.0f}s" if job.source_profile == "music" else f"Transcribing audio — {processed:.0f}s of {duration:.0f}s"
+            label = (f"Transcribing isolated narration — {processed:.0f}s of {duration:.0f}s" if job.source_profile == "music" and job.music_audio_mode.value == "replace_music_keep_voice" else f"Transcribing music — {processed:.0f}s of {duration:.0f}s" if job.source_profile == "music" else f"Transcribing audio — {processed:.0f}s of {duration:.0f}s")
             step = self._step_by_id(job, "transcribe")
             self._apply_step(
                 job, step, status="active", detail=label,
@@ -1722,7 +1840,7 @@ class JobManager:
         return report
 
     def _local_planning_fallback(self, job: Job, private: dict[str, Any], pool: list[Candidate], error: Exception):
-        warning = _openrouter_fallback_warning(error)
+        warning = _openrouter_fallback_warning(error, job_provider_name(job))
         if warning not in job.warnings:
             job.warnings.append(warning)
         self.fail_step(job, "openrouter", detail=warning, private=private)
@@ -1731,17 +1849,24 @@ class JobManager:
         self.complete_step(job, "local_planning", detail=f"{len(chosen)} candidates planned locally", private=private)
         return chosen
 
-    def _plan_smart_candidates(self, job: Job, private: dict[str, Any], words: list[dict[str, Any]]):
+    def _plan_smart_candidates(self, job: Job, private: dict[str, Any], words: list[dict[str, Any]], *, local_only: bool = False):
         requested = int(private.get("effective_target", private["count"]))
         high_volume = private.get("batch_mode", job.batch_mode) == "high_volume"
-        if high_volume:
+        preserve_voice = job.source_profile == "music" and job.music_audio_mode.value == "replace_music_keep_voice"
+        if high_volume and not preserve_voice:
             source_duration = float((private.get("source_metadata") or {}).get("duration", 0))
             pool = _high_volume_smart_candidates(words, job.style, requested, float(private["min_duration"]), float(private["max_duration"]), source_duration)
         else:
             pool = select_candidates(
-                words, job.style, min(30, max(requested, requested * 3)),
+                words, job.style, requested if preserve_voice else min(30, max(requested, requested * 3)),
                 float(private["min_duration"]), float(private["max_duration"]),
+                **({"strict_bounds": True} if preserve_voice else {}),
             )
+        if local_only:
+            self.start_step(job, "local_planning", detail="Planning isolated narration moments", label="Planning narration moments", progress=33, private=private)
+            chosen = pool[:requested]
+            self.complete_step(job, "local_planning", detail=f"{len(chosen)} narration moments planned locally", private=private)
+            return chosen
         if not pool:
             return []
         if high_volume or not private.get("use_openrouter") or not job_allows_provider(job, private):
@@ -1749,7 +1874,7 @@ class JobManager:
             chosen = pool[:requested]
             self.complete_step(job, "local_planning", detail=f"{len(chosen)} candidates planned locally", private=private)
             return chosen
-        self.start_step(job, "openrouter", detail="Reviewing deterministic candidate excerpts", label="Planning clips with OpenRouter", progress=33, private=private)
+        self.start_step(job, "openrouter", detail="Reviewing deterministic candidate excerpts", label=f"Planning clips with {job_provider_name(job)}", progress=33, private=private)
         excerpts = [
             {"index": index, "start": candidate.start, "end": candidate.end, "text": " ".join(str(word["text"]) for word in candidate.words)[:800]}
             for index, candidate in enumerate(pool)
@@ -1762,6 +1887,7 @@ class JobManager:
                     "properties": {"indexes": {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": len(pool) - 1}, "minItems": 1, "maxItems": requested}},
                     "required": ["indexes"], "additionalProperties": False,
                 },
+                ollama=job_uses_ollama(job),
             ))
         except Exception as exc:
             # Only the optional provider call is guarded here. Cancellation and
@@ -1770,12 +1896,12 @@ class JobManager:
             return self._local_planning_fallback(job, private, pool, exc)
         indexes = result.get("indexes") if isinstance(result, dict) else None
         if not isinstance(indexes, list) or not indexes or len(indexes) > requested:
-            return self._local_planning_fallback(job, private, pool, ValueError("OpenRouter returned a malformed planning response"))
+            return self._local_planning_fallback(job, private, pool, ValueError(f"{job_provider_name(job)} returned a malformed planning response"))
         if any(type(index) is not int or not 0 <= index < len(pool) for index in indexes):
-            return self._local_planning_fallback(job, private, pool, ValueError("OpenRouter returned invalid candidate indexes"))
+            return self._local_planning_fallback(job, private, pool, ValueError(f"{job_provider_name(job)} returned invalid candidate indexes"))
         unique = list(dict.fromkeys(indexes))
         if not unique:
-            return self._local_planning_fallback(job, private, pool, ValueError("OpenRouter returned no usable candidate indexes"))
+            return self._local_planning_fallback(job, private, pool, ValueError(f"{job_provider_name(job)} returned no usable candidate indexes"))
         selected_indexes = set(unique)
         chosen = [pool[index] for index in unique[:requested]]
         # The provider is an ordering enhancement, not a reason to silently
@@ -1784,8 +1910,133 @@ class JobManager:
         if len(chosen) < min(requested, len(pool)):
             chosen.extend(candidate for index, candidate in enumerate(pool) if index not in selected_indexes and len(chosen) < requested)
         self.complete_step(job, "openrouter", detail=f"AI planning completed for {len(chosen)} candidates", private=private)
-        self.skip_step(job, "local_planning", detail="OpenRouter planning succeeded", private=private)
+        self.skip_step(job, "local_planning", detail=f"{job_provider_name(job)} planning succeeded", private=private)
         return chosen
+
+    def _verify_music_boundaries(
+        self, job: Job, private: dict[str, Any], planning_duration: float, *, allow_identical: bool = True,
+    ) -> None:
+        self.start_step(job, "boundaries", detail="Verifying music clip windows", label="Verifying music boundaries", progress=36, private=private)
+        try:
+            _validate_music_windows(
+                job.clips, planning_duration,
+                float(private["min_duration"]), float(private["max_duration"]),
+                allow_identical=allow_identical,
+            )
+        except MediaError as exc:
+            self.fail_step(job, "boundaries", detail=str(exc), private=private)
+            raise
+        distinct = len({(float(item.start), float(item.end)) for item in job.clips})
+        self.complete_step(job, "boundaries", detail=f"{distinct} music boundaries verified", private=private)
+
+    def _repair_saved_music_plan(self, job: Job, private: dict[str, Any], words: list[dict[str, Any]], planning_duration: float) -> None:
+        """Reconcile a saved 'Keep voice, replace background music' plan.
+
+        Completed clips keep their ids, outputs, Library links and blobs.
+        Invalid unpublished windows are regenerated deterministically from the
+        cached narration transcript without re-downloading or re-separating;
+        regenerated windows never overlap retained windows.  A partial plan
+        that cannot be safely regenerated keeps its completed outputs and
+        fails with an actionable error instead of publishing invalid windows.
+        """
+        minimum = float(private["min_duration"])
+        maximum = float(private["max_duration"])
+        completed = [clip for clip in job.clips if clip.state == "complete"]
+        for clip in completed:
+            start, end = float(clip.start), float(clip.end)
+            if not math.isfinite(start) or not math.isfinite(end) or not math.isfinite(end - start):
+                raise MediaError(
+                    f"Completed clip {clip.index} has a non-finite saved boundary; its published output was kept. "
+                    "Repair the project from a valid checkpoint before continuing."
+                )
+        completed_windows = [(float(clip.start), float(clip.end)) for clip in completed]
+        if len(completed_windows) != len(set(completed_windows)):
+            raise MediaError(
+                "Completed Keep voice clips repeat the same narration window; published outputs were kept. "
+                "Remove or regenerate the duplicate clip before continuing."
+            )
+        retained = sorted(set(completed_windows))
+
+        def overlaps(left: tuple[float, float], right: tuple[float, float]) -> bool:
+            return max(0.0, min(left[1], right[1]) - max(left[0], right[0])) > 1e-6
+
+        def window_is_usable(clip: Clip) -> bool:
+            start, end = float(clip.start), float(clip.end)
+            duration = end - start
+            if not math.isfinite(start) or not math.isfinite(end) or not math.isfinite(duration):
+                return False
+            if start < -1e-6 or end > planning_duration + 1e-6:
+                return False
+            if duration < minimum - 1e-6 or duration > maximum + 1e-6:
+                return False
+            return not any(overlaps((float(clip.start), float(clip.end)), window) for window in retained)
+
+        kept: list[Clip] = []
+        discarded: list[Clip] = []
+        for clip in sorted(
+            (item for item in job.clips if item.state != "complete"),
+            key=lambda item: (
+                float(item.start) if math.isfinite(float(item.start)) else math.inf,
+                float(item.end) if math.isfinite(float(item.end)) else math.inf,
+                item.index,
+            ),
+        ):
+            if window_is_usable(clip) and not any(overlaps((float(clip.start), float(clip.end)), (float(item.start), float(item.end))) for item in kept):
+                kept.append(clip)
+            else:
+                discarded.append(clip)
+        if not discarded:
+            return
+        if not completed:
+            # Nothing has been published, so the whole invalid plan is an
+            # unpublished checkpoint.  Re-plan below through the ordinary
+            # planning path and only reset derived state tied to the
+            # discarded clips; source, stem and transcript caches stay valid.
+            warning = "A saved plan violated the requested narration bounds; queued clips were regenerated from the cached transcript."
+            if warning not in job.warnings:
+                job.warnings.append(warning)
+            job.clips = []
+            job.total_items = 0
+            job.planned_count = 0
+            self._save(job, private)
+            return
+        slots = list(discarded)
+        reserve = retained + [(float(item.start), float(item.end)) for item in kept]
+        requested = int(private.get("effective_target", private["count"]))
+        reserved_count = len(reserve)
+        candidates = select_candidates(
+            words, job.style, requested + reserved_count, minimum, maximum,
+            strict_bounds=True, reserved_windows=tuple(reserve),
+        )[:len(slots)]
+        if len(candidates) < len(slots):
+            raise MediaError(
+                f"Only {reserved_count + len(candidates)} of {requested} narration windows fit without overlapping "
+                f"{len(completed)} completed clip(s); {len(completed)} completed output(s) were kept. "
+                "Choose fewer clips to finish this project safely."
+            )
+        rebuilt: list[Clip] = []
+        for slot, candidate in zip(slots, candidates):
+            clip = clip_from_candidate(candidate, slot.index)
+            clip.id = str(uuid.uuid4())
+            clip.music_track = job.music_track
+            clip.music_audio_mode = job.music_audio_mode
+            clip.music_song_gain = job.music_song_gain
+            clip.music_original_audio_gain = job.music_original_audio_gain
+            excerpt = " ".join(str(word["text"]) for word in candidate.words)
+            clip.visual_label = visual_concept(excerpt)
+            clip.fallback_used = False
+            rebuilt.append(clip)
+        discarded_ids = {id(item) for item in discarded}
+        job.clips = sorted(
+            [item for item in job.clips if item.state == "complete" or id(item) not in discarded_ids] + rebuilt,
+            key=lambda item: (float(item.start), float(item.end), item.index),
+        )
+        job.total_items = len(job.clips)
+        job.planned_count = len(job.clips)
+        warning = f"{len(rebuilt)} queued clip(s) violated the requested narration bounds and were regenerated from the cached transcript; completed outputs were kept."
+        if warning not in job.warnings:
+            job.warnings.append(warning)
+        self._save(job, private)
 
     def _generate_hook_text(self, job: Job, private: dict[str, Any], words: list[dict[str, Any]]) -> None:
         step = next((item for item in job.steps if item.id == "hook_text"), None)
@@ -1839,7 +2090,7 @@ class JobManager:
         try:
             result = asyncio.run(self.profiles.openrouter_json(
                 [{"role": "system", "content": HOOK_TEXT_RULES}, {"role": "user", "content": hook_text_clips(excerpts)}],
-                hook_text_schema(len(excerpts)), temperature=0.8,
+                hook_text_schema(len(excerpts)), temperature=0.8, ollama=job_uses_ollama(job),
             ))
             hooks = result.get("hooks") if isinstance(result, dict) else None
             if not isinstance(hooks, list):
@@ -1867,7 +2118,7 @@ class JobManager:
             elif invalid_items:
                 reason = "some hook items were missing or invalid"
         except Exception as exc:
-            reason = " ".join(redact(provider_runtime_message(exc, "OpenRouter")).split()).strip(" .") or "provider request failed"
+            reason = " ".join(redact(provider_runtime_message(exc, job_provider_name(job))).split()).strip(" .") or "provider request failed"
             for clip in job.clips:
                 clip.hook_text = None
         local_count = 0
@@ -1988,10 +2239,10 @@ class JobManager:
             return
 
         try:
-            models = asyncio.run(self.profiles.openrouter_models())
+            models = asyncio.run(self.profiles.openrouter_models(ollama=job_uses_ollama(job)))
             selected = next((item for item in models if item.id == model_id), None)
             if not selected or not selected.pricing:
-                raise ProviderError("unavailable", "The selected metadata model is unavailable or has unknown pricing.")
+                raise ProviderError("unavailable", ollama_model_missing(model_id) if job_uses_ollama(job) else "The selected metadata model is unavailable or has unknown pricing.")
             try:
                 input_rate = float(selected.pricing["prompt"]) * 1_000_000
                 output_rate = float(selected.pricing["completion"]) * 1_000_000
@@ -2002,7 +2253,7 @@ class JobManager:
             if "response_format" not in selected.supported_parameters:
                 raise ProviderError("unavailable", "The selected metadata model does not advertise structured JSON output support.")
         except Exception as exc:
-            self._metadata_generation_fallback(job, private, pending, provider_runtime_message(exc, "OpenRouter"))
+            self._metadata_generation_fallback(job, private, pending, provider_runtime_message(exc, job_provider_name(job)))
             return
 
         prompt_version = SEO_PROMPT_VERSION
@@ -2055,7 +2306,7 @@ class JobManager:
                     [{"role": "system", "content": system}, {"role": "user", "content": user}], schema,
                     require_saved_profile=True, model_id=model_id, temperature=0.4, max_tokens=estimated_output,
                     provider={"require_parameters": True, "max_price": {"prompt": 0.10, "completion": 0.40}},
-                    reasoning={"enabled": False}, include_usage=True,
+                    reasoning={"enabled": False}, include_usage=True, ollama=job_uses_ollama(job),
                 ))
                 if not result or not isinstance(result, tuple):
                     raise ProviderError("not_configured", "Connect and test the selected OpenRouter profile before generating metadata.")
@@ -2112,7 +2363,7 @@ class JobManager:
                     state[clip.id] = {"status": "generated", "cache_key": cache_key, "model": model_id, "updated_at": time.time()}
                 self._save(job, private)
             except Exception as exc:
-                failed_reason = " ".join(redact(provider_runtime_message(exc, "OpenRouter")).split()).strip(" .") or "Provider request failed"
+                failed_reason = " ".join(redact(provider_runtime_message(exc, job_provider_name(job))).split()).strip(" .") or "Provider request failed"
                 break
         remaining = [entry for entry in pending if entry[0].youtube_metadata_status != "generated"]
         if remaining:
@@ -2246,7 +2497,7 @@ class JobManager:
         new_private.pop("caption_rerender", None)
         new_private.pop("caption_rerender_error", None)
         fast = job_uses_fast_pipeline(job, new_private)
-        steps = self._fast_steps() if fast else self._smart_steps(False, job.source_profile, include_hook_text=False)
+        steps = self._fast_steps() if fast else self._smart_steps(False, job.source_profile, include_hook_text=False, preserve_voice=job.music_audio_mode.value == "replace_music_keep_voice")
         warnings = ["New source-only versions are rendering from the saved original source. Previous outputs are preserved."]
         if job.source_profile == "music":
             repeated = len(clips) - len({(clip.start, clip.end) for clip in clips})
@@ -2285,6 +2536,8 @@ class JobManager:
                 job.warnings.append(warning)
         profile = job.source_profile
         music_track = self._music_track_source(job, private) if profile == "music" else None
+        preserve_voice = profile == "music" and job.music_audio_mode.value == "replace_music_keep_voice"
+        music_voice_track = self._music_voice_stem(job, private, source, metadata) if preserve_voice else None
         if not metadata["audio"] and music_track is None:
             requirement = "readable sung vocals" if job.source_profile == "music" else "speech"
             raise MediaError(f"This video has no readable audio track. Automatic clips require {requirement}; retain it as a source for manual editing.")
@@ -2297,11 +2550,12 @@ class JobManager:
         # ASR can now cache/check the original identity before doing any audio
         # conversion, and produce decoder PCM without an intermediate MP3.
         music_track_source = music_track
-        transcript_source = source
+        transcript_source = music_voice_track or source
         # A selected song often continues past the visual source boundary. Keep
         # bounded real audio after that boundary so Whisper can finish its last
         # phrase; clip selection/rendering remain limited to the video duration.
         transcript_duration = (
+            source_duration if preserve_voice else
             _music_transcription_duration(
                 source_duration,
                 music_track_source is not None,
@@ -2310,10 +2564,14 @@ class JobManager:
             if profile == "music" else source_duration
         )
         music_context_seconds = max(0.0, transcript_duration - source_duration)
-        speed = float(private.get("music_track_speed", 1.0)) if music_track_source is not None else 1.0
+        speed = float(private.get("music_track_speed", 1.0)) if music_track_source is not None and not preserve_voice else 1.0
         planning_duration = source_duration
         target = self._resolve_batch_target(job, private, planning_duration)
-        if music_track_source is not None:
+        if preserve_voice and music_voice_track is not None:
+            voice_state = private["music_voice_stem"]
+            voice_identity = f"{voice_state['source_hash']}:{voice_state['model_identity']}:{voice_state['stem_hash']}"
+            transcription_source_hash = hashlib.sha256(voice_identity.encode()).hexdigest()
+        elif music_track_source is not None:
             transcription_source_hash = _media_fn("music_transcription_source_hash")(
                 sha256_file(music_track_source), speed, transcript_duration,
             )
@@ -2322,14 +2580,16 @@ class JobManager:
             private["source_hash"] = source_hash
             transcription_source_hash = source_hash
         language = private.get("transcription_language", "en")
-        beam = self.settings.music_whisper_beam_size if profile == "music" else self.settings.whisper_beam_size
+        decode_profile = "speech" if preserve_voice else profile
+        beam = self.settings.music_whisper_beam_size if decode_profile == "music" else self.settings.whisper_beam_size
         cache_key = transcription_cache_key(
             transcription_source_hash,
             self.settings,
-            profile=profile,
+            profile=decode_profile,
             language=language,
             beam_size=beam,
             word_timestamps=True,
+            vad_filter=True if preserve_voice else None,
         )
         transcript = private.get("transcript")
         if transcript and private.get("transcript_cache_key") != cache_key:
@@ -2344,12 +2604,21 @@ class JobManager:
                 return
             transcript = self.db.cache_get(cache_key)
             if transcript:
-                self.skip_step(job, "audio", detail="Validated transcript cache reused", private=private)
-                job.warnings.append("Reused a validated local transcript cache entry.")
+                if preserve_voice:
+                    self.complete_step(job, "audio", detail="Isolated narration stem ready; validated transcript cache reused", private=private)
+                else:
+                    self.skip_step(job, "audio", detail="Validated transcript cache reused", private=private)
+                    job.warnings.append("Reused a validated local transcript cache entry.")
             else:
                 self.start_step(job, "audio", detail="Extracting 16 kHz mono audio", label="Preparing audio for transcription", progress=12, private=private)
                 audio_path = self.settings.data_path / "jobs" / job.id / "transcription" / "audio-16k.wav"
-                if music_track_source is not None:
+                if preserve_voice and music_voice_track is not None:
+                    audio = media_module.extract_audio_16k(
+                        music_voice_track, self.settings, output=audio_path,
+                        duration=transcript_duration,
+                        cancellation_callback=lambda: not self._cooperate(job),
+                    )
+                elif music_track_source is not None:
                     audio = _media_fn("extract_music_audio_16k")(
                         music_track_source, self.settings, output=audio_path, speed=speed,
                         duration=transcript_duration,
@@ -2370,14 +2639,10 @@ class JobManager:
             private["transcript"] = transcript
             private["transcript_cache_key"] = cache_key
             self._save(job, private)
-            self.complete_step(job, "transcribe", detail=self._transcript_detail(transcript, source_duration=source_duration, music=profile == "music"), private=private)
+            self.complete_step(job, "transcribe", detail=self._transcript_detail(transcript, source_duration=source_duration, music=profile == "music" and not preserve_voice, narration=preserve_voice), private=private)
         words = transcript["words"]
         boundary_truncated_words: list[dict[str, Any]] = []
         if profile == "music":
-            boundary_truncated_words = [
-                word for word in words
-                if float(word.get("start", 0)) < planning_duration < float(word.get("end", 0))
-            ]
             diagnostics = transcript.get("diagnostics") if isinstance(transcript.get("diagnostics"), dict) else {}
             invalid_count = int(diagnostics.get("invalid_timing_count") or 0)
             if invalid_count:
@@ -2387,25 +2652,55 @@ class JobManager:
                 )
                 if warning not in job.warnings:
                     job.warnings.append(warning)
-            words = [
-                {**word, "end": min(float(word["end"]), planning_duration)}
-                for word in words
-                if float(word.get("start", 0)) < planning_duration and float(word.get("end", 0)) > 0
-            ]
+            if preserve_voice:
+                # Strict narration planning filters malformed timing without
+                # changing the raw cached transcript or its diagnostics.
+                timed_words = _timed_words(words)
+                boundary_truncated_words = [
+                    word for word in timed_words
+                    if float(word["start"]) < planning_duration < float(word["end"])
+                ]
+                words = [
+                    {**word, "end": min(float(word["end"]), planning_duration)}
+                    for word in timed_words if float(word["start"]) < planning_duration
+                ]
+            else:
+                boundary_truncated_words = [
+                    word for word in words
+                    if float(word.get("start", 0)) < planning_duration < float(word.get("end", 0))
+                ]
+                words = [
+                    {**word, "end": min(float(word["end"]), planning_duration)}
+                    for word in words
+                    if float(word.get("start", 0)) < planning_duration and float(word.get("end", 0)) > 0
+                ]
+        if preserve_voice and job.clips:
+            # A saved plan with invalid unpublished windows previously failed
+            # the pre-render guard forever, because retry skipped replanning
+            # whenever clips existed.  Reconcile those checkpoints here.
+            self._repair_saved_music_plan(job, private, words, planning_duration)
         if not job.clips:
             if not self._cooperate(job):
                 self._save(job)
                 return
-            candidates = select_music_candidates(words, job.style, target, float(private["min_duration"]), float(private["max_duration"])) if profile == "music" else self._plan_smart_candidates(job, private, words)
-            if profile == "music":
+            candidates = (
+                self._plan_smart_candidates(job, private, words, local_only=True)
+                if preserve_voice else
+                select_music_candidates(words, job.style, target, float(private["min_duration"]), float(private["max_duration"]))
+                if profile == "music" else
+                self._plan_smart_candidates(job, private, words)
+            )
+            if profile == "music" and not preserve_voice:
                 self.start_step(job, "local_planning", detail="Grouping timed words into lyric lines", label="Grouping lyric lines locally", progress=33, private=private)
                 self.complete_step(job, "local_planning", detail=f"{len(candidates)} duration-bounded lyric windows planned", private=private)
             self.start_step(job, "select", detail="Selecting complete moments", label="Finding coherent, complete moments", progress=34, private=private)
-            if not candidates and private.get("batch_mode", job.batch_mode) != "high_volume":
+            if not candidates and (preserve_voice or private.get("batch_mode", job.batch_mode) != "high_volume"):
+                if preserve_voice:
+                    raise MediaError("Isolated narration did not contain enough timed speech for the requested duration; choose a shorter clip or a source with a longer spoken passage")
                 if profile == "music":
                     raise MediaError("The lyric transcript did not contain a timed, non-overlapping line group inside the requested duration range")
                 raise MediaError("The transcript did not contain a valid complete moment inside the requested duration range")
-            if profile == "music" and candidates:
+            if profile == "music" and candidates and not preserve_voice:
                 requested_count = int(private["count"])
                 unique_candidates = list(candidates)
                 duplicate_count = max(0, requested_count - len(unique_candidates))
@@ -2417,7 +2712,7 @@ class JobManager:
                     )
                     if warning not in job.warnings:
                         job.warnings.insert(0, warning)
-            if len(candidates) < target and private.get("batch_mode", job.batch_mode) == "high_volume":
+            if len(candidates) < target and private.get("batch_mode", job.batch_mode) == "high_volume" and not preserve_voice:
                 requested_count = int(private.get("count", target))
                 final_target, reason = _high_volume_shortfall(requested_count, len(candidates), source_duration, "timed-transcript")
                 job.effective_target = final_target
@@ -2433,7 +2728,11 @@ class JobManager:
                 job.warnings.append(reason)
                 self._save(job, private)
             elif len(candidates) < int(private["count"]):
-                if profile == "music":
+                if preserve_voice:
+                    job.warnings.append(
+                        f"Found {len(candidates)} valid non-overlapping narration windows instead of {private['count']}; the source held no more complete speech inside the requested duration range."
+                    )
+                elif profile == "music":
                     job.warnings.append(f"Found {len(candidates)} valid unique lyric windows instead of {private['count']}; repeated valid windows to fill the requested count.")
                 else:
                     job.warnings.append(f"Found {len(candidates)} valid clips instead of {private['count']}; complete boundaries were prioritised over filler.")
@@ -2468,41 +2767,47 @@ class JobManager:
             job.planned_count = len(clips)
             self._save(job, private)
             self.complete_step(job, "select", detail=f"{len(clips)} moments selected", private=private)
-            self.start_step(job, "boundaries", detail="Verifying clip boundaries against the source timeline", label="Verifying clip boundaries", progress=36, private=private)
-            for clip in clips:
-                clip_timeline_duration = planning_duration if profile == "music" else float(metadata["duration"])
-                if clip.start < 0 or clip.end > clip_timeline_duration + 1e-6 or clip.end <= clip.start:
-                    raise MediaError(f"Clip {clip.index} falls outside the source timeline")
-            self.complete_step(job, "boundaries", detail=f"{len(clips)} boundaries verified", private=private)
+            if profile != "music":
+                self.start_step(job, "boundaries", detail="Verifying clip boundaries against the source timeline", label="Verifying clip boundaries", progress=36, private=private)
+                for clip in clips:
+                    if clip.start < 0 or clip.end > float(metadata["duration"]) + 1e-6 or clip.end <= clip.start:
+                        raise MediaError(f"Clip {clip.index} falls outside the source timeline")
+                self.complete_step(job, "boundaries", detail=f"{len(clips)} boundaries verified", private=private)
+        if profile == "music" and job.clips:
+            self._verify_music_boundaries(
+                job, private, planning_duration, allow_identical=not preserve_voice,
+            )
         self._generate_youtube_metadata(job, private, words if isinstance(private.get("transcript"), dict) else [])
         self._generate_hook_text(job, private, words if isinstance(private.get("transcript"), dict) else [])
         if profile == "music":
             _assign_music_treatments(job, private, self._save)
-            minimum = float(private["min_duration"])
-            maximum = float(private["max_duration"])
-            ordered = sorted(job.clips, key=lambda item: (item.start, item.end, item.index))
-            distinct_windows = sorted({(float(item.start), float(item.end)) for item in ordered})
-            previous_end = 0.0
-            for start, end in distinct_windows:
-                duration = end - start
-                if (
-                    start < -1e-6
-                    or end > planning_duration + 1e-6
-                    or duration < minimum - 1e-6
-                    or duration > maximum + 1e-6
-                    or start < previous_end - 1e-6
-                ):
-                    raise MediaError(
-                        f"Music clips do not meet the requested {minimum:g}–{maximum:g}s non-overlapping bounds inside the available music timeline; no invalid output was published."
-                    )
-                previous_end = end
+            _validate_music_windows(
+                job.clips, planning_duration,
+                float(private["min_duration"]), float(private["max_duration"]),
+                allow_identical=not preserve_voice,
+            )
         self._snapshot_video_overlays(job, private, words)
         if music_track_source is not None:
+            self.start_step(job, "render", detail="Preparing the background song for clip rendering", label="Preparing replacement song audio", progress=39, private=private)
+            last_music_track_heartbeat = time.monotonic()
+
+            def music_track_cancelled() -> bool:
+                nonlocal last_music_track_heartbeat
+                if not self._cooperate(job):
+                    return True
+                now = time.monotonic()
+                if now - last_music_track_heartbeat >= 5:
+                    job.last_heartbeat_at = now_iso()
+                    self._save(job, private)
+                    last_music_track_heartbeat = now
+                return False
+
+            render_speed = float(private.get("music_track_speed", speed))
             music_track = _media_fn("prepare_music_track")(
                 music_track_source,
-                self.settings.data_path / "jobs" / job.id / "transcription" / f"music-{speed:.2f}.mp3",
-                speed, self.settings, duration=source_duration,
-                cancellation_callback=lambda: not self._cooperate(job),
+                self.settings.data_path / "jobs" / job.id / "transcription" / f"music-{render_speed:.2f}.mp3",
+                render_speed, self.settings, duration=source_duration,
+                cancellation_callback=music_track_cancelled,
             )
         output_dir = self.settings.data_path / "jobs" / job.id / "clips"
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -2586,6 +2891,7 @@ class JobManager:
                         (private.get("music_presentation") or {}).get("hook_text_format"),
                     ) if profile == "music" else {}),
                     **({"music_track": music_track, "music_track_speed": 1.0} if music_track else {}),
+                    **({"music_voice_track": music_voice_track} if music_voice_track else {}),
                     **({"music_audio_mode": job.music_audio_mode, "music_song_gain": job.music_song_gain, "music_original_audio_gain": job.music_original_audio_gain} if job.source_profile == "music" else {}),
                 }
                 try:
@@ -3058,7 +3364,8 @@ class JobManager:
                 if clip.state == "failed":
                     clip.state, clip.error = "queued", None
             job.state, job.stage_label, job.error = "queued", "Retrying failed outputs", None
-            self._reset_steps_for_retry(job)
+            preserve_voice = job.source_profile == "music" and job.music_audio_mode.value == "replace_music_keep_voice"
+            self._reset_steps_for_retry(job, recheck_boundaries=preserve_voice)
             await self.enqueue(job.id)
         self._save(job)
         return job
@@ -3098,7 +3405,7 @@ class JobManager:
         new_job = Job(
             id=new_id, project_id=job.project_id, library_folder_id=job.library_folder_id,
             source_blob_id=job.source_blob_id, mode="clip", content_format=job.content_format, processing_mode="fast",
-            execution_policy="auto" if job_allows_provider(job, private) else "engine_only",
+            execution_policy=job.execution_policy if job_allows_provider(job, private) else "engine_only",
             requested_count=job.requested_count, batch_mode=job.batch_mode, effective_target=job.effective_target,
             cap_explanation=job.cap_explanation, state="queued", stage="queued", stage_label="Queued on this machine",
             progress=0, style=job.style, burn_subtitles=bool(new_private.get("burn_subtitles", job.burn_subtitles)), steps=self._fast_steps(),

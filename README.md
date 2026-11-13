@@ -20,7 +20,7 @@ curl -fsSL https://raw.githubusercontent.com/carmelo-schepis/S6_CUT/main/install
 irm https://raw.githubusercontent.com/carmelo-schepis/S6_CUT/main/Install-S6_CUT.ps1 | iex
 ```
 
-Open **<http://localhost:8080>** when the installer finishes. It downloads, builds, and starts the complete app. The first build can take several minutes.
+Open the **Frontend** URL printed when the installer finishes (normally <http://127.0.0.1:8080>). If the default web port is occupied, the installer selects and prints a different port. It downloads, builds, and starts the complete app. The first build can take several minutes.
 
 **To update, paste the same command again.** Your settings and media are preserved.
 
@@ -28,6 +28,8 @@ Open **<http://localhost:8080>** when the installer finishes. It downloads, buil
 <summary>Installation details, requirements, network access, and uninstall</summary>
 
 The installer downloads S6_cut into `~/s6_cut`, creates `.env` on first run, builds the containers, and waits for the app to become ready. Existing installations are updated in place, and your configuration and data are preserved. No GitHub account or API key is required.
+
+On Linux/macOS, if the default engine port `8001` or frontend port `8080` is occupied, the installer retries using a free host port and saves it in `.env`. The engine remains loopback-only. Open the Frontend URL printed when installation finishes; it includes any newly assigned web port. Explicitly exported ports and custom `.env` ports are respected; resolve conflicts for those by changing `S6_ENGINE_PORT` or `S6_PORT` yourself.
 
 Git is optional: the installer uses your existing Git installation when available, or runs Git inside Docker automatically. Node.js, Python, FFmpeg, and the other application dependencies are installed inside the application containers.
 
@@ -145,11 +147,14 @@ Copy `.env.example` to `.env`. Important values:
 
 The OpenRouter profile can be configured in Settings. Persistent secrets are encrypted with a locally generated instance key and are never returned by read APIs. Headless deployments may set `OPENROUTER_API_KEY` in `.env` or Docker secrets orchestration. Protect `.env` like any other credential file.
 
+An Ollama server can be used instead of OpenRouter for a single project. Add its endpoint and model in the same Settings profile. Projects then shows an **Ollama** execution choice; OpenRouter is not called for those jobs. From Docker, use `http://host.docker.internal:11434`. On Linux, start Ollama with `OLLAMA_HOST=0.0.0.0` so the container can reach it.
+
 ### Whisper performance tuning
 
 Smart-mode transcription runs locally with Faster-Whisper. The CPU-friendly defaults (`cpu` + `int8` + beam 1) keep memory low and decode fast; raise the model size or beam only when you need more accuracy and have CPU/RAM headroom:
 
 - `S6_WHISPER_MODEL=base` or `small` is the sweet spot on 8 GB hosts; `medium`/`large-v3` need noticeably more RAM and time.
+- Speech audio over 20 minutes is transcribed in 15-minute overlapping windows so memory stays flat on long videos; music is always one pass.
 - On an NVIDIA GPU, set `S6_WHISPER_DEVICE=cuda` with `S6_WHISPER_COMPUTE_TYPE=float16` for the fastest decode.
 - `S6_WHISPER_WORD_TIMESTAMPS=false` skips per-word alignment (faster) but disables word-timed captions; keep it `true` for captioned clips.
 

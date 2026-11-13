@@ -13,6 +13,7 @@ import selectors
 import threading
 import time
 import unicodedata
+import wave
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from functools import lru_cache
@@ -177,13 +178,13 @@ def transcription_options(
     beam_size: int | None = None,
     word_timestamps: bool | None = None,
     condition_on_previous_text: bool | None = None,
+    vad_filter: bool | None = None,
 ):
     """Resolve the deterministic Faster-Whisper options for a profile.
 
-    Music is deliberately opt-in: it selects its own model/beam defaults,
-    disables speech VAD, and cannot turn off word timestamps needed by lyric
-    clip boundaries and captions.  No vocal-isolation or other speculative
-    audio conditioning is applied here.
+    Music selects its own model/beam defaults and keeps word timestamps enabled.
+    Speech VAD remains off by default for lyrics but can be enabled explicitly
+    for an isolated narration stem.
     """
     model = whisper_model_for_profile(settings, profile)
     configured_beam = settings.music_whisper_beam_size if profile == "music" else settings.whisper_beam_size
@@ -201,7 +202,7 @@ def transcription_options(
         "compute_type": compute_type or settings.whisper_compute_type,
         "beam_size": max(1, min(int(configured_beam if beam_size is None else beam_size), 8)),
         "word_timestamps": resolved_words,
-        "vad_filter": profile == "speech",
+        "vad_filter": (profile == "speech") if vad_filter is None else bool(vad_filter),
         "audio_conditioning": _TRANSCRIPTION_AUDIO_CONDITIONING[profile],
     }
     if profile == "music":
@@ -231,6 +232,7 @@ def transcription_cache_identity(
     beam_size: int | None = None,
     word_timestamps: bool | None = True,
     condition_on_previous_text: bool | None = None,
+    vad_filter: bool | None = None,
 ):
     """Return a stable identity for a transcript's decoding conditions."""
     options = transcription_options(
@@ -242,6 +244,7 @@ def transcription_cache_identity(
         beam_size=beam_size,
         word_timestamps=word_timestamps,
         condition_on_previous_text=condition_on_previous_text,
+        vad_filter=vad_filter,
     )
     identity_options = dict(options)
     if profile == "music":
@@ -265,6 +268,7 @@ def transcription_cache_key(
     beam_size: int | None = None,
     word_timestamps: bool | None = True,
     condition_on_previous_text: bool | None = None,
+    vad_filter: bool | None = None,
 ):
     """Return a source-specific transcript cache key."""
     identity = transcription_cache_identity(
@@ -276,6 +280,7 @@ def transcription_cache_key(
         beam_size=beam_size,
         word_timestamps=word_timestamps,
         condition_on_previous_text=condition_on_previous_text,
+        vad_filter=vad_filter,
     )
     return f"{identity}:{source_hash}"
 
@@ -648,6 +653,10 @@ def _run_ytdlp_download(
         output = process.returncode or 0
         if output:
             detail = "\n".join(lines[-8:])
+            # The 403 line can scroll out of the last eight lines when yt-dlp
+            # prints retry output after it; keep the marker so the fallback fires.
+            if any("HTTP Error 403" in line for line in lines) and "HTTP Error 403" not in detail:
+                detail = "HTTP Error 403: Forbidden (reported earlier by yt-dlp)\n" + detail
             raise MediaError(redact(detail or "yt-dlp failed"))
     except TranscriptionCancelled:
         raise
@@ -689,7 +698,16 @@ def download_youtube(
         # before any media bytes arrive, so a preview exists while downloading.
         common.append("--write-thumbnail")
     common.append(url)
-    candidates = _run_ytdlp_download(common, target_dir, settings, progress_callback=progress_callback, cancellation_callback=cancellation_callback)
+    try:
+        candidates = _run_ytdlp_download(common, target_dir, settings, progress_callback=progress_callback, cancellation_callback=cancellation_callback)
+    except (TranscriptionCancelled, DownloadStalled):
+        raise
+    except MediaError as exc:
+        # The mweb client can be refused for the video stream (HTTP 403) while
+        # the android/web clients still serve it. Fall back to them once.
+        if "HTTP Error 403" not in str(exc):
+            raise
+        candidates = []
     if not candidates:
         _cleanup_partials(target_dir)
         retry = common.copy()
@@ -722,7 +740,32 @@ def download_youtube_audio(
                "--output", str(target.with_suffix(".%(ext)s")),
                "--progress-template", "download:%(progress.status)s|%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s|%(progress._percent_str)s", url]
     command[-1:-1] = ["--extractor-args", YOUTUBE_EXTRACTOR_ARGS[0], "--extractor-args", YOUTUBE_EXTRACTOR_ARGS[1]]
-    _run_ytdlp_download(command, target.parent, settings, progress_callback=progress_callback, cancellation_callback=cancellation_callback)
+    try:
+        _run_ytdlp_download(command, target.parent, settings, progress_callback=progress_callback, cancellation_callback=cancellation_callback)
+    except (TranscriptionCancelled, DownloadStalled):
+        raise
+    except MediaError as exc:
+        # Same fallback as the video import: the mweb client can be refused
+        # for an audio stream (HTTP 403) that android/web still serves.
+        if "HTTP Error 403" not in str(exc):
+            raise
+        # android alone serves some audio streams that the combined list
+        # refuses, because yt-dlp tries the web client first in that list.
+        last_error: MediaError = exc
+        for clients in ("android", "android,web,web_music"):
+            _cleanup_partials(target.parent)
+            retry = command.copy()
+            retry[-1:-1] = ["--extractor-args", f"youtube:player_client={clients}"]
+            try:
+                _run_ytdlp_download(retry, target.parent, settings, progress_callback=progress_callback, cancellation_callback=cancellation_callback)
+                last_error = None
+                break
+            except (TranscriptionCancelled, DownloadStalled):
+                raise
+            except MediaError as retry_exc:
+                last_error = retry_exc
+        if last_error is not None:
+            raise last_error
     if not target.is_file():
         candidates = sorted(target.parent.glob(target.stem + ".*.mp3"))
         if candidates:
@@ -870,6 +913,59 @@ def _finite_or_none(value: Any) -> float | None:
     return number if math.isfinite(number) else None
 
 
+# Speech audio longer than this is transcribed in overlapping windows. One Faster-Whisper
+# call over a 2 h 13 min file was killed at the engine's 3 GiB limit inside model.transcribe():
+# 30 min peaked at 2.1 GB, while 15-minute windows peaked at 1.3 GB on the same audio.
+_WINDOW_THRESHOLD_SECONDS = 1200.0
+_WINDOW_SECONDS = 900.0
+_WINDOW_OVERLAP_SECONDS = 10.0
+
+
+def _windowed_speech_duration(path: Path, profile: str) -> float | None:
+    """Duration of canonical 16 kHz mono PCM speech that needs windowing, otherwise None."""
+    if profile != "speech":
+        return None
+    try:
+        with wave.open(str(path), "rb") as wav:
+            if (wav.getnchannels(), wav.getsampwidth(), wav.getframerate()) != (1, 2, 16000):
+                return None
+            duration = wav.getnframes() / wav.getframerate()
+    except (wave.Error, EOFError, OSError):
+        return None
+    return duration if duration > _WINDOW_THRESHOLD_SECONDS else None
+
+
+def _transcription_passes(path: Path, window_duration: float | None) -> Iterable[tuple[Any, float, float, float]]:
+    """Yield ``(audio, offset, keep_from, keep_to)`` for each Faster-Whisper call.
+
+    Each window holds one slice of PCM at a time, never the whole file. A word or
+    segment is kept only when its midpoint falls in that window's share of the
+    timeline, so the overlap at each seam is counted once.
+    """
+    if window_duration is None:
+        yield str(path), 0.0, 0.0, math.inf
+        return
+    import numpy as np
+    rate = 16000
+    start, index = 0.0, 0
+    with wave.open(str(path), "rb") as wav:
+        while True:
+            end = min(window_duration, start + _WINDOW_SECONDS + _WINDOW_OVERLAP_SECONDS)
+            wav.setpos(int(round(start * rate)))
+            pcm = wav.readframes(int(round((end - start) * rate)))
+            audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+            del pcm
+            last = end >= window_duration
+            keep_from = 0.0 if index == 0 else start + _WINDOW_OVERLAP_SECONDS / 2
+            keep_to = math.inf if last else start + _WINDOW_SECONDS + _WINDOW_OVERLAP_SECONDS / 2
+            yield audio, start, keep_from, keep_to
+            del audio
+            if last:
+                return
+            start += _WINDOW_SECONDS
+            index += 1
+
+
 def transcribe(
     path: Path,
     settings: Settings,
@@ -883,6 +979,7 @@ def transcribe(
     profile: str = "speech",
     language: str | None = "en",
     condition_on_previous_text: bool | None = None,
+    vad_filter: bool | None = None,
 ) -> dict[str, Any]:
     """Transcribe media with Faster-Whisper and return word-level timing.
 
@@ -934,6 +1031,7 @@ def transcribe(
         beam_size=beam_size,
         word_timestamps=word_timestamps,
         condition_on_previous_text=condition_on_previous_text,
+        vad_filter=vad_filter,
     )
     fixture = os.getenv("S6_TEST_TRANSCRIPT_JSON")
     if fixture:
@@ -958,12 +1056,14 @@ def transcribe(
     run_words = options["word_timestamps"]
     run_model = options["model"]
 
+    window_duration = _windowed_speech_duration(path, profile)
     total_duration = 0.0
     if progress_callback is not None:
         total_duration = _media_duration(path, settings)
         if cancellation_callback is not None and cancellation_callback():
             raise TranscriptionCancelled("Transcription cancelled before model load")
 
+    total_seconds = window_duration if window_duration is not None else total_duration
     model_load_started = time.monotonic()
     with _whisper_lock:
         model_key = f"{run_model}:{run_device}:{run_compute}"
@@ -999,28 +1099,46 @@ def transcribe(
         })
     if options["language"] is not None:
         transcribe_kwargs["language"] = options["language"]
-    segments, info = model.transcribe(str(path), **transcribe_kwargs)
     words: list[dict[str, Any]] = []
     segment_records: list[dict[str, Any]] = []
-    for segment in segments:
+    info: Any = None
+    for audio, offset, keep_from, keep_to in _transcription_passes(path, window_duration):
         if cancellation_callback is not None and cancellation_callback():
             raise TranscriptionCancelled("Transcription cancelled during decoding")
-        segment_record = {"start": float(segment.start), "end": float(segment.end), "text": segment.text.strip()}
-        if profile == "music":
-            segment_record.update({
-                "avg_logprob": _finite_or_none(getattr(segment, "avg_logprob", None)),
-                "compression_ratio": _finite_or_none(getattr(segment, "compression_ratio", None)),
-                "no_speech_prob": _finite_or_none(getattr(segment, "no_speech_prob", None)),
-                "temperature": _finite_or_none(getattr(segment, "temperature", None)),
-            })
-        segment_records.append(segment_record)
-        for word in segment.words or []:
-            text = str(word.word).strip()
-            if text:
-                words.append({"text": text, "start": float(word.start), "end": float(word.end), "confidence": float(word.probability or 0)})
-        if progress_callback is not None and total_duration > 0:
-            fraction = min(1.0, max(0.0, float(segment.end) / total_duration))
-            progress_callback(fraction, f"Transcribing: {segment.text.strip()[:60]}")
+        if window_duration is not None and progress_callback is not None and total_seconds > 0:
+            progress_callback(min(1.0, max(0.0, offset / total_seconds)), "")
+        segments, pass_info = model.transcribe(audio, **transcribe_kwargs)
+        if info is None:
+            info = pass_info
+            # Later windows reuse the language the first window detected, so auto-detect cannot change mid-video.
+            if options["language"] is None and isinstance(getattr(info, "language", None), str):
+                transcribe_kwargs["language"] = info.language
+        for segment in segments:
+            if cancellation_callback is not None and cancellation_callback():
+                raise TranscriptionCancelled("Transcription cancelled during decoding")
+            seg_start, seg_end = offset + float(segment.start), offset + float(segment.end)
+            if keep_from <= (seg_start + seg_end) / 2 < keep_to:
+                segment_record = {"start": seg_start, "end": seg_end, "text": segment.text.strip()}
+                if profile == "music":
+                    segment_record.update({
+                        "avg_logprob": _finite_or_none(getattr(segment, "avg_logprob", None)),
+                        "compression_ratio": _finite_or_none(getattr(segment, "compression_ratio", None)),
+                        "no_speech_prob": _finite_or_none(getattr(segment, "no_speech_prob", None)),
+                        "temperature": _finite_or_none(getattr(segment, "temperature", None)),
+                    })
+                segment_records.append(segment_record)
+            for word in segment.words or []:
+                text = str(word.word).strip()
+                if not text:
+                    continue
+                word_start, word_end = offset + float(word.start), offset + float(word.end)
+                if keep_from <= (word_start + word_end) / 2 < keep_to:
+                    words.append({"text": text, "start": word_start, "end": word_end, "confidence": float(word.probability or 0)})
+            if progress_callback is not None and total_seconds > 0:
+                fraction = min(1.0, max(0.0, seg_end / total_seconds))
+                progress_callback(fraction, f"Transcribing: {segment.text.strip()[:60]}")
+    words.sort(key=lambda item: item["start"])
+    segment_records.sort(key=lambda item: item["start"])
     if not words:
         if profile == "music":
             raise MediaError("No sung words with usable timestamps were detected. Instrumentals, buried vocals, and unclear mixes may not produce lyric clips; no audio was padded or duplicated.")
@@ -3177,13 +3295,44 @@ def _smart_speech_emoji_filters(plan: list[tuple[Path, float, float, int, int, i
     return ";".join(filters)
 
 
-def _music_audio_filters(*, source_audio: bool, muted: bool, source_volume: float, mode: str, song_gain: float, original_gain: float, duration: float, song_input: int, speed: float) -> tuple[list[str], str, bool]:
-    """Build the soundtrack audio graph; return filters, output label, mixed flag."""
+VOICE_NARRATION_TARGET_LUFS = -18.0
+
+
+def _music_audio_filters(*, source_audio: bool, muted: bool, source_volume: float, mode: str, song_gain: float, original_gain: float, duration: float, song_input: int | None, speed: float, voice_input: int | None = None) -> tuple[list[str], str, bool]:
+    """Build the soundtrack graph; the voice-preservation mode uses its isolated input."""
     speed = min(1.5, max(0.75, float(speed)))
     song_gain = min(2.0, max(0.0, float(song_gain)))
     original_gain = min(2.0, max(0.0, float(original_gain)))
-    original_active = mode == "mix_original" and source_audio and not muted
     filters = []
+    if mode == "replace_music_keep_voice":
+        if voice_input is None:
+            raise MediaError("The isolated narration stem is unavailable; the original audio was not restored")
+        voice_gain = 0.0 if muted else min(2.0, max(0.0, float(source_volume)))
+        # Separated narration sits well below a mastered song, so normalise it to a
+        # speech loudness target before the Output volume and the song mix. The song
+        # keeps its own fixed level; only the narration default is raised.
+        filters.append(
+            f"[{voice_input}:a:0]asetpts=PTS-STARTPTS,aresample=48000,atrim=duration={duration:.6f},"
+            f"loudnorm=I={VOICE_NARRATION_TARGET_LUFS:.1f}:TP=-1.5:LRA=11,"
+            f"volume={voice_gain:.6f}[voiceout]"
+        )
+        if song_input is None:
+            return filters, "voiceout", False
+        filters.append(
+            f"[{song_input}:a:0]asetpts=PTS-STARTPTS,aresample=48000,asetrate=48000*{speed:.3f},"
+            f"aresample=48000,atrim=duration={duration:.6f},volume={song_gain:.6f}[songout]"
+        )
+        filters.append(
+            "[voiceout][songout]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,"
+            # Normalised narration plus the song can overshoot; keep about 1 dB of headroom
+            # so AAC encoding does not decode above full scale.
+            "alimiter=limit=0.89:level=false:latency=1,"
+            f"atrim=duration={duration:.6f},asetpts=PTS-STARTPTS[mixedout]"
+        )
+        return filters, "mixedout", True
+    if song_input is None:
+        raise MediaError("A background song input is required for this audio mode")
+    original_active = mode == "mix_original" and source_audio and not muted
     filters.append(
         f"[{song_input}:a:0]asetpts=PTS-STARTPTS,aresample=48000,asetrate=48000*{speed:.3f},"
         f"aresample=48000,atrim=duration={duration:.6f},volume={song_gain:.6f}[songout]"
@@ -3203,7 +3352,9 @@ def _music_audio_filters(*, source_audio: bool, muted: bool, source_volume: floa
     return filters, "mixedout", True
 
 
-def render_clip(source: Path, output: Path, *, start: float, end: float, aspect: str, words: list[dict[str, Any]], visuals: list[tuple[str, float, float]], overlays: list[tuple[Path, float, float]], settings: Settings, style: str = "educational", has_audio: bool = True, embed_subtitles: bool = False, subtitle_language: str = "und", creator_credit: str | None = None, content_format: str | None = None, centered_partial_fill: bool = False, subscribe_animation: dict[str, Any] | None = None, music_theme: str | None = None, music_top_text: str | None = None, music_treatment: str | None = None, hook_text: str | None = None, presentation: str | None = None, reaction_policy: str | None = None, source_profile: str = "speech", subtitles_enabled: bool = True, muted: bool = False, volume: float = 1.0, filter_preset: str = "none", filter_intensity: float = 1.0, tint_color: str = "#d58a55", tint_opacity: int = 0, text_overlays: list[dict[str, Any]] | None = None, music_track: Path | None = None, music_track_speed: float = 1.0, music_audio_mode: str = "song_only", music_song_gain: float = 1.0, music_original_audio_gain: float = 1.0, music_lyric_animation: str | None = None, music_hook_text_format: str | None = None, editing_presentation: dict[str, Any] | None = None) -> None:
+def render_clip(source: Path, output: Path, *, start: float, end: float, aspect: str, words: list[dict[str, Any]], visuals: list[tuple[str, float, float]], overlays: list[tuple[Path, float, float]], settings: Settings, style: str = "educational", has_audio: bool = True, embed_subtitles: bool = False, subtitle_language: str = "und", creator_credit: str | None = None, content_format: str | None = None, centered_partial_fill: bool = False, subscribe_animation: dict[str, Any] | None = None, music_theme: str | None = None, music_top_text: str | None = None, music_treatment: str | None = None, hook_text: str | None = None, presentation: str | None = None, reaction_policy: str | None = None, source_profile: str = "speech", subtitles_enabled: bool = True, muted: bool = False, volume: float = 1.0, filter_preset: str = "none", filter_intensity: float = 1.0, tint_color: str = "#d58a55", tint_opacity: int = 0, text_overlays: list[dict[str, Any]] | None = None, music_track: Path | None = None, music_voice_track: Path | None = None, music_track_speed: float = 1.0, music_audio_mode: str = "song_only", music_song_gain: float = 1.0, music_original_audio_gain: float = 1.0, music_lyric_animation: str | None = None, music_hook_text_format: str | None = None, editing_presentation: dict[str, Any] | None = None) -> None:
+    if music_audio_mode == "replace_music_keep_voice" and music_voice_track is None:
+        raise MediaError("The isolated narration stem is unavailable; the original audio was not restored")
     output.parent.mkdir(parents=True, exist_ok=True)
     editing = normalize_editing_presentation(editing_presentation)
     video_filter = video_filter_choice(editing)
@@ -3251,6 +3402,10 @@ def render_clip(source: Path, output: Path, *, start: float, end: float, aspect:
     if music_track is not None:
         music_track_input = 1 + len(overlays) + len(subscribe_animations) + len(emoji_inputs) + (1 if embed_subtitles else 0)
         command.extend(["-stream_loop", "-1", "-ss", f"{start * min(1.5, max(0.75, float(music_track_speed))):.3f}", "-i", str(music_track)])
+    music_voice_input = None
+    if music_voice_track is not None:
+        music_voice_input = 1 + len(overlays) + len(subscribe_animations) + len(emoji_inputs) + (1 if embed_subtitles else 0) + (1 if music_track is not None else 0)
+        command.extend(["-ss", f"{start:.3f}", "-i", str(music_voice_track)])
     source_dimensions = (src_width, src_height)
     sample_aspect_ratio = float(source_meta.get("sample_aspect_ratio") or 1.0)
     if source_meta["rotation"] % 180:
@@ -3264,11 +3419,11 @@ def render_clip(source: Path, output: Path, *, start: float, end: float, aspect:
         mapped = f"emojiout{len(emoji_plan) - 1}"
     audio_output = None
     mixed_audio = False
-    if music_track_input is not None:
+    if music_track_input is not None or music_voice_input is not None:
         audio_filters, audio_output, mixed_audio = _music_audio_filters(
             source_audio=has_audio, muted=muted, source_volume=volume, mode=str(music_audio_mode),
             song_gain=music_song_gain, original_gain=music_original_audio_gain,
-            duration=duration, song_input=music_track_input, speed=music_track_speed,
+            duration=duration, song_input=music_track_input, speed=music_track_speed, voice_input=music_voice_input,
         )
         filters += ";" + ";".join(audio_filters)
     command.extend(["-t", f"{duration:.3f}", "-filter_complex", filters, "-map", f"[{mapped}]"])
@@ -3283,7 +3438,7 @@ def render_clip(source: Path, output: Path, *, start: float, end: float, aspect:
     command.extend(["-c:v", DELIVERY_VIDEO_CODEC, "-preset", DELIVERY_PRESET, "-crf", DELIVERY_CRF, "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-t", f"{duration:.3f}", str(temp)])
     run(command, cwd=output.parent, timeout=7200)
     metadata = probe(temp, settings)
-    if metadata["width"] != width or metadata["height"] != height or ((music_track is not None or (has_audio and not muted)) and not metadata["audio"]):
+    if metadata["width"] != width or metadata["height"] != height or ((music_track is not None or music_voice_track is not None or (has_audio and not muted)) and not metadata["audio"]):
         raise MediaError("Rendered clip failed structural output validation")
     os.replace(temp, output)
 
@@ -3550,6 +3705,7 @@ def render_fast_clip(
     tint_opacity: int = 0,
     text_overlays: list[dict[str, Any]] | None = None,
     music_track: Path | None = None,
+    music_voice_track: Path | None = None,
     music_track_speed: float = 1.0,
     music_audio_mode: str = "song_only",
     music_song_gain: float = 1.0,
@@ -3592,6 +3748,8 @@ def render_fast_clip(
     has_audio : bool
         Whether the source segment has an audio track to encode.
     """
+    if music_audio_mode == "replace_music_keep_voice" and music_voice_track is None:
+        raise MediaError("The isolated narration stem is unavailable; the original audio was not restored")
     output.parent.mkdir(parents=True, exist_ok=True)
     width, height = dimensions(aspect)
     duration = max(0.1, end - start)
@@ -3616,7 +3774,7 @@ def render_fast_clip(
             subtitles_enabled=subtitles_enabled, hook_text=hook_text,
             muted=muted, volume=volume, filter_preset=filter_preset, filter_intensity=filter_intensity,
             tint_color=tint_color, tint_opacity=tint_opacity, text_overlays=text_overlays,
-            music_track=music_track, music_track_speed=music_track_speed,
+            music_track=music_track, music_voice_track=music_voice_track, music_track_speed=music_track_speed,
             music_audio_mode=music_audio_mode, music_song_gain=music_song_gain,
             music_original_audio_gain=music_original_audio_gain, editing_presentation=editing,
         )
@@ -3637,7 +3795,7 @@ def render_fast_clip(
             music_lyric_animation=music_lyric_animation, music_hook_text_format=music_hook_text_format,
             muted=muted, volume=volume, filter_preset=filter_preset, filter_intensity=filter_intensity,
             tint_color=tint_color, tint_opacity=tint_opacity, text_overlays=text_overlays,
-            music_track=music_track, music_track_speed=music_track_speed,
+            music_track=music_track, music_voice_track=music_voice_track, music_track_speed=music_track_speed,
             music_audio_mode=music_audio_mode, music_song_gain=music_song_gain,
             music_original_audio_gain=music_original_audio_gain, editing_presentation=editing,
         )
@@ -3710,18 +3868,23 @@ def render_fast_clip(
     if music_track is not None:
         speed = min(1.5, max(0.75, float(music_track_speed)))
         command.extend(["-stream_loop", "-1", "-ss", f"{start * speed:.3f}", "-i", str(music_track)])
+    music_voice_input = None
+    if music_voice_track is not None:
+        music_voice_input = 1 + len(subscribe_animations) + (1 if embed_subtitles else 0) + (1 if music_track is not None else 0)
+        command.extend(["-ss", f"{start:.3f}", "-i", str(music_voice_track)])
     command.extend(["-t", f"{duration:.3f}"])
     graph_audio_output = None
-    if music_track is not None:
-        song_input = 1 + len(subscribe_animations) + (1 if embed_subtitles else 0)
+    has_music_audio_graph = music_track is not None or music_voice_input is not None
+    if has_music_audio_graph:
+        song_input = 1 + len(subscribe_animations) + (1 if embed_subtitles else 0) if music_track is not None else None
         audio_filters, graph_audio_output, _ = _music_audio_filters(
             source_audio=has_audio, muted=muted, source_volume=volume, mode=str(music_audio_mode),
             song_gain=music_song_gain, original_gain=music_original_audio_gain,
-            duration=duration, song_input=song_input, speed=music_track_speed,
+            duration=duration, song_input=song_input, speed=music_track_speed, voice_input=music_voice_input,
         )
     else:
         audio_filters = []
-    if subscribe_animations or music_track is not None:
+    if subscribe_animations or has_music_audio_graph:
         graph = [f"[0:v]{vf}[base]"]
         current = "base"
         current = _composite_subscribe_animations(graph, current, subscribe_animations)
@@ -3749,7 +3912,7 @@ def render_fast_clip(
         "-movflags",
         "+faststart",
     ])
-    if music_track is not None:
+    if music_track is not None or music_voice_track is not None:
         command.extend(["-c:a", DELIVERY_AUDIO_CODEC, "-b:a", DELIVERY_AUDIO_BITRATE, "-ar", DELIVERY_AUDIO_RATE])
     elif has_audio and not muted:
         command.extend([
@@ -3778,7 +3941,7 @@ def render_fast_clip(
             f"Fast clip failed delivery validation: expected {width}x{height}, "
             f"got {result['width']}x{result['height']}"
         )
-    if (music_track is not None or (has_audio and not muted)) and not result["audio"]:
+    if (music_track is not None or music_voice_track is not None or (has_audio and not muted)) and not result["audio"]:
         raise MediaError("Fast clip expected audio but the output has no audio track")
     if abs(float(result["duration"]) - duration) > max(0.75, duration * 0.05):
         raise MediaError("Fast clip failed duration validation")

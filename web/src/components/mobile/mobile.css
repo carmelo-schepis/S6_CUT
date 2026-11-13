@@ -173,10 +173,9 @@
 .m-app .checklist-heading { display: none; }
 /* The icons share the entry's left edge, under the toggle's chevron. Each row's
    8px of padding hangs out into the gutter, which gives the live row's tint room
-   around its text, and the rail runs through the icon centres. (The selectors
+   around its text. (The selectors
    name .compact to outrank the desktop's own compact padding.) */
 .m-work-steps .checklist-panel.compact .process-checklist { gap: 0; margin: 0 calc(-1 * var(--space-2)); padding: 0; }
-.m-work-steps .process-checklist::before { top: 14px; bottom: 14px; left: calc(var(--space-2) + 7.5px); }
 .m-work-steps .checklist-panel.compact .checklist-step { align-items: start; gap: var(--space-3); padding: var(--space-1) var(--space-2); line-height: var(--type-text-line); }
 .m-work-steps .checklist-icon { margin-top: 2px; }
 /* The label and its status word share a line, and every status word ends on the

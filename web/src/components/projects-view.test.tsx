@@ -71,6 +71,14 @@ describe("Projects create flow", () => {
     expect(screen.queryByRole("button", { name: /Delete project Interview/ })).not.toBeInTheDocument();
   });
 
+  it("lists the step-2 groups in screen order, with Processing mode beside Format", () => {
+    render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    const groups = () => [...document.querySelectorAll<HTMLElement>(".style-step > section.field-group")].map((group) => group.getAttribute("aria-label"));
+    expect(groups()).toEqual(["Editorial style", "Format", "Processing mode", "Batch size", "Execution"]);
+    fireEvent.click(screen.getByRole("button", { name: /^Music(?: \/ sung vocals)?$/i }));
+    expect(groups()).toEqual(["Editorial style", "Format", "Batch size", "Execution"]);
+  });
+
   it("offers Library B-roll only on render routes that honor the explicit choice", () => {
     render(<ProjectsView health={health} onCreated={vi.fn()} />);
     openOptions();
@@ -273,6 +281,30 @@ describe("Projects create flow", () => {
     fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
     await waitFor(() => expect(mockCreateClipJob).toHaveBeenCalled());
     expect(mockCreateClipJob.mock.calls[0][0]).not.toHaveProperty("hookText");
+  });
+
+  it("shows music editorial styles only in Music mode and keeps each mode's choice", async () => {
+    mockCreateClipJob.mockResolvedValue({ project, job: undefinedJob });
+    render(<ProjectsView health={health} onCreated={vi.fn()} />);
+    const pressed = () => [...document.querySelectorAll<HTMLElement>(".style-grid .style-card[aria-pressed=true] strong")].map((node) => node.textContent);
+    const labels = () => [...document.querySelectorAll<HTMLElement>(".style-grid .style-card strong")].map((node) => node.textContent);
+    expect(labels()).toEqual(["Funny", "Serious", "Educational", "Hype"]);
+    expect(pressed()).toEqual(["Educational"]);
+    fireEvent.click(screen.getByRole("button", { name: "Music / sung vocals" }));
+    expect(labels()).toEqual(["Chorus", "Energy", "Storytelling", "Clear lyrics"]);
+    expect(pressed()).toEqual(["Chorus"]);
+    fireEvent.click(screen.getByRole("button", { name: /Storytelling/ }));
+    expect(pressed()).toEqual(["Storytelling"]);
+    fireEvent.click(screen.getByRole("button", { name: /Clip mode/ }));
+    expect(labels()).toEqual(["Funny", "Serious", "Educational", "Hype"]);
+    expect(pressed()).toEqual(["Educational"]);
+    fireEvent.click(screen.getByRole("button", { name: "Music / sung vocals" }));
+    expect(pressed()).toEqual(["Storytelling"]);
+    fireEvent.click(screen.getByRole("tab", { name: "YouTube" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "YouTube URL" }), { target: { value: "https://www.youtube.com/watch?v=fixture" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Create/i }));
+    await waitFor(() => expect(mockCreateClipJob).toHaveBeenCalled());
+    expect(mockCreateClipJob.mock.calls[0][0]).toMatchObject({ style: "serious", sourceProfile: "music" });
   });
 
   it("uses Music mode's effective Smart processing after Fast was selected", () => {
@@ -518,5 +550,59 @@ describe("Local execution selection", () => {
     await waitFor(() => expect(mockCreateClipJob).toHaveBeenCalledWith(expect.objectContaining({
       executionPolicy: "engine_only", processingMode: "auto", burnSubtitles: true, hookText: true,
     })));
+  });
+});
+
+describe("Ollama execution option", () => {
+  const localProfile: ProviderProfile = {
+    id: "local", name: "Local", textModelId: "openai/gpt-4.1-mini", selected: true, persistence: "encrypted",
+    openrouterConfigured: false, textStatus: "not_configured", status: "local only", capabilities: [], fallbacks: {},
+  };
+  const ollamaProfile: ProviderProfile = { ...localProfile, ollamaUrl: "http://host.docker.internal:11434", ollamaModel: "llama3.2", ollamaStatus: "connected" };
+
+  beforeEach(() => {
+    storedValues.clear();
+    mockCreateClipJob.mockReset();
+    mockCreateClipJob.mockResolvedValue({ project, job: undefinedJob });
+  });
+
+  it("hides the Ollama choice when the selected profile has no endpoint", () => {
+    render(<ProjectsView health={health} onCreated={vi.fn()} selectedProfile={localProfile} hasSelectedProvider={false} />);
+    openOptions();
+    expect(screen.queryByRole("button", { name: "Local model" })).not.toBeInTheDocument();
+  });
+
+  it("shows Ollama beside the other execution choices and submits it when chosen", async () => {
+    render(<ProjectsView health={health} onCreated={vi.fn()} selectedProfile={ollamaProfile} hasSelectedProvider={false} />);
+    openOptions();
+    const ollama = screen.getByRole("button", { name: "Local model" });
+    fireEvent.click(ollama);
+    expect(ollama).toHaveAttribute("aria-pressed", "true");
+    fireEvent.change(screen.getByLabelText("Choose video file"), { target: { files: [new File(["video"], "movie.mp4", { type: "video/mp4" })] } });
+    fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
+    await waitFor(() => expect(mockCreateClipJob).toHaveBeenCalledWith(expect.objectContaining({ executionPolicy: "ollama" })));
+  });
+
+  it("removes the choice and submits Auto once the endpoint is gone", async () => {
+    const { rerender } = render(<ProjectsView health={health} onCreated={vi.fn()} selectedProfile={ollamaProfile} hasSelectedProvider={false} />);
+    openOptions();
+    fireEvent.click(screen.getByRole("button", { name: "Local model" }));
+    rerender(<ProjectsView health={health} onCreated={vi.fn()} selectedProfile={localProfile} hasSelectedProvider={false} />);
+    expect(screen.queryByRole("button", { name: "Local model" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Auto · API with local fallback/ })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.change(screen.getByLabelText("Choose video file"), { target: { files: [new File(["video"], "movie.mp4", { type: "video/mp4" })] } });
+    fireEvent.click(screen.getByRole("button", { name: /Create 5 short clips/i }));
+    await waitFor(() => expect(mockCreateClipJob).toHaveBeenCalledWith(expect.objectContaining({ executionPolicy: "auto" })));
+  });
+
+  it("hides Ollama while its switch is off and returns to Auto, without reselecting it when switched back on", () => {
+    const { rerender } = render(<ProjectsView health={health} onCreated={vi.fn()} selectedProfile={ollamaProfile} hasSelectedProvider={false} />);
+    openOptions();
+    fireEvent.click(screen.getByRole("button", { name: "Local model" }));
+    rerender(<ProjectsView health={health} onCreated={vi.fn()} selectedProfile={{ ...ollamaProfile, ollamaEnabled: false }} hasSelectedProvider={false} />);
+    expect(screen.queryByRole("button", { name: "Local model" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Auto · API with local fallback/ })).toHaveAttribute("aria-pressed", "true");
+    rerender(<ProjectsView health={health} onCreated={vi.fn()} selectedProfile={{ ...ollamaProfile, ollamaEnabled: true }} hasSelectedProvider={false} />);
+    expect(screen.getByRole("button", { name: "Local model" })).toHaveAttribute("aria-pressed", "false");
   });
 });

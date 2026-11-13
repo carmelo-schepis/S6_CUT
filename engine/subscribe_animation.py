@@ -8,8 +8,8 @@ ANIMATION_DURATION_SECONDS = 4.0
 ANIMATION_CANVAS_WIDTH = 1536
 ANIMATION_CANVAS_HEIGHT = 540
 ANIMATION_BUTTON_WIDTH = 1026
-# Union of every frame's non-transparent pixels (measured at 10 fps), in the
-# animation canvas: the part of the layer that can actually cover the footage.
+# Conservative visible envelope in source pixels, including cursor and faint
+# shadow fringes. All 120 frames are checked against this reservation.
 ANIMATION_VISIBLE_TOP = 75
 ANIMATION_VISIBLE_BOTTOM = 437
 SCHEDULE_VERSION = 1

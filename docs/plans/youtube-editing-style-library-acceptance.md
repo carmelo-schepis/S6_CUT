@@ -2,7 +2,7 @@
 
 Runner: `scripts/qa/editing-style-library-acceptance.mjs`
 Spec: `tests/acceptance/editing-style-library-real.spec.ts`
-Plan: `docs/plans/youtube-editing-style-library.md` (sections "Plain YouTube sources and isolated execution" and "Browser workflow")
+The acceptance workflow and safeguards are documented in this file.
 
 **Status: required journeys passed separately; full runner did not pass in one unfiltered run.** UI and the real speech journey passed in run `20261030051247-4175627-20f3d2`. The real Music journey passed in the isolated Music-only run `20261030061002-48561-fa94fc`, including the explicit Warm filter over a clip that the automatic Music assignment had marked grayscale. The Music-only runner correctly reports `INCOMPLETE` because it was grep-filtered; an earlier full run passed UI and Speech but failed Music before the later selector and chroma-threshold fixes. Evidence stays under ignored `test-artifacts/editing-style-library/`. Do not interpret a filtered runner result as an overall `PASS`.
 

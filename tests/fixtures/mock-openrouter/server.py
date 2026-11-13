@@ -20,6 +20,10 @@ MODELS = [
     {"id": "google/gemini-2.5-flash-lite", "name": "Gemini 2.5 Flash Lite (mock)", "context_length": 1048576,
      "pricing": {"prompt": "0.0000001", "completion": "0.0000004"}, "supported_parameters": ["response_format", "structured_outputs", "temperature"],
      "architecture": {"output_modalities": ["text"]}},
+    # Lists without structured output so the dropdown's warning path has a real row to show.
+    {"id": "vendor/plain-text-mock", "name": "Plain text (mock)", "context_length": 8192,
+     "pricing": {"prompt": "0.0000002", "completion": "0.0000006"}, "supported_parameters": ["temperature"],
+     "architecture": {"output_modalities": ["text"]}},
 ]
 STOP = {"the", "a", "an", "and", "but", "so", "um", "uh", "i", "we", "you", "it", "is", "to", "of", "that", "this", "in", "on", "for", "just", "like", "okay", "ok", "yeah", "all", "right"}
 

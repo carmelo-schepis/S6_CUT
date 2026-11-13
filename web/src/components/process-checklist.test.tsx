@@ -68,19 +68,19 @@ describe("ProcessChecklist – checkmark only for complete", () => {
     render(<ProcessChecklist steps={[pending, active, complete, skipped, failed]} />);
     const items = screen.getAllByRole("listitem");
     // pending
-    expect(items[0].querySelector(".lucide-circle")).toBeInTheDocument();
-    expect(items[0].querySelector(".lucide-check")).toBeNull();
+    expect(items[0].querySelector('[data-step-icon="pending"]')).toBeInTheDocument();
+    expect(items[0].querySelector('[data-step-icon="complete"]')).toBeNull();
     // active
-    expect(items[1].querySelector(".lucide-loader-circle")).toBeInTheDocument();
-    expect(items[1].querySelector(".lucide-check")).toBeNull();
+    expect(items[1].querySelector('[data-step-icon="active"]')).toBeInTheDocument();
+    expect(items[1].querySelector('[data-step-icon="complete"]')).toBeNull();
     // complete
-    expect(items[2].querySelector(".lucide-check")).toBeInTheDocument();
+    expect(items[2].querySelector('[data-step-icon="complete"]')).toBeInTheDocument();
     // skipped
-    expect(items[3].querySelector(".lucide-minus")).toBeInTheDocument();
-    expect(items[3].querySelector(".lucide-check")).toBeNull();
+    expect(items[3].querySelector('[data-step-icon="skipped"]')).toBeInTheDocument();
+    expect(items[3].querySelector('[data-step-icon="complete"]')).toBeNull();
     // failed — checks for any icon svg and no checkmark
-    expect(items[4].querySelector(".checklist-icon svg")).toBeInTheDocument();
-    expect(items[4].querySelector(".lucide-check")).toBeNull();
+    expect(items[4].querySelector('[data-step-icon="failed"]')).toBeInTheDocument();
+    expect(items[4].querySelector('[data-step-icon="complete"]')).toBeNull();
   });
 
   it("never infers completion from a full item count when status is still active", () => {
@@ -90,9 +90,42 @@ describe("ProcessChecklist – checkmark only for complete", () => {
     };
     render(<ProcessChecklist steps={[fullItems]} />);
     const row = screen.getByRole("listitem");
-    expect(row.querySelector(".lucide-check")).toBeNull();
-    expect(row.querySelector(".lucide-loader-circle")).toBeInTheDocument();
+    expect(row.querySelector('[data-step-icon="complete"]')).toBeNull();
+    expect(row.querySelector('[data-step-icon="active"]')).toBeInTheDocument();
     expect(screen.getByText("5 of 5")).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------
+describe("ProcessChecklist – one drawing per step and one-shot motion", () => {
+  it("draws each state as one ring at cx=8 cy=8 r=7, with no mark on pending", () => {
+    render(<ProcessChecklist steps={[pending, active, complete, skipped, failed]} />);
+    for (const item of screen.getAllByRole("listitem")) {
+      const rings = item.querySelectorAll(".step-ring");
+      expect(rings).toHaveLength(1);
+      expect(rings[0]).toHaveAttribute("cx", "8");
+      expect(rings[0]).toHaveAttribute("cy", "8");
+      expect(rings[0]).toHaveAttribute("r", "7");
+    }
+    expect(screen.getAllByRole("listitem")[0].querySelector(".step-mark")).toBeNull();
+  });
+
+  it("plays the complete tick once when it arrives live, and never on mount", () => {
+    const live: ProcessingStep = { id: "live", label: "Clips rendered", status: "active", startedAt: "2026-08-13T00:00:00Z" };
+    const { container, rerender } = render(<ProcessChecklist steps={[live]} />);
+    expect(container.querySelector(".checkmark-new")).toBeNull();
+    rerender(<ProcessChecklist steps={[{ ...live, status: "complete", completedAt: "2026-08-13T00:01:00Z" }]} />);
+    expect(container.querySelector(".checkmark-new")).toBeInTheDocument();
+  });
+
+  it("settles a skipped or failed step in once when it arrives live, and never on mount", () => {
+    const live: ProcessingStep = { id: "live", label: "OpenRouter planning", status: "active", startedAt: "2026-08-13T00:00:00Z" };
+    const mounted = render(<ProcessChecklist steps={[failed]} />);
+    expect(mounted.container.querySelector(".settle-new")).toBeNull();
+    mounted.unmount();
+    const { container, rerender } = render(<ProcessChecklist steps={[live]} />);
+    rerender(<ProcessChecklist steps={[{ ...live, status: "failed", detail: "Provider request failed [redacted]" }]} />);
+    expect(container.querySelector(".settle-new")).toBeInTheDocument();
   });
 });
 
@@ -131,7 +164,7 @@ describe("ProcessChecklist – paused state", () => {
     const row = screen.getByRole("listitem");
     expect(row).toHaveTextContent("Clips rendered");
     expect(row).toHaveTextContent("Paused");
-    expect(row.querySelector(".lucide-check")).toBeNull();
+    expect(row.querySelector('[data-step-icon="complete"]')).toBeNull();
   });
 
   it("does not tick elapsed when paused", () => {
@@ -145,7 +178,7 @@ describe("ProcessChecklist – paused state", () => {
     const pausedNoStart: ProcessingStep = { id: "a", label: "Cut points planned", status: "active" };
     render(<ProcessChecklist steps={[pausedNoStart]} jobState="paused" />);
     expect(screen.getByText("Paused")).toBeInTheDocument();
-    expect(screen.getByRole("listitem").querySelector(".lucide-loader-circle")).toBeInTheDocument();
+    expect(screen.getByRole("listitem").querySelector('[data-step-icon="paused"]')).toBeInTheDocument();
   });
 });
 
@@ -205,6 +238,80 @@ describe("ProcessChecklist – finished run", () => {
     render(<ProcessChecklist steps={[complete, active]} jobState="active" />);
     expect(screen.getByRole("list", { name: "Short creation progress" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /steps$/ })).not.toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------
+describe("ProcessChecklist – collapsible, summary and quiet (Workspace)", () => {
+  const runningSteps = [complete, active, pending];
+
+  it("is closed by default while running and the toggle opens and closes it", () => {
+    vi.useRealTimers();
+    render(<ProcessChecklist steps={runningSteps} jobState="active" collapsible />);
+    expect(screen.queryByRole("list", { name: "Short creation progress" })).not.toBeInTheDocument();
+    const toggle = screen.getByRole("button", { name: "Show steps" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).toHaveAttribute("aria-controls", screen.getByTestId("progress-step-list").id);
+    act(() => { toggle.click(); });
+    expect(screen.getByRole("list", { name: "Short creation progress" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Hide steps" })).toHaveAttribute("aria-expanded", "true");
+    act(() => { screen.getByRole("button", { name: "Hide steps" }).click(); });
+    expect(screen.queryByRole("list", { name: "Short creation progress" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show steps" })).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("opens by default when a step failed, and the user's choice then wins", () => {
+    vi.useRealTimers();
+    render(<ProcessChecklist steps={[complete, failed]} jobState="failed" collapsible />);
+    expect(screen.getByRole("list", { name: "Short creation progress" })).toBeInTheDocument();
+    expect(screen.getByText("Provider request failed [redacted]")).toBeInTheDocument();
+    act(() => { screen.getByRole("button", { name: "Hide steps" }).click(); });
+    expect(screen.queryByRole("list", { name: "Short creation progress" })).not.toBeInTheDocument();
+  });
+
+  it("renders the summary in the heading row and keeps the h2 as the region's name", () => {
+    render(<ProcessChecklist steps={runningSteps} jobState="active" collapsible summary={<div className="job-strip">Rendering clips 19%</div>} />);
+    const region = screen.getByRole("region", { name: "Short creation progress" });
+    expect(region).toContainElement(screen.getByText("Rendering clips 19%"));
+    const heading = screen.getByRole("heading", { name: "Short creation progress" });
+    expect(heading).toHaveClass("sr-only");
+  });
+
+  it("keeps the visible heading when no summary is given", () => {
+    render(<ProcessChecklist steps={runningSteps} jobState="active" collapsible />);
+    expect(screen.getByRole("heading", { name: "Short creation progress" })).not.toHaveClass("sr-only");
+  });
+
+  it("counts the active step as Step i of M, and keeps the finished wording", () => {
+    const { rerender } = render(<ProcessChecklist steps={runningSteps} jobState="active" collapsible />);
+    expect(screen.getByText("Step 2 of 3")).toBeInTheDocument();
+    rerender(<ProcessChecklist steps={[complete, skipped]} jobState="complete" collapsible />);
+    expect(screen.getByText("1 of 2 complete")).toBeInTheDocument();
+    rerender(<ProcessChecklist steps={[complete, pending]} jobState="active" collapsible />);
+    expect(screen.getByText("2 steps")).toBeInTheDocument();
+  });
+
+  it("does not use the Step i of M wording unless collapsible", () => {
+    render(<ProcessChecklist steps={runningSteps} jobState="active" />);
+    expect(screen.getByText("3 steps")).toBeInTheDocument();
+    expect(screen.queryByText(/^Step \d+ of/)).not.toBeInTheDocument();
+  });
+
+  it("quiet drops the active row's detail and its x of y, but keeps elapsed and status", () => {
+    const completeWithItems: ProcessingStep = { ...complete, currentItem: 4, totalItems: 4 };
+    render(<ProcessChecklist steps={[completeWithItems, active]} jobState="active" quiet />);
+    const row = screen.getByTestId("progress-step-s2");
+    expect(row).toHaveTextContent("In progress");
+    expect(row).toHaveTextContent(/Elapsed 0:00/);
+    expect(row).not.toHaveTextContent("Rendering output 3");
+    expect(row).not.toHaveTextContent("3 of 5");
+    expect(screen.getByTestId("progress-step-s3")).not.toHaveTextContent("4 of 4");
+  });
+
+  it("quiet keeps skipped and failed detail", () => {
+    render(<ProcessChecklist steps={[skipped, failed]} jobState="failed" quiet />);
+    expect(screen.getByText("No connected provider; used local planning")).toBeInTheDocument();
+    expect(screen.getByText("Provider request failed [redacted]")).toBeInTheDocument();
   });
 });
 

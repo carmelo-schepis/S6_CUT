@@ -2,7 +2,7 @@
 // zod schemas must mirror engine/models.py camelCase fields exactly
 // A parse failure on any view is a hard error — add fields on both sides together
 
-import { z } from "zod/v3";
+import { z } from "zod";
 
 export const styleSchema = z.enum(["funny", "serious", "educational", "hype"]);
 export type Style = z.infer<typeof styleSchema>;
@@ -29,6 +29,8 @@ export const batchModeSchema = z.enum(["standard", "high_volume"]);
 export type BatchMode = z.infer<typeof batchModeSchema>;
 export const sourceProfileSchema = z.enum(["speech", "music"]);
 export type SourceProfile = z.infer<typeof sourceProfileSchema>;
+export const musicAudioModeSchema = z.enum(["song_only", "mix_original", "replace_music_keep_voice"]);
+export type MusicAudioMode = z.infer<typeof musicAudioModeSchema>;
 export const musicThemeSchema = z.enum(["clean", "warm", "serif", "reference_white_sans", "reference_yellow_sans", "reference_white_serif", "condensed_black", "condensed_white", "handwritten_stack", "karaoke_focus", "soft_glow", "lyric_plate"]);
 export type MusicTheme = z.infer<typeof musicThemeSchema>;
 export const musicLyricAnimationSchema = z.enum(["legacy", "slow_fade", "line_crossfade", "word_build"]);
@@ -168,7 +170,7 @@ export const clipSchema = z.object({
   musicTopText: z.string().max(100).nullable().optional(),
   musicTreatment: z.enum(["color", "grayscale"]).nullable().optional(),
   musicTrack: musicTrackSchema.nullable().optional(),
-  musicAudioMode: z.enum(["song_only", "mix_original"]).optional(),
+  musicAudioMode: musicAudioModeSchema.optional(),
   musicSongGain: z.number().min(0).max(2).optional(),
   musicOriginalAudioGain: z.number().min(0).max(2).optional(),
   downloadUrl: z.string().nullable().optional(),
@@ -258,7 +260,7 @@ export const jobSchema = z.object({
   totalItems: z.number().default(0),
   style: styleSchema,
   processingMode: processingModeSchema.default("smart"),
-  executionPolicy: z.enum(["auto", "engine_only"]).optional(),
+  executionPolicy: z.enum(["auto", "engine_only", "ollama"]).optional(),
   contentFormat: contentFormatSchema.default("short"),
   sourceProfile: sourceProfileSchema.optional(),
   libraryOverlaysEnabled: z.boolean().optional(),
@@ -272,7 +274,7 @@ export const jobSchema = z.object({
   editingPresentation: editingPresentationSchema.nullable().optional(),
   musicTopText: z.string().max(100).nullable().optional(),
   musicTrack: musicTrackSchema.nullable().optional(),
-  musicAudioMode: z.enum(["song_only", "mix_original"]).optional(),
+  musicAudioMode: musicAudioModeSchema.optional(),
   musicSongGain: z.number().min(0).max(2).optional(),
   musicOriginalAudioGain: z.number().min(0).max(2).optional(),
   hookTextEnabled: z.boolean().optional(),
@@ -326,7 +328,7 @@ export const projectSchema = z.object({
   contentFormat: contentFormatSchema.default("short"),
   sourceProfile: sourceProfileSchema.optional(),
   musicTrack: musicTrackSchema.nullable().optional(),
-  musicAudioMode: z.enum(["song_only", "mix_original"]).optional(),
+  musicAudioMode: musicAudioModeSchema.optional(),
   musicSongGain: z.number().min(0).max(2).optional(),
   musicOriginalAudioGain: z.number().min(0).max(2).optional(),
   latestJobId: z.string().nullable().optional(),
@@ -352,7 +354,7 @@ export const healthSchema = z.object({
   configuredWorkers: z.number().int().positive().optional(),
   activeWorkers: z.number(),
   queuedJobs: z.number(),
-  fallbacks: z.record(z.string()),
+  fallbacks: z.record(z.string(), z.string()),
 });
 export type Health = z.infer<typeof healthSchema>;
 
@@ -386,11 +388,28 @@ export const profileSchema = z.object({
   textStatus: providerConnectionStatusSchema.default("not_configured"),
   textMessage: z.string().nullable().optional(),
   textLastCheckedAt: z.string().nullable().optional(),
+  ollamaUrl: z.string().nullable().optional(),
+  ollamaModel: z.string().nullable().optional(),
+  ollamaStatus: providerConnectionStatusSchema.optional(),
+  ollamaMessage: z.string().nullable().optional(),
+  ollamaLastCheckedAt: z.string().nullable().optional(),
+  // Optional so profiles saved before the switches existed still parse; a missing switch means on.
+  openrouterEnabled: z.boolean().optional(),
+  ollamaEnabled: z.boolean().optional(),
   status: z.string(),
   capabilities: z.array(z.string()),
-  fallbacks: z.record(z.string()),
+  fallbacks: z.record(z.string(), z.string()),
 });
 export type ProviderProfile = z.infer<typeof profileSchema>;
+
+/** A provider is on unless its switch is explicitly off, so older profiles keep working. */
+export function isOpenRouterOn(profile: { openrouterEnabled?: boolean } | null | undefined): boolean {
+  return profile?.openrouterEnabled !== false;
+}
+
+export function isOllamaOn(profile: { ollamaEnabled?: boolean } | null | undefined): boolean {
+  return profile?.ollamaEnabled !== false;
+}
 
 export const assetOriginSchema = z.enum(["manual-import", "project-source", "generated-clip", "script-output"]);
 export type AssetOrigin = z.infer<typeof assetOriginSchema>;
@@ -455,7 +474,7 @@ export type AssetPage = z.infer<typeof assetPageSchema>;
 export const recentClipsPageSchema = z.object({ items: assetSchema.array(), page: z.number().int().positive(), pageSize: z.number().int().positive(), hasMore: z.boolean(), total: z.number().int().nonnegative() });
 export type RecentClipsPage = z.infer<typeof recentClipsPageSchema>;
 
-export const assetDeleteResultSchema = z.object({ deleted: z.array(z.string()), failed: z.record(z.string()) });
+export const assetDeleteResultSchema = z.object({ deleted: z.array(z.string()), failed: z.record(z.string(), z.string()) });
 
 export const libraryPurgeResultSchema = z.object({
   assetsDeleted: z.number().int().nonnegative(),

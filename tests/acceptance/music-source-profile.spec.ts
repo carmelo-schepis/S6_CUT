@@ -224,7 +224,9 @@ test("completed music jobs meet the requested minimum and expose timed caption a
   await page.locator('.job-card[data-job-id="music-complete-job"]')
     .getByRole("button", { name: "Open", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Completed music fixture" })).toBeVisible();
-  await expect(page.getByText("Song: Verified backing track · 0.85× speed")).toBeVisible();
+  // The song line lives in the header details panel, behind the muted meta toggle.
+  await page.locator(".workspace-meta-toggle").click();
+  await expect(page.locator("#workspace-project-details .workspace-detail-row").filter({ hasText: "Song" })).toContainText("Verified backing track · 0.85× speed");
   await expect(page.locator(".workspace-secondary-meta").first()).toContainText(/Music \/ sung vocals/);
   await expect(page.locator(".clip-tile.complete")).toHaveCount(completedProject.requestedCount);
 
