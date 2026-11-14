@@ -2,6 +2,90 @@
 
 S6_cut uses the same `compose.yaml` on ordinary Docker hosts, in a Portainer Stack, and in a TrueNAS SCALE Custom App. There is no appliance-specific fork.
 
+## TrueNAS SCALE: scripted install (recommended)
+
+Needs TrueNAS SCALE 24.10 or newer (Docker-based Apps; 25.04+ recommended) with a pool chosen under **Apps → Configuration**. In **System → Shell**, or over SSH:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/carmelo-schepis/S6_CUT/main/install-truenas.sh | sudo bash
+```
+
+`install-truenas.sh` does the following:
+
+1. Checks that it runs as root on TrueNAS SCALE. On other hosts it stops and points you to `install.sh`.
+2. Finds the Apps pool (`midclt call docker.config`) and creates these datasets through the middleware, so they appear under **Datasets**. Datasets that already exist are reused.
+
+   ```text
+   <pool>/apps/s6-cut            parent; also holds truenas-app.yaml
+   <pool>/apps/s6-cut/source     git checkout and .env
+   <pool>/apps/s6-cut/data       projects, Library, media, models, secrets
+   ```
+
+3. Clones the repository into `source`, using the host's `git` or, without it, Git in a container.
+4. Creates `source/.env` from `.env.example` on the first run only. It sets `S6_DATA_PATH` to the data dataset and `S6_PORT` to 30180, or the next port that no listening socket and no other app, running or stopped, uses. If the engine's loopback debug port 8001 is taken, it also picks a free `S6_ENGINE_PORT`.
+5. Gives UID/GID 10001 (the engine user) ownership of the data dataset.
+6. Renders `compose.yaml` + `.env` with `docker compose config` into `<pool>/apps/s6-cut/truenas-app.yaml` (mode 600, because it contains `.env` values such as `OPENROUTER_API_KEY`).
+7. Builds the images on the NAS with TrueNAS's project name (`docker compose -p ix-s6-cut build`), so the app's deploy step does not rebuild. TrueNAS gives a deploy 20 minutes.
+8. Creates the Custom App with `app.create` (`custom_app: true`, `custom_compose_config_string`), or on a re-run updates it with `app.update`. That redeploys a running app. A stopped app is started with `app.redeploy`.
+9. Waits up to 10 minutes for the `web` container to report healthy, then prints the LAN URL, the dataset paths, and how to update.
+
+The app then appears under **Apps → Installed** as `s6-cut`, and Start, Stop, Edit and Delete work there as for any Custom App.
+
+**Why a resolved file instead of `include:`.** TrueNAS keeps a Custom App's compose file under `/mnt/.ix-apps/app_configs/<app>/` and runs it from there. That breaks relative paths, and an `include:` would make TrueNAS depend on `.env` lookups it does not show. The resolved file has absolute build contexts and data paths. `docker compose` checks it on the NAS before it is submitted, and **Edit** shows exactly what runs.
+
+### Update
+
+Run the same command again. It runs `git fetch` and `git reset --hard origin/<branch>` (`main` by default) in `source`, rebuilds the images, and updates the app. `.env` and the data dataset are never overwritten. Snapshot the data dataset first if you want a rollback point.
+
+Use the installer, not the Apps **Update** button, to update the scripted app: its images are built on the NAS and are not in a registry.
+
+### Change settings
+
+Edit `<pool>/apps/s6-cut/source/.env`, then re-run the install command to render and apply it. Changes made only in the app's **Edit** screen are replaced by the next re-run.
+
+### Environment overrides
+
+`sudo` drops your environment, so put overrides after `sudo`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/carmelo-schepis/S6_CUT/main/install-truenas.sh | sudo S6_PORT=30200 bash
+```
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `S6_POOL` | the Apps pool | Pool for the `apps/<app>` datasets |
+| `S6_PORT` | 30180, or the next free port | Web port on the LAN. Saved to `.env`; an explicit value also changes an existing install |
+| `S6_APP_NAME` | `s6-cut` | TrueNAS app name, also used in the dataset path |
+| `S6_BRANCH` | `main` | Branch to install and track |
+| `S6_REPO_URL` | this repository | Repository to clone |
+| `S6_START_TIMEOUT` | 600 | Seconds to wait for the web service to become healthy |
+
+### Uninstall
+
+```bash
+sudo bash /mnt/<pool>/apps/s6-cut/source/uninstall-truenas.sh
+```
+
+This deletes the app with `app.delete` and keeps every dataset, so re-running the installer brings S6_cut back with its data. Options:
+
+- `--remove-images` also removes the app's images.
+- `--purge` also destroys `<pool>/apps/s6-cut` with its `source` and `data` children. It lists the datasets and their paths, then asks you to type the dataset name. Add `--yes` to skip that prompt, for example when piping the script from curl: `curl -fsSL …/uninstall-truenas.sh | sudo bash -s -- --purge --yes`.
+
+`S6_POOL` and `S6_APP_NAME` work as for the installer.
+
+## TrueNAS SCALE: Install via YAML (no shell)
+
+[`truenas/s6-cut.yaml`](../truenas/s6-cut.yaml) is a self-contained Custom App that runs the prebuilt multi-arch images `ghcr.io/carmelo-schepis/s6-cut-engine` and `ghcr.io/carmelo-schepis/s6-cut-web`, published by `.github/workflows/images.yml` on every push to `main`.
+
+> The images exist only after that workflow has run on `main`. GHCR creates new packages as private, so the repository owner has to set both packages to **Public** once (GitHub → Packages → package → Package settings → Change visibility). Until then, TrueNAS cannot pull them without registry credentials.
+
+1. Create a dataset for the data, for example `tank/apps/s6-cut/data` (preset Generic).
+2. In **Apps → Discover Apps → ⋮ → Install via YAML**, name the app `s6-cut` and paste the file.
+3. Replace both `/mnt/tank/apps/s6-cut/data` paths with your dataset's path. Change `30180` if that port is taken.
+4. Save, wait about two minutes for the engine, and open `http://<NAS-IP>:30180`.
+
+The `data-init` service gives UID 10001 ownership of the data dataset on every start. To update, click **Update** when TrueNAS offers one, or run `midclt call -j app.pull_images s6-cut '{"redeploy": true}'`. Settings are the `environment:` values in the YAML. Edit them in the app's **Edit** screen.
+
 ## Dataset layout
 
 Create two datasets so application source and persistent media/state have separate lifecycles:
@@ -22,12 +106,14 @@ S6_WHISPER_MODEL=base
 
 Start with one worker. Transcription and H.264 composition consume substantial CPU, RAM, and I/O. No GPU is required.
 
-## TrueNAS SCALE Custom App
+## TrueNAS SCALE Custom App (manual fallback)
+
+Use these steps if neither route above fits, for example on a TrueNAS release whose middleware API differs.
 
 1. Choose the Apps pool and create the source/data datasets above.
 2. Put the repository and `.env` in the source dataset.
 3. In Apps, choose **Discover Apps → Custom App → Install via YAML** (wording varies by SCALE release).
-4. Use Compose YAML with an `include` pointing at the repository `compose.yaml`, or paste the resolved Compose definition.
+4. Paste the resolved Compose definition from `docker compose -p ix-s6-cut config`, run in the source dataset. An `include:` pointing at the repository `compose.yaml` can also work, but see the note on resolved files above.
 5. Confirm only the `web` service maps `${S6_PORT}:8080`; the engine has no host port.
 6. Confirm the absolute data dataset maps to `/app/data`.
 7. Install, wait through the two-minute model/runtime health start period, and open the web portal.
