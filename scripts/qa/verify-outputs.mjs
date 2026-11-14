@@ -18,7 +18,10 @@ import {
   sourceCorrespondence, bandActivity, sectionProfile, MOTION_FLOOR,
 } from "./media-forensics.mjs";
 
-const root = resolve(process.env.S6_AUTHENTICITY_ROOT || "test-artifacts/content-authenticity");
+// content-authenticity.mjs passes S6_AUTHENTICITY_ROOT; a standalone run
+// follows the same S6_PLAYWRIGHT_ARTIFACTS base the Playwright specs use.
+const root = resolve(process.env.S6_AUTHENTICITY_ROOT
+  || join(process.env.S6_PLAYWRIGHT_ARTIFACTS || "test-artifacts", "content-authenticity"));
 setMountRoot(root);
 const fixturePath = join(root, "fixture/s6cut-authenticity-source.mp4");
 
