@@ -7,9 +7,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     S6_DATA_PATH=/app/data
 
-# apt-get upgrade applies Debian security fixes published after the base tag
-# was built. It trades byte-for-byte rebuilds for patched system libraries;
-# the caption goldens were checked to render identically with and without it.
+# apt-get upgrade applies Debian package updates (including security fixes)
+# published after the base tag was built. It trades byte-for-byte rebuilds for
+# patched system libraries; the caption golden tests pass with and without it.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg ca-certificates tini curl unzip \
     && apt-get upgrade -y \

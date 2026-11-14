@@ -13,15 +13,19 @@
 import { createHash } from "node:crypto";
 import { readFile, writeFile, mkdir, readdir } from "node:fs/promises";
 import { join, resolve, basename } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   setMountRoot, probe, fullDecode, visualMetrics, audioMetrics, extractFrames,
   sourceCorrespondence, bandActivity, sectionProfile, MOTION_FLOOR,
 } from "./media-forensics.mjs";
 
 // content-authenticity.mjs passes S6_AUTHENTICITY_ROOT; a standalone run
-// follows the same S6_PLAYWRIGHT_ARTIFACTS base the Playwright specs use.
-const root = resolve(process.env.S6_AUTHENTICITY_ROOT
-  || join(process.env.S6_PLAYWRIGHT_ARTIFACTS || "test-artifacts", "content-authenticity"));
+// follows the same S6_PLAYWRIGHT_ARTIFACTS base, resolved from the repo root
+// exactly as content-authenticity.mjs resolves it.
+const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
+const root = process.env.S6_AUTHENTICITY_ROOT
+  ? resolve(process.env.S6_AUTHENTICITY_ROOT)
+  : join(resolve(repoRoot, process.env.S6_PLAYWRIGHT_ARTIFACTS || "test-artifacts"), "content-authenticity");
 setMountRoot(root);
 const fixturePath = join(root, "fixture/s6cut-authenticity-source.mp4");
 
