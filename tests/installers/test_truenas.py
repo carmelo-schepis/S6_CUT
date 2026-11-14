@@ -101,13 +101,14 @@ class TrueNasInstallerTests(unittest.TestCase):
     def run_script(self, script, *args, stdin=None, check=None, **kwargs):
         # Piped into bash exactly like `curl ... | sudo bash`, without a controlling terminal.
         kwargs.setdefault("start_new_session", True)
+        kwargs.setdefault("cwd", self.base)
         if stdin is None:
             result = subprocess.run(["/bin/bash", "-s", "--", *args], input=(ROOT / script).read_text(),
-                                    text=True, capture_output=True, env=self.env, cwd=self.base,
+                                    text=True, capture_output=True, env=self.env,
                                     timeout=180, **kwargs)
         else:
             result = subprocess.run(["/bin/bash", str(ROOT / script), *args], stdin=stdin,
-                                    text=True, capture_output=True, env=self.env, cwd=self.base,
+                                    text=True, capture_output=True, env=self.env,
                                     timeout=180, **kwargs)
         output = result.stdout + result.stderr
         if check is True:
@@ -383,6 +384,33 @@ class TrueNasInstallerTests(unittest.TestCase):
         self.assertEqual(delete[2:], ['"tank/apps/s6-cut"', '{"recursive": true}'])
         self.assertLess(self.midclt_methods().index("app.delete"), self.midclt_methods().index("pool.dataset.delete"))
         self.assertIn("tank/apps/s6-cut/source", output)
+
+    def test_purge_from_the_documented_path_inside_the_dataset(self):
+        # The docs run the copy in the source dataset. bash keeps its script
+        # open, which on ZFS makes that dataset busy (the fake refuses too).
+        self.install()
+        result = subprocess.run(["/bin/bash", str(self.app_root / "source" / "uninstall-truenas.sh"),
+                                 "--purge", "--yes"], capture_output=True, text=True, env=self.env,
+                                cwd=self.base, start_new_session=True, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(self.app_root.exists())
+        self.assertEqual(sorted(self.load_state()["datasets"]), ["tank", "tank/apps"])
+        self.assertEqual(list(self.base.glob("s6-uninstall.*")), [])
+
+    def test_piped_purge_started_inside_the_dataset_moves_out_first(self):
+        self.install()
+        self.uninstall("--purge", "--yes", check=True, cwd=self.app_root / "source")
+        self.assertFalse(self.app_root.exists())
+
+    def test_purge_refuses_while_a_process_uses_the_dataset(self):
+        self.install()
+        holder = subprocess.Popen(["/bin/sleep", "60"], cwd=self.app_root / "data")
+        self.addCleanup(holder.kill)
+        _, output = self.uninstall("--purge", "--yes", check=False)
+        self.assertIn(f"{holder.pid} /bin/sleep 60", output)
+        self.assertIn("Nothing was destroyed", output)
+        self.assertNotIn("pool.dataset.delete", self.midclt_methods())
+        self.assertTrue((self.app_root / "data").is_dir())
 
     def run_with_tty(self, answer, *args):
         primary, secondary = os.openpty()

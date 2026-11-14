@@ -69,7 +69,7 @@ sudo bash /mnt/<pool>/apps/s6-cut/source/uninstall-truenas.sh
 This deletes the app with `app.delete` and keeps every dataset, so re-running the installer brings S6_cut back with its data. Options:
 
 - `--remove-images` also removes the app's images.
-- `--purge` also destroys `<pool>/apps/s6-cut` with its `source` and `data` children. It lists the datasets and their paths, then asks you to type the dataset name. Add `--yes` to skip that prompt, for example when piping the script from curl: `curl -fsSL …/uninstall-truenas.sh | sudo bash -s -- --purge --yes`.
+- `--purge` also destroys `<pool>/apps/s6-cut` with its `source` and `data` children. It lists the datasets and their paths, then asks you to type the dataset name. Add `--yes` to skip that prompt, for example when piping the script from curl: `curl -fsSL …/uninstall-truenas.sh | sudo bash -s -- --purge --yes`. ZFS cannot destroy a dataset while something uses it, so `--purge` first lists any process whose working directory or open files are inside these folders (for example a shell you `cd`'d into them) and stops without destroying anything until they are gone.
 
 `S6_POOL` and `S6_APP_NAME` work as for the installer.
 

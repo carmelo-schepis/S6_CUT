@@ -93,10 +93,45 @@ json_filter() {
   python3 -c 'import json, sys; print(json.dumps([[sys.argv[1], "=", sys.argv[2]]]))' "$1" "$2"
 }
 
+# Prints "<pid> <command>" for each process whose working directory or open
+# files are inside the given paths. ZFS cannot unmount, and so cannot destroy,
+# a dataset while any exist.
+dataset_users() {
+  python3 - "$@" <<'PY'
+import os, sys
+roots = [os.path.realpath(p) for p in sys.argv[1:]]
+for pid in sorted(filter(str.isdigit, os.listdir("/proc")), key=int):
+    try:
+        links = [os.readlink(f"/proc/{pid}/cwd")]
+        links += [os.readlink(f"/proc/{pid}/fd/{fd}") for fd in os.listdir(f"/proc/{pid}/fd")]
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            cmd = f.read().replace(b"\0", b" ").decode(errors="replace").strip()
+    except OSError:
+        continue
+    if any(link == r or link.startswith(r + "/") for link in links for r in roots):
+        print(f"{pid} {cmd[:100]}")
+PY
+}
+
 [[ "$(id -u)" == "0" ]] || die "This uninstaller must run as root: sudo bash $0"
 command -v midclt >/dev/null 2>&1 \
   || die "This does not look like TrueNAS SCALE (no 'midclt'). On other hosts use uninstall.sh."
 [[ "$APP_NAME" =~ ^[a-z]([-a-z0-9]*[a-z0-9])?$ ]] || die "S6_APP_NAME '$APP_NAME' is not a valid app name."
+
+# The documented command runs this file from the source dataset that --purge
+# destroys. bash keeps its script open, which would leave that dataset busy, so
+# continue from a copy outside it, with the working directory moved out too.
+if [[ "$PURGE" == true ]]; then
+  if [[ -n "${S6_UNINSTALL_COPY:-}" && "$S6_UNINSTALL_COPY" == "${BASH_SOURCE[0]:-}" ]]; then
+    rm -f -- "$S6_UNINSTALL_COPY"
+  elif [[ -f "${BASH_SOURCE[0]:-}" ]]; then
+    copy="$(mktemp "${TMPDIR:-/tmp}/s6-uninstall.XXXXXX")"
+    cp "${BASH_SOURCE[0]}" "$copy"
+    cd /
+    S6_UNINSTALL_COPY="$copy" exec bash "$copy" "$@"
+  fi
+  cd /
+fi
 
 info "S6_cut Uninstaller for TrueNAS SCALE"
 
@@ -126,10 +161,13 @@ else
 fi
 
 datasets=""
+mountpoints=()
 if [[ -n "$ROOT_DS" ]]; then
-  datasets="$(midclt call pool.dataset.query "$(json_filter id "$ROOT_DS")" '{"extra": {"retrieve_children": true}}' \
-    | json_eval '[x["id"] + "  (" + str(x.get("mountpoint") or "not mounted") + ")" for r in d for x in [r] + r.get("children", [])]')" \
+  query="$(midclt call pool.dataset.query "$(json_filter id "$ROOT_DS")" '{"extra": {"retrieve_children": true}}')" \
     || die "Could not look up dataset $ROOT_DS. Nothing was destroyed."
+  datasets="$(json_eval '[x["id"] + "  (" + str(x.get("mountpoint") or "not mounted") + ")" for r in d for x in [r] + r.get("children", [])]' <<<"$query")" \
+    || die "Could not read dataset $ROOT_DS. Nothing was destroyed."
+  mapfile -t mountpoints < <(json_eval '[x["mountpoint"] for r in d for x in [r] + r.get("children", []) if x.get("mountpoint")]' <<<"$query")
 fi
 
 if [[ "$PURGE" != true ]]; then
@@ -153,6 +191,14 @@ fi
 echo
 warn "--purge permanently destroys these datasets, including every project, Library item, media file, model and .env:"
 print_datasets
+if (( ${#mountpoints[@]} )); then
+  users="$(dataset_users "${mountpoints[@]}")"
+  if [[ -n "$users" ]]; then
+    fail "These processes are using the datasets, so TrueNAS cannot unmount them:"
+    while IFS= read -r line; do printf '    %s\n' "$line"; done <<<"$users" >&2
+    die "Stop them, or cd out of ${mountpoints[0]} in that shell, then re-run. Nothing was destroyed."
+  fi
+fi
 if [[ "$YES" != true ]]; then
   answer=""
   if ! { exec 3</dev/tty; } 2>/dev/null; then
