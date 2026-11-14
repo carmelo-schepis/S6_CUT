@@ -77,7 +77,7 @@ This deletes the app with `app.delete` and keeps every dataset, so re-running th
 
 [`truenas/s6-cut.yaml`](../truenas/s6-cut.yaml) is a self-contained Custom App that runs the prebuilt multi-arch images `ghcr.io/carmelo-schepis/s6-cut-engine` and `ghcr.io/carmelo-schepis/s6-cut-web`, published by `.github/workflows/images.yml` on every push to `main`.
 
-> The images exist only after that workflow has run on `main`. GHCR creates new packages as private, so the repository owner has to set both packages to **Public** once (GitHub → Packages → package → Package settings → Change visibility). Until then, TrueNAS cannot pull them without registry credentials.
+Both images are public, so TrueNAS pulls them without registry credentials. Besides `latest`, each push to `main` also tags the `package.json` version and `sha-<commit>`. To pin a release, use one of those in place of `latest`.
 
 1. Create a dataset for the data, for example `tank/apps/s6-cut/data` (preset Generic).
 2. In **Apps → Discover Apps → ⋮ → Install via YAML**, name the app `s6-cut` and paste the file.
