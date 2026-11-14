@@ -94,13 +94,15 @@ Only nginx publishes a port to your network. The FastAPI engine stays on the Com
 
 Requirements: Node.js 24+, Python 3.12, and FFmpeg/FFprobe. Install the exact dependencies, then start the Vite UI and FastAPI engine together:
 
-```powershell
+```bash
 npm ci
 python -m venv .venv
-.venv\Scripts\python -m pip install -r engine\requirements-dev.lock
-$env:S6_PYTHON = ".venv\Scripts\python.exe"
+.venv/bin/python -m pip install -r engine/requirements-dev.lock
+export S6_PYTHON=".venv/bin/python"
 npm run dev
 ```
+
+On Windows, use PowerShell and replace the Python commands above with `.venv\Scripts\python -m pip install -r engine\requirements-dev.lock` and `$env:S6_PYTHON = ".venv\Scripts\python.exe"`.
 
 Open <http://127.0.0.1:5173>. Vite proxies same-origin `/api` requests to port 8001. On Windows, `START_S6_CUT.cmd` builds and starts the production Compose application.
 
