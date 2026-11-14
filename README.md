@@ -24,6 +24,16 @@ Open the **Frontend** URL printed when the installer finishes (normally <http://
 
 **To update, paste the same command again.** Your settings and media are preserved.
 
+### TrueNAS SCALE
+
+In **System → Shell** (TrueNAS SCALE 24.10 or newer; 25.04+ recommended):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/carmelo-schepis/S6_CUT/main/install-truenas.sh | sudo bash
+```
+
+S6_cut installs as a normal app under **Apps → Installed**, with its source and data on datasets in your Apps pool, and the installer prints its LAN URL (port 30180 by default). To update, run the same command again. If you'd rather not use the shell, paste [`truenas/s6-cut.yaml`](truenas/s6-cut.yaml) into **Apps → Discover Apps → ⋮ → Install via YAML**. It runs prebuilt images. See [TrueNAS SCALE and Portainer deployment](docs/TRUENAS_PORTAINER.md) for settings, the uninstaller, and manual steps.
+
 <details>
 <summary>Installation details, requirements, network access, and uninstall</summary>
 
