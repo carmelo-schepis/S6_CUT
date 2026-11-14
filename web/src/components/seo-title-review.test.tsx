@@ -82,6 +82,15 @@ describe("SeoTitleReviewDialog", () => {
     expect(onCancel).toHaveBeenCalledTimes(2);
   });
 
+  it("cancels a backdrop press's focus change but leaves presses on controls alone", () => {
+    // jsdom does not move focus on mousedown, so assert the cancelled default
+    // that keeps a real browser's focus (and Escape) inside the dialog.
+    const { dialog } = renderDialog();
+    const backdrop = dialog.parentElement!;
+    expect(fireEvent.mouseDown(backdrop)).toBe(false);
+    expect(fireEvent.mouseDown(screen.getByRole("textbox", { name: `New title for ${result.suggestions[0].currentTitle}` }))).toBe(true);
+  });
+
   it("explains rule-only results when AI is unavailable and hides the cost line without requests", () => {
     renderDialog({ aiAvailable: false, requests: 0, warning: "OpenRouter rate limited; try later.", suggestions: result.suggestions.slice(2) });
     expect(screen.getByText("Connect an OpenRouter profile in Settings to write AI titles; only rule-based project renames are shown.")).toBeInTheDocument();
