@@ -70,6 +70,9 @@ class TrueNasInstallerTests(unittest.TestCase):
             "S6_START_TIMEOUT": "30",
             "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
             "TMPDIR": str(self.base),
+            # fake_middleware and the fake client live in truenas_fakes; pylib holds truenas_api_client.
+            "PYTHONPATH": f"{FAKES / 'pylib'}{os.pathsep}{FAKES}",
+            "PYTHONDONTWRITEBYTECODE": "1",
         }
         self.app_root = self.mnt / "tank" / "apps" / "s6-cut"
         self.app_configs = self.base / "ix-apps" / "app_configs"
@@ -122,14 +125,26 @@ class TrueNasInstallerTests(unittest.TestCase):
         self.assertIn("S6_cut is running as the TrueNAS app 's6-cut'", output)
         return output
 
-    def calls(self, tool=None):
+    def entries(self):
         if not self.log.exists():
             return []
-        calls = [json.loads(line) for line in self.log.read_text().splitlines()]
-        return [c["args"] for c in calls if tool is None or c["tool"] == tool]
+        return [json.loads(line) for line in self.log.read_text().splitlines()]
+
+    def calls(self, tool=None):
+        return [e["args"] for e in self.entries() if tool is None or e["tool"] == tool]
 
     def midclt_methods(self):
         return [next(a for a in args[1:] if a != "-j") for args in self.calls("midclt")]
+
+    def methods(self):
+        """Middleware methods in call order, through midclt or the middleware client."""
+        names = []
+        for entry in self.entries():
+            if entry["tool"] == "midclt":
+                names.append(next(a for a in entry["args"][1:] if a != "-j"))
+            elif entry["tool"] == "client":
+                names.append(entry["args"][0])
+        return names
 
     def env_file(self):
         return (self.app_root / "source" / ".env").read_text()
@@ -159,15 +174,21 @@ class TrueNasInstallerTests(unittest.TestCase):
         docker = self.calls("docker")
         build = next(i for i, a in enumerate(docker) if "build" in a)
         self.assertEqual(docker[build][:4], ["compose", "-p", "ix-s6-cut", "-f"])
-        methods = self.midclt_methods()
+        methods = self.methods()
         log = self.calls()
         self.assertLess(next(i for i, a in enumerate(log) if "build" in a),
                         next(i for i, a in enumerate(log) if "app.create" in a))
         self.assertIn("app.create", methods)
         self.assertNotIn("app.update", methods)
-        create = next(a for a in self.calls("midclt") if "app.create" in a)
-        self.assertEqual(create[:3], ["call", "-j", "app.create"])
-        payload = json.loads(create[3])
+        # Regression for the TrueNAS 25.04 sudo kill ("sudo: argv[N] mismatch"):
+        # the compose payload goes through the middleware client, never midclt's
+        # argv, and no midclt argument may exceed the 1024-byte fake limit.
+        self.assertNotIn("app.create", self.midclt_methods())
+        for args in self.calls("midclt"):
+            for arg in args:
+                self.assertLessEqual(len(arg.encode()), 1024, arg[:80])
+        create = next(a for a in self.calls("client") if a[0] == "app.create")
+        payload = json.loads(create[1])
         self.assertEqual(payload["app_name"], "s6-cut")
         self.assertIs(payload["custom_app"], True)
 
@@ -213,15 +234,15 @@ class TrueNasInstallerTests(unittest.TestCase):
         self.assertEqual(self.git("-C", str(source), "rev-parse", "HEAD").stdout.strip(), new_head)
         self.assertEqual(env_path.read_text(), before_env)
         self.assertEqual((self.app_root / "data" / "project.json").read_text(), "keep me")
-        methods = self.midclt_methods()
+        methods = self.methods()
         self.assertNotIn("pool.dataset.create", methods)
         self.assertNotIn("app.create", methods)
         self.assertIn("app.update", methods)
         # app.update already recreates a running app's containers.
         self.assertNotIn("app.redeploy", methods)
-        update = next(a for a in self.calls("midclt") if "app.update" in a)
-        self.assertEqual(update[:4], ["call", "-j", "app.update", "s6-cut"])
-        self.assertEqual(set(json.loads(update[4])), {"custom_compose_config_string"})
+        update = next(a for a in self.calls("client") if a[0] == "app.update")
+        self.assertEqual(json.loads(update[1]), "s6-cut")
+        self.assertEqual(set(json.loads(update[2])), {"custom_compose_config_string"})
         self.assertTrue(any("build" in a for a in self.calls("docker")))
         self.assertIn("Configuration preserved", output)
 
@@ -231,7 +252,7 @@ class TrueNasInstallerTests(unittest.TestCase):
         self.save_state()
         self.log.unlink()
         self.install()
-        methods = self.midclt_methods()
+        methods = self.methods()
         self.assertLess(methods.index("app.update"), methods.index("app.redeploy"))
         self.assertEqual(self.load_state()["apps"]["s6-cut"]["state"], "RUNNING")
 
@@ -282,7 +303,7 @@ class TrueNasInstallerTests(unittest.TestCase):
         _, output = self.run_script("install-truenas.sh", check=False)
         self.assertIn("Port 30200 (S6_PORT) is already in use", output)
         self.assertIn("S6_PORT=30201", output)
-        self.assertNotIn("app.create", self.midclt_methods())
+        self.assertNotIn("app.create", self.methods())
 
     def test_pool_and_app_name_overrides(self):
         self.state["datasets"]["fast"] = str(self.mnt / "fast")
@@ -338,6 +359,51 @@ class TrueNasInstallerTests(unittest.TestCase):
         self.assertIn("was not healthy after 0s", output)
         self.assertIn("Diagnostics: containers of ix-s6-cut", output)
 
+    def test_app_create_port_error_suggests_another_port(self):
+        self.state["app_error"] = "[EFAULT] Bind for 0.0.0.0:30180 failed: port is already allocated"
+        self.save_state()
+        _, output = self.run_script("install-truenas.sh", check=False)
+        self.assertIn("TrueNAS could not create the app because a port is taken", output)
+        self.assertIn("Re-run with S6_PORT=<free port>", output)
+        self.assertIn("Install via YAML", output)
+
+    def test_app_create_other_error_gives_no_port_hint(self):
+        self.state["app_error"] = "[EFAULT] image pull denied"
+        self.save_state()
+        _, output = self.run_script("install-truenas.sh", check=False)
+        self.assertIn("TrueNAS could not create the app. Manual fallback", output)
+        self.assertNotIn("S6_PORT=<free port>", output)
+
+    def test_rejected_yaml_string_is_retried_as_parsed_configuration(self):
+        self.state["reject_string"] = True
+        self.save_state()
+        output = self.install()
+        self.assertIn("rejected the YAML string", output)
+        creates = [a for a in self.calls("client") if a[0] == "app.create"]
+        self.assertEqual(len(creates), 2)
+        self.assertEqual(set(json.loads(creates[1][1])), {"custom_compose_config", "app_name", "custom_app"})
+        self.assertIn("s6-cut", self.load_state()["apps"])
+
+    def test_without_the_middleware_client_midclt_carries_the_app_job(self):
+        self.env["PYTHONPATH"] = str(FAKES)
+        self.env["FAKE_TN_ARGV_LIMIT"] = "0"
+        output = self.install()
+        self.assertIn("falling back to midclt", output)
+        self.assertIn("app.create", self.midclt_methods())
+        self.assertEqual(self.calls("client"), [])
+
+    def test_sudo_kill_of_midclt_is_explained_without_a_port_hint(self):
+        # No middleware client, so midclt carries the payload and sudo kills it.
+        self.env["PYTHONPATH"] = str(FAKES)
+        _, output = self.run_script("install-truenas.sh", check=False)
+        self.assertIn("sudo stopped the midclt call", output)
+        self.assertIn("Install via YAML", output)
+        self.assertIn("Re-running this command is safe", output)
+        self.assertNotIn("re-run with S6_PORT", output)
+        self.assertEqual(self.midclt_methods().count("app.create"), 1)
+        self.assertNotIn("s6-cut", self.load_state()["apps"])
+        self.assertTrue((self.app_root / "truenas-app.yaml").exists())
+
     # --- uninstall ------------------------------------------------------------
 
     def uninstall(self, *args, **kwargs):
@@ -358,7 +424,7 @@ class TrueNasInstallerTests(unittest.TestCase):
         self.assertIn("tank/apps/s6-cut/data", output)
         # Re-installing reuses the kept data and .env.
         self.install()
-        self.assertIn("app.create", self.midclt_methods())
+        self.assertIn("app.create", self.methods())
 
     def test_uninstall_remove_images(self):
         self.install()

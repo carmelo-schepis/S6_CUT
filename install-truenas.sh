@@ -48,6 +48,8 @@ WEB_PORT=""
 PROJECT=""
 USED_PORTS=""
 DS_MOUNT=""
+APP_JOB_LOG=""
+APP_JOB_KIND=other
 
 # --- formatting ---------------------------------------------------------------
 
@@ -476,21 +478,122 @@ print(json.dumps(config))
 ' "$1" "$2" "$APP_NAME" "$APP_YAML"
 }
 
-# midclt prints job progress; keep it for diagnostics and retry with the dict
-# form only if this middleware rejects the string field itself.
-run_app_job() {
-  local mode="$1" output status=0
+# The app job (app.create / app.update) is sent through TrueNAS's middleware
+# Python client in this process. The compose payload never goes on a command
+# line: on TrueNAS, sudo stops a midclt call whose argv is too long ("sudo:
+# argv[N] mismatch") and the app is not created. The payload is read from
+# $APP_YAML (mode 0600) by the helper. Exit 3 when no client module is importable.
+mid_app_job() {
+  python3 -c '
+import json, sys
+mode, form, name, path = sys.argv[1:5]
+try:
+    from truenas_api_client import Client
+except ImportError:
+    try:
+        from middlewared.client import Client
+    except ImportError:
+        print("No TrueNAS middleware Python client is importable.", file=sys.stderr)
+        sys.exit(3)
+text = open(path).read()
+if form == "dict":
+    import yaml
+    config = {"custom_compose_config": yaml.safe_load(text)}
+else:
+    config = {"custom_compose_config_string": text}
+if mode == "create":
+    config.update({"app_name": name, "custom_app": True})
+    params = [config]
+else:
+    params = [name, config]
+shown = [None]
+def progress(job):
+    desc = (job.get("progress") or {}).get("description")
+    if desc and desc != shown[0]:
+        shown[0] = desc
+        print(desc, file=sys.stderr, flush=True)
+try:
+    with Client() as client:
+        client.call("app." + mode, *params, job=True, callback=progress)
+except Exception as e:
+    print(f"{type(e).__name__}: {e}", file=sys.stderr)
+    sys.exit(1)
+' "$@"
+}
+
+# attempt_app_job MODE FORM: one job through the middleware client; output to $APP_JOB_LOG.
+attempt_app_job() {
+  local status=0
+  mid_app_job "$1" "$2" "$APP_NAME" "$APP_YAML" 2>&1 | tee "$APP_JOB_LOG" || status=$?
+  return "$status"
+}
+
+# attempt_midclt_app_job MODE FORM: the same job through midclt. Only the fallback
+# for systems without the Python client; midclt takes the payload on its command line.
+attempt_midclt_app_job() {
+  local mode="$1" form="$2" status=0
   local -a args=(-j "app.$mode")
   [[ "$mode" == update ]] && args+=("$APP_NAME")
-  output="$(mktemp)"
-  mid "${args[@]}" "$(app_payload "$mode" string)" 2>&1 | tee "$output" || status=$?
-  if (( status != 0 )) && grep -q 'custom_compose_config_string' "$output"; then
+  mid "${args[@]}" "$(app_payload "$mode" "$form")" 2>&1 | tee "$APP_JOB_LOG" || status=$?
+  return "$status"
+}
+
+# TrueNAS's sudo stops a midclt call whose argv is too long. $1: transport, $2: exit status.
+app_job_sudo_killed() {
+  [[ "$1" == midclt ]] && { (( $2 == 137 )) || grep -qE 'argv\[[0-9]+\] mismatch' "$APP_JOB_LOG"; }
+}
+
+# run_app_job MODE: create or update the app. Retries once with the parsed
+# configuration only if this middleware rejects the YAML string field itself.
+# Sets APP_JOB_KIND to sudo, port or other when the job fails.
+run_app_job() {
+  local mode="$1" status=0 transport=client
+  APP_JOB_LOG="$(mktemp)"
+  attempt_app_job "$mode" string || status=$?
+  if (( status == 3 )); then
+    transport=midclt
+    warn "TrueNAS's Python middleware client cannot be imported; falling back to midclt."
+    status=0
+    attempt_midclt_app_job "$mode" string || status=$?
+  fi
+  if (( status != 0 )) && ! app_job_sudo_killed "$transport" "$status" \
+      && grep -q 'custom_compose_config_string' "$APP_JOB_LOG"; then
     warn "This TrueNAS version rejected the YAML string; retrying with the parsed configuration."
     status=0
-    mid "${args[@]}" "$(app_payload "$mode" dict)" 2>&1 | tee "$output" || status=$?
+    if [[ "$transport" == client ]]; then
+      attempt_app_job "$mode" dict || status=$?
+    else
+      attempt_midclt_app_job "$mode" dict || status=$?
+    fi
   fi
-  rm -f "$output"
+  APP_JOB_KIND=other
+  if (( status != 0 )); then
+    if app_job_sudo_killed "$transport" "$status"; then
+      APP_JOB_KIND=sudo
+    elif grep -qiE 'already allocated|address already in use|port [0-9]+ .*in use|port is already' "$APP_JOB_LOG"; then
+      APP_JOB_KIND=port
+    fi
+  fi
+  rm -f "$APP_JOB_LOG"
   return "$status"
+}
+
+# app_job_failed VERB: explain a failed app.create or app.update, then exit.
+app_job_failed() {
+  local verb="$1" fallback
+  if [[ "$verb" == create ]]; then
+    fallback="Manual fallback: Apps -> Discover Apps -> ⋮ -> Install via YAML, name '$APP_NAME', paste $APP_YAML"
+  else
+    fallback="Manual fallback: Apps -> Installed -> $APP_NAME -> Edit, paste $APP_YAML"
+  fi
+  case "$APP_JOB_KIND" in
+    sudo)
+      abort "TrueNAS could not $verb the app: its sudo stopped the midclt call because the app configuration is too large to pass on the command line (sudo argv mismatch). This system has no importable TrueNAS middleware Python client, so the job went through midclt. $fallback. Re-running this command is safe." ;;
+    port)
+      abort "TrueNAS could not $verb the app because a port is taken. Re-run with S6_PORT=<free port> after sudo. $fallback" ;;
+    *)
+      abort "TrueNAS could not $verb the app. $fallback" ;;
+  esac
 }
 
 deploy_app() {
@@ -499,14 +602,12 @@ deploy_app() {
   if [[ -z "$state" ]]; then
     CURRENT_STEP="creating the TrueNAS app '$APP_NAME'"
     step "Creating the TrueNAS app '$APP_NAME' (waits for the engine health check)..."
-    run_app_job create \
-      || abort "TrueNAS could not create the app. If a port is taken, re-run with S6_PORT=<free port> after sudo. Manual fallback: Apps -> Discover Apps -> ⋮ -> Install via YAML, name '$APP_NAME', paste $APP_YAML"
+    run_app_job create || app_job_failed create
     ok "App '$APP_NAME' created"
   else
     CURRENT_STEP="updating the TrueNAS app '$APP_NAME'"
     step "Updating the TrueNAS app '$APP_NAME' (currently $state)..."
-    run_app_job update \
-      || abort "TrueNAS could not update the app. Manual fallback: Apps -> Installed -> $APP_NAME -> Edit, paste $APP_YAML"
+    run_app_job update || app_job_failed update
     # app.update recreates the containers of a running app itself; a stopped
     # app only gets its configuration saved, so start it with a redeploy.
     if [[ "$(app_state)" == "STOPPED" ]]; then
