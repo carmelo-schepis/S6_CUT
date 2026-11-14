@@ -8,9 +8,11 @@ test.describe.configure({ mode: "serial" });
 test("downloads only completed MP4s in a titled Unicode ZIP", async ({ page }, testInfo) => {
   const acceptanceUrl = process.env.S6_ACCEPTANCE_URL;
   const composeProject = process.env.S6_ACCEPTANCE_COMPOSE_PROJECT;
-  if (process.env.S6_ACCEPTANCE_ISOLATED !== "1" || !acceptanceUrl || !composeProject || composeProject === "s6-cut") {
-    throw new Error("Bulk export requires an explicitly isolated S6_ACCEPTANCE_URL and S6_ACCEPTANCE_COMPOSE_PROJECT.");
-  }
+  // Opt-in: this test writes into the engine's job folders, so it only runs
+  // against a disposable stack the caller names explicitly.
+  test.skip(process.env.S6_ACCEPTANCE_ISOLATED !== "1" || !acceptanceUrl || !composeProject,
+    "set S6_ACCEPTANCE_ISOLATED=1, S6_ACCEPTANCE_URL and S6_ACCEPTANCE_COMPOSE_PROJECT to run bulk export against a disposable stack");
+  if (composeProject === "s6-cut") throw new Error("Bulk export refuses the default s6-cut compose project.");
   const port = new URL(acceptanceUrl).port;
   if (!port || port === "8080" || port === "8001") throw new Error("Bulk export refuses the default application ports.");
 

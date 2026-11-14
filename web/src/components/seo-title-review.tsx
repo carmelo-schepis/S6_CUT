@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { Sparkles } from "lucide-react";
 import type { TitleApplyItem, TitleKind, TitleSuggestion, TitleSuggestionResponse } from "../types";
 import { Button } from "./common";
@@ -47,7 +47,11 @@ export function SeoTitleReviewDialog({ result, applying, error, onCancel, onAppl
     })));
   };
 
-  return <div className="dialog-backdrop" role="presentation"><section ref={dialogRef} className="confirmation-dialog seo-title-dialog" role="dialog" aria-modal="true" aria-labelledby="seo-title-review-heading" data-testid="seo-title-review" tabIndex={-1} onKeyDown={handleKeyDown}>
+  // A press on the backdrop would move focus to the page behind this modal,
+  // where Escape and the Tab trap no longer reach the dialog's key handler.
+  const keepFocusInside = (event: MouseEvent<HTMLDivElement>) => { if (event.target === event.currentTarget) event.preventDefault(); };
+
+  return <div className="dialog-backdrop" role="presentation" onMouseDown={keepFocusInside}><section ref={dialogRef} className="confirmation-dialog seo-title-dialog" role="dialog" aria-modal="true" aria-labelledby="seo-title-review-heading" data-testid="seo-title-review" tabIndex={-1} onKeyDown={handleKeyDown}>
     <header className="seo-title-dialog-head"><Sparkles size={18} aria-hidden="true" /><h2 id="seo-title-review-heading">Review SEO titles</h2></header>
     <div className="seo-title-dialog-body">
       {!result.aiAvailable && <p className="seo-title-notice" role="note">Connect an OpenRouter profile in Settings to write AI titles; only rule-based project renames are shown.</p>}

@@ -3,6 +3,17 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+// Every request below is stubbed with page.route. The production PWA service
+// worker would otherwise answer from the live stack first, so the stubbed
+// profile and job states never reach WebKit (seen on iPad desktop mode).
+test.use({ serviceWorkers: "block" });
+
+// Apple phones and tablets get the read-only status app (covered by
+// ios-status-view.spec.ts), which has none of the desktop screens this file
+// checks. iPad desktop mode serves the desktop shell, so it stays in.
+test.skip(({ userAgent }) => /iPad|iPhone/.test(userAgent ?? ""),
+  "the Apple mobile shell is a read-only status app without these screens");
+
 const artifactRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../test-artifacts/helper-copy-removal");
 const health = { status: "ready", version: "test", database: true, ffmpeg: true, ffprobe: true, whisper: true, ytdlp: true, localTts: false, dataPath: "Local mounted data", freeBytes: 1_000_000_000, configuredWorkers: 1, activeWorkers: 0, queuedJobs: 0, fallbacks: { planning: "Deterministic" } };
 const disconnectedProfile = { id: "provider-1", name: "Studio", textModelId: "vendor/model", selected: false, persistence: "encrypted", openrouterConfigured: false, openrouterMasked: "••••1234", textStatus: "not_configured", textMessage: null, textLastCheckedAt: null, status: "connected", capabilities: ["OpenRouter text generation"], fallbacks: { planning: "Deterministic" } };

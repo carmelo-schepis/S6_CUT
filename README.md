@@ -275,6 +275,12 @@ successful run also needs a trace artifact. The seam requires both
 `S6_TEST_MODE=1` and the harness-provided failure name,
 is disabled by default, and is never used by normal provider requests.
 
+Some acceptance specs need a disposable installation and must never run against
+a live data directory:
+
+- `tests/acceptance/bulk-export.spec.ts` requires its disposable data root to be writable by both the test runner and engine container. Run it against a dedicated isolated data root; do not change permissions on a live data directory to make the test pass. It is skipped unless `S6_ACCEPTANCE_ISOLATED=1`, `S6_ACCEPTANCE_URL` and `S6_ACCEPTANCE_COMPOSE_PROJECT` name that disposable stack, and it fails if they point at the default `s6-cut` project or ports 8080/8001.
+- `tests/acceptance/library-project-sync-live.spec.ts` assumes a fresh, empty installation. Run it against a new disposable data root, never an existing user installation.
+
 The live AI hook YouTube acceptance is opt-in (`S6_RUN_LIVE_AI_HOOK_TEXT=1`)
 and runs against a separately provisioned isolated stack with a connected
 OpenRouter profile. Set `S6_AI_HOOK_TEXT_ENGINE_CONTAINER` to that stack's
