@@ -13,6 +13,16 @@ const activeJob = { schemaVersion: 1, id: "job-running", projectId: "project-1",
 const completedJob = { ...activeJob, id: "job-complete", state: "complete", stage: "complete", stageLabel: "Completed", progress: 100 };
 const json = (route: Route, body: unknown) => route.fulfill({ contentType: "application/json", body: JSON.stringify(body) });
 
+// These specs stub engine APIs with page.route; the production PWA service
+// worker would otherwise answer from the live stack before Playwright can.
+test.use({ serviceWorkers: "block" });
+
+// Apple phones and tablets run the deliberate read-only status app (covered by
+// ios-status-view.spec.ts), which has none of the desktop screens checked here.
+// iPad desktop mode serves the desktop shell, so it stays in the matrix.
+test.skip(({ userAgent }) => /iPad|iPhone/.test(userAgent ?? ""),
+  "the Apple mobile shell is a deliberate read-only status app without these screens");
+
 async function mockEngine(page: Page, { profiles = [disconnectedProfile], jobs = [] }: { profiles?: unknown[]; jobs?: unknown[] } = {}) {
   let currentAsset = initialAsset;
   let updateCount = 0;
