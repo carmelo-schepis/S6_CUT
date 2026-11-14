@@ -120,9 +120,11 @@ command -v midclt >/dev/null 2>&1 \
 
 # The documented command runs this file from the source dataset that --purge
 # destroys. bash keeps its script open, which would leave that dataset busy, so
-# continue from a copy outside it, with the working directory moved out too.
+# continue from a copy outside it. Moving to / keeps this process off the busy
+# list; a shell that is itself inside the dataset still has to leave it.
 if [[ "$PURGE" == true ]]; then
-  if [[ -n "${S6_UNINSTALL_COPY:-}" && "$S6_UNINSTALL_COPY" == "${BASH_SOURCE[0]:-}" ]]; then
+  if [[ -n "${S6_UNINSTALL_COPY:-}" && "$S6_UNINSTALL_COPY" == "${BASH_SOURCE[0]:-}" \
+        && "$(basename -- "$S6_UNINSTALL_COPY")" == s6-uninstall.* ]]; then
     rm -f -- "$S6_UNINSTALL_COPY"
   elif [[ -f "${BASH_SOURCE[0]:-}" ]]; then
     copy="$(mktemp "${TMPDIR:-/tmp}/s6-uninstall.XXXXXX")"
@@ -212,7 +214,7 @@ fi
 
 step "Destroying dataset $ROOT_DS and its children..."
 midclt call pool.dataset.delete "$(python3 -c 'import json, sys; print(json.dumps(sys.argv[1]))' "$ROOT_DS")" '{"recursive": true}' >/dev/null \
-  || die "Could not destroy $ROOT_DS. Check that nothing else (an SMB/NFS share, another app) uses it, then re-run with --purge."
+  || die "Could not destroy $ROOT_DS. If TrueNAS says it is busy, something still uses it: a container or another app mounting one of the folders above, or a share. Stop it, then re-run with --purge."
 ok "Destroyed $ROOT_DS"
 echo
 ok "S6_cut fully removed."

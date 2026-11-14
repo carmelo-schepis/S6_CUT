@@ -397,7 +397,7 @@ class TrueNasInstallerTests(unittest.TestCase):
         self.assertEqual(sorted(self.load_state()["datasets"]), ["tank", "tank/apps"])
         self.assertEqual(list(self.base.glob("s6-uninstall.*")), [])
 
-    def test_piped_purge_started_inside_the_dataset_moves_out_first(self):
+    def test_piped_purge_started_inside_the_dataset_does_not_block_itself(self):
         self.install()
         self.uninstall("--purge", "--yes", check=True, cwd=self.app_root / "source")
         self.assertFalse(self.app_root.exists())
@@ -410,6 +410,16 @@ class TrueNasInstallerTests(unittest.TestCase):
         self.assertIn(f"{holder.pid} /bin/sleep 60", output)
         self.assertIn("Nothing was destroyed", output)
         self.assertNotIn("pool.dataset.delete", self.midclt_methods())
+        self.assertTrue((self.app_root / "data").is_dir())
+
+    def test_purge_refuses_while_a_file_in_the_dataset_is_open(self):
+        self.install()
+        with open(self.app_root / "data" / "held.log", "w") as log:
+            holder = subprocess.Popen(["/bin/sleep", "60"], stdout=log, cwd=self.base)
+        self.addCleanup(holder.kill)
+        _, output = self.uninstall("--purge", "--yes", check=False)
+        self.assertIn(f"{holder.pid} /bin/sleep 60", output)
+        self.assertIn("Nothing was destroyed", output)
         self.assertTrue((self.app_root / "data").is_dir())
 
     def run_with_tty(self, answer, *args):
