@@ -52,6 +52,25 @@ if (method in JOBS) != job:
     fail(f"{method} {'is' if method in JOBS else 'is not'} a job; check the -j flag")
 
 
+def busy_paths(paths):
+    """Processes with a working directory or open file under paths.
+
+    ZFS refuses to unmount (and so to destroy) a dataset while any exist:
+    "cannot unmount ...: pool or dataset is busy".
+    """
+    roots = [os.path.realpath(p) for p in paths]
+    users = []
+    for pid in filter(str.isdigit, os.listdir("/proc")):
+        try:
+            links = [os.readlink(f"/proc/{pid}/cwd")]
+            links += [os.readlink(f"/proc/{pid}/fd/{fd}") for fd in os.listdir(f"/proc/{pid}/fd")]
+        except OSError:
+            continue
+        if any(link == r or link.startswith(r + "/") for link in links for r in roots):
+            users.append(pid)
+    return users
+
+
 def match(filters, item):
     return all(item.get(key) == value for key, op, value in filters if op == "=")
 
@@ -115,6 +134,8 @@ elif method == "pool.dataset.delete":
     children = [d for d in state["datasets"] if d.startswith(name + "/")]
     if children and not options.get("recursive"):
         fail(f"{name} has children; recursive is required")
+    if busy_paths([state["datasets"][ds] for ds in [name, *children]]):
+        fail(f"Failed to delete dataset: cannot unmount '{name}': pool or dataset is busy")
     for ds in sorted([name, *children], reverse=True):
         shutil.rmtree(state["datasets"].pop(ds), ignore_errors=True)
     save()
