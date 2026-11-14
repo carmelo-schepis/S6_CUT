@@ -88,7 +88,7 @@ describe("LibraryView", () => {
     mockListFolders.mockResolvedValue([...folders, { ...folders[1], id: "child", name: "Child", parentId: "acme" }]);
     render(<LibraryView />);
     const tree = await screen.findByRole("list", { name: "Media folders" });
-    const parent = within(tree).getByText("Acme", { exact: true }).closest("button");
+    const parent = (await within(tree).findByText("Acme", { exact: true })).closest("button");
     expect(parent).not.toBeNull();
     const parentItem = parent!.closest("li");
     expect(parentItem).not.toBeNull();
