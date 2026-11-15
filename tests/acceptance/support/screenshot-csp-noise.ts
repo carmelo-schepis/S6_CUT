@@ -1,15 +1,32 @@
+const SCREENSHOT_CSP_ERROR = "Refused to apply a stylesheet because its hash, its nonce, or 'unsafe-inline' does not appear in the style-src directive";
+
 /**
- * WebKit logs this console error every time Playwright's `page.screenshot()`
- * runs: the stylesheet Playwright injects is refused by the app's
- * `style-src 'self'`. It comes from the test tool, not the app, and
- * `caret: "initial"` does not stop it.
+ * WebKit logs one console error each time Playwright takes a screenshot of a
+ * page or element: the app's `style-src 'self'` refuses the stylesheet
+ * Playwright injects. `caret: "initial"` does not stop it.
  *
- * WebKit words a refused inline style from the app the same way, so this is
- * ignored only in WebKit. Chromium logs nothing for a screenshot and still
- * reports an app inline style ("Applying inline style violates ..."), so the
- * CSP check stays covered there.
+ * WebKit words a refused inline style from the app the same way. So take
+ * screenshots through `take`, and `visible` drops only as many of these
+ * errors as screenshots were taken. Any further one is the app's and stays.
+ * Chromium logs nothing for a screenshot, so nothing is dropped there.
  */
-export function isScreenshotCspNoise(text: string, browserName: string): boolean {
-  return browserName === "webkit"
-    && text.startsWith("Refused to apply a stylesheet because its hash, its nonce, or 'unsafe-inline' does not appear in the style-src directive");
+export function screenshotCspAllowance(browserName: string) {
+  let taken = 0;
+  return {
+    async take(screenshot: () => Promise<unknown>) {
+      taken += 1;
+      await screenshot();
+    },
+    visible(consoleErrors: string[]) {
+      if (browserName !== "webkit") return consoleErrors;
+      let allowance = taken;
+      return consoleErrors.filter((error) => {
+        if (allowance > 0 && error.startsWith(SCREENSHOT_CSP_ERROR)) {
+          allowance -= 1;
+          return false;
+        }
+        return true;
+      });
+    },
+  };
 }
