@@ -3275,6 +3275,13 @@ input[type="checkbox"]:checked::before {
    on a narrow column instead of being squeezed under its own text. */
 .metadata-model-card .settings-card-head { flex-wrap: wrap; gap: var(--space-2) var(--space-3); }
 .metadata-model-card .settings-card-head > .button { flex: 0 0 auto; white-space: nowrap; }
+/* Its parts sit one field gap apart, so the price hint, the auto-title box and
+   the status lines below never touch. The head keeps the 24px step to the
+   first field that every other settings card has. */
+.metadata-model-card { display: grid; gap: var(--gap-field); }
+.metadata-model-card > .settings-card-head { padding-bottom: calc(var(--space-6) - var(--gap-field)); }
+.metadata-model-status { display: grid; gap: var(--space-1); }
+.metadata-model-status > p { margin: 0; }
 
 /* Keep the Library focused on browsing; editing lives with the preview. */
 .library-page { padding-top: 24px; }

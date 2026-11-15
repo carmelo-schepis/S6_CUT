@@ -22,6 +22,7 @@ export function SettingsView({ health, onHealthRefresh, onProfilesChanged, onSki
   const [metadataModelsLoading, setMetadataModelsLoading] = useState(false);
   const [metadataModelError, setMetadataModelError] = useState<string | null>(null);
   const selectedProfile = profiles.find((profile) => profile.selected) || null;
+  const metadataModelId = selectedProfile?.youtubeMetadataModelId || "google/gemini-2.5-flash-lite";
   // Model lookups need a connected OpenRouter; a switched-off one is never called.
   const metadataAvailable = Boolean(selectedProfile && selectedProfile.textStatus === "connected" && isOpenRouterOn(selectedProfile));
   const purgeTriggerRef = useRef<HTMLButtonElement>(null);
@@ -109,8 +110,8 @@ export function SettingsView({ health, onHealthRefresh, onProfilesChanged, onSki
         {!profiles.length && !showSetupForm && <div className="settings-empty"><KeyRound size={22} /><div><strong>No text provider profile</strong><p>Local deterministic planning, captions, and text-card visuals remain available.</p></div>{onSkipSetup && <Button variant="ghost" onClick={onSkipSetup}>Continue with local cutting <ArrowRight size={13} /></Button>}</div>}
       </section>
       <section className="settings-card metadata-model-card" aria-labelledby="metadata-model-heading"><div className="settings-card-head"><div><KeyRound size={18} /><div><h2 id="metadata-model-heading">Title and description model</h2><p>Independent from the general planning model; uses the selected OpenRouter profile credentials.</p></div></div><Button disabled={metadataModelsLoading || !metadataAvailable} onClick={() => void refreshMetadataModels()}><RefreshCw size={14} /> {metadataModelsLoading ? "Refreshing…" : "Refresh models"}</Button></div>
-        <Field label="YouTube title and description model" hint="Only models advertising structured output and priced at no more than $0.10/M input and $0.40/M output are eligible. No automatic paid-model substitution."><select aria-label="Title and description model" value={selectedProfile?.youtubeMetadataModelId || "google/gemini-2.5-flash-lite"} disabled={!metadataAvailable} onChange={(event) => void setMetadataModel(event.target.value)}>
-          {selectedProfile && !metadataModels.some((model) => model.id === selectedProfile.youtubeMetadataModelId) && <option value={selectedProfile.youtubeMetadataModelId}>{selectedProfile.youtubeMetadataModelId} · unavailable or not refreshed</option>}
+        <Field label="YouTube title and description model" hint="Only models advertising structured output and priced at no more than $0.10/M input and $0.40/M output are eligible. No automatic paid-model substitution."><select aria-label="Title and description model" value={metadataModelId} disabled={!metadataAvailable} onChange={(event) => void setMetadataModel(event.target.value)}>
+          {!metadataModels.some((model) => model.id === metadataModelId) && <option value={metadataModelId}>{metadataModelId} · {selectedProfile ? "unavailable or not refreshed" : "default"}</option>}
           {metadataModels.map((model) => {
             const input = Number(model.pricing?.prompt) * 1_000_000;
             const output = Number(model.pricing?.completion) * 1_000_000;
@@ -119,10 +120,12 @@ export function SettingsView({ health, onHealthRefresh, onProfilesChanged, onSki
           })}
         </select></Field>
         <label className="check-row auto-seo-titles-toggle"><input type="checkbox" data-testid="auto-seo-titles" checked={selectedProfile?.autoSeoTitles ?? true} disabled={!selectedProfile || savingAutoSeo} onChange={(event) => void setAutoSeoTitles(event.target.checked)} /><span><strong>Auto-write SEO titles for new clips</strong><small>Smart short clips get an AI title and description when OpenRouter is connected.</small></span></label>
-        {!selectedProfile && <p className="form-hint">Select and connect an OpenRouter profile first.</p>}
-        {selectedProfile && !isOpenRouterOn(selectedProfile) && <p className="form-hint">OpenRouter is off for this profile. Turn it on to change this model.</p>}
-        {metadataModelError && <p className="form-error" role="alert">Could not refresh model availability: {metadataModelError}</p>}
-        {selectedProfile && <p className="form-hint">Configured: {selectedProfile.youtubeMetadataModelId || "google/gemini-2.5-flash-lite"}. Generation is unavailable if the model is missing, unknown-priced, or above the hard cap.</p>}
+        <div className="metadata-model-status">
+          {!selectedProfile && <p className="form-hint">Select and connect an OpenRouter profile first.</p>}
+          {selectedProfile && !isOpenRouterOn(selectedProfile) && <p className="form-hint">OpenRouter is off for this profile. Turn it on to change this model.</p>}
+          {metadataModelError && <p className="form-error" role="alert">Could not refresh model availability: {metadataModelError}</p>}
+          {selectedProfile && <p className="form-hint">Configured: {metadataModelId}. Generation is unavailable if the model is missing, unknown-priced, or above the hard cap.</p>}
+        </div>
       </section>
       <section className="settings-card about-card"><img src="/legal-logo.png" alt="S6_cut logo" /><div><h2>S6_cut</h2><p>Free, open-source, local-first video editing. No account, watermark, or artificial usage limit.</p><p className="muted">Process only media you own or are authorised to use. Code licences do not grant rights to downloaded media, fonts, models, voices, or logos.</p><span className="version">Engine {health?.version || "—"} · Schema v1</span></div></section>
     </div><div className="settings-column">

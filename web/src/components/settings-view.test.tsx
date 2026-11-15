@@ -63,6 +63,14 @@ describe("SettingsView", () => {
     fireEvent.change(picker, { target: { value: cheaper.id } });
     await waitFor(() => expect(mockSaveProfile).toHaveBeenCalledWith(expect.objectContaining({ youtubeMetadataModelId: cheaper.id, textModelId: connectedProfile.textModelId, selected: true }), connectedProfile.id));
   });
+  it("names the default title model instead of an empty picker when no profile is selected", async () => {
+    mockListProfiles.mockResolvedValue([baseProfile]); renderView();
+    const picker = await screen.findByRole("combobox", { name: "Title and description model" });
+    expect(picker).toBeDisabled();
+    expect(picker).toHaveValue("google/gemini-2.5-flash-lite");
+    expect(within(picker).getByRole("option", { name: "google/gemini-2.5-flash-lite · default" })).toBeInTheDocument();
+    expect(screen.getByText("Select and connect an OpenRouter profile first.")).toBeInTheDocument();
+  });
   it("binds Auto-write SEO titles to the selected profile and saves changes", async () => {
     mockListProfiles.mockResolvedValue([connectedProfile]);
     mockSaveProfile.mockResolvedValue({ ...connectedProfile, autoSeoTitles: false });
