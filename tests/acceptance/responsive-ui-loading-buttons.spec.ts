@@ -2,8 +2,12 @@ import { expect, test, type Page } from "@playwright/test";
 import type { Job, Project, ProviderProfile } from "../../web/src/types";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { isScreenshotCspNoise } from "./support/screenshot-csp-noise";
 
 const artifacts = path.resolve(process.cwd(), "test-artifacts", "responsive-ui-loading-buttons");
+// A cancelled fetch, as Chromium and WebKit word it (music-voice-replacement-real
+// and production-section-smoke treat the pair the same way).
+const cancelledRequest = ["net::ERR_ABORTED", "Load request cancelled"];
 const viewports = [
   ["desktop", 1440, 900],
   ["laptop", 1024, 768],
@@ -108,15 +112,15 @@ async function assertContained(page: Page, selector: string, container: string) 
 }
 
 test.describe("responsive loading and creation controls", () => {
-  test("keeps creation states and controls clean at every required viewport", async ({ page }) => {
+  test("keeps creation states and controls clean at every required viewport", async ({ page, browserName }) => {
     const consoleErrors: string[] = [];
     const failedRequests: string[] = [];
-    page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
+    page.on("console", (message) => { if (message.type() === "error" && !isScreenshotCspNoise(message.text(), browserName)) consoleErrors.push(message.text()); });
     // Recent project cards autoplay a source preview (b64f1a0), so moving to the
     // next viewport cancels whatever media fetch is still in flight. An aborted
     // request is the navigation working, not the application failing — the same
     // filter the other suites in this directory apply.
-    page.on("requestfailed", (request) => { if (request.failure()?.errorText !== "net::ERR_ABORTED") failedRequests.push(`${request.method()} ${request.url()} ${request.failure()?.errorText || ""}`); });
+    page.on("requestfailed", (request) => { if (!cancelledRequest.includes(request.failure()?.errorText || "")) failedRequests.push(`${request.method()} ${request.url()} ${request.failure()?.errorText || ""}`); });
     test.setTimeout(180_000);
     await fs.mkdir(artifacts, { recursive: true });
     for (const [name, width, height] of viewports) {
@@ -181,12 +185,12 @@ test.describe("responsive loading and creation controls", () => {
     expect(failedRequests, "failed application requests").toEqual([]);
   });
 
-  test("renders the representative processing fixture without concatenation or overlap", async ({ page }) => {
+  test("renders the representative processing fixture without concatenation or overlap", async ({ page, browserName }) => {
     test.setTimeout(60_000);
     const consoleErrors: string[] = [];
     const failedRequests: string[] = [];
-    page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
-    page.on("requestfailed", (request) => { if (request.failure()?.errorText !== "net::ERR_ABORTED") failedRequests.push(`${request.method()} ${request.url()} ${request.failure()?.errorText || ""}`); });
+    page.on("console", (message) => { if (message.type() === "error" && !isScreenshotCspNoise(message.text(), browserName)) consoleErrors.push(message.text()); });
+    page.on("requestfailed", (request) => { if (!cancelledRequest.includes(request.failure()?.errorText || "")) failedRequests.push(`${request.method()} ${request.url()} ${request.failure()?.errorText || ""}`); });
     await installFixtures(page);
     for (const [name, width, height] of viewports) {
       await page.setViewportSize({ width, height });
