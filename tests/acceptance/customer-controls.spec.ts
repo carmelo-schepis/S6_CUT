@@ -1,5 +1,10 @@
 import { test, expect, type Page } from "@playwright/test";
 import type { Job, Project } from "../../web/src/types";
+import { skipOnIOSStatusView } from "./support/ios-status-view";
+
+// Stubbed API routes: a registered service worker answers fetches itself and,
+// in WebKit, bypasses page.route, so the stubs would never be hit.
+test.use({ serviceWorkers: "block" });
 
 /**
  * Customer-facing control behaviour that regressed or was repaired during the
@@ -49,7 +54,8 @@ async function installLargeHistory(page: Page, count: number) {
 }
 
 test.describe("customer controls", () => {
-  test("one click on Create makes exactly one job even when double-clicked", async ({ page }) => {
+  test("one click on Create makes exactly one job even when double-clicked", async ({ page }, testInfo) => {
+    skipOnIOSStatusView(testInfo);
     let posts = 0;
     await page.route("**/api/v1/jobs/clip", async (route) => {
       posts += 1;
@@ -80,7 +86,8 @@ test.describe("customer controls", () => {
     await expect(create).toBeEnabled();
   });
 
-  test("project history controls are absent and Jobs keeps long history reachable", async ({ page }) => {
+  test("project history controls are absent and Jobs keeps long history reachable", async ({ page }, testInfo) => {
+    skipOnIOSStatusView(testInfo);
     const total = 40;
     await installLargeHistory(page, total);
     await page.goto("/", { waitUntil: "domcontentloaded" });
@@ -119,10 +126,11 @@ test.describe("customer controls", () => {
     await expect(page.getByRole("heading", { name: "Recent projects" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: `Preview source video for ${project.name}` })).toHaveCount(0);
     await page.getByRole("button", { name: "Library", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "Library" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Library", exact: true })).toBeVisible();
   });
 
-  test("the jobs queue is bounded with the total kept visible", async ({ page }) => {
+  test("the jobs queue is bounded with the total kept visible", async ({ page }, testInfo) => {
+    skipOnIOSStatusView(testInfo);
     await installLargeHistory(page, 40);
     await page.goto("/", { waitUntil: "domcontentloaded" });
     await page.getByRole("button", { name: "Jobs", exact: true }).click();
@@ -145,7 +153,8 @@ test.describe("customer controls", () => {
     await page.goto("/", { waitUntil: "domcontentloaded" });
   });
 
-  test("creation validation explains the problem without exposing backend detail", async ({ page }) => {
+  test("creation validation explains the problem without exposing backend detail", async ({ page }, testInfo) => {
+    skipOnIOSStatusView(testInfo);
     await page.goto("/", { waitUntil: "domcontentloaded" });
     // The folded rail peeks open under a resting pointer; keep it over the page.
     await page.mouse.move(900, 400);

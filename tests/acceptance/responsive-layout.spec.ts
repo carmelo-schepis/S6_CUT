@@ -1,7 +1,16 @@
 import { test, expect } from "@playwright/test";
+import { skipOnIOSStatusView } from "./support/ios-status-view";
+
+test.beforeEach(({}, testInfo) => skipOnIOSStatusView(testInfo));
+
+// Stubbed API routes: a registered service worker answers fetches itself and,
+// in WebKit, bypasses page.route, so the stubs would never be hit.
+test.use({ serviceWorkers: "block" });
 
 test.describe("responsive layout regressions", () => {
-  test("keeps mobile navigation labels inside their cells", async ({ page }) => {
+  test("keeps mobile navigation labels inside their cells", async ({ page, browserName }) => {
+    // WebKit follows Safari: plain Tab skips buttons unless Option is held.
+    const tabKey = browserName === "webkit" ? "Alt+Tab" : "Tab";
     // The rail caption is General text (14px) at every breakpoint — there is no
     // mobile-only type size. Seven captions cannot fit a seven-column bottom bar
     // below ~600px, so the caption is dropped there and the item becomes the
@@ -11,6 +20,9 @@ test.describe("responsive layout regressions", () => {
       await page.setViewportSize({ width, height: 844 });
       await page.goto("/", { waitUntil: "domcontentloaded" });
       await expect(page.locator(".app-rail nav")).toBeVisible();
+      // The rail is painted under the startup splash while #root is still
+      // inert; Tab cannot reach it until the app is revealed.
+      await expect(page.locator("#root")).not.toHaveAttribute("inert");
       const nav = page.locator(".app-rail nav");
       const measurement = await nav.evaluate((element) => {
         const items = [...element.querySelectorAll<HTMLElement>(".nav-item")];
@@ -53,7 +65,7 @@ test.describe("responsive layout regressions", () => {
         // is evaluated the same way a keyboard user encounters this control.
         let tabStops = 0;
         while (!(await items.nth(index).evaluate((item) => document.activeElement === item)) && tabStops < 30) {
-          await page.keyboard.press("Tab");
+          await page.keyboard.press(tabKey);
           tabStops += 1;
         }
         expect(await items.nth(index).evaluate((item) => document.activeElement === item), `${width}px keyboard focus target`).toBe(true);

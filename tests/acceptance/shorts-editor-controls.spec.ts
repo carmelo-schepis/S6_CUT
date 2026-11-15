@@ -1,4 +1,7 @@
 import { expect, test } from "@playwright/test";
+import { skipOnIOSStatusView } from "./support/ios-status-view";
+
+test.beforeEach(({}, testInfo) => skipOnIOSStatusView(testInfo));
 
 test.use({ serviceWorkers: "block" });
 

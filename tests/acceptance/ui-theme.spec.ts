@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { skipOnIOSStatusView } from "./support/ios-status-view";
 
 /**
  * Theme contract for the S6 Cut UI.
@@ -65,7 +66,8 @@ async function openRoute(page: Page, label: string) {
 }
 
 test.describe("theme contract", () => {
-  test("every visible first-party text node is white", async ({ page }) => {
+  test("every visible first-party text node is white", async ({ page }, testInfo) => {
+    skipOnIOSStatusView(testInfo);
     test.setTimeout(180_000);
     const offenders: unknown[] = [];
     for (const [, width, height] of viewports) {
@@ -109,7 +111,8 @@ test.describe("theme contract", () => {
     expect(offenders, `non-white text: ${JSON.stringify(offenders, null, 1)}`).toEqual([]);
   });
 
-  test("numbered step badges are 24px circles with centred, unclipped digits", async ({ page }) => {
+  test("numbered step badges are 24px circles with centred, unclipped digits", async ({ page }, testInfo) => {
+    skipOnIOSStatusView(testInfo);
     test.setTimeout(120_000);
     for (const [, width, height] of viewports) {
       await page.setViewportSize({ width, height });
@@ -171,7 +174,8 @@ test.describe("theme contract", () => {
     }
   });
 
-  test("a badge keeps its circle beside a long wrapping heading and a double digit", async ({ page }) => {
+  test("a badge keeps its circle beside a long wrapping heading and a double digit", async ({ page }, testInfo) => {
+    skipOnIOSStatusView(testInfo);
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/", { waitUntil: "domcontentloaded" });
     await openRoute(page, "Projects");
@@ -198,7 +202,8 @@ test.describe("theme contract", () => {
     expect(Math.abs(stressed!.dx), "double digit stays centred").toBeLessThanOrEqual(1);
   });
 
-  test("painted accents come only from the logo-derived palette", async ({ page }) => {
+  test("painted accents come only from the logo-derived palette", async ({ page }, testInfo) => {
+    skipOnIOSStatusView(testInfo);
     test.setTimeout(120_000);
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto("/", { waitUntil: "domcontentloaded" });
@@ -218,7 +223,9 @@ test.describe("theme contract", () => {
         };
         const out: string[] = [];
         for (const el of document.querySelectorAll<HTMLElement>("*")) {
-          if (el.closest("svg,canvas,video,img,iframe") || el.closest(".caption-preview")) continue;
+          // Caption previews, caption samples and filter swatches show what the
+          // render will paint, in the render's colours, not the product's.
+          if (el.closest("svg,canvas,video,img,iframe") || el.closest(".caption-preview, .caption-sample, .style-footage")) continue;
           const style = getComputedStyle(el);
           for (const value of [style.backgroundColor, style.borderTopColor, style.borderLeftColor, style.color, style.outlineColor]) {
             const parsed = read(value);
@@ -237,7 +244,8 @@ test.describe("theme contract", () => {
     expect(unapproved, `unapproved accent colours: ${unapproved.join(", ")}`).toEqual([]);
   });
 
-  test("no brand red is painted anywhere", async ({ page }) => {
+  test("no brand red is painted anywhere", async ({ page }, testInfo) => {
+    skipOnIOSStatusView(testInfo);
     test.setTimeout(300_000);
     const offenders: unknown[] = [];
     for (const [, width, height] of viewports) {
@@ -290,8 +298,10 @@ test.describe("theme contract", () => {
           const bad: { cls: string; tag: string; property: string; colour: string }[] = [];
           for (const el of document.querySelectorAll<HTMLElement>("*")) {
             // The caption preview simulates the subtitle FFmpeg burns into the
-            // frame; it keeps the render's own colours, not the product's.
-            if (el.closest("svg,canvas,video,img,iframe") || el.closest(".caption-preview")) continue;
+            // frame; it keeps the render's own colours, not the product's. The
+            // style pickers' caption samples and filter swatches are the same
+            // kind of render stand-in.
+            if (el.closest("svg,canvas,video,img,iframe") || el.closest(".caption-preview, .caption-sample, .style-footage")) continue;
             const style = getComputedStyle(el);
             const properties = {
               backgroundColor: style.backgroundColor,
