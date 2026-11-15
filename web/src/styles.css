@@ -3443,4 +3443,7 @@ select:not([multiple]):not([size]) {
   background-position: right 12px center !important;
   background-size: 12px 8px !important;
 }
-select:not([multiple]):not([size]):disabled { cursor: default; }
+/* Turning the native look off also drops the browser's own disabled styling
+   (WebKit kept full strength; Chromium dimmed to .7), so a disabled select
+   fades as a whole, arrow included, the same way a disabled button does. */
+select:disabled { cursor: not-allowed; opacity: .55; }
