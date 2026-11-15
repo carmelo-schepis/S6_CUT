@@ -106,7 +106,7 @@ Requirements: Node.js 24+, Python 3.12, and FFmpeg/FFprobe. Install the exact de
 
 ```bash
 npm ci
-python -m venv .venv
+python3.12 -m venv .venv
 .venv/bin/python -m pip install -r engine/requirements-dev.lock
 export S6_PYTHON=".venv/bin/python"
 npm run dev
