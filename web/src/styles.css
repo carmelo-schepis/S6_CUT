@@ -3425,3 +3425,22 @@ input[type="checkbox"]:checked::before {
 .lyric-preview-stage.theme-karaoke-focus { font-family: "Style Barlow", sans-serif; font-weight: 700; }
 .lyric-preview-stage.theme-lyric-plate { background: linear-gradient(135deg, #3b6ea5, #c0705a); font-family: "Music Barlow", sans-serif; }
 .lyric-preview-stage.theme-lyric-plate .lyric-preview-line { padding: .12em .5em; border-radius: .3em; background: rgba(0, 0, 0, .62); }
+
+/* --- Select arrow ---------------------------------------------------------- */
+/* Every dropdown draws the same chevron 12px in from its right border. The
+   native arrow sat about 8px from the border on Safari, tighter than the
+   text's own inset, and differed per browser. Room is reserved beside it so a
+   long option is clipped before the arrow instead of running under it. The
+   longhands are !important because surface rules reset selects with the
+   `background` and `padding` shorthands (transparent fields, the compact
+   editor stage). */
+select:not([multiple]):not([size]) {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 32px !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8' fill='none' stroke='%23a3a3a3' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1.2 1.6 6 6.4l4.8-4.8'/%3E%3C/svg%3E") !important;
+  background-repeat: no-repeat !important;
+  background-position: right 12px center !important;
+  background-size: 12px 8px !important;
+}
+select:not([multiple]):not([size]):disabled { cursor: default; }
