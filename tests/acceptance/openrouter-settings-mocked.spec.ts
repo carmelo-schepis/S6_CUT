@@ -1,6 +1,13 @@
 import { expect, test } from "@playwright/test";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { skipOnIOSStatusView } from "./support/ios-status-view";
+
+// Stubbed API routes: a registered service worker answers fetches itself and,
+// in WebKit, bypasses page.route, so the stubs would never be hit.
+test.use({ serviceWorkers: "block" });
+
+test.beforeEach(({}, testInfo) => skipOnIOSStatusView(testInfo));
 
 const profile = {
   id: "mock-openrouter", name: "Mock OpenRouter", textModelId: "openai/gpt-4.1-mini", selected: true,
@@ -19,7 +26,10 @@ for (const [name, width, height] of [["desktop", 1440, 900], ["mobile", 390, 844
     await page.route("**/api/v1/profiles/mock-openrouter/test", async (route) => { current = verifiedProfile; return route.fulfill({ json: verifiedProfile }); });
     await page.goto("/", { waitUntil: "domcontentloaded" }); await page.getByRole("button", { name: "Settings", exact: true }).click();
     const row = page.getByRole("article"); await expect(row).toContainText("Ready to test"); await expect(row).toContainText("••••test"); await expect(row.locator(".provider-results .connection-result")).toHaveCount(1);
-    await row.getByRole("button", { name: "Test" }).click(); await expect(row).toContainText("Connected; text generation succeeded"); await expect(row).not.toContainText("API key");
+    await row.getByRole("button", { name: "Test", exact: true }).click(); await expect(row).toContainText("Connected; text generation succeeded");
+    // The row has carried an "OpenRouter API key" field since the provider
+    // boxes landed; what must not mention the key is the verification result.
+    await expect(row.locator(".provider-results .connection-result")).not.toContainText("API key");
     await page.screenshot({ path: artifact, fullPage: false }); await page.reload({ waitUntil: "domcontentloaded" }); await page.getByRole("button", { name: "Settings", exact: true }).click(); await expect(page.getByRole("article")).toContainText("••••test");
   });
 }

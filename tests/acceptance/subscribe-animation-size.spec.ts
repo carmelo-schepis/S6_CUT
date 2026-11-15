@@ -10,6 +10,9 @@ import { fileURLToPath } from "node:url";
 import { assertZipIntact, extractZip, openOptionRow, openWorkspaceForProject, zipNames } from "./support/workspace";
 import { verifyVideoOutput } from "../support/video-output";
 import { recordBrowserDiagnostics } from "./support/browser-diagnostics";
+import { skipOnIOSStatusView } from "./support/ios-status-view";
+
+test.beforeEach(({}, testInfo) => skipOnIOSStatusView(testInfo));
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const fixture = process.env.S6_SUBSCRIBE_FIXTURE || path.join(root, "tests/fixtures/openrouter-fallback.mp4");

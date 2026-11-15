@@ -20,6 +20,9 @@
 import { expect, test } from "@playwright/test";
 import path from "node:path";
 import { createClipProject, root } from "./support/workspace";
+import { skipOnIOSStatusView } from "./support/ios-status-view";
+
+test.beforeEach(({}, testInfo) => skipOnIOSStatusView(testInfo));
 
 type Page = import("@playwright/test").Page;
 

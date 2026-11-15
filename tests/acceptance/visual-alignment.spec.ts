@@ -11,6 +11,7 @@
  * impossible (noted where it applies).
  */
 import { expect, test } from "@playwright/test";
+import { skipOnIOSStatusView } from "./support/ios-status-view";
 
 type Page = import("@playwright/test").Page;
 
@@ -51,6 +52,10 @@ async function findClippedContent(page: Page) {
     for (const element of document.querySelectorAll("body *")) {
       if (!element.getClientRects().length) continue;
       if (element.closest(".sr-only")) continue;
+      // The Projects wallpaper is a decorative, aria-hidden layer whose image
+      // is deliberately taller than its fixed frame so it can scroll with
+      // the page. It holds no content to clip.
+      if (element.closest(".app-wallpaper")) continue;
       // A single-line form control is its own scroll container for its value:
       // the asset inspector's Licence field holds 49 characters in a 246px box
       // and reports a 36px overflow while working exactly as designed. That is
@@ -75,7 +80,8 @@ async function findClippedContent(page: Page) {
 }
 
 test.describe("visual alignment", () => {
-  test("step badges are one component at one size on every screen", async ({ page }) => {
+  test("step badges are one component at one size on every screen", async ({ page }, testInfo) => {
+    skipOnIOSStatusView(testInfo);
     test.setTimeout(180_000);
     for (const [name, width, height] of viewports) {
       await page.setViewportSize({ width, height });
@@ -136,7 +142,8 @@ test.describe("visual alignment", () => {
     }
   });
 
-  test("the Processing mode control and the Create action share one control height", async ({ page }) => {
+  test("the Processing mode control and the Create action share one control height", async ({ page }, testInfo) => {
+    skipOnIOSStatusView(testInfo);
     test.setTimeout(120_000);
     // The create flow is one column: output settings, then Create underneath.
     for (const [name, width, height] of [viewports[0], viewports[1], viewports[3]] as const) {
@@ -173,7 +180,8 @@ test.describe("visual alignment", () => {
     }
   });
 
-  test("a selected option is exactly the size of an unselected one", async ({ page }) => {
+  test("a selected option is exactly the size of an unselected one", async ({ page }, testInfo) => {
+    skipOnIOSStatusView(testInfo);
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto("/", { waitUntil: "domcontentloaded" });
     await gotoRoute(page, "Projects");
@@ -224,7 +232,8 @@ test.describe("visual alignment", () => {
     }
   });
 
-  test("repeated components keep one geometry per row", async ({ page }) => {
+  test("repeated components keep one geometry per row", async ({ page }, testInfo) => {
+    skipOnIOSStatusView(testInfo);
     test.setTimeout(180_000);
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto("/", { waitUntil: "domcontentloaded" });
@@ -266,7 +275,8 @@ test.describe("visual alignment", () => {
     }
   });
 
-  test("major sections share one horizontal guide, with nothing clipped or overflowing", async ({ page }) => {
+  test("major sections share one horizontal guide, with nothing clipped or overflowing", async ({ page }, testInfo) => {
+    skipOnIOSStatusView(testInfo);
     test.setTimeout(240_000);
     for (const [name, width, height] of viewports) {
       await page.setViewportSize({ width, height });

@@ -1,6 +1,9 @@
 import { expect, test } from "@playwright/test";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { skipOnIOSStatusView } from "./support/ios-status-view";
+
+test.beforeEach(({}, testInfo) => skipOnIOSStatusView(testInfo));
 
 const root = path.resolve(process.cwd());
 const artifacts = path.join(root, "test-artifacts", "ui-layout-regressions");
@@ -97,7 +100,7 @@ test.describe("creation and Library layout regressions", () => {
       expect(focusMeasure.bottom).toBeLessThanOrEqual(height);
 
       await page.getByRole("button", { name: "Library", exact: true }).click();
-      await expect(page.getByRole("heading", { name: "Library" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Library", exact: true })).toBeVisible();
       await expect(page.locator("button.asset-card-details").first()).toBeVisible({ timeout: 15_000 });
       await page.locator("button.asset-card-details").first().click();
       const inspector = page.locator(".asset-inspector");
