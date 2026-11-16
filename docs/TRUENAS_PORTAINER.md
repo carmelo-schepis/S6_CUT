@@ -113,8 +113,8 @@ Use these steps if neither route above fits, for example on a TrueNAS release wh
 1. Choose the Apps pool and create the source/data datasets above.
 2. Put the repository and `.env` in the source dataset.
 3. In Apps, choose **Discover Apps → Custom App → Install via YAML** (wording varies by SCALE release).
-4. Paste the resolved Compose definition from `docker compose -p ix-s6-cut config`, run in the source dataset. An `include:` pointing at the repository `compose.yaml` can also work, but see the note on resolved files above.
-5. Confirm only the `web` service maps `${S6_PORT}:8080`; the engine has no host port.
+4. Paste the resolved Compose definition from `docker compose -p ix-s6-cut config`, run in the source dataset.
+5. Confirm `web` maps `${S6_PORT}:8080` and `engine` maps `127.0.0.1:${S6_ENGINE_PORT:-8001}:8001`. The engine port is published on the host loopback interface only; it is not exposed on the network.
 6. Confirm the absolute data dataset maps to `/app/data`.
 7. Install, wait through the two-minute model/runtime health start period, and open the web portal.
 8. Create a small permitted test project before importing large media.
