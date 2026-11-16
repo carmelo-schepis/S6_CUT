@@ -10,12 +10,12 @@ type ConsoleSource = Pick<Page, "on" | "evaluate">;
  * Playwright injects. `caret: "initial"` does not stop it.
  *
  * WebKit words a refused inline style from the app the same way. So take
- * screenshots through `take`: `visible` drops only an error that arrived
- * during a screenshot call, at most one per call. A screenshot that logs
- * nothing consumes no allowance, so an app error logged before, between or
- * after screenshots is always reported, and a window with two errors
- * (screenshot plus app) keeps the second. Chromium logs nothing for a
- * screenshot, so nothing is dropped there.
+ * screenshots through `take`: each call opens a window that closes at the
+ * first error it produces, and `visible` drops at most one error from that
+ * window. A screenshot that logs nothing leaves an empty window, so an app
+ * error logged before, between or after screenshots is always reported, and
+ * a window with two errors (screenshot plus app) keeps the second. Chromium
+ * logs nothing for a screenshot, so nothing is dropped there.
  */
 export function screenshotCspAllowance(page: ConsoleSource, browserName: string) {
   const errors: string[] = [];
@@ -30,8 +30,13 @@ export function screenshotCspAllowance(page: ConsoleSource, browserName: string)
       const start = errors.length;
       await screenshot();
       // The console entry crosses the browser connection after the screenshot
-      // resolves; one round-trip drains it into this screenshot's window.
-      await page.evaluate(() => undefined);
+      // resolves. Poll round-trips until it lands, then close the window at
+      // once, so anything logged later is outside every screenshot.
+      if (browserName === "webkit") {
+        for (let attempt = 0; attempt < 10 && errors.length === start; attempt += 1) {
+          await page.evaluate(() => undefined);
+        }
+      }
       windows.push({ start, end: errors.length });
     },
     visible() {
