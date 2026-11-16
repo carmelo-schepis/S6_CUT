@@ -6,6 +6,7 @@ import { expect, test, type Page } from "@playwright/test";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { assertZipIntact, extractZip, openOptionRow, openWorkspaceForProject, zipNames } from "./support/workspace";
 import { verifyVideoOutput } from "../support/video-output";
@@ -76,15 +77,67 @@ async function captureFrame(page: Page, time: number, screenshotPath: string): P
   });
 }
 
+/**
+ * Run ffmpeg/ffprobe from the engine image on a file in `mp4Path`'s folder, so
+ * the host needs no media tooling (the same pattern as extractZip).
+ */
+function mediaTool(tool: "ffmpeg" | "ffprobe", mp4Path: string, args: (work: (file: string) => string) => string[]): Buffer {
+  const mount = path.dirname(mp4Path);
+  const work = (file: string) => `/work/${path.relative(mount, file)}`;
+  return execFileSync("docker", ["run", "--rm", "--network", "none", "--entrypoint", tool,
+    "-u", `${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}`, "-e", "HOME=/tmp",
+    "-v", `${mount}:/work`, process.env.S6_FORENSICS_IMAGE || "s6-cut-engine", ...args(work)], { maxBuffer: 16 * 1024 * 1024 });
+}
+
+function mp4Duration(mp4Path: string): number {
+  const output = mediaTool("ffprobe", mp4Path, (work) => ["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=duration", "-of", "csv=p=0", work(mp4Path)]);
+  const duration = Number(output.toString().trim());
+  if (!Number.isFinite(duration) || duration <= 0) throw new Error(`ffprobe gave no video duration for ${mp4Path}`);
+  return duration;
+}
+
+/**
+ * Decode one frame of the exported MP4 at `time`, downscaled to the sampling
+ * width, and save that frame at full size as `pngPath` for evidence. Reading the file, not seeking
+ * the page's <video> and drawing it to a canvas, keeps the measurement the same
+ * in every browser. In WebKit the enabled and disabled renders sampled that way
+ * differed across the whole picture, so the artwork box spanned the frame.
+ */
+function decodeFrame(mp4Path: string, time: number, aspect: Aspect, pngPath: string): Frame {
+  const [videoWidth, videoHeight] = dimensions[aspect];
+  // Keep enough resolution for a stable pixel-derived artwork bounding box.
+  const width = 192;
+  const height = Math.round(width * videoHeight / videoWidth);
+  const raw = mediaTool("ffmpeg", mp4Path, (work) => ["-v", "error", "-ss", time.toFixed(3), "-i", work(mp4Path),
+    "-frames:v", "1", "-y", work(pngPath),
+    "-frames:v", "1", "-vf", `scale=${width}:${height}:flags=area`, "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"]);
+  if (raw.length !== width * height * 4) throw new Error(`decoded ${raw.length} bytes at ${time}s, expected ${width * height * 4}`);
+  return { width, height, pixels: [...raw] };
+}
+
 function differenceBox(on: Frame, off: Frame) {
   expect([on.width, on.height]).toEqual([off.width, off.height]);
   let minX = on.width, minY = on.height, maxX = -1, maxY = -1, changed = 0;
   // Compare decoded output pixels, excluding the lower caption/credit band.
   // The animation is composited at y=8%; pixels below 45% are not artwork.
-  for (let y = 0; y < Math.floor(on.height * 0.45); y += 1) for (let x = 0; x < on.width; x += 1) {
+  const band = Math.floor(on.height * 0.45);
+  const differs = new Uint8Array(band * on.width);
+  for (let y = 0; y < band; y += 1) for (let x = 0; x < on.width; x += 1) {
     const p = (y * on.width + x) * 4;
     const delta = Math.max(Math.abs(on.pixels[p] - off.pixels[p]), Math.abs(on.pixels[p + 1] - off.pixels[p + 1]), Math.abs(on.pixels[p + 2] - off.pixels[p + 2]));
-    if (delta < 24) continue;
+    if (delta >= 24) differs[y * on.width + x] = 1;
+  }
+  // The two renders are encoded separately, so compression noise flips a lone
+  // pixel here and there (one on the burned-in timecode stretched a 16:9 box
+  // from 0.46 to 0.60 of the width). The artwork is a solid button, so only a
+  // changed pixel with at least three changed neighbours counts. A 1px-wide
+  // stroke has at most two and would not widen the box; the lower bounds and
+  // the changed-pixel minimum still catch artwork that shrinks or disappears.
+  for (let y = 0; y < band; y += 1) for (let x = 0; x < on.width; x += 1) {
+    if (!differs[y * on.width + x]) continue;
+    let neighbours = 0;
+    for (let ny = Math.max(0, y - 1); ny <= Math.min(band - 1, y + 1); ny += 1) for (let nx = Math.max(0, x - 1); nx <= Math.min(on.width - 1, x + 1); nx += 1) neighbours += differs[ny * on.width + nx];
+    if (neighbours - 1 < 3) continue;
     minX = Math.min(minX, x); minY = Math.min(minY, y); maxX = Math.max(maxX, x); maxY = Math.max(maxY, y); changed += 1;
   }
   return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1, changed };
@@ -155,10 +208,11 @@ async function createAndRender(page: Page, options: { projectName: string; aspec
   const mp4Path = options.testInfo.outputPath(`${prefix}.mp4`);
   await download.saveAs(mp4Path);
   expect((await fs.stat(mp4Path)).size).toBeGreaterThan(50_000);
-  const start = evidence.duration - 5;
+  const mp4Seconds = mp4Duration(mp4Path);
+  const start = mp4Seconds - 5;
   const stateFrames: Frame[] = [];
-  for (const [index, offset] of [0.65, 1.05, 2.0].entries()) stateFrames.push(await captureFrame(page, start + offset, options.testInfo.outputPath(`${prefix}-state-${index}.png`)));
-  const offCycleFrame = await captureFrame(page, evidence.duration - 0.15, options.testInfo.outputPath(`${prefix}-after-animation.png`));
+  for (const [index, offset] of [0.65, 1.05, 2.0].entries()) stateFrames.push(decodeFrame(mp4Path, start + offset, options.aspect, options.testInfo.outputPath(`${prefix}-state-${index}.png`)));
+  const offCycleFrame = decodeFrame(mp4Path, mp4Seconds - 0.15, options.aspect, options.testInfo.outputPath(`${prefix}-after-animation.png`));
   return { projectName: options.projectName, jobId: job.id, clipId: clip.id, start: clip.start, end: clip.end, duration: clip.duration, assetId: clip.libraryAssetId ?? null, aspect: options.aspect, mp4Path, stateFrames, offCycleFrame };
 }
 
