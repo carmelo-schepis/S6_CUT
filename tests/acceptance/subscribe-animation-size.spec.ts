@@ -90,7 +90,9 @@ function mediaTool(tool: "ffmpeg" | "ffprobe", mp4Path: string, args: (work: (fi
 }
 
 function mp4Duration(mp4Path: string): number {
-  const output = mediaTool("ffprobe", mp4Path, (work) => ["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=duration", "-of", "csv=p=0", work(mp4Path)]);
+  // Read the container duration: some MP4s carry it only on the format entry,
+  // not on the video stream (edit lists, fragmented output).
+  const output = mediaTool("ffprobe", mp4Path, (work) => ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", work(mp4Path)]);
   const duration = Number(output.toString().trim());
   if (!Number.isFinite(duration) || duration <= 0) throw new Error(`ffprobe gave no video duration for ${mp4Path}`);
   return duration;
@@ -108,6 +110,9 @@ function decodeFrame(mp4Path: string, time: number, aspect: Aspect, pngPath: str
   // Keep enough resolution for a stable pixel-derived artwork bounding box.
   const width = 192;
   const height = Math.round(width * videoHeight / videoWidth);
+  // Two outputs, one decoded frame each: a full-size PNG for evidence, then
+  // the downscaled raw RGBA sampled for measurement. Each output needs its own
+  // `-frames:v 1`; the second one also carries the scale filter.
   const raw = mediaTool("ffmpeg", mp4Path, (work) => ["-v", "error", "-ss", time.toFixed(3), "-i", work(mp4Path),
     "-frames:v", "1", "-y", work(pngPath),
     "-frames:v", "1", "-vf", `scale=${width}:${height}:flags=area`, "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"]);
@@ -130,9 +135,10 @@ function differenceBox(on: Frame, off: Frame) {
   // The two renders are encoded separately, so compression noise flips a lone
   // pixel here and there (one on the burned-in timecode stretched a 16:9 box
   // from 0.46 to 0.60 of the width). The artwork is a solid button, so only a
-  // changed pixel with at least three changed neighbours counts. A 1px-wide
-  // stroke has at most two and would not widen the box; the lower bounds and
-  // the changed-pixel minimum still catch artwork that shrinks or disappears.
+  // changed pixel with at least three changed neighbours counts. That measures
+  // solid regions only: a 1px stroke (at most two neighbours) is invisible to
+  // this box, and would not widen it anyway. The lower bounds and the
+  // changed-pixel minimum still catch artwork that shrinks or disappears.
   for (let y = 0; y < band; y += 1) for (let x = 0; x < on.width; x += 1) {
     if (!differs[y * on.width + x]) continue;
     let neighbours = 0;
