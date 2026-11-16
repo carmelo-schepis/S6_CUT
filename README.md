@@ -108,7 +108,7 @@ Requirements: Node.js 24+, Python 3.12, and FFmpeg/FFprobe. Install the exact de
 
 ```bash
 npm ci
-python3 -m venv .venv
+python3.12 -m venv .venv
 .venv/bin/python -m pip install -r engine/requirements-dev.lock
 npm run dev
 ```
@@ -117,7 +117,7 @@ npm run dev
 
 ```powershell
 npm ci
-python -m venv .venv
+py -3.12 -m venv .venv
 .venv\Scripts\python -m pip install -r engine\requirements-dev.lock
 $env:S6_PYTHON = ".venv\Scripts\python.exe"
 npm run dev
