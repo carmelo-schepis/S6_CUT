@@ -263,7 +263,7 @@ restoration service is used.
 npm run lint
 npm run typecheck
 npm test
-python -m pytest engine/tests -q
+.venv/bin/python -m pytest engine/tests -q
 npm run build
 docker compose config
 ```
