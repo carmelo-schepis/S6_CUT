@@ -1,4 +1,8 @@
 import { test, expect } from "@playwright/test";
+import { skipOnIOSStatusView } from "./support/ios-status-view";
+
+// Help lives in the desktop workspace; the iOS status view has no Help.
+test.beforeEach(({}, testInfo) => skipOnIOSStatusView(testInfo));
 
 test.describe("S6 Cut Help", () => {
   test("opens, documents the application, traps focus, and restores focus", async ({ page }, testInfo) => {
