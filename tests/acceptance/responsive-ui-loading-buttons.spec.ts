@@ -3,6 +3,13 @@ import type { Job, Project, ProviderProfile } from "../../web/src/types";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { screenshotCspAllowance } from "./support/screenshot-csp-noise";
+import { skipOnIOSStatusView } from "./support/ios-status-view";
+
+test.beforeEach(({}, testInfo) => skipOnIOSStatusView(testInfo));
+
+// Stubbed API routes: a registered service worker answers fetches itself and,
+// in WebKit, bypasses page.route, so the stubs would never be hit.
+test.use({ serviceWorkers: "block" });
 
 const artifacts = path.resolve(process.cwd(), "test-artifacts", "responsive-ui-loading-buttons");
 // A cancelled fetch, as Chromium and WebKit word it (music-voice-replacement-real
@@ -227,7 +234,7 @@ test.describe("responsive loading and creation controls", () => {
     expect(failedRequests, "failed application requests").toEqual([]);
   });
 
-  test("shows connected-provider mode copy without breaking the control row", async ({ page }) => {
+  test("selects Smart with a connected provider without breaking the control row", async ({ page }) => {
     const connected: ProviderProfile = {
       id: "safe-connected-profile",
       name: "Connected OpenRouter",
@@ -247,8 +254,12 @@ test.describe("responsive loading and creation controls", () => {
     await page.setViewportSize({ width: 320, height: 568 });
     await page.goto("/", { waitUntil: "domcontentloaded" });
     await expect(page.locator(".provider-callout:not(.compact)")).toHaveCount(0);
-    await page.getByRole("button", { name: "Smart", exact: true }).click();
-    await expect(page.locator(".field-group-hint").filter({ hasText: "selected provider" })).toBeVisible();
+    // The "Smart uses the selected provider" hint was removed on purpose
+    // (#50; helper-copy-removal keeps it out). With a provider connected, Smart
+    // must still take the selection without pushing the row out of the panel.
+    const smart = page.getByRole("button", { name: "Smart", exact: true });
+    await smart.click();
+    await expect(smart).toHaveAttribute("aria-pressed", "true");
     await assertNoOverflow(page);
     await page.screenshot({ path: path.join(artifacts, "creation-connected-smart.png"), fullPage: false });
   });
