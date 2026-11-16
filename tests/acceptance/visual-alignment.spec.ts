@@ -349,7 +349,7 @@ test.describe("visual alignment", () => {
         const scrolled = element.scrollWidth - element.clientWidth;
         const outside = [...element.querySelectorAll("select, input, button, .search-box")]
           .map((item) => ({ label: item.getAttribute("aria-label") || item.className || item.tagName, rect: item.getBoundingClientRect() }))
-          .filter(({ rect }) => rect.right > bounds.right + 1 || rect.left < bounds.left - 1)
+          .filter(({ rect }) => rect.right > bounds.right + 1 || rect.left < bounds.left - 1 || rect.top < bounds.top - 1 || rect.bottom > bounds.bottom + 1)
           .map(({ label }) => label);
         return { scrolled, outside };
       });
