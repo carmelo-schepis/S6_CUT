@@ -312,4 +312,28 @@ test.describe("visual alignment", () => {
       }
     }
   });
+
+  test("every Library filter option fits beside the dropdown arrow", async ({ page }, testInfo) => {
+    skipOnIOSStatusView(testInfo);
+    // The filters have fixed widths, and every select reserves 32px for its
+    // arrow. A label wider than what is left is cut off mid-word ("Generated
+    // cli"), so each option, not just the one showing, must fit.
+    for (const [name, width, height] of viewports) {
+      await page.setViewportSize({ width, height });
+      await page.goto("/", { waitUntil: "domcontentloaded" });
+      await gotoRoute(page, "Library");
+      const filters = page.locator(".library-toolbar select");
+      await expect(filters.first()).toBeVisible();
+      const tooWide = await filters.evaluateAll((selects) => selects.flatMap((select) => {
+        const style = getComputedStyle(select);
+        const context = document.createElement("canvas").getContext("2d")!;
+        context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+        const room = select.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+        return [...(select as HTMLSelectElement).options]
+          .map((option) => ({ select: select.getAttribute("aria-label"), option: option.textContent, text: Math.ceil(context.measureText(option.textContent || "").width), room: Math.floor(room) }))
+          .filter((entry) => entry.text > entry.room);
+      }));
+      expect(tooWide, `${name}: Library filter options cut off by the arrow`).toEqual([]);
+    }
+  });
 });

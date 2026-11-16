@@ -2,8 +2,12 @@ import { expect, test, type Page } from "@playwright/test";
 import type { Job, Project, ProviderProfile } from "../../web/src/types";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { screenshotCspAllowance } from "./support/screenshot-csp-noise";
 
 const artifacts = path.resolve(process.cwd(), "test-artifacts", "responsive-ui-loading-buttons");
+// A cancelled fetch, as Chromium and WebKit word it (music-voice-replacement-real
+// and production-section-smoke treat the pair the same way).
+const cancelledRequest = ["net::ERR_ABORTED", "Load request cancelled"];
 const viewports = [
   ["desktop", 1440, 900],
   ["laptop", 1024, 768],
@@ -108,15 +112,16 @@ async function assertContained(page: Page, selector: string, container: string) 
 }
 
 test.describe("responsive loading and creation controls", () => {
-  test("keeps creation states and controls clean at every required viewport", async ({ page }) => {
+  test("keeps creation states and controls clean at every required viewport", async ({ page, browserName }) => {
     const consoleErrors: string[] = [];
     const failedRequests: string[] = [];
+    const shots = screenshotCspAllowance(browserName);
     page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
     // Recent project cards autoplay a source preview (b64f1a0), so moving to the
     // next viewport cancels whatever media fetch is still in flight. An aborted
     // request is the navigation working, not the application failing — the same
     // filter the other suites in this directory apply.
-    page.on("requestfailed", (request) => { if (request.failure()?.errorText !== "net::ERR_ABORTED") failedRequests.push(`${request.method()} ${request.url()} ${request.failure()?.errorText || ""}`); });
+    page.on("requestfailed", (request) => { if (!cancelledRequest.includes(request.failure()?.errorText || "")) failedRequests.push(`${request.method()} ${request.url()} ${request.failure()?.errorText || ""}`); });
     test.setTimeout(180_000);
     await fs.mkdir(artifacts, { recursive: true });
     for (const [name, width, height] of viewports) {
@@ -171,22 +176,23 @@ test.describe("responsive loading and creation controls", () => {
       const create = page.getByRole("button", { name: "Create 12 short clips", exact: true });
       await expect(create).toBeVisible();
       await assertNoOverflow(page);
-      if (name === "desktop") await page.screenshot({ path: path.join(artifacts, `creation-${name}.png`), fullPage: false });
+      if (name === "desktop") await shots.take(() => page.screenshot({ path: path.join(artifacts, `creation-${name}.png`), fullPage: false }));
       if (name === "mobile-tiny") {
         await create.scrollIntoViewIfNeeded();
-        await page.screenshot({ path: path.join(artifacts, "creation-mobile-tiny-form.png"), fullPage: false });
+        await shots.take(() => page.screenshot({ path: path.join(artifacts, "creation-mobile-tiny-form.png"), fullPage: false }));
       }
     }
-    expect(consoleErrors, "browser console errors").toEqual([]);
+    expect(shots.visible(consoleErrors), "browser console errors").toEqual([]);
     expect(failedRequests, "failed application requests").toEqual([]);
   });
 
-  test("renders the representative processing fixture without concatenation or overlap", async ({ page }) => {
+  test("renders the representative processing fixture without concatenation or overlap", async ({ page, browserName }) => {
     test.setTimeout(60_000);
     const consoleErrors: string[] = [];
     const failedRequests: string[] = [];
+    const shots = screenshotCspAllowance(browserName);
     page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
-    page.on("requestfailed", (request) => { if (request.failure()?.errorText !== "net::ERR_ABORTED") failedRequests.push(`${request.method()} ${request.url()} ${request.failure()?.errorText || ""}`); });
+    page.on("requestfailed", (request) => { if (!cancelledRequest.includes(request.failure()?.errorText || "")) failedRequests.push(`${request.method()} ${request.url()} ${request.failure()?.errorText || ""}`); });
     await installFixtures(page);
     for (const [name, width, height] of viewports) {
       await page.setViewportSize({ width, height });
@@ -215,9 +221,9 @@ test.describe("responsive loading and creation controls", () => {
       expect(measure.scrollWidth).toBeLessThanOrEqual(measure.clientWidth + 1);
       expect(measure.scrollHeight).toBeGreaterThanOrEqual(measure.clientHeight);
       for (let index = 1; index < measure.blocks.length; index += 1) expect(measure.blocks[index].top).toBeGreaterThanOrEqual(measure.blocks[index - 1].bottom - 1);
-      if (name === "desktop" || name === "mobile-tiny") await processing.screenshot({ path: path.join(artifacts, `loading-${name}.png`) });
+      if (name === "desktop" || name === "mobile-tiny") await shots.take(() => processing.screenshot({ path: path.join(artifacts, `loading-${name}.png`) }));
     }
-    expect(consoleErrors, "browser console errors").toEqual([]);
+    expect(shots.visible(consoleErrors), "browser console errors").toEqual([]);
     expect(failedRequests, "failed application requests").toEqual([]);
   });
 
