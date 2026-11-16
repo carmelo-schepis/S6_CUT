@@ -90,12 +90,15 @@ function mediaTool(tool: "ffmpeg" | "ffprobe", mp4Path: string, args: (work: (fi
 }
 
 function mp4Duration(mp4Path: string): number {
-  // Read the container duration: some MP4s carry it only on the format entry,
-  // not on the video stream (edit lists, fragmented output).
-  const output = mediaTool("ffprobe", mp4Path, (work) => ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", work(mp4Path)]);
-  const duration = Number(output.toString().trim());
-  if (!Number.isFinite(duration) || duration <= 0) throw new Error(`ffprobe gave no video duration for ${mp4Path}`);
-  return duration;
+  // The state samples are video frames, so prefer the video stream duration;
+  // an audio track or edit list can make the format duration longer. Some MP4s
+  // carry duration only on the format entry, so fall back to that.
+  const probe = (entry: string) => mediaTool("ffprobe", mp4Path, (work) => ["-v", "error", "-select_streams", "v:0", "-show_entries", entry, "-of", "csv=p=0", work(mp4Path)]).toString().trim();
+  for (const entry of ["stream=duration", "format=duration"]) {
+    const duration = Number(probe(entry).split("\n")[0]);
+    if (Number.isFinite(duration) && duration > 0) return duration;
+  }
+  throw new Error(`ffprobe gave no video duration for ${mp4Path}`);
 }
 
 /**
