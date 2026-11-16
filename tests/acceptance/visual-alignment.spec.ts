@@ -335,5 +335,27 @@ test.describe("visual alignment", () => {
       }));
       expect(tooWide, `${name}: Library filter options cut off by the arrow`).toEqual([]);
     }
+    // The filters gained 32px each and the search gave the 64px back, so the
+    // toolbar must still fit the widths between desktop and tablet where its
+    // controls wrap onto a second line.
+    for (const [width, height] of [[1000, 800], [900, 800], [720, 450]] as const) {
+      await page.setViewportSize({ width, height });
+      await page.goto("/", { waitUntil: "domcontentloaded" });
+      await gotoRoute(page, "Library");
+      const toolbar = page.locator(".library-toolbar");
+      await expect(toolbar).toBeVisible();
+      const overflow = await toolbar.evaluate((element) => {
+        const bounds = element.getBoundingClientRect();
+        const scrolled = element.scrollWidth - element.clientWidth;
+        const outside = [...element.querySelectorAll("select, input, button, .search-box")]
+          .map((item) => ({ label: item.getAttribute("aria-label") || item.className || item.tagName, rect: item.getBoundingClientRect() }))
+          .filter(({ rect }) => rect.right > bounds.right + 1 || rect.left < bounds.left - 1 || rect.top < bounds.top - 1 || rect.bottom > bounds.bottom + 1)
+          .map(({ label }) => label);
+        return { scrolled, outside };
+      });
+      expect(overflow.scrolled, `library toolbar scrolls horizontally at ${width}px`).toBeLessThanOrEqual(1);
+      expect(overflow.outside, `library toolbar controls escape the toolbar at ${width}px`).toEqual([]);
+      await expectNoHorizontalOverflow(page, `library at ${width}px`);
+    }
   });
 });
