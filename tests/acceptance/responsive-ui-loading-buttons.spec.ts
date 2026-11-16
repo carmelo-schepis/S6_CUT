@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type Request } from "@playwright/test";
 import type { Job, Project, ProviderProfile } from "../../web/src/types";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -12,9 +12,20 @@ test.beforeEach(({}, testInfo) => skipOnIOSStatusView(testInfo));
 test.use({ serviceWorkers: "block" });
 
 const artifacts = path.resolve(process.cwd(), "test-artifacts", "responsive-ui-loading-buttons");
-// A cancelled fetch, as Chromium and WebKit word it (music-voice-replacement-real
-// and production-section-smoke treat the pair the same way).
-const cancelledRequest = ["net::ERR_ABORTED", "Load request cancelled"];
+// A cancelled fetch, as Chromium and WebKit word it. Only the deliberate
+// teardown is excused: a media element's own request, and the API-served
+// Library asset preview that recent project cards autoplay. A cancelled API
+// call anywhere else is still a failure (production-section-smoke applies the
+// same scope to media).
+const isCancellation = (request: Request) => ["net::ERR_ABORTED", "Load request cancelled"].includes(request.failure()?.errorText || "");
+const isLibraryPreview = (request: Request) => {
+  try {
+    return /^\/api\/v1\/library\/assets\/[^/]+\/preview$/.test(new URL(request.url()).pathname);
+  } catch {
+    return false;
+  }
+};
+const isCancelledMedia = (request: Request) => isCancellation(request) && (request.resourceType() === "media" || isLibraryPreview(request));
 const viewports = [
   ["desktop", 1440, 900],
   ["laptop", 1024, 768],
@@ -120,15 +131,13 @@ async function assertContained(page: Page, selector: string, container: string) 
 
 test.describe("responsive loading and creation controls", () => {
   test("keeps creation states and controls clean at every required viewport", async ({ page, browserName }) => {
-    const consoleErrors: string[] = [];
     const failedRequests: string[] = [];
-    const shots = screenshotCspAllowance(browserName);
-    page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
+    const shots = screenshotCspAllowance(page, browserName);
     // Recent project cards autoplay a source preview (b64f1a0), so moving to the
     // next viewport cancels whatever media fetch is still in flight. An aborted
     // request is the navigation working, not the application failing — the same
     // filter the other suites in this directory apply.
-    page.on("requestfailed", (request) => { if (!cancelledRequest.includes(request.failure()?.errorText || "")) failedRequests.push(`${request.method()} ${request.url()} ${request.failure()?.errorText || ""}`); });
+    page.on("requestfailed", (request) => { if (!isCancelledMedia(request)) failedRequests.push(`${request.method()} ${request.url()} ${request.failure()?.errorText || ""}`); });
     test.setTimeout(180_000);
     await fs.mkdir(artifacts, { recursive: true });
     for (const [name, width, height] of viewports) {
@@ -189,17 +198,15 @@ test.describe("responsive loading and creation controls", () => {
         await shots.take(() => page.screenshot({ path: path.join(artifacts, "creation-mobile-tiny-form.png"), fullPage: false }));
       }
     }
-    expect(shots.visible(consoleErrors), "browser console errors").toEqual([]);
+    expect(shots.visible(), "browser console errors").toEqual([]);
     expect(failedRequests, "failed application requests").toEqual([]);
   });
 
   test("renders the representative processing fixture without concatenation or overlap", async ({ page, browserName }) => {
     test.setTimeout(60_000);
-    const consoleErrors: string[] = [];
     const failedRequests: string[] = [];
-    const shots = screenshotCspAllowance(browserName);
-    page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
-    page.on("requestfailed", (request) => { if (!cancelledRequest.includes(request.failure()?.errorText || "")) failedRequests.push(`${request.method()} ${request.url()} ${request.failure()?.errorText || ""}`); });
+    const shots = screenshotCspAllowance(page, browserName);
+    page.on("requestfailed", (request) => { if (!isCancelledMedia(request)) failedRequests.push(`${request.method()} ${request.url()} ${request.failure()?.errorText || ""}`); });
     await installFixtures(page);
     for (const [name, width, height] of viewports) {
       await page.setViewportSize({ width, height });
@@ -230,7 +237,7 @@ test.describe("responsive loading and creation controls", () => {
       for (let index = 1; index < measure.blocks.length; index += 1) expect(measure.blocks[index].top).toBeGreaterThanOrEqual(measure.blocks[index - 1].bottom - 1);
       if (name === "desktop" || name === "mobile-tiny") await shots.take(() => processing.screenshot({ path: path.join(artifacts, `loading-${name}.png`) }));
     }
-    expect(shots.visible(consoleErrors), "browser console errors").toEqual([]);
+    expect(shots.visible(), "browser console errors").toEqual([]);
     expect(failedRequests, "failed application requests").toEqual([]);
   });
 
