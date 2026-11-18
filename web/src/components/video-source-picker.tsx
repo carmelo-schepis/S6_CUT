@@ -1,4 +1,4 @@
-import { useId, useRef, useState, type ReactNode } from "react";
+import { useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Film, Link2, UploadCloud } from "lucide-react";
 import { Button } from "./common";
 
@@ -43,18 +43,30 @@ export function VideoSourcePicker({ mode, onModeChange, file, onFile, url, onUrl
     setDragActive(false);
     onModeChange(next);
   };
+  const handleTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    const tabs = Array.from(event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? []);
+    const currentIndex = tabs.indexOf(event.currentTarget);
+    const nextIndex = event.key === "ArrowRight" ? (currentIndex + 1) % tabs.length
+      : event.key === "ArrowLeft" ? (currentIndex - 1 + tabs.length) % tabs.length
+        : event.key === "Home" ? 0
+          : event.key === "End" ? tabs.length - 1 : -1;
+    if (nextIndex < 0 || !tabs.length) return;
+    event.preventDefault();
+    tabs[nextIndex].click();
+    tabs[nextIndex].focus();
+  };
   return <div className="video-source-picker">
     <div className="mini-tabs source-tabs" role="tablist" aria-label="Source video type">
-      <button type="button" role="tab" aria-selected={mode === "file"} className={mode === "file" ? "active" : ""} onClick={() => changeMode("file")}><UploadCloud size={14} /> Local file</button>
-      <button type="button" role="tab" aria-selected={mode === "url"} className={mode === "url" ? "active" : ""} onClick={() => changeMode("url")}><Link2 size={14} /> YouTube</button>
-      {children && <button type="button" role="tab" aria-selected={mode === "library"} className={mode === "library" ? "active" : ""} onClick={() => changeMode("library")}><Film size={14} /> Library</button>}
+      <button type="button" id="source-file-tab" role="tab" aria-controls="source-file-panel" aria-selected={mode === "file"} tabIndex={mode === "file" ? 0 : -1} className={mode === "file" ? "active" : ""} onKeyDown={handleTabKeyDown} onClick={() => changeMode("file")}><UploadCloud size={14} /> Local file</button>
+      <button type="button" id="source-url-tab" role="tab" aria-controls="source-url-panel" aria-selected={mode === "url"} tabIndex={mode === "url" ? 0 : -1} className={mode === "url" ? "active" : ""} onKeyDown={handleTabKeyDown} onClick={() => changeMode("url")}><Link2 size={14} /> YouTube</button>
+      {children && <button type="button" id="source-library-tab" role="tab" aria-controls="source-library-panel" aria-selected={mode === "library"} tabIndex={mode === "library" ? 0 : -1} className={mode === "library" ? "active" : ""} onKeyDown={handleTabKeyDown} onClick={() => changeMode("library")}><Film size={14} /> Library</button>}
     </div>
-    {mode === "file" && <div className={`drop-zone ${file ? "has-file" : ""} ${dragActive ? "drag-active" : ""}`} role="group" aria-label="Local video source" aria-describedby={instructionsId} onDragEnter={(event) => { event.preventDefault(); dragDepth.current += 1; setDragActive(true); }} onDragOver={(event) => { event.preventDefault(); setDragActive(true); }} onDragLeave={(event) => { event.preventDefault(); dragDepth.current = Math.max(0, dragDepth.current - 1); if (dragDepth.current === 0) setDragActive(false); }} onDrop={(event) => { event.preventDefault(); dragDepth.current = 0; setDragActive(false); if (event.dataTransfer.files.length > 1) { onFile(null, "Choose one video file at a time."); return; } select(event.dataTransfer.files[0]); }}>
+    {mode === "file" && <div id="source-file-panel" role="tabpanel" aria-labelledby="source-file-tab" tabIndex={0}><div className={`drop-zone ${file ? "has-file" : ""} ${dragActive ? "drag-active" : ""}`} role="group" aria-label="Local video source" aria-describedby={instructionsId} onDragEnter={(event) => { event.preventDefault(); dragDepth.current += 1; setDragActive(true); }} onDragOver={(event) => { event.preventDefault(); setDragActive(true); }} onDragLeave={(event) => { event.preventDefault(); dragDepth.current = Math.max(0, dragDepth.current - 1); if (dragDepth.current === 0) setDragActive(false); }} onDrop={(event) => { event.preventDefault(); dragDepth.current = 0; setDragActive(false); if (event.dataTransfer.files.length > 1) { onFile(null, "Choose one video file at a time."); return; } select(event.dataTransfer.files[0]); }}>
       <input ref={input} type="file" accept={VIDEO_ACCEPT} aria-label="Choose video file" hidden onChange={(event) => { select(event.target.files?.[0]); event.currentTarget.value = ""; }} />
       <span id={instructionsId} className="sr-only">Use Browse files to choose one video, or drop one video here.</span>
       {file ? <><Film size={25} /><strong title={file.name}>{file.name}</strong><span>{humanFileSize(file.size)} · ready to validate</span><div className="source-actions"><button type="button" onClick={() => input.current?.click()}>Choose another</button><button type="button" onClick={() => onFile(null)}>Remove</button></div></> : <><UploadCloud size={26} /><strong>Drop a video here</strong><span>MP4, MOV, WebM, MKV, M4V or AVI</span><Button type="button" onClick={() => input.current?.click()}>Browse files</Button></>}
-    </div>}
-    {mode === "url" && <div className="field"><label className="field-label" htmlFor="source-youtube-url">YouTube URL</label><input id="source-youtube-url" type="url" value={url} onChange={(event) => onUrl(event.target.value)} placeholder="https://www.youtube.com/watch?v=..." /><small>Public YouTube links only. DRM and access controls are never bypassed.</small>{downloadAction}</div>}
-    {mode === "library" && children}
+    </div></div>}
+    {mode === "url" && <div id="source-url-panel" role="tabpanel" aria-labelledby="source-url-tab" tabIndex={0}><div className="field"><label className="field-label" htmlFor="source-youtube-url">YouTube URL</label><input id="source-youtube-url" type="url" value={url} onChange={(event) => onUrl(event.target.value)} placeholder="https://www.youtube.com/watch?v=..." /><small>Public YouTube links only. DRM and access controls are never bypassed.</small>{downloadAction}</div></div>}
+    {mode === "library" && <div id="source-library-panel" role="tabpanel" aria-labelledby="source-library-tab" tabIndex={0}>{children}</div>}
   </div>;
 }

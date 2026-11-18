@@ -15,6 +15,28 @@ describe("VideoSourcePicker", () => {
     expect(onFile).toHaveBeenCalledWith(expect.any(File));
   });
 
+  it("exposes source choices as accessible tabs with a labelled panel", () => {
+    renderPicker();
+    const tablist = screen.getByRole("tablist", { name: "Source video type" });
+    const localTab = screen.getByRole("tab", { name: "Local file" });
+    const urlTab = screen.getByRole("tab", { name: "YouTube" });
+    expect(tablist).toContainElement(localTab);
+    expect(localTab).toHaveAttribute("aria-selected", "true");
+    expect(localTab).toHaveAttribute("tabindex", "0");
+    expect(urlTab).toHaveAttribute("tabindex", "-1");
+    expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", "source-file-tab");
+  });
+
+  it("moves focus and selection with the tab arrow keys", () => {
+    const onModeChange = vi.fn();
+    render(<VideoSourcePicker mode="file" onModeChange={onModeChange} file={null} onFile={vi.fn()} url="" onUrl={vi.fn()} />);
+    const localTab = screen.getByRole("tab", { name: "Local file" });
+    const urlTab = screen.getByRole("tab", { name: "YouTube" });
+    fireEvent.keyDown(localTab, { key: "ArrowRight" });
+    expect(onModeChange).toHaveBeenCalledWith("url");
+    expect(urlTab).toHaveFocus();
+  });
+
   it("rejects unsupported and multiple dropped files", () => {
     const onFile = renderPicker();
     const zone = screen.getByText("Drop a video here").parentElement!;
