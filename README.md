@@ -163,7 +163,7 @@ Copy `.env.example` to `.env`. Important values:
 | `S6_MAX_SOURCE_SECONDS` | `14400` | Four-hour duration ceiling |
 | `S6_JOB_RETENTION_DAYS` | `30` | Operator retention target |
 | `S6_MEDIA_URL_TTL_SECONDS` | `900` | Signed media/download-link lifetime |
-| `S6_YTDLP_CONNECT_TIMEOUT` | `45` | YouTube connection timeout in seconds |
+| `S6_YTDLP_CONNECT_TIMEOUT` | `45` | yt-dlp per-socket connection/read timeout in seconds |
 | `S6_YTDLP_SETUP_TIMEOUT` | `300` | YouTube extractor setup timeout in seconds |
 | `S6_YTDLP_INACTIVITY_TIMEOUT` | `300` | No-byte inactivity period before a download fails; actively progressing large files are not cut off |
 
