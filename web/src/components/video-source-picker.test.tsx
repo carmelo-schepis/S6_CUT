@@ -28,6 +28,20 @@ describe("VideoSourcePicker", () => {
     expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", localTab.id);
   });
 
+  it("keeps tab and panel relationships unique across picker instances", () => {
+    const picker = <VideoSourcePicker mode="file" onModeChange={vi.fn()} file={null} onFile={vi.fn()} url="" onUrl={vi.fn()} />;
+    render(<>{picker}{picker}</>);
+    const tabs = screen.getAllByRole("tab");
+    const panels = screen.getAllByRole("tabpanel");
+    expect(new Set(tabs.map((tab) => tab.id)).size).toBe(tabs.length);
+    expect(new Set(panels.map((panel) => panel.id)).size).toBe(panels.length);
+    panels.forEach((panel) => {
+      const tab = document.getElementById(panel.getAttribute("aria-labelledby")!);
+      expect(tab).toBeTruthy();
+      expect(document.getElementById(tab!.getAttribute("aria-controls")!)).toBe(panel);
+    });
+  });
+
   it("moves focus and selection with the tab arrow keys", () => {
     function Harness() {
       const [mode, setMode] = useState<"file" | "url" | "library">("file");
