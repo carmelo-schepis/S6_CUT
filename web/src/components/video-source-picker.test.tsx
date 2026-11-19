@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { VideoSourcePicker } from "./video-source-picker";
 
@@ -24,17 +25,35 @@ describe("VideoSourcePicker", () => {
     expect(localTab).toHaveAttribute("aria-selected", "true");
     expect(localTab).toHaveAttribute("tabindex", "0");
     expect(urlTab).toHaveAttribute("tabindex", "-1");
-    expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", "source-file-tab");
+    expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", localTab.id);
   });
 
   it("moves focus and selection with the tab arrow keys", () => {
-    const onModeChange = vi.fn();
-    render(<VideoSourcePicker mode="file" onModeChange={onModeChange} file={null} onFile={vi.fn()} url="" onUrl={vi.fn()} />);
-    const localTab = screen.getByRole("tab", { name: "Local file" });
-    const urlTab = screen.getByRole("tab", { name: "YouTube" });
-    fireEvent.keyDown(localTab, { key: "ArrowRight" });
-    expect(onModeChange).toHaveBeenCalledWith("url");
-    expect(urlTab).toHaveFocus();
+    function Harness() {
+      const [mode, setMode] = useState<"file" | "url" | "library">("file");
+      return <VideoSourcePicker mode={mode} onModeChange={setMode} file={null} onFile={vi.fn()} url="" onUrl={vi.fn()} children={<p>Library content</p>} />;
+    }
+    render(<Harness />);
+    const tabs = screen.getAllByRole("tab");
+
+    const assertMode = (index: number) => {
+      const selected = screen.getByRole("tab", { name: ["Local file", "YouTube", "Library"][index] });
+      expect(selected).toHaveAttribute("aria-selected", "true");
+      expect(tabs.filter((tab) => tab.getAttribute("tabindex") === "0")).toEqual([selected]);
+      expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", selected.id);
+      expect(document.getElementById(selected.getAttribute("aria-controls")!)).toBe(screen.getByRole("tabpanel"));
+
+    };
+    fireEvent.keyDown(tabs[0], { key: "ArrowRight" });
+    expect(tabs[1]).toHaveFocus(); assertMode(1);
+    fireEvent.keyDown(tabs[1], { key: "ArrowLeft" });
+    expect(tabs[0]).toHaveFocus(); assertMode(0);
+    fireEvent.keyDown(tabs[0], { key: "ArrowLeft" });
+    expect(tabs[2]).toHaveFocus(); assertMode(2);
+    fireEvent.keyDown(tabs[2], { key: "Home" });
+    expect(tabs[0]).toHaveFocus(); assertMode(0);
+    fireEvent.keyDown(tabs[0], { key: "End" });
+    expect(tabs[2]).toHaveFocus(); assertMode(2);
   });
 
   it("rejects unsupported and multiple dropped files", () => {
