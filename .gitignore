@@ -74,6 +74,9 @@ web/dist/
 .venv/
 __pycache__/
 .pytest_cache/
+.ruff_cache/
+.cache/
+.vscode/
 .coverage
 data/
 *.pyc
