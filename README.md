@@ -268,6 +268,8 @@ npm run build
 docker compose config
 ```
 
+On Windows (PowerShell), run the engine tests with `.venv\Scripts\python -m pytest engine\tests -q`.
+
 The combined frontend and engine quality gate also checks that retired providers do not return to customer-facing source, then runs the checks above that are available through npm:
 
 ```bash
