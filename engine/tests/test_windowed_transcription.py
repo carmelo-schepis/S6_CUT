@@ -177,7 +177,9 @@ def test_auto_language_is_detected_once_and_pinned_for_later_windows(tmp_path: P
     assert len(FakeModel.calls) == 5
 
 
-def test_progress_stays_between_zero_and_one_and_never_goes_backwards(tmp_path: Path, settings: Settings, tiny_windows: None) -> None:
+def test_progress_stays_between_zero_and_one_and_never_goes_backwards(tmp_path: Path, settings: Settings, tiny_windows: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Progress reporting probes the duration with FFprobe; stub it so the test runs without FFmpeg installed.
+    monkeypatch.setattr(media, "_media_duration", lambda *_: 5.0)
     path = write_wav(tmp_path / "progress.wav", 5.0)
     seen: list[float] = []
     media.transcribe(path, settings, progress_callback=lambda fraction, _="": seen.append(fraction))
