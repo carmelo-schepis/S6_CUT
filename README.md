@@ -163,7 +163,8 @@ Copy `.env.example` to `.env`. Important values:
 | `S6_MAX_SOURCE_SECONDS` | `14400` | Four-hour duration ceiling |
 | `S6_JOB_RETENTION_DAYS` | `30` | Operator retention target |
 | `S6_MEDIA_URL_TTL_SECONDS` | `900` | Signed media/download-link lifetime |
-| `S6_YTDLP_CONNECT_TIMEOUT` | `45` | YouTube connection/setup timeout in seconds |
+| `S6_YTDLP_CONNECT_TIMEOUT` | `45` | yt-dlp per-socket connection/read timeout in seconds |
+| `S6_YTDLP_SETUP_TIMEOUT` | `300` | YouTube extractor setup timeout in seconds |
 | `S6_YTDLP_INACTIVITY_TIMEOUT` | `300` | No-byte inactivity period before a download fails; actively progressing large files are not cut off |
 
 The OpenRouter profile can be configured in Settings. Persistent secrets are encrypted with a locally generated instance key and are never returned by read APIs. Headless deployments may set `OPENROUTER_API_KEY` in `.env` or Docker secrets orchestration. Protect `.env` like any other credential file.
