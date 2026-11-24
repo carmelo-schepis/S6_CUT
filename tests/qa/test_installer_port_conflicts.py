@@ -71,7 +71,7 @@ class InstallerPortConflictTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertTrue(config.startswith(original))
                 self.assertIn("effective=49152", result.stdout)
-                self.assertIn("compose up -d --no-build | engine=0", calls)
+                self.assertIn("compose up -d --force-recreate --no-build | engine=0", calls)
                 self.assertEqual(calls.count("--build"), 1)
 
     def test_frontend_only_and_both_default_conflicts_recover(self):
@@ -87,6 +87,7 @@ class InstallerPortConflictTests(unittest.TestCase):
                 self.assertEqual(calls.count("--no-build"), 1 if failure == "none" else 2)
                 if failure != "none":
                     self.assertIn("S6_ENGINE_PORT=49152", config)
+                    self.assertIn("compose up -d --force-recreate --no-build", calls)
 
     def test_custom_or_exported_web_ports_remain_fatal(self):
         for options in ({"web_port": "18080"}, {"exported_web": True}):
