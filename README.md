@@ -52,7 +52,9 @@ Frontend: http://127.0.0.1:8080
 Backend:  http://localhost:8001
 ```
 
-Fresh desktop installs publish the web gateway and the engine debug port on IPv4 loopback. Existing `.env` files are preserved. Review `S6_PORT` in your installation's `.env`: a bare port such as `S6_PORT=8080` publishes on all host interfaces. For local access only, use `S6_PORT=127.0.0.1:8080` (or keep your current port number) and run `docker compose up -d` in the install directory. An exported `S6_PORT` takes precedence over the file.
+Fresh desktop installs publish the web gateway and engine debug port on IPv4 loopback. On Linux with Docker Engine older than 28.0.0, machines on the same local network segment can still reach loopback-published ports. Upgrade Docker Engine or restrict access at the host firewall. See [Docker port publishing](https://docs.docker.com/engine/network/port-publishing/).
+
+Existing `.env` files are preserved. A saved numeric binding such as `S6_PORT=8080` publishes on all host interfaces. If that port is occupied, choose another binding in `.env` before retrying. To bind to loopback, use `S6_PORT=127.0.0.1:8080` with the port number you want and run `docker compose up -d` in the install directory. An exported `S6_PORT` takes precedence over the file.
 
 For intentional remote access, set `S6_PORT=<host-address>:8080` to publish on a specific address. The gateway forwards `/api/`, including the API docs, and S6_cut has no built-in authentication. Anyone who can reach the gateway can access your projects and Library, including deletion. Restrict remote access to trusted users with a VPN access policy or an authenticated HTTPS reverse proxy.
 

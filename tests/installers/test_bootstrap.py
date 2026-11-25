@@ -77,6 +77,8 @@ if sys.argv[1:3] == ['compose', 'up']:
     if os.environ.get('S6_TEST_WEB_OCCUPIED') and web == '127.0.0.1:8080':
         print('failed to bind host port 127.0.0.1:8080/tcp: address already in use', file=sys.stderr)
         sys.exit(1)
+if sys.argv[1:] == ['compose', 'ps', '-q', '--status', 'running', 'engine']:
+    print('engine-container')
 if sys.argv[1:4] == ['compose', 'port', 'engine']:
     print('127.0.0.1:' + os.environ.get('S6_ENGINE_PORT', '8001'))
 if sys.argv[1:4] == ['compose', 'port', 'web']:

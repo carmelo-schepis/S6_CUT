@@ -205,13 +205,17 @@ start_containers() {
     else
       status=$?
     fi
+    # Web starts after the engine. Check which service reached the bind attempt
+    # when a custom port overlaps the other service's default.
     if [[ "$engine_default" == true && "$recover_engine" == false ]] &&
-      grep -Eq '127\.0\.0\.1:8001.*(address already in use|port is already allocated)' "$output"; then
+      grep -Eq '127\.0\.0\.1:8001.*(address already in use|port is already allocated)' "$output" &&
+      [[ -z "$(docker compose ps -q --status running engine)" ]]; then
       warn "Engine port 8001 is already in use; asking Docker for a free loopback port."
       compose_env+=(S6_ENGINE_PORT=0)
       recover_engine=true
     elif [[ "$web_default" == true && "$recover_web" == false ]] &&
-      grep -Eq '127\.0\.0\.1:8080.*(address already in use|port is already allocated)' "$output"; then
+      grep -Eq '127\.0\.0\.1:8080.*(address already in use|port is already allocated)' "$output" &&
+      [[ -n "$(docker compose ps -q --status running engine)" ]]; then
       warn "Frontend port 8080 is already in use; asking Docker for a free loopback port."
       compose_env+=(S6_PORT=127.0.0.1:0)
       recover_web=true
@@ -224,14 +228,14 @@ start_containers() {
   done
   rm -f "$output"
   published_web="$("${compose_env[@]}" docker compose port web 8080)"
-  published_web="${published_web%%$'\n'*}"
-  [[ "$published_web" == *:* ]] || die "Docker did not publish web port 8080."
+  published_web="$(check_published_binding "$published_web" web 8080)"
   case "$published_web" in
     0.0.0.0:*) published_web="127.0.0.1:${published_web##*:}" ;;
     \[::\]:*|:::*) published_web="[::1]:${published_web##*:}" ;;
   esac
   WEB_URL="http://$published_web"
   ENGINE_PORT="$("${compose_env[@]}" docker compose port engine 8001)"
+  ENGINE_PORT="$(check_published_binding "$ENGINE_PORT" engine 8001)"
   ENGINE_PORT="${ENGINE_PORT##*:}"
   for service in engine web; do
     if [[ "$service" == engine && "$recover_engine" == true ]]; then
@@ -246,15 +250,21 @@ start_containers() {
       continue
     fi
     assigned_port="${assigned_binding##*:}"
-    if [[ ! "$assigned_port" =~ ^[0-9]+$ ]] ||
-      (( 10#$assigned_port < 1 || 10#$assigned_port > 65535 )); then
-      die "Could not determine Docker's assigned $service port."
-    fi
     # Append only the selected overrides, preserving existing configuration.
     printf '\n# Installer-selected port: the default %s was occupied.\n%s=%s\n' "$target" "$name" "$assigned_binding" >> .env
     ok "$service host port $assigned_port saved in .env"
   done
   ok "Containers started"
+}
+
+check_published_binding() {
+  local binding="${1%%$'\n'*}" service="$2" target="$3" port
+  port="${binding##*:}"
+  if [[ "$binding" != ?*:* || ! "$port" =~ ^[0-9]{1,5}$ ]] ||
+    (( 10#$port < 1 || 10#$port > 65535 )); then
+    die "Could not determine Docker's published address. Check 'docker compose port $service $target'."
+  fi
+  printf '%s' "$binding"
 }
 
 read_env() {
