@@ -94,6 +94,20 @@ check_prerequisites() {
   docker info >/dev/null 2>&1 \
     || die "Docker is installed but its engine is not running or not reachable. Start Docker (for example Docker Desktop), wait until it is ready, then re-run the install command."
   ok "Docker engine is running"
+  if [[ "$(uname -s)" == "Linux" ]]; then
+    local engine_version engine_major engine_suffix
+    if ! engine_version=$(docker version --format '{{.Server.Version}}' 2>/dev/null) ||
+      [[ ! "$engine_version" =~ ^([0-9]{1,9})\.[0-9]+\.[0-9]+([-+~][a-zA-Z0-9][a-zA-Z0-9._+~-]*)?$ ]]; then
+      die "Could not verify the Docker Engine server version. Linux installs require Docker Engine 28.0.0 or newer. Check 'docker version' and re-run the install command."
+    fi
+    engine_major="${BASH_REMATCH[1]}"
+    engine_suffix="${BASH_REMATCH[2]}"
+    # Accept stable build metadata and numeric distribution package revisions.
+    if (( 10#$engine_major < 28 )) ||
+      [[ -n "$engine_suffix" && "$engine_suffix" != +* && "$engine_suffix" != [-~][0-9]* ]]; then
+      die "Docker Engine $engine_version is installed. Linux installs require a stable Docker Engine release of 28.0.0 or newer. Upgrade Docker Engine and re-run the install command."
+    fi
+  fi
   local compose_version_output compose_major compose_minor compose_patch
   if ! compose_version_output=$(docker compose version 2>&1); then
     die "Docker Compose 2.3 or newer is required but the 'docker compose' command is missing. Install Docker Compose 2.3 or newer (https://docs.docker.com/compose/install/), then re-run the install command."

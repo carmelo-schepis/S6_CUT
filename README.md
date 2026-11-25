@@ -4,6 +4,14 @@ S6_cut is a free, open-source, local-first video studio. Drop a long video or pa
 
 There is no S6_cut account, credit system, watermark, artificial usage limit, or mandatory hosted application backend. The web gateway and private media engine run on hardware you control.
 
+## Local-only access on Linux
+
+Fresh desktop installs publish the web gateway and the engine debug port on `127.0.0.1`. Use Docker Engine **28.0.0 or newer** to rely on that bind address for local-only access. Check the Docker server version with `docker version --format '{{.Server.Version}}'`. On older releases, other devices on the same local network segment can reach loopback-published ports. Anyone who can reach either port can use the unauthenticated API to access projects and Library media. See [Docker port publishing](https://docs.docker.com/engine/network/port-publishing/).
+
+The Linux desktop installer checks the Docker server version before installing or updating S6_cut. It requires a verifiable stable release of Docker Engine 28.0.0 or newer.
+
+If you must run an older release, use Docker Compose to [install manually](#manual-installation-docker-compose) or [update an existing installation](#update-an-existing-installation). Before starting S6_cut, configure a host firewall to block off-host access to both Docker-published TCP ports. The defaults are `8080` for the web gateway and `8001` for the engine. Match the firewall rules to the ports configured by `S6_PORT` and `S6_ENGINE_PORT`. Docker-published traffic can bypass ordinary UFW rules. See [Docker firewall guidance](https://docs.docker.com/engine/network/packet-filtering-firewalls/#docker-and-ufw).
+
 ## One-paste install
 
 With Docker running, paste the command for your OS. Linux and macOS require Compose v2.3 or newer; Windows requires Compose 2.26 or newer because Compose v2.25 has a `config --format json` regression.
@@ -52,8 +60,6 @@ Frontend: http://127.0.0.1:8080
 Backend:  http://localhost:8001
 ```
 
-Fresh desktop installs publish the web gateway and engine debug port on IPv4 loopback. On Linux with Docker Engine older than 28.0.0, machines on the same local network segment can still reach loopback-published ports. Upgrade Docker Engine or restrict access at the host firewall. See [Docker port publishing](https://docs.docker.com/engine/network/port-publishing/).
-
 Existing `.env` files are preserved. A saved numeric binding such as `S6_PORT=8080` publishes on all host interfaces. If that port is occupied, choose another binding in `.env` before retrying. To bind to loopback, use `S6_PORT=127.0.0.1:8080` with the port number you want and run `docker compose up -d` in the install directory. An exported `S6_PORT` takes precedence over the file.
 
 For intentional remote access, set `S6_PORT=<host-address>:8080` to publish on a specific address. The gateway forwards `/api/`, including the API docs, and S6_cut has no built-in authentication. Anyone who can reach the gateway can access your projects and Library, including deletion. Restrict remote access to trusted users with a VPN access policy or an authenticated HTTPS reverse proxy.
@@ -86,7 +92,7 @@ The requested count is preserved. The effective target is confirmed against FFpr
 
 ## Manual installation (Docker Compose)
 
-Prefer to run the commands yourself, or want to pin a specific revision? Clone and start S6_cut manually:
+Before starting S6_cut on Linux, check the [requirements for local-only access](#local-only-access-on-linux).
 
 ```bash
 git clone https://github.com/carmelo-schepis/S6_CUT.git
@@ -102,7 +108,17 @@ Open <http://localhost:8080>. To stop without deleting state:
 docker compose down
 ```
 
-Only nginx publishes a port to your network. The FastAPI engine stays on the Compose network and additionally binds the host loopback at <http://localhost:8001> (API docs at `/api/docs`) for local debugging. Do not expose the raw engine HTTP port to the public internet; use an authenticated HTTPS reverse proxy or VPN for remote access.
+The web gateway uses the address set by `S6_PORT`. The FastAPI engine uses the Compose network and publishes a debug port at <http://localhost:8001> with API docs at `/api/docs`. Keep the debug port restricted to the host. For remote access, put the web gateway behind an authenticated HTTPS reverse proxy or VPN.
+
+### Update an existing installation
+
+On Linux with an older Docker Engine, put the [host firewall rules](#local-only-access-on-linux) in place before rebuilding. With Git installed on the host, run this from your existing checkout. Replace `~/s6_cut` if you installed in a different directory.
+
+```bash
+cd ~/s6_cut && git pull --ff-only && docker compose up -d --build
+```
+
+Compose reuses the checkout's `.env` and data directory. If you set ports or the data path through exported variables, use the same values for the update.
 
 ## Local development
 
@@ -154,7 +170,7 @@ Copy `.env.example` to `.env`. Important values:
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `S6_PORT` | `127.0.0.1:8080` | Published web address and port. A numeric override publishes on all host interfaces. |
-| `S6_ENGINE_PORT` | `8001` | Engine API port, bound to the host loopback only (API docs and debugging) |
+| `S6_ENGINE_PORT` | `8001` | Engine API port for debugging. Publishes to `127.0.0.1`. See [local-only access on Linux](#local-only-access-on-linux). |
 | `S6_DATA_PATH` | `./data` | Persistent database, jobs, uploads, Library, cache, models, exports, and instance secrets |
 | `S6_WHISPER_MODEL` | `base` | CPU-friendly local Faster-Whisper model used for speech transcription and captions in Auto and Smart clips |
 | `S6_WHISPER_DEVICE` | `cpu` | Whisper device: `cpu`, `auto`, or `cuda` |
