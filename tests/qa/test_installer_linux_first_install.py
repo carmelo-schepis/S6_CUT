@@ -41,11 +41,24 @@ class DataOwnershipTests(unittest.TestCase):
 class FailedStartRecoveryTests(unittest.TestCase):
     def up_command(self, created):
         with tempfile.TemporaryDirectory() as tmp:
+            docker = Path(tmp) / "docker"
+            docker.write_text(
+                '#!/bin/bash\n'
+                'case "$2:$3" in\n'
+                '  ps:*) printf "%s" "' + created + '";;\n'
+                '  port:web) echo 127.0.0.1:8080;;\n'
+                '  port:engine) echo 127.0.0.1:8001;;\n'
+                '  *) echo "$*" >> calls;;\n'
+                'esac\n'
+            )
+            docker.chmod(0o755)
             shell = "\n".join([
                 "set -Eeuo pipefail", 'INSTALL_DIR="$PWD"', "FORCE_RECREATE=false",
+                'DEFAULT_WEB_BINDING=127.0.0.1:8080',
+                'export PATH="$PWD:$PATH"',
                 "step() { :; }; ok() { :; }; info() { :; }; warn() { :; }",
-                'docker() { if [[ "$2" == ps ]]; then printf "%s" "' + created + '"; return 0; fi; echo "$*" >> calls; }',
-                definitions("read_env", "start_containers"), "start_containers", "cat calls",
+                definitions("read_env", "start_containers", "check_published_binding"),
+                "start_containers", "cat calls",
             ])
             return subprocess.run(["bash", "-c", shell], cwd=tmp, capture_output=True, text=True, check=True).stdout
 

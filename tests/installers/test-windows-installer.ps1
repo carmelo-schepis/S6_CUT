@@ -73,7 +73,7 @@ function docker {
     }
     if ($Call -eq "compose config --format json") {
         # Mocked Compose resolution for this harness; this is not live install evidence.
-        $WebBinding = "8080"
+        $WebBinding = "127.0.0.1:8080"
         $EnginePort = "8001"
         if (Test-Path -LiteralPath ".env") {
             foreach ($Line in Get-Content -LiteralPath ".env") {
@@ -120,7 +120,7 @@ function Invoke-WebRequest {
 function New-TestRepository {
     New-Item -ItemType Directory -Path $SourceRepo -Force | Out-Null
     Set-Content -LiteralPath (Join-Path $SourceRepo "compose.yaml") -Value "services: {}" -Encoding Ascii
-    Set-Content -LiteralPath (Join-Path $SourceRepo ".env.example") -Value @("S6_PORT=8080", "S6_ENGINE_PORT=8001", "CUSTOM=keep") -Encoding Ascii
+    Copy-Item -LiteralPath (Join-Path (Split-Path $InstallerPath -Parent) ".env.example") -Destination $SourceRepo
     & $GitPath -C $SourceRepo init -b main | Out-Null
     & $GitPath -C $SourceRepo add compose.yaml .env.example
     & $GitPath -C $SourceRepo -c user.name="Windows Harness" -c user.email="harness@example.invalid" commit -m "fixture" | Out-Null
@@ -154,8 +154,8 @@ try {
     $DefaultPath = Join-Path $TestRoot "default install with spaces"
     $Default = Invoke-MockedInstall -Name "default" -Target $DefaultPath
     Assert-Equal $null $Default.Error "Default installer path should succeed."
-    Assert-Equal "http://127.0.0.1:8080/api/health" $Default.HealthUrls[0] "Default readiness URL should use the numeric default."
-    Assert-True ($Default.Output -match 'Frontend: http://localhost:8080') "Default frontend URL was not reported correctly."
+    Assert-Equal "http://127.0.0.1:8080/api/health" $Default.HealthUrls[0] "Default readiness URL should use the loopback default."
+    Assert-True ($Default.Output -match 'Frontend: http://127\.0\.0\.1:8080') "Default frontend URL was not reported correctly."
     Assert-True ($Default.Output -match 'Backend:\s+http://localhost:8001') "Default backend URL was not reported correctly."
     Assert-True ($Default.DockerCalls -contains "compose up -d --build") "Default Compose command was not issued."
 

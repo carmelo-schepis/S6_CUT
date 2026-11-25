@@ -22,7 +22,7 @@ curl -fsSL https://raw.githubusercontent.com/carmelo-schepis/S6_CUT/main/install
    ```
 
 3. Clones the repository into `source`, using the host's `git` or, without it, Git in a container.
-4. Creates `source/.env` from `.env.example` on the first run only. It sets `S6_DATA_PATH` to the data dataset and `S6_PORT` to 30180, or the next port that no listening socket and no other app, running or stopped, uses. If the engine's loopback debug port 8001 is taken, it also picks a free `S6_ENGINE_PORT`.
+4. Creates `source/.env` from `.env.example` on the first run only. It sets `S6_DATA_PATH` to the data dataset. For LAN access it overrides the desktop loopback default with a numeric `S6_PORT` of 30180 or the next port unused by a listening socket or another app. If the engine's loopback debug port 8001 is taken, it also picks a free `S6_ENGINE_PORT`.
 5. Gives UID/GID 10001 (the engine user) ownership of the data dataset.
 6. Renders `compose.yaml` + `.env` with `docker compose config` into `<pool>/apps/s6-cut/truenas-app.yaml` (mode 600, because it contains `.env` values such as `OPENROUTER_API_KEY`).
 7. Builds the images on the NAS with TrueNAS's project name (`docker compose -p ix-s6-cut build`), so the app's deploy step does not rebuild. TrueNAS gives a deploy 20 minutes.
@@ -124,9 +124,9 @@ TrueNAS Custom App UI fields and YAML support can change by release. `docker com
 ## Portainer Stack
 
 1. Create a Stack from the repository or upload `compose.yaml`.
-2. Add the variables from `.env.example`; use an absolute `S6_DATA_PATH` on the Docker host.
+2. Use an absolute `S6_DATA_PATH` on the Docker host. For LAN access, set `S6_PORT` to the intended host address and port (for example, `192.168.1.50:8080`). A bare port such as `8080` publishes on all host interfaces. The desktop default `127.0.0.1:8080` allows access from the Docker host.
 3. Deploy the Stack and wait for both health checks.
-4. Open `http://host:S6_PORT` only from a trusted LAN/VPN.
+4. Open the configured web address from a trusted LAN or VPN.
 
 ## Update
 

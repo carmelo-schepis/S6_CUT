@@ -18,44 +18,55 @@ def definitions(*names):
 class InstallerPortConflictTests(unittest.TestCase):
     def run_installer(self, failure="address already in use", port="8001", exported=False,
                       force=False, retry_fails=False, assigned="127.0.0.1:49152",
-                      web_conflict=False, web_port="8080", exported_web=False):
+                      web_conflict=False, web_port="127.0.0.1:8080", exported_web=False,
+                      assigned_web="127.0.0.1:49153"):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             original = "# user config\nS6_ENGINE_PORT=" + port + "\nS6_PORT=" + web_port + "\nS6_DATA_PATH=/keep/my/data\n"
             (root / ".env").write_text(original)
+            docker = root / "docker"
+            docker.write_text(r'''#!/bin/bash
+if [[ "$2" == ps ]]; then
+    if [[ "$*" == "compose ps -q --status running engine" && -e engine-running ]]; then
+        echo engine-container
+    fi
+    exit 0
+fi
+if [[ "$2" == port ]]; then
+    if [[ "$3" == engine ]]; then printf '%s\n' "$ASSIGNED"
+    else printf '%s\n' "$ASSIGNED_WEB"; fi
+    exit 0
+fi
+printf '%s | engine=%s | web=%s\n' "$*" "${S6_ENGINE_PORT:-default}" "${S6_PORT:-default}" >> calls
+if [[ "$RETRY_FAILS" == true && "${S6_ENGINE_PORT:-}" == 0 ]]; then exit 1; fi
+if [[ "$FAILURE" != none && "${S6_ENGINE_PORT:-}" != 0 ]]; then
+    echo "Error response from daemon: 127.0.0.1:$CONFIG_PORT: $FAILURE"
+    exit 17
+fi
+: > engine-running
+if [[ "$WEB_CONFLICT" == true && "${S6_PORT:-}" != 127.0.0.1:0 ]]; then
+    echo "Error response from daemon: $WEB_ERROR_BINDING: address already in use"
+    exit 17
+fi
+''')
+            docker.chmod(0o755)
             shell = "\n".join([
                 "set -Eeuo pipefail", 'INSTALL_DIR="$PWD"',
+                'DEFAULT_WEB_BINDING=127.0.0.1:8080',
                 "FORCE_RECREATE=" + ("true" if force else "false"),
                 'step() { :; }; ok() { :; }; info() { :; }; warn() { echo "$*"; }',
                 'die() { echo "$*" >&2; exit 1; }',
                 "trap 'echo DIAGNOSTICS >&2' ERR",
-                '''docker() {
-                    if [[ "$2" == ps ]]; then return 0; fi
-                    printf '%s | engine=%s\n' "$*" "${S6_ENGINE_PORT:-default}" >> calls
-                    if [[ "$*" == "compose port engine 8001" ]]; then
-                        echo "$ASSIGNED"; return 0
-                    fi
-                    if [[ "$*" == "compose port web 8080" ]]; then
-                        printf '0.0.0.0:49153\\n[::]:49153\\n'; return 0
-                    fi
-                    if [[ "$RETRY_FAILS" == true && "${S6_ENGINE_PORT:-}" == "0" ]]; then return 1; fi
-                    if [[ "$FAILURE" != none && "${S6_ENGINE_PORT:-}" != "0" ]]; then
-                        echo "Error response from daemon: 127.0.0.1:$CONFIG_PORT: $FAILURE"
-                        return 17
-                    fi
-                    if [[ "$WEB_CONFLICT" == true && "${S6_PORT:-}" != "0" ]]; then
-                        echo "Error response from daemon: 0.0.0.0:$WEB_PORT: address already in use"
-                        return 17
-                    fi
-                    return 0
-                }''',
-                definitions("read_env", "start_containers", "web_host_port", "print_summary"), "start_containers", "print_summary",
+                definitions("read_env", "start_containers", "check_published_binding", "print_summary"),
+                "start_containers", "print_summary",
                 'printf "effective=%s\n" "$(read_env S6_ENGINE_PORT 8001)"',
             ])
             env = {k: v for k, v in os.environ.items() if k not in ("S6_ENGINE_PORT", "S6_PORT")}
-            env.update(FAILURE=failure, CONFIG_PORT=port, ASSIGNED=assigned,
+            env.update(PATH=str(root) + os.pathsep + env["PATH"],
+                       FAILURE=failure, CONFIG_PORT=port, ASSIGNED=assigned, ASSIGNED_WEB=assigned_web,
                        RETRY_FAILS="true" if retry_fails else "false",
-                       WEB_CONFLICT="true" if web_conflict else "false", WEB_PORT=web_port)
+                       WEB_CONFLICT="true" if web_conflict else "false",
+                       WEB_ERROR_BINDING=web_port if ":" in web_port else "0.0.0.0:" + web_port)
             if exported:
                 env["S6_ENGINE_PORT"] = port
             if exported_web:
@@ -81,7 +92,8 @@ class InstallerPortConflictTests(unittest.TestCase):
                     failure=failure, web_conflict=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertTrue(config.startswith(original))
-                self.assertIn("S6_PORT=49153", config)
+                self.assertIn("S6_PORT=127.0.0.1:49153", config)
+                self.assertIn("web=127.0.0.1:0", calls)
                 self.assertIn("Frontend: http://127.0.0.1:49153", result.stdout)
                 self.assertEqual(calls.count("--build"), 1)
                 self.assertEqual(calls.count("--no-build"), 1 if failure == "none" else 2)
@@ -89,7 +101,8 @@ class InstallerPortConflictTests(unittest.TestCase):
                     self.assertIn("S6_ENGINE_PORT=49152", config)
 
     def test_custom_or_exported_web_ports_remain_fatal(self):
-        for options in ({"web_port": "18080"}, {"exported_web": True}):
+        for options in ({"web_port": "8080"}, {"web_port": "18080"},
+                        {"web_port": "127.0.0.1:8001"}, {"exported_web": True}):
             with self.subTest(options=options):
                 result, config, calls, original = self.run_installer(
                     failure="none", web_conflict=True, **options)
@@ -125,9 +138,12 @@ class InstallerPortConflictTests(unittest.TestCase):
         self.assertIn("DIAGNOSTICS", result.stderr)
 
     def test_invalid_assigned_port_does_not_change_configuration(self):
-        result, config, _, original = self.run_installer(assigned="invalid")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(config, original)
+        for options in ({"assigned": "invalid"}, {"assigned_web": "127.0.0.1:0"},
+                        {"assigned_web": "127.0.0.1:65536"}):
+            with self.subTest(options=options):
+                result, config, _, original = self.run_installer(**options)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(config, original)
 
 
 if __name__ == "__main__":

@@ -39,7 +39,7 @@ S6_cut installs as a normal app under **Apps → Installed**, with its source an
 
 The installer downloads S6_cut into `~/s6_cut`, creates `.env` on first run, builds the containers, and waits for the app to become ready. Existing installations are updated in place, and your configuration and data are preserved. No GitHub account or API key is required.
 
-On Linux/macOS, if the default engine port `8001` or frontend port `8080` is occupied, the installer retries using a free host port and saves it in `.env`. The engine remains loopback-only. Open the Frontend URL printed when installation finishes; it includes any newly assigned web port. Explicitly exported ports and custom `.env` ports are respected; resolve conflicts for those by changing `S6_ENGINE_PORT` or `S6_PORT` yourself.
+On Linux/macOS, if the default engine port `8001` or frontend port `8080` is occupied, the installer retries using a free loopback port and saves it in `.env`. Open the Frontend URL printed when installation finishes; it includes any newly assigned web port. Explicitly exported ports and custom `.env` ports are respected; resolve conflicts for those by changing `S6_ENGINE_PORT` or `S6_PORT` yourself.
 
 Git is optional: the installer uses your existing Git installation when available, or runs Git inside Docker automatically. Node.js, Python, FFmpeg, and the other application dependencies are installed inside the application containers.
 
@@ -48,11 +48,15 @@ Requirements: a running Docker Engine or Docker Desktop with Compose v2.3 or new
 The default URLs are:
 
 ```text
-Frontend: http://localhost:8080
+Frontend: http://127.0.0.1:8080
 Backend:  http://localhost:8001
 ```
 
-The engine's own port is bound to loopback and is never published to your network. That is not, however, an access control for the API: the web gateway proxies `/api/` — including the API docs at `/api/docs` — through to the engine, and S6_cut has no authentication. The API is therefore reachable from every interface the frontend is published on, which by default is all of them. Anyone who can reach the frontend can create, read and delete your projects and Library media. Set `S6_PORT` to bind it narrower — `S6_PORT=127.0.0.1:8080` restricts it to this machine, and `S6_PORT=<one-address>:8080` to a single interface — or keep it on a trusted network.
+Fresh desktop installs publish the web gateway and engine debug port on IPv4 loopback. On Linux with Docker Engine older than 28.0.0, machines on the same local network segment can still reach loopback-published ports. Upgrade Docker Engine or restrict access at the host firewall. See [Docker port publishing](https://docs.docker.com/engine/network/port-publishing/).
+
+Existing `.env` files are preserved. A saved numeric binding such as `S6_PORT=8080` publishes on all host interfaces. If that port is occupied, choose another binding in `.env` before retrying. To bind to loopback, use `S6_PORT=127.0.0.1:8080` with the port number you want and run `docker compose up -d` in the install directory. An exported `S6_PORT` takes precedence over the file.
+
+For intentional remote access, set `S6_PORT=<host-address>:8080` to publish on a specific address. The gateway forwards `/api/`, including the API docs, and S6_cut has no built-in authentication. Anyone who can reach the gateway can access your projects and Library, including deletion. Restrict remote access to trusted users with a VPN access policy or an authenticated HTTPS reverse proxy.
 
 To uninstall while keeping your data:
 
@@ -149,7 +153,7 @@ Copy `.env.example` to `.env`. Important values:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `S6_PORT` | `8080` | Published web/portal port — the URL you open in a browser and the only port reachable from your network |
+| `S6_PORT` | `127.0.0.1:8080` | Published web address and port. A numeric override publishes on all host interfaces. |
 | `S6_ENGINE_PORT` | `8001` | Engine API port, bound to the host loopback only (API docs and debugging) |
 | `S6_DATA_PATH` | `./data` | Persistent database, jobs, uploads, Library, cache, models, exports, and instance secrets |
 | `S6_WHISPER_MODEL` | `base` | CPU-friendly local Faster-Whisper model used for speech transcription and captions in Auto and Smart clips |
