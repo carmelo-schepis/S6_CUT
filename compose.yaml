@@ -91,15 +91,10 @@ services:
       - "host.docker.internal:host-gateway"
     networks:
       - private
-    # Loopback-only binding: this published port is reachable only from the
-    # host at http://localhost:${S6_ENGINE_PORT:-8001}, for local debugging,
-    # and nginx is the only container that publishes to the network.
-    #
-    # It is NOT an access control for the API. The web service proxies /api/
-    # (including /api/docs) straight through to this engine with no
-    # authentication, so every endpoint here — project deletion and Library
-    # purge included — is reachable from whatever interfaces S6_PORT binds the
-    # frontend to. Narrow S6_PORT, or firewall it, to restrict that.
+    # Publish the debug port on IPv4 loopback. On Linux, Docker Engine releases
+    # before 28.0.0 need host firewall protection for loopback-published ports.
+    # See "Local-only access on Linux" in README.md.
+    # The web gateway also proxies /api/ to the engine without authentication.
     ports:
       - "127.0.0.1:${S6_ENGINE_PORT:-8001}:8001"
     healthcheck:

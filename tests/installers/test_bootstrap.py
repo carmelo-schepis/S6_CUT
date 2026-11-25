@@ -90,6 +90,15 @@ if sys.argv[1:3] == ['compose', 'version']:
         sys.exit(1)
     version = os.environ.get('S6_TEST_COMPOSE_VERSION', '2.26.0')
     print('Docker Compose version v' + version)
+if sys.argv[1:2] == ['version']:
+    if os.environ.get('S6_TEST_ENGINE_VERSION_FAILURE'):
+        sys.exit(1)
+    server_version = os.environ.get('S6_TEST_ENGINE_VERSION', '29.1.3')
+    if sys.argv[2:] == ['--format', '{{{{.Server.Version}}}}']:
+        print(server_version)
+    else:
+        print('Client: Version: 30.0.0')
+        print('Server: Version: ' + server_version)
 if sys.argv[1:2] == ['run']:
     args = sys.argv[1:]
     mount = args[args.index('--mount') + 1]
@@ -99,16 +108,78 @@ if sys.argv[1:2] == ['run']:
     sys.exit(result.returncode)
 '''
 
+    def run_installer(self):
+        return subprocess.run(["/bin/bash"], input=(ROOT / "install.sh").read_text(),
+                              text=True, capture_output=True, env=self.env,
+                              cwd=self.home, timeout=120)
+
     def install(self):
-        result = subprocess.run(["/bin/bash"], input=(ROOT / "install.sh").read_text(),
-                                text=True, capture_output=True, env=self.env,
-                                cwd=self.home, timeout=120)
+        result = self.run_installer()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("S6_cut is running", result.stdout)
         return result
 
     def calls(self):
         return [json.loads(line) for line in self.log.read_text().splitlines()]
+
+    def use_linux(self):
+        self.executable(self.bin / "uname", "#!/bin/sh\necho Linux\n")
+        self.executable(self.bin / "docker", self.stub("linux-docker"))
+
+    def assert_engine_preflight_rejected(self, diagnostic):
+        first_call = len(self.calls()) if self.log.exists() else 0
+        result = self.run_installer()
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("28.0.0", result.stderr)
+        self.assertIn(diagnostic, result.stderr)
+        self.assertEqual([call["args"] for call in self.calls()[first_call:]],
+                         [["info"], ["version", "--format", "{{.Server.Version}}"]])
+
+    def test_linux_docker_engine_rejects_old_daemon_and_minimum_prerelease(self):
+        self.use_linux()
+        self.env["S6_PORT"] = "18080"
+        for version in ["27.5.1", "28.0.0-rc.1"]:
+            with self.subTest(version=version):
+                self.env["S6_TEST_ENGINE_VERSION"] = version
+                self.assert_engine_preflight_rejected(version)
+                self.assertFalse((self.home / "s6_cut").exists())
+
+    def test_linux_docker_engine_rejects_unverifiable_daemon(self):
+        self.use_linux()
+        for version in ["", "Docker version 28.0.0", "28.0", "28.0.0\n29.0.0"]:
+            with self.subTest(version=version):
+                self.env["S6_TEST_ENGINE_VERSION"] = version
+                self.assert_engine_preflight_rejected("Could not verify")
+                self.assertFalse((self.home / "s6_cut").exists())
+        self.env["S6_TEST_ENGINE_VERSION_FAILURE"] = "1"
+        self.assert_engine_preflight_rejected("Could not verify")
+        self.assertFalse((self.home / "s6_cut").exists())
+
+    def test_linux_docker_engine_accepts_supported_stable_versions(self):
+        self.use_linux()
+        for version in ["28.0.0", "28.0.0-0ubuntu1~24.04.1", "29.1.3+dfsg1"]:
+            with self.subTest(version=version):
+                self.env["S6_TEST_ENGINE_VERSION"] = version
+                self.assertIn("Frontend: http://127.0.0.1:8080", self.install().stdout)
+
+    def test_linux_docker_engine_rejected_update_preserves_checkout_configuration_and_data(self):
+        self.use_linux()
+        self.install()
+        target = self.home / "s6_cut"
+        head = self.git("-C", str(target), "rev-parse", "HEAD").stdout
+        marker = target / "data" / "project"
+        marker.parent.mkdir()
+        marker.write_text("keep project")
+        config = target / ".env"
+        config.write_text("S6_PORT=8080\nCUSTOM=preserve\n")
+        self.git("-C", str(self.source), "-c", "user.name=Test", "-c",
+                 "user.email=test@example.invalid", "commit", "--allow-empty", "-m", "Update")
+        self.env["S6_TEST_ENGINE_VERSION"] = "27.5.1"
+        self.assert_engine_preflight_rejected("27.5.1")
+        self.assertEqual(self.git("-C", str(target), "rev-parse", "HEAD", "origin/main").stdout,
+                         head + head)
+        self.assertEqual(config.read_text(), "S6_PORT=8080\nCUSTOM=preserve\n")
+        self.assertEqual(marker.read_text(), "keep project")
 
     def test_mac_minimal_path_fresh_install_and_update_preserve_data(self):
         result = self.install()
@@ -125,6 +196,7 @@ if sys.argv[1:2] == ['run']:
         self.assertEqual((target / ".env").read_text(), "S6_PORT=8080\nCUSTOM=preserve\n")
         self.assertEqual((target / "data" / "project").read_text(), "preserve this project")
         self.assertTrue(any(c["tool"] == "discovered-docker" for c in self.calls()))
+        self.assertFalse(any(c["args"][:1] == ["version"] for c in self.calls()))
 
     def test_existing_docker_on_path_keeps_precedence(self):
         self.executable(self.bin / "docker", self.stub("path-docker"))

@@ -2,6 +2,8 @@
 
 S6_cut uses the same `compose.yaml` on ordinary Docker hosts, in a Portainer Stack, and in a TrueNAS SCALE Custom App. There is no appliance-specific fork.
 
+On Linux with Docker Engine older than 28.0.0, use a host firewall to block off-host access to the engine debug port if your deployment publishes it. For a local-only Portainer Stack on those releases, apply the same protection to the web gateway port. See [local-only access on Linux](../README.md#local-only-access-on-linux).
+
 ## TrueNAS SCALE: scripted install (recommended)
 
 Needs TrueNAS SCALE 24.10 or newer (Docker-based Apps; 25.04+ recommended) with a pool chosen under **Apps → Configuration**. In **System → Shell**, or over SSH:
@@ -114,7 +116,7 @@ Use these steps if neither route above fits, for example on a TrueNAS release wh
 2. Put the repository and `.env` in the source dataset.
 3. In Apps, choose **Discover Apps → Custom App → Install via YAML** (wording varies by SCALE release).
 4. Paste the resolved Compose definition from `docker compose -p ix-s6-cut config`, run in the source dataset.
-5. Confirm `web` maps `${S6_PORT}:8080` and `engine` maps `127.0.0.1:${S6_ENGINE_PORT:-8001}:8001`. The engine port is published on the host loopback interface only; it is not exposed on the network.
+5. Confirm `web` maps `${S6_PORT}:8080` and `engine` maps `127.0.0.1:${S6_ENGINE_PORT:-8001}:8001`.
 6. Confirm the absolute data dataset maps to `/app/data`.
 7. Install, wait through the two-minute model/runtime health start period, and open the web portal.
 8. Create a small permitted test project before importing large media.
