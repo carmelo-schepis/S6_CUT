@@ -184,6 +184,7 @@ prepare_environment() {
 start_containers() {
   CURRENT_STEP="building and starting the containers"
   local published_web output status assigned_binding assigned_port service target name
+  local unhealthy_container dependency_service
   local recover_engine=false recover_web=false engine_default=false web_default=false
   local build_flag=--build
   local -a up_args=(-d) compose_env=(env)
@@ -220,8 +221,18 @@ start_containers() {
       compose_env+=(S6_PORT=127.0.0.1:0)
       recover_web=true
     else
+      if [[ $(<"$output") =~ [Cc]ontainer[[:blank:]]+([[:alnum:]_.-]+)[[:blank:]]+is[[:blank:]]+unhealthy ]]; then
+        unhealthy_container="${BASH_REMATCH[1]}"
+        dependency_service="$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.service" }}' "$unhealthy_container" 2>/dev/null)" || dependency_service=""
+        if [[ "$dependency_service" =~ ^[[:alnum:]_.-]+$ ]]; then
+          warn "The $dependency_service service did not become healthy. Run 'docker compose logs --tail 60 $dependency_service' in $INSTALL_DIR."
+        else
+          warn "Container $unhealthy_container did not become healthy. Run 'docker logs --tail 60 $unhealthy_container'."
+        fi
+      elif grep -Eq 'address already in use|port is already allocated' "$output"; then
+        warn "If a published port is occupied, change S6_ENGINE_PORT or S6_PORT in $INSTALL_DIR/.env and re-run the installer."
+      fi
       rm -f "$output"
-      warn "If a published port is occupied, change S6_ENGINE_PORT or S6_PORT in $INSTALL_DIR/.env and re-run the installer."
       return "$status"
     fi
     # A failed port bind can leave containers in `created` without network
