@@ -84,10 +84,17 @@ class InstallerPortConflictTests(unittest.TestCase):
                 self.assertIn("S6_PORT=49153", config)
                 self.assertIn("Frontend: http://127.0.0.1:49153", result.stdout)
                 self.assertEqual(calls.count("--build"), 1)
-                self.assertEqual(calls.count("--no-build"), 1 if failure == "none" else 2)
+                retries = [
+                    call.split(" | ", 1)[0]
+                    for call in calls.splitlines()
+                    if "--no-build" in call
+                ]
+                expected_retries = 1 if failure == "none" else 2
+                self.assertEqual(
+                    retries, ["compose up -d --force-recreate --no-build"] * expected_retries
+                )
                 if failure != "none":
                     self.assertIn("S6_ENGINE_PORT=49152", config)
-                    self.assertIn("compose up -d --force-recreate --no-build", calls)
 
     def test_custom_or_exported_web_ports_remain_fatal(self):
         for options in ({"web_port": "18080"}, {"exported_web": True}):
