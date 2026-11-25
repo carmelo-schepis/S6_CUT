@@ -224,6 +224,11 @@ start_containers() {
       warn "If a published port is occupied, change S6_ENGINE_PORT or S6_PORT in $INSTALL_DIR/.env and re-run the installer."
       return "$status"
     fi
+    # A failed port bind can leave containers in `created` without network
+    # attachments. Recreate the stack before retrying with the replacement port.
+    if [[ " ${up_args[*]} " != *" --force-recreate "* ]]; then
+      up_args+=(--force-recreate)
+    fi
     build_flag=--no-build
   done
   rm -f "$output"

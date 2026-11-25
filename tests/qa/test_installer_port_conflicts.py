@@ -82,7 +82,7 @@ fi
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertTrue(config.startswith(original))
                 self.assertIn("effective=49152", result.stdout)
-                self.assertIn("compose up -d --no-build | engine=0", calls)
+                self.assertIn("compose up -d --force-recreate --no-build | engine=0", calls)
                 self.assertEqual(calls.count("--build"), 1)
 
     def test_frontend_only_and_both_default_conflicts_recover(self):
@@ -96,7 +96,15 @@ fi
                 self.assertIn("web=127.0.0.1:0", calls)
                 self.assertIn("Frontend: http://127.0.0.1:49153", result.stdout)
                 self.assertEqual(calls.count("--build"), 1)
-                self.assertEqual(calls.count("--no-build"), 1 if failure == "none" else 2)
+                retries = [
+                    call.split(" | ", 1)[0]
+                    for call in calls.splitlines()
+                    if "--no-build" in call
+                ]
+                expected_retries = 1 if failure == "none" else 2
+                self.assertEqual(
+                    retries, ["compose up -d --force-recreate --no-build"] * expected_retries
+                )
                 if failure != "none":
                     self.assertIn("S6_ENGINE_PORT=49152", config)
 
