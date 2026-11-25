@@ -26,6 +26,7 @@ BRANCH="${S6_BRANCH:-main}"
 START_TIMEOUT="${S6_START_TIMEOUT:-300}"
 FORCE_RECREATE="${S6_FORCE_RECREATE:-false}"
 COMPOSE_FILE="compose.yaml"
+DEFAULT_WEB_BINDING="127.0.0.1:8080"
 CURRENT_STEP="starting"
 GIT_VIA_DOCKER=false
 GIT_IMAGE="alpine/git:2.54.0@sha256:4fac439ee3b9204bec99c712b8a15942999632458f716ae8149fbb97cb760cd4"
@@ -182,14 +183,12 @@ prepare_environment() {
 
 start_containers() {
   CURRENT_STEP="building and starting the containers"
-  local engine_port web_binding output status assigned_port service target name
+  local published_web output status assigned_binding assigned_port service target name
   local recover_engine=false recover_web=false engine_default=false web_default=false
   local build_flag=--build
-  local -a up_args=(-d)
-  engine_port="$(read_env S6_ENGINE_PORT 8001)"
-  web_binding="$(read_env S6_PORT 8080)"
-  [[ "$engine_port" == "8001" && -z "${S6_ENGINE_PORT+x}" ]] && engine_default=true
-  [[ "$web_binding" == "8080" && -z "${S6_PORT+x}" ]] && web_default=true
+  local -a up_args=(-d) compose_env=(env)
+  [[ -z "${S6_ENGINE_PORT+x}" && "$(read_env S6_ENGINE_PORT 8001)" == "8001" ]] && engine_default=true
+  [[ -z "${S6_PORT+x}" && "$(read_env S6_PORT "$DEFAULT_WEB_BINDING")" == "$DEFAULT_WEB_BINDING" ]] && web_default=true
   # A container whose start failed comes back without its network attachment,
   # so a stack left in the created state by an earlier attempt must be recreated.
   if [[ "$FORCE_RECREATE" == "true" ]] || [[ -n "$(docker compose ps -aq --status created 2>/dev/null)" ]]; then
@@ -201,8 +200,7 @@ start_containers() {
   # At most two retries: each default binding can be replaced once. Docker
   # allocates port 0 atomically; internal container ports remain unchanged.
   while true; do
-    if S6_ENGINE_PORT="$engine_port" S6_PORT="$web_binding" \
-      docker compose up "${up_args[@]}" "$build_flag" 2>&1 | tee "$output"; then
+    if "${compose_env[@]}" docker compose up "${up_args[@]}" "$build_flag" 2>&1 | tee "$output"; then
       break
     else
       status=$?
@@ -210,12 +208,12 @@ start_containers() {
     if [[ "$engine_default" == true && "$recover_engine" == false ]] &&
       grep -Eq '127\.0\.0\.1:8001.*(address already in use|port is already allocated)' "$output"; then
       warn "Engine port 8001 is already in use; asking Docker for a free loopback port."
-      engine_port=0
+      compose_env+=(S6_ENGINE_PORT=0)
       recover_engine=true
     elif [[ "$web_default" == true && "$recover_web" == false ]] &&
-      grep -Eq '(0\.0\.0\.0|\[::\]|::):8080.*(address already in use|port is already allocated)' "$output"; then
-      warn "Frontend port 8080 is already in use; asking Docker for a free port."
-      web_binding=0
+      grep -Eq '127\.0\.0\.1:8080.*(address already in use|port is already allocated)' "$output"; then
+      warn "Frontend port 8080 is already in use; asking Docker for a free loopback port."
+      compose_env+=(S6_PORT=127.0.0.1:0)
       recover_web=true
     else
       rm -f "$output"
@@ -225,26 +223,35 @@ start_containers() {
     build_flag=--no-build
   done
   rm -f "$output"
+  published_web="$("${compose_env[@]}" docker compose port web 8080)"
+  published_web="${published_web%%$'\n'*}"
+  [[ "$published_web" == *:* ]] || die "Docker did not publish web port 8080."
+  case "$published_web" in
+    0.0.0.0:*) published_web="127.0.0.1:${published_web##*:}" ;;
+    \[::\]:*|:::*) published_web="[::1]:${published_web##*:}" ;;
+  esac
+  WEB_URL="http://$published_web"
+  ENGINE_PORT="$("${compose_env[@]}" docker compose port engine 8001)"
+  ENGINE_PORT="${ENGINE_PORT##*:}"
   for service in engine web; do
     if [[ "$service" == engine && "$recover_engine" == true ]]; then
+      assigned_binding="$ENGINE_PORT"
       target=8001
       name=S6_ENGINE_PORT
     elif [[ "$service" == web && "$recover_web" == true ]]; then
+      assigned_binding="$published_web"
       target=8080
       name=S6_PORT
     else
       continue
     fi
-    assigned_port="$(S6_ENGINE_PORT="$engine_port" S6_PORT="$web_binding" docker compose port "$service" "$target")"
-    # An all-interface frontend may have both IPv4 and IPv6 publications.
-    assigned_port="${assigned_port%%$'\n'*}"
-    assigned_port="${assigned_port##*:}"
+    assigned_port="${assigned_binding##*:}"
     if [[ ! "$assigned_port" =~ ^[0-9]+$ ]] ||
       (( 10#$assigned_port < 1 || 10#$assigned_port > 65535 )); then
-      die "Could not determine Docker's assigned $service port. Run 'docker compose port $service $target' to inspect it."
+      die "Could not determine Docker's assigned $service port."
     fi
     # Append only the selected overrides, preserving existing configuration.
-    printf '\n# Installer-selected port: the default %s was occupied.\n%s=%s\n' "$target" "$name" "$assigned_port" >> .env
+    printf '\n# Installer-selected port: the default %s was occupied.\n%s=%s\n' "$target" "$name" "$assigned_binding" >> .env
     ok "$service host port $assigned_port saved in .env"
   done
   ok "Containers started"
@@ -264,25 +271,13 @@ read_env() {
   printf '%s' "${value:-$default}"
 }
 
-web_host_port() {
-  local binding="$1" port
-  port="${binding##*:}"
-  if [[ ! "$port" =~ ^[0-9]{1,5}$ ]] || (( 10#$port < 1 || 10#$port > 65535 )); then
-    die "S6_PORT must be a numeric port or a binding ending in a valid published port (1–65535)."
-  fi
-  printf '%s' "$port"
-}
-
 wait_for_ready() {
   CURRENT_STEP="waiting for S6_cut to become ready"
-  local web_binding web_port url deadline
-  web_binding="$(read_env S6_PORT 8080)"
-  web_port="$(web_host_port "$web_binding")"
-  url="http://127.0.0.1:${web_port}/api/health"
+  local deadline
   step "Waiting for S6_cut to become ready (timeout ${START_TIMEOUT}s)..."
   deadline=$(( $(date +%s) + START_TIMEOUT ))
   while (( $(date +%s) < deadline )); do
-    if curl -fsS --max-time 5 -o /dev/null "$url" 2>/dev/null; then
+    if curl -fsS --noproxy '*' --max-time 5 -o /dev/null "$WEB_URL/api/health" 2>/dev/null; then
       ok "S6_cut is ready"
       return 0
     fi
@@ -308,15 +303,11 @@ report_status() {
 }
 
 print_summary() {
-  local web_binding web_port engine_port
-  web_binding="$(read_env S6_PORT 8080)"
-  web_port="$(web_host_port "$web_binding")"
-  engine_port="$(read_env S6_ENGINE_PORT 8001)"
   echo
   ok "S6_cut is running"
   echo
-  printf '  Frontend: http://127.0.0.1:%s\n' "$web_port"
-  printf '  Backend:  http://localhost:%s\n' "$engine_port"
+  printf '  Frontend: %s\n' "$WEB_URL"
+  printf '  Backend:  http://localhost:%s\n' "$ENGINE_PORT"
   echo
   info "Next steps"
   echo "  • Open the Frontend URL in your browser to start creating projects."

@@ -134,7 +134,7 @@ services:
       engine:
         condition: service_healthy
     ports:
-      - "${S6_PORT:-8080}:8080"
+      - "${S6_PORT:-127.0.0.1:8080}:8080"
     networks:
       - private
     healthcheck:

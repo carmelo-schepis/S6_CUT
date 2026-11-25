@@ -25,14 +25,14 @@ class BootstrapTests(unittest.TestCase):
         self.source.mkdir()
         self.git("init", "-b", "main", str(self.source))
         (self.source / "compose.yaml").write_text("services: {}\n")
-        (self.source / ".env.example").write_text("S6_PORT=8080\n")
+        shutil.copy(ROOT / ".env.example", self.source / ".env.example")
         self.git("-C", str(self.source), "add", ".")
         self.git("-C", str(self.source), "-c", "user.name=Test", "-c",
                  "user.email=test@example.invalid", "commit", "-m", "Fixture")
         self.bin = self.base / "bin"
         self.bin.mkdir()
         # A minimal SSH-like PATH: only known prerequisites, no host Docker.
-        for command in ["git", "id", "mkdir", "ls", "cp", "grep", "tail", "cut", "tr", "date", "sleep"]:
+        for command in ["git", "id", "mkdir", "ls", "cp", "grep", "tail", "cut", "tr", "date", "sleep", "mktemp", "tee", "rm", "env"]:
             (self.bin / command).symlink_to(shutil.which(command))
         self.executable(self.bin / "uname", "#!/bin/sh\necho Darwin\n")
         self.executable(self.bin / "xcode-select", "#!/bin/sh\nexit 0\n")
@@ -61,11 +61,28 @@ class BootstrapTests(unittest.TestCase):
         import sys
         return f'''#!{sys.executable}
 import json, os, pathlib, subprocess, sys
+web = os.environ.get('S6_PORT')
+dotenv = pathlib.Path('.env')
+if not web and dotenv.is_file():
+    for line in dotenv.read_text().splitlines():
+        key, _, value = line.partition('=')
+        if key.strip() == 'S6_PORT':
+            web = value.strip().strip('"').strip("'")
+web = web or '127.0.0.1:8080'
 with open(os.environ['S6_TEST_LOG'], 'a') as log:
-    log.write(json.dumps({{'tool': {tool!r}, 'args': sys.argv[1:]}}) + '\\n')
+    log.write(json.dumps({{'tool': {tool!r}, 'args': sys.argv[1:], 'web_binding': web}}) + '\\n')
 if sys.argv[1:3] == ['compose', 'up']:
     assert pathlib.Path('compose.yaml').exists()
     assert pathlib.Path('.env').exists()
+    if os.environ.get('S6_TEST_WEB_OCCUPIED') and web == '127.0.0.1:8080':
+        print('failed to bind host port 127.0.0.1:8080/tcp: address already in use', file=sys.stderr)
+        sys.exit(1)
+if sys.argv[1:4] == ['compose', 'port', 'engine']:
+    print('127.0.0.1:' + os.environ.get('S6_ENGINE_PORT', '8001'))
+if sys.argv[1:4] == ['compose', 'port', 'web']:
+    if web == '127.0.0.1:0':
+        web = '127.0.0.1:49152'
+    print(web if ':' in web else '0.0.0.0:' + web)
 if sys.argv[1:3] == ['compose', 'version']:
     if os.environ.get('S6_TEST_COMPOSE_MISSING'):
         sys.exit(1)
@@ -92,7 +109,10 @@ if sys.argv[1:2] == ['run']:
         return [json.loads(line) for line in self.log.read_text().splitlines()]
 
     def test_mac_minimal_path_fresh_install_and_update_preserve_data(self):
-        self.install()
+        result = self.install()
+        self.assertIn("Frontend: http://127.0.0.1:8080", result.stdout)
+        starts = [call for call in self.calls() if call["args"][:2] == ["compose", "up"]]
+        self.assertEqual([call["web_binding"] for call in starts], ["127.0.0.1:8080"])
         target = self.home / "s6_cut"
         self.assertEqual(self.git("-C", str(target), "branch", "--show-current").stdout.strip(), "main")
         (target / ".env").write_text("S6_PORT=8080\nCUSTOM=preserve\n")
@@ -147,6 +167,28 @@ if sys.argv[1:2] == ['run']:
         self.assertTrue(all("http://127.0.0.1:18080/api/health" in args for args in requests))
         self.assertIn("Frontend: http://127.0.0.1:18080", result.stdout)
         self.assertIn("Backend:  http://localhost:18001", result.stdout)
+
+    def test_explicit_interface_controls_readiness_and_summary(self):
+        self.env["S6_PORT"] = "192.0.2.5:18080"
+        result = self.install()
+        requests = [call["args"] for call in self.calls() if call["tool"] == "curl"]
+        self.assertTrue(requests)
+        self.assertTrue(all("http://192.0.2.5:18080/api/health" in args for args in requests))
+        self.assertIn("Frontend: http://192.0.2.5:18080", result.stdout)
+
+    def test_occupied_default_retries_and_persists_loopback_binding(self):
+        self.env["S6_TEST_WEB_OCCUPIED"] = "1"
+        result = self.install()
+        self.assertIn("Frontend: http://127.0.0.1:49152", result.stdout)
+        starts = [call for call in self.calls() if call["args"][:2] == ["compose", "up"]]
+        self.assertEqual([call["web_binding"] for call in starts], ["127.0.0.1:8080", "127.0.0.1:0"])
+        self.assertIn("--no-build", starts[-1]["args"])
+        requests = [call["args"] for call in self.calls() if call["tool"] == "curl"]
+        self.assertTrue(requests)
+        self.assertTrue(all("http://127.0.0.1:49152/api/health" in args for args in requests))
+        config = (self.home / "s6_cut" / ".env").read_text()
+        self.assertIn("S6_PORT=127.0.0.1:49152", config)
+        self.assertIn("Frontend: http://127.0.0.1:49152", self.install().stdout)
 
     def test_missing_git_downloads_and_updates_using_docker(self):
         (self.bin / "git").unlink()
