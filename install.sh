@@ -225,7 +225,7 @@ start_containers() {
         unhealthy_container="${BASH_REMATCH[1]}"
         dependency_service="$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.service" }}' "$unhealthy_container" 2>/dev/null)" || dependency_service=""
         if [[ "$dependency_service" =~ ^[[:alnum:]_.-]+$ ]]; then
-          warn "The $dependency_service service did not become healthy. Run 'docker compose logs --tail 60 $dependency_service' in $INSTALL_DIR."
+          warn "The $dependency_service service did not become healthy. Run 'docker logs --tail 60 $unhealthy_container'."
         else
           warn "Container $unhealthy_container did not become healthy. Run 'docker logs --tail 60 $unhealthy_container'."
         fi

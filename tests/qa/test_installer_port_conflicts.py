@@ -20,7 +20,7 @@ class InstallerPortConflictTests(unittest.TestCase):
                       force=False, retry_fails=False, assigned="127.0.0.1:49152",
                       web_conflict=False, web_port="127.0.0.1:8080", exported_web=False,
                       assigned_web="127.0.0.1:49153", unhealthy=False,
-                      dependency_service="pot-provider"):
+                      dependency_service="pot-provider", inspect_fails=False):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             original = "# user config\nS6_ENGINE_PORT=" + port + "\nS6_PORT=" + web_port + "\nS6_DATA_PATH=/keep/my/data\n"
@@ -28,7 +28,7 @@ class InstallerPortConflictTests(unittest.TestCase):
             docker = root / "docker"
             docker.write_text(r'''#!/bin/bash
 if [[ "$1" == inspect ]]; then
-    [[ "$*" == *qa-stack-pot-provider-1 ]] || exit 1
+    [[ "$*" == *qa-stack-pot-provider-1 && "$INSPECT_FAILS" == false ]] || exit 1
     printf '%s\n' "$DEPENDENCY_SERVICE"
     exit 0
 fi
@@ -74,6 +74,7 @@ fi
             env = {k: v for k, v in os.environ.items() if k not in ("S6_ENGINE_PORT", "S6_PORT")}
             env.update(PATH=str(root) + os.pathsep + env["PATH"],
                        FAILURE=failure, CONFIG_PORT=port, ASSIGNED=assigned, ASSIGNED_WEB=assigned_web,
+                       INSPECT_FAILS="true" if inspect_fails else "false",
                        UNHEALTHY="true" if unhealthy else "false", DEPENDENCY_SERVICE=dependency_service,
                        RETRY_FAILS="true" if retry_fails else "false",
                        WEB_CONFLICT="true" if web_conflict else "false",
@@ -150,18 +151,20 @@ fi
                 )
 
     def test_unhealthy_dependency_reports_log_command_without_changing_configuration(self):
-        for service, log_command in (
-            ("pot-provider", "docker compose logs --tail 60 pot-provider"),
-            ("", "docker logs --tail 60 qa-stack-pot-provider-1"),
+        for service, inspect_fails, subject in (
+            ("pot-provider", False, "The pot-provider service"),
+            ("", False, "Container qa-stack-pot-provider-1"),
+            ("pot-provider", True, "Container qa-stack-pot-provider-1"),
         ):
-            with self.subTest(service=service):
+            with self.subTest(service=service, inspect_fails=inspect_fails):
                 result, config, calls, original = self.run_installer(
-                    unhealthy=True, dependency_service=service
+                    unhealthy=True, dependency_service=service, inspect_fails=inspect_fails
                 )
                 self.assertEqual(result.returncode, 19)
                 self.assertEqual(config, original)
                 self.assertEqual(len(calls.splitlines()), 1)
-                self.assertIn(log_command, result.stdout)
+                self.assertIn(f"{subject} did not become healthy", result.stdout)
+                self.assertIn("docker logs --tail 60 qa-stack-pot-provider-1", result.stdout)
                 self.assertNotIn("If a published port is occupied", result.stdout)
 
     def test_force_recreate_is_kept_on_retry(self):
