@@ -211,6 +211,15 @@ test.describe("§6.8 Library", () => {
       await userFolder.locator("> button").focus();
       await page.keyboard.press("Tab");
       await expect(userFolder.locator("> .folder-actions").getByRole("button", { name: `Add subfolder to ${name}`, exact: true })).toBeFocused();
+      // Shift+Tab back into a folder from outside it must also reach its actions, not skip to the folder button.
+      const leaf = list.locator(".folder-node:has(> .folder-actions):not(:has(.folder-node))").last();
+      const leafName = (await leaf.locator("> button .folder-name").textContent())!.trim();
+      const remove = leaf.locator("> .folder-actions").getByRole("button", { name: `Remove ${leafName}`, exact: true });
+      await remove.focus();
+      await page.keyboard.press("Tab");
+      await expect(remove).not.toBeFocused();
+      await page.keyboard.press("Shift+Tab");
+      await expect(remove).toBeFocused();
     } else {
       test.info().annotations.push({ type: "note", description: "no user folder in this dataset; action Tab order not exercised" });
     }
