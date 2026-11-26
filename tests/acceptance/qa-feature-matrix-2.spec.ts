@@ -196,14 +196,23 @@ test.describe("§6.8 Library", () => {
     await expect(list).toBeVisible({ timeout: 20_000 });
     expect(await page.locator('[role="tree"], [role="treeitem"]').count(), "no partial ARIA tree widget").toBe(0);
     const folders = list.locator(".folder-node > button");
-    expect(await folders.count(), "the folder list should expose folder buttons").toBeGreaterThan(0);
-    const tabIndexes = await folders.evaluateAll((buttons) => buttons.map((button) => (button as HTMLButtonElement).tabIndex));
-    expect(tabIndexes.every((index) => index === 0), "every folder button should be in the Tab order").toBe(true);
+    await expect(folders.first()).toBeVisible();
+    expect(await list.locator('[tabindex="-1"]').count(), "no roving tabindex inside the folder list").toBe(0);
     const first = folders.first();
     await first.focus();
     await page.keyboard.press("Tab");
     await expect(first).not.toBeFocused();
     await page.keyboard.press("Shift+Tab");
     await expect(first).toBeFocused();
+    // Folder actions stay hidden until the folder has focus; Tab from a user folder must land on them.
+    const userFolder = list.locator(".folder-node:has(> .folder-actions)").first();
+    if (await userFolder.count()) {
+      const name = (await userFolder.locator("> button .folder-name").textContent())!.trim();
+      await userFolder.locator("> button").focus();
+      await page.keyboard.press("Tab");
+      await expect(page.getByRole("button", { name: `Add subfolder to ${name}`, exact: true })).toBeFocused();
+    } else {
+      test.info().annotations.push({ type: "note", description: "no user folder in this dataset; action Tab order not exercised" });
+    }
   });
 });

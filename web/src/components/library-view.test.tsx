@@ -84,7 +84,7 @@ describe("LibraryView", () => {
     expect(screen.queryByText("Other logo")).not.toBeInTheDocument();
   });
 
-  it("exposes nested folders as a nested list with independently tabbable actions", async () => {
+  it("exposes nested folders as a nested list without tree roles or roving tabindex", async () => {
     mockListFolders.mockResolvedValue([...folders, { ...folders[1], id: "child", name: "Child", parentId: "acme" }]);
     render(<LibraryView />);
     const tree = await screen.findByRole("list", { name: "Media folders" });
