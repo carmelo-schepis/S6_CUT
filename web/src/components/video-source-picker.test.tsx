@@ -26,6 +26,8 @@ describe("VideoSourcePicker", () => {
     expect(localTab).toHaveAttribute("tabindex", "0");
     expect(urlTab).toHaveAttribute("tabindex", "-1");
     expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", localTab.id);
+    // Panels hold focusable controls, so they are not extra Tab stops.
+    expect(screen.getByRole("tabpanel")).not.toHaveAttribute("tabindex");
   });
 
   it("keeps tab and panel relationships unique across picker instances", () => {

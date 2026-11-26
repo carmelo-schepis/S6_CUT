@@ -778,6 +778,7 @@ main { min-width: 0; }
    a dead gap beside the taller output column. */
 .source-step .video-source-picker { flex: 1 1 auto; display: flex; flex-direction: column; gap: var(--space-2); min-height: 0; }
 .source-step .drop-zone { flex: 1 1 auto; min-height: 200px; }
+.source-step .video-source-picker > [role="tabpanel"] { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
 .create-mode-controls { display: flex; align-items: center; gap: var(--space-2); flex: 0 0 auto; }
 .create-topline .segmented button { white-space: nowrap; }
 .music-mode-icon { font-size: 18px; line-height: 1; }
