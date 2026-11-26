@@ -189,20 +189,30 @@ test.describe("§6.8 Library", () => {
     expect(after, "there should be generated clips from this run").toBeGreaterThan(0);
   });
 
-  test("folder tree supports roving keyboard navigation", async ({ page }) => {
+  test("folder list uses native list semantics and standard Tab order", async ({ page }) => {
     await boot(page);
     await rail(page, "Library");
-    const items = page.locator('[role="treeitem"]');
-    await expect(items.first()).toBeVisible({ timeout: 20_000 });
-    const count = await items.count();
-    expect(count, "the folder tree should expose treeitems").toBeGreaterThan(0);
-    await items.first().focus();
-    await page.keyboard.press("ArrowDown");
-    await page.waitForTimeout(300);
-    const focused = await page.evaluate(() => document.activeElement?.getAttribute("role"));
-    expect(focused, "ArrowDown should keep focus inside the tree").toBe("treeitem");
-    await page.keyboard.press("End");
-    await page.waitForTimeout(300);
-    expect(await page.evaluate(() => document.activeElement?.getAttribute("role"))).toBe("treeitem");
+    const list = page.getByRole("list", { name: "Media folders" });
+    await expect(list).toBeVisible({ timeout: 20_000 });
+    expect(await page.locator('[role="tree"], [role="treeitem"]').count(), "no partial ARIA tree widget").toBe(0);
+    const folders = list.locator(".folder-node > button");
+    await expect(folders.first()).toBeVisible();
+    expect(await list.locator('[tabindex="-1"]').count(), "no roving tabindex inside the folder list").toBe(0);
+    const first = folders.first();
+    await first.focus();
+    await page.keyboard.press("Tab");
+    await expect(first).not.toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(first).toBeFocused();
+    // Folder actions stay hidden until the folder has focus; Tab from a user folder must land on them.
+    const userFolder = list.locator(".folder-node:has(> .folder-actions)").first();
+    if (await userFolder.count()) {
+      const name = (await userFolder.locator("> button .folder-name").textContent())!.trim();
+      await userFolder.locator("> button").focus();
+      await page.keyboard.press("Tab");
+      await expect(userFolder.locator("> .folder-actions").getByRole("button", { name: `Add subfolder to ${name}`, exact: true })).toBeFocused();
+    } else {
+      test.info().annotations.push({ type: "note", description: "no user folder in this dataset; action Tab order not exercised" });
+    }
   });
 });

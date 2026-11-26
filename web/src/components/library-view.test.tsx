@@ -76,12 +76,26 @@ describe("LibraryView", () => {
     render(<LibraryView />);
     expect(await screen.findByText("Acme launch")).toBeInTheDocument();
     expect(screen.getByText("Generated clip")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("treeitem", { name: /Acme/ }));
+    fireEvent.click(within(screen.getByRole("list", { name: "Media folders" })).getByText("Acme", { exact: true }).closest("button")!);
     fireEvent.change(screen.getByLabelText("Search media"), { target: { value: "launch" } });
     fireEvent.change(screen.getByLabelText("Media type"), { target: { value: "video" } });
     fireEvent.change(screen.getByLabelText("Asset origin"), { target: { value: "generated-clip" } });
     expect(screen.getByText("Acme launch")).toBeInTheDocument();
     expect(screen.queryByText("Other logo")).not.toBeInTheDocument();
+  });
+
+  it("exposes nested folders as a nested list without tree roles or roving tabindex", async () => {
+    mockListFolders.mockResolvedValue([...folders, { ...folders[1], id: "child", name: "Child", parentId: "acme" }]);
+    render(<LibraryView />);
+    const tree = await screen.findByRole("list", { name: "Media folders" });
+    const parent = (await within(tree).findByText("Acme", { exact: true })).closest("button");
+    expect(parent).not.toBeNull();
+    const parentItem = parent!.closest("li");
+    expect(parentItem).not.toBeNull();
+    const child = within(tree).getByText("Child", { exact: true }).closest("li");
+    expect(within(parentItem!).getByRole("list")).toContainElement(child);
+    expect(within(parentItem!).getByRole("button", { name: "Rename Acme" })).toBeInTheDocument();
+    expect(tree.querySelectorAll('[role="tree"], [role="treeitem"], [tabindex="-1"]')).toHaveLength(0);
   });
 
   it("stars the context-menu target without saving or replacing an inspector draft", async () => {
