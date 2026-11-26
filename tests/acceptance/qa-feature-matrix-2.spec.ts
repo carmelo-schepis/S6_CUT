@@ -189,20 +189,21 @@ test.describe("§6.8 Library", () => {
     expect(after, "there should be generated clips from this run").toBeGreaterThan(0);
   });
 
-  test("folder tree supports roving keyboard navigation", async ({ page }) => {
+  test("folder list uses native list semantics and standard Tab order", async ({ page }) => {
     await boot(page);
     await rail(page, "Library");
-    const items = page.locator('[role="treeitem"]');
-    await expect(items.first()).toBeVisible({ timeout: 20_000 });
-    const count = await items.count();
-    expect(count, "the folder tree should expose treeitems").toBeGreaterThan(0);
-    await items.first().focus();
-    await page.keyboard.press("ArrowDown");
-    await page.waitForTimeout(300);
-    const focused = await page.evaluate(() => document.activeElement?.getAttribute("role"));
-    expect(focused, "ArrowDown should keep focus inside the tree").toBe("treeitem");
-    await page.keyboard.press("End");
-    await page.waitForTimeout(300);
-    expect(await page.evaluate(() => document.activeElement?.getAttribute("role"))).toBe("treeitem");
+    const list = page.getByRole("list", { name: "Media folders" });
+    await expect(list).toBeVisible({ timeout: 20_000 });
+    expect(await page.locator('[role="tree"], [role="treeitem"]').count(), "no partial ARIA tree widget").toBe(0);
+    const folders = list.locator(".folder-node > button");
+    expect(await folders.count(), "the folder list should expose folder buttons").toBeGreaterThan(0);
+    const tabIndexes = await folders.evaluateAll((buttons) => buttons.map((button) => (button as HTMLButtonElement).tabIndex));
+    expect(tabIndexes.every((index) => index === 0), "every folder button should be in the Tab order").toBe(true);
+    const first = folders.first();
+    await first.focus();
+    await page.keyboard.press("Tab");
+    await expect(first).not.toBeFocused();
+    await page.keyboard.press("Shift+Tab");
+    await expect(first).toBeFocused();
   });
 });

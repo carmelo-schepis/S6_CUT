@@ -76,7 +76,7 @@ describe("LibraryView", () => {
     render(<LibraryView />);
     expect(await screen.findByText("Acme launch")).toBeInTheDocument();
     expect(screen.getByText("Generated clip")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Acme1" }));
+    fireEvent.click(within(screen.getByRole("list", { name: "Media folders" })).getByText("Acme", { exact: true }).closest("button")!);
     fireEvent.change(screen.getByLabelText("Search media"), { target: { value: "launch" } });
     fireEvent.change(screen.getByLabelText("Media type"), { target: { value: "video" } });
     fireEvent.change(screen.getByLabelText("Asset origin"), { target: { value: "generated-clip" } });
@@ -94,7 +94,8 @@ describe("LibraryView", () => {
     expect(parentItem).not.toBeNull();
     const child = within(tree).getByText("Child", { exact: true }).closest("li");
     expect(within(parentItem!).getByRole("list")).toContainElement(child);
-    expect(within(parentItem!).getByRole("button", { name: "Rename Acme" }).tabIndex).toBe(0);
+    expect(within(parentItem!).getByRole("button", { name: "Rename Acme" })).toBeInTheDocument();
+    expect(tree.querySelectorAll('[role="tree"], [role="treeitem"], [tabindex="-1"]')).toHaveLength(0);
   });
 
   it("stars the context-menu target without saving or replacing an inspector draft", async () => {
