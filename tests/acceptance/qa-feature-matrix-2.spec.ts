@@ -210,7 +210,7 @@ test.describe("§6.8 Library", () => {
       const name = (await userFolder.locator("> button .folder-name").textContent())!.trim();
       await userFolder.locator("> button").focus();
       await page.keyboard.press("Tab");
-      await expect(page.getByRole("button", { name: `Add subfolder to ${name}`, exact: true })).toBeFocused();
+      await expect(userFolder.locator("> .folder-actions").getByRole("button", { name: `Add subfolder to ${name}`, exact: true })).toBeFocused();
     } else {
       test.info().annotations.push({ type: "note", description: "no user folder in this dataset; action Tab order not exercised" });
     }
