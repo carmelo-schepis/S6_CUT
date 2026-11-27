@@ -20,6 +20,7 @@ class InstallerPortConflictTests(unittest.TestCase):
                       force=False, retry_fails=False, assigned="127.0.0.1:49152",
                       web_conflict=False, web_port="127.0.0.1:8080", exported_web=False,
                       assigned_web="127.0.0.1:49153", unhealthy=False,
+                      web_error_binding=None,
                       dependency_service="pot-provider", inspect_fails=False):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -78,7 +79,7 @@ fi
                        UNHEALTHY="true" if unhealthy else "false", DEPENDENCY_SERVICE=dependency_service,
                        RETRY_FAILS="true" if retry_fails else "false",
                        WEB_CONFLICT="true" if web_conflict else "false",
-                       WEB_ERROR_BINDING=web_port if ":" in web_port else "0.0.0.0:" + web_port)
+                       WEB_ERROR_BINDING=web_error_binding or (web_port if ":" in web_port else "0.0.0.0:" + web_port))
             if exported:
                 env["S6_ENGINE_PORT"] = port
             if exported_web:
@@ -119,6 +120,14 @@ fi
                 )
                 if failure != "none":
                     self.assertIn("S6_ENGINE_PORT=49152", config)
+
+    def test_frontend_bind_error_reported_as_wildcard_address_recovers(self):
+        result, config, calls, _ = self.run_installer(
+            failure="none", web_conflict=True, web_error_binding="0.0.0.0:8080"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("S6_PORT=127.0.0.1:49153", config)
+        self.assertIn("web=127.0.0.1:0", calls)
 
     def test_custom_or_exported_web_ports_remain_fatal(self):
         for options in ({"web_port": "8080"}, {"web_port": "18080"},

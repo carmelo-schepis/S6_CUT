@@ -229,7 +229,7 @@ start_containers() {
       compose_env+=(S6_ENGINE_PORT=0)
       recover_engine=true
     elif [[ "$web_default" == true && "$recover_web" == false ]] &&
-      grep -Eq '127\.0\.0\.1:8080.*(address already in use|port is already allocated)' "$output" &&
+      grep -Eq ':8080([^0-9]|$).*(address already in use|port is already allocated)' "$output" &&
       [[ -n "$(docker compose ps -q --status running engine)" ]]; then
       warn "Frontend port 8080 is already in use; asking Docker for a free loopback port."
       compose_env+=(S6_PORT=127.0.0.1:0)
