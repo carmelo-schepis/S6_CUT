@@ -54,6 +54,25 @@ def confined(root: Path, *parts: str) -> Path:
     return target
 
 
+def normalize_relative_posix_path(value: str) -> str:
+    """Canonical POSIX relative path for signed download URLs (`.`/`..`/`//` only)."""
+    if "\\" in value or value.startswith("/") or "://" in value:
+        raise ValueError("Invalid relative path")
+    parts: list[str] = []
+    for part in value.split("/"):
+        if part in ("", "."):
+            continue
+        if part == "..":
+            if not parts:
+                raise ValueError("Path escapes the configured data directory")
+            parts.pop()
+            continue
+        parts.append(part)
+    if not parts:
+        raise ValueError("Invalid relative path")
+    return "/".join(parts)
+
+
 def validate_youtube_url(value: str) -> str:
     parsed = urlparse(value.strip())
     host = (parsed.hostname or "").lower().rstrip(".")

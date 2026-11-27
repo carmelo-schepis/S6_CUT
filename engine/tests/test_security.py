@@ -5,13 +5,30 @@ from pathlib import Path
 
 import pytest
 
-from engine.security import MediaSigner, SecretVault, confined, mask_secret, safe_filename, validate_youtube_url
+from engine.security import MediaSigner, SecretVault, confined, mask_secret, normalize_relative_posix_path, safe_filename, validate_youtube_url
 
 
 def test_paths_and_filenames_are_confined(tmp_path) -> None:
     assert safe_filename("../../my clip?.mp4") == "my-clip-.mp4"
     with pytest.raises(ValueError):
         confined(tmp_path, "..", "outside.txt")
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("jobs/foo//bar.mp4", "jobs/foo/bar.mp4"),
+        ("jobs/foo/./bar.mp4", "jobs/foo/bar.mp4"),
+        ("jobs/foo/../bar.mp4", "jobs/bar.mp4"),
+    ],
+)
+def test_normalize_relative_posix_path_collapses_dot_segments(raw, expected) -> None:
+    assert normalize_relative_posix_path(raw) == expected
+
+
+def test_normalize_relative_posix_path_rejects_escape() -> None:
+    with pytest.raises(ValueError, match="escapes"):
+        normalize_relative_posix_path("../secrets/media-signing.key")
 
 
 def test_url_import_rejects_unsupported_protocol_and_host() -> None:

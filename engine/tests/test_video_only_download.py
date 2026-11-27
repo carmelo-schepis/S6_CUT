@@ -129,6 +129,13 @@ def test_signed_job_mp4_route_serves_only_confined_valid_links(tmp_path: Path, m
     traversal = client.get("/api/v1/files/jobs/%2e%2e/outside.mp4", params={"expires": expires, "signature": signature})
     assert traversal.status_code == 403
 
+    doubled = client.get(
+        f"/api/v1/files/jobs/download-only-job//source.mp4",
+        params={"expires": expires, "signature": signature},
+    )
+    assert doubled.status_code == 200
+    assert doubled.content == b"route fixture"
+
 
 def test_video_download_list_hides_signed_download_urls(monkeypatch: pytest.MonkeyPatch) -> None:
     from fastapi.testclient import TestClient
