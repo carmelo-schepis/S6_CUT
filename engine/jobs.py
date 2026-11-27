@@ -730,17 +730,20 @@ class JobManager:
         job = self.db.get_job(job_id)
         if job and job.mode == "script":
             raise RetiredScriptJobError("Legacy jobs are read-only and cannot be queued")
-        with self._queue_lock:
-            if job_id in self._queued_ids:
-                return
-            try:
-                self.queue.put_nowait(job_id)
-            except asyncio.QueueFull:
-                if not tolerate_full:
-                    raise QueueFullError("The local render queue is full. Wait for an active job or raise S6_MAX_QUEUED_JOBS.")
-                return
-            self._queued_ids.add(job_id)
-            self._pending_order.append(job_id)
+        while True:
+            with self._queue_lock:
+                if job_id in self._queued_ids:
+                    return
+                try:
+                    self.queue.put_nowait(job_id)
+                except asyncio.QueueFull:
+                    if not tolerate_full:
+                        raise QueueFullError("The local render queue is full. Wait for an active job or raise S6_MAX_QUEUED_JOBS.")
+                else:
+                    self._queued_ids.add(job_id)
+                    self._pending_order.append(job_id)
+                    return
+            await asyncio.sleep(.1)
 
     def queue_position(self, job_id: str) -> int | None:
         with self._queue_lock:

@@ -846,6 +846,41 @@ def test_switch_fast_initializes_checklist_and_skips_replaced(monkeypatch: pytes
     assert all(step.detail == "Replaced by a fast cut of the same source" for step in old_after.steps[1:] if step.id != "openrouter")
 
 
+async def _wait_for_tolerate_full_enqueue(manager: JobManager, job_id: str) -> None:
+    await manager.enqueue(job_id, tolerate_full=True)
+
+
+def test_tolerate_full_enqueue_waits_for_capacity_instead_of_dropping(tmp_path: Path) -> None:
+    """Recovery uses tolerate_full=True; a slot can disappear between the feeder
+    noticing capacity and put_nowait. The enqueue path must wait, not return and
+    leave a recovered job orphaned on the queue."""
+    test_settings = replace(settings, data_path=tmp_path, max_queued_jobs=1, job_workers=0)
+    test_db = Database(tmp_path / "s6-cut.sqlite3")
+    vault = SecretVault(tmp_path / "secrets" / "instance.key")
+    test_profiles = ProfileService(test_db, vault)
+    test_rules = LibraryRules(test_db, tmp_path / "library")
+    test_manager = JobManager(test_db, test_rules, test_profiles, test_settings)
+
+    with test_manager._queue_lock:
+        test_manager.queue.put_nowait("holder")
+        test_manager._queued_ids.add("holder")
+
+    async def release_holder() -> None:
+        await asyncio.sleep(0.05)
+        with test_manager._queue_lock:
+            test_manager.queue.get_nowait()
+            test_manager._queued_ids.discard("holder")
+
+    async def run() -> None:
+        releaser = asyncio.create_task(release_holder())
+        await _wait_for_tolerate_full_enqueue(test_manager, "recovered-job")
+        await releaser
+
+    asyncio.run(run())
+    assert "recovered-job" in test_manager._queued_ids
+    assert "recovered-job" in test_manager._pending_order
+
+
 def test_switch_fast_queue_full_leaves_original_untouched(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     test_db, test_manager = _cluster(tmp_path)
     source = tmp_path / "queue-source.mp4"
