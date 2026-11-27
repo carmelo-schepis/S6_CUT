@@ -3327,7 +3327,14 @@ class JobManager:
                 if self.queue.full():
                     raise QueueFullError("The local render queue is full. Wait before switching to fast cut.")
                 new_job = self._switch_to_fast(job)
-            await self.enqueue(new_job.id)
+            # A slot can disappear between the pre-check and enqueue; the smart job
+            # is already cancelled_kept, so block until the replacement is queued.
+            while True:
+                try:
+                    await self.enqueue(new_job.id)
+                    break
+                except QueueFullError:
+                    await asyncio.sleep(.1)
             return new_job
         if action == "pause" and job.state in {"queued", "active", "recovered"}:
             job.state, job.stage_label = "paused", "Paused after current safe checkpoint"

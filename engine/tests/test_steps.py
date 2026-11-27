@@ -846,6 +846,39 @@ def test_switch_fast_initializes_checklist_and_skips_replaced(monkeypatch: pytes
     assert all(step.detail == "Replaced by a fast cut of the same source" for step in old_after.steps[1:] if step.id != "openrouter")
 
 
+def test_switch_fast_waits_when_enqueue_races_a_full_queue(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    test_db, test_manager = _cluster(tmp_path)
+    _project(test_db, "race-proj")
+    source = tmp_path / "jobs" / "race-smart" / "source" / "source.mp4"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_bytes(b"source")
+    smart = Job(
+        id="race-smart", project_id="race-proj", mode="clip", processing_mode="smart",
+        state="queued", stage="queued", stage_label="Queued", progress=0, style="educational",
+        steps=test_manager._smart_steps(),
+    )
+    test_db.save_job(smart, {"source_path": str(source), "processing_mode": "smart"})
+
+    attempts = {"count": 0}
+    original_enqueue = test_manager.enqueue
+
+    async def enqueue_with_transient_full(job_id: str, *, tolerate_full: bool = False) -> None:
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise QueueFullError("The local render queue is full")
+        await original_enqueue(job_id, tolerate_full=tolerate_full)
+
+    monkeypatch.setattr(test_manager, "enqueue", enqueue_with_transient_full)
+
+    new_job = asyncio.run(test_manager.control("race-smart", "switch-fast"))
+
+    assert new_job.processing_mode == "fast"
+    assert new_job.id in test_manager._queued_ids
+    assert test_manager.queue_position(new_job.id) == 1
+    old = test_db.get_job("race-smart")
+    assert old is not None and old.state == "cancelled_kept"
+
+
 def test_switch_fast_queue_full_leaves_original_untouched(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     test_db, test_manager = _cluster(tmp_path)
     source = tmp_path / "queue-source.mp4"
