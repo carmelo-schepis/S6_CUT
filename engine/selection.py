@@ -129,10 +129,9 @@ def select_candidates(
     words: list[dict[str, Any]], style: Style, count: int, minimum: float, maximum: float, *,
     strict_bounds: bool = False, reserved_windows: tuple[tuple[float, float], ...] = (),
 ) -> list[Candidate]:
-    if strict_bounds:
-        # Keep the persisted transcript untouched while preventing malformed
-        # timestamps from entering candidate construction or interval scoring.
-        words = _timed_words(words)
+    # Filter malformed timings for every planning path. Callers keep the raw
+    # transcript object; only the local word list used for scoring is sanitized.
+    words = _timed_words(words)
     if not words:
         return []
     sentences = _sentence_ranges(words)
