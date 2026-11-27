@@ -38,7 +38,7 @@ from .models import (
 )
 from .editing_presets import validate_editing_request
 from .providers import ProfileService, ProviderError, ollama_model_missing
-from .security import MediaSigner, SecretVault, confined, safe_filename, validate_youtube_url
+from .security import MediaSigner, SecretVault, confined, normalize_relative_posix_path, safe_filename, validate_youtube_url
 from .seo_titles import SEO_PROMPT_VERSION, SEO_TITLE_RULES, normalize_seo_description, normalize_seo_title, source_context_title
 from .source_preview import PREVIEW_NAME, ensure_preview, has_preview, read_info_title
 from .thumbnails import get_thumbnail, prune_thumbnails
@@ -1430,6 +1430,10 @@ async def export_job(job_id: str, value: SelectionInput) -> dict[str, str]:
 @app.get("/api/v1/files/{relative_path:path}")
 # DO-NOT-CHANGE: only serves jobs/ and exports/ prefixes; HMAC-verified; confined path
 async def download_file(relative_path: str, expires: int = Query(...), signature: str = Query(...), inline: bool = Query(False)) -> FileResponse:
+    try:
+        relative_path = normalize_relative_posix_path(relative_path)
+    except ValueError as exc:
+        raise HTTPException(400, "Invalid download path") from exc
     if not relative_path.startswith(("jobs/", "exports/")) or Path(relative_path).suffix.casefold() not in {".mp4", ".zip"} or not signer.verify(relative_path, expires, signature):
         raise HTTPException(403, "Download link is invalid or expired")
     try:
