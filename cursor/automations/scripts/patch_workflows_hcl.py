@@ -79,16 +79,21 @@ def ensure_git_pr_action(block: str) -> str:
     return re.sub(r"\n(\s*trigger\s*=)", "\n" + git_pr_snippet + r"\1", block, count=1)
 
 
-def append_policy_to_prompt(block: str, policy: str) -> str:
-    if POLICY_HEADER in block:
-        return block
+def strip_existing_policy(body: str) -> str:
+    """Remove a prior delivery policy section from prompt text."""
+    if POLICY_HEADER not in body:
+        return body
+    idx = body.index(POLICY_HEADER)
+    return body[:idx].rstrip("\n")
 
+
+def append_policy_to_prompt(block: str, policy: str) -> str:
     heredoc = re.search(
         r'(?ms)^\s*prompt\s*=\s*<<-?(?P<tag>[A-Za-z0-9_]+)\s*\n(?P<body>.*?)^\s*(?P=tag)\s*\n',
         block,
     )
     if heredoc:
-        body = heredoc.group("body").rstrip("\n")
+        body = strip_existing_policy(heredoc.group("body").rstrip("\n"))
         tag = heredoc.group("tag")
         new_body = f"{body}\n\n{policy}\n"
         replacement = f"  prompt = <<-{tag}\n{new_body}{tag}\n"
@@ -97,7 +102,8 @@ def append_policy_to_prompt(block: str, policy: str) -> str:
     quoted = re.search(r'(?m)^\s*prompt\s*=\s*"(?P<body>(?:\\.|[^"\\])*)"\s*$', block)
     if quoted:
         body = quoted.group("body").replace("\\n", "\n").replace('\\"', '"')
-        new_body = f"{body.rstrip()}\n\n{policy}"
+        body = strip_existing_policy(body.rstrip())
+        new_body = f"{body}\n\n{policy}"
         escaped = new_body.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
         return block[: quoted.start()] + f'  prompt = "{escaped}"' + block[quoted.end() :]
 

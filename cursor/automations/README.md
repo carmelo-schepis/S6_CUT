@@ -4,7 +4,7 @@ Config-as-code for the six Carmelo automations on `carmelo-schepis/S6_CUT`, patc
 
 1. Run install/verification in the Cloud Agent environment (`skip_install` false).
 2. May open GitHub PRs (`git_pr` action; `open_git_pr` not disabled).
-3. Follow the **Delivery policy** appended to each prompt (`policy-delivery.md`).
+3. Follow the **Delivery policy** appended to each prompt (`policy-delivery.md`): **every run must ship exactly one tested, non-draft PR** on a `cursor/` branch (no skip).
 
 ## Automations
 
@@ -34,7 +34,7 @@ What the script does:
 
 1. `terraform init` with `cursor/cursor` ~> 0.8.
 2. `terraform plan -generate-config-out` — imports each automation by ID (`imports.tf`), reads full remote config.
-3. `scripts/patch_workflows_hcl.py` — removes `open_git_pr` from `disabled_default_tools`, sets `skip_install = false`, adds `action { git_pr = {} }` if missing, appends `policy-delivery.md` to prompts (deduped by header).
+3. `scripts/patch_workflows_hcl.py` — removes `open_git_pr` from `disabled_default_tools`, sets `skip_install = false`, adds `action { git_pr = {} }` if missing, replaces or appends `policy-delivery.md` on each prompt (mandatory PR + test policy).
 4. `terraform apply` — pushes changes only via Terraform; triggers/models/scope are preserved from generated config except those fields.
 
 Dry-run without apply:
