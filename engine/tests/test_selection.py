@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import math
+
 from engine.selection import _score, _score_music, select_candidates
 
 
@@ -55,6 +58,36 @@ def test_style_weights_change_auditable_ranking() -> None:
     assert educational.score.explanation.endswith("educational style weighting.")
     assert hype.score.explanation.endswith("hype style weighting.")
     assert educational.score.total != hype.score.total
+
+
+def test_speech_selection_filters_unusable_timestamps_without_mutating_input() -> None:
+    """Smart clip planning calls select_candidates without strict_bounds. Whisper
+    can still leave invalid timings in the cached transcript; they must not
+    become non-finite clip windows or break provider JSON planning."""
+    invalid = [
+        {"text": "nan", "start": float("nan"), "end": 4.0},
+        {"text": "negative", "start": -1.0, "end": 1.0},
+        {"text": "zero", "start": 2.0, "end": 2.0},
+        {"text": "missing", "end": 5.0},
+        {"text": "infinite", "start": 6.0, "end": float("inf")},
+    ]
+    valid = [
+        {"text": f"spoken{index}.", "start": float(index * 2), "end": index * 2 + 1.5}
+        for index in range(20)
+    ]
+    noisy = [valid[0], *invalid[:2], *valid[1:5], *invalid[2:], *valid[5:]]
+    before = list(noisy)
+
+    expected = select_candidates(valid, "serious", 3, 8, 12)
+    actual = select_candidates(noisy, "serious", 3, 8, 12)
+
+    assert [(item.start, item.end) for item in actual] == [(item.start, item.end) for item in expected]
+    assert noisy == before
+    assert all(math.isfinite(item.start) and math.isfinite(item.end) for item in actual)
+    json.dumps(
+        [{"index": index, "start": item.start, "end": item.end} for index, item in enumerate(actual)],
+        allow_nan=False,
+    )
 
 
 def test_short_source_fallback_returns_candidate_below_requested_minimum() -> None:
