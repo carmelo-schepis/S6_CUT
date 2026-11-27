@@ -5,7 +5,17 @@ from pathlib import Path
 
 import pytest
 
+from engine.access_log import redact_signed_url_query
 from engine.security import MediaSigner, SecretVault, confined, mask_secret, safe_filename, validate_youtube_url
+
+
+def test_access_log_redacts_signed_media_query_params() -> None:
+    line = '127.0.0.1:8001 - "GET /api/v1/files/jobs/x/clips/a.mp4?expires=1700000000&signature=AbCdEf HTTP/1.1" 200'
+    redacted = redact_signed_url_query(line)
+    assert "AbCdEf" not in redacted
+    assert "1700000000" not in redacted
+    assert "expires=[redacted]" in redacted
+    assert "signature=[redacted]" in redacted
 
 
 def test_paths_and_filenames_are_confined(tmp_path) -> None:
