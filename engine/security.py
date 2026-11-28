@@ -33,9 +33,14 @@ def safe_filename(name: str, fallback: str = "media") -> str:
     return cleaned
 
 
+def _strip_unicode_format_characters(value: str) -> str:
+    """Drop bidi and other format controls that defeat reserved-name checks."""
+    return "".join(character for character in value if unicodedata.category(character) != "Cf")
+
+
 def safe_archive_title(name: str | None, fallback: str = "s6-cut-videos"):
     """Return a readable, cross-platform title safe for a ZIP name and root."""
-    normalized = unicodedata.normalize("NFKC", name or "")
+    normalized = _strip_unicode_format_characters(unicodedata.normalize("NFKC", name or ""))
     normalized = ARCHIVE_INVALID.sub("-", normalized.replace("..", "-"))
     normalized = re.sub(r"\s+", " ", normalized).strip(" .")[:160].strip(" .")
     if not normalized or not any(character.isalnum() for character in normalized) or normalized.casefold() in {".", ".."}:
