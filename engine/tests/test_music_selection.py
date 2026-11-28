@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from engine import selection
 from engine.selection import group_music_lyric_lines, select_candidates, select_music_candidates
 
@@ -130,6 +132,35 @@ def test_music_repeated_chorus_selection_is_deterministic() -> None:
     first = select_music_candidates(chorus, "serious", 2, 1, 4)
     assert len(first) == 2
     assert first == select_music_candidates(chorus, "serious", 2, 1, 4)
+
+
+def test_music_interval_dp_reuses_running_score_totals(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Dense lyric transcripts enumerate huge candidate pools; the interval DP must
+    reuse accumulated totals instead of re-summing clip scores on every tie-break."""
+    words = [
+        {"text": f"lyric{index}.", "start": index * 0.4, "end": index * 0.4 + 0.35}
+        for index in range(3500)
+    ]
+    baseline = select_music_candidates(words, "serious", 30, 8, 16)
+    assert len(baseline) == 30
+    assert all(8 <= item.end - item.start <= 12 + 1e-6 for item in baseline)
+    assert all(left.end <= right.start + 1e-6 for left, right in zip(baseline, baseline[1:]))
+
+    resums = 0
+    original = selection._better_interval_selection
+
+    def counting_better(*args, **kwargs):
+        nonlocal resums
+        if kwargs.get("left_score") is None and args and args[0]:
+            resums += 1
+        if kwargs.get("right_score") is None and len(args) > 1 and args[1]:
+            resums += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(selection, "_better_interval_selection", counting_better)
+    again = select_music_candidates(words, "serious", 30, 8, 16)
+    assert again == baseline
+    assert resums == 0
 
 
 def test_music_candidates_never_return_subsecond_or_under_minimum_windows() -> None:

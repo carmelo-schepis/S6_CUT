@@ -326,13 +326,21 @@ def _music_units(lines: list[list[dict[str, Any]]], maximum: float) -> list[list
     return units
 
 
-def _better_interval_selection(left: tuple[Candidate, ...] | None, right: tuple[Candidate, ...] | None) -> tuple[Candidate, ...] | None:
+def _better_interval_selection(
+    left: tuple[Candidate, ...] | None,
+    right: tuple[Candidate, ...] | None,
+    *,
+    left_score: float | None = None,
+    right_score: float | None = None,
+) -> tuple[Candidate, ...] | None:
     if left is None:
         return right
     if right is None:
         return left
-    left_score = sum(item.score.total for item in left)
-    right_score = sum(item.score.total for item in right)
+    if left_score is None:
+        left_score = sum(item.score.total for item in left)
+    if right_score is None:
+        right_score = sum(item.score.total for item in right)
     if len(left) != len(right):
         return left if len(left) > len(right) else right
     if not math.isclose(left_score, right_score):
@@ -347,16 +355,34 @@ def _select_non_overlapping_candidates(candidates: list[Candidate], count: int) 
         return []
     ordered = sorted(candidates, key=lambda item: (item.end, item.start, -item.score.total))
     ends = [item.end for item in ordered]
-    states: list[dict[int, tuple[Candidate, ...]]] = [{0: ()}]
+    # Track running score totals so interval DP avoids re-summing selections on
+    # every comparison when long lyric transcripts expand the candidate pool.
+    states: list[dict[int, tuple[tuple[Candidate, ...], float]]] = [{0: ((), 0.0)}]
     for index, candidate in enumerate(ordered, start=1):
         previous = states[index - 1].copy()
         compatible = bisect_right(ends, candidate.start, 0, index - 1)
-        for size, selection in states[compatible].items():
+        for size, (selection, selection_score) in states[compatible].items():
             if size < count:
                 option = selection + (candidate,)
-                previous[size + 1] = _better_interval_selection(previous.get(size + 1), option) or option
+                option_score = selection_score + candidate.score.total
+                incumbent = previous.get(size + 1)
+                chosen = _better_interval_selection(
+                    incumbent[0] if incumbent else None,
+                    option,
+                    left_score=incumbent[1] if incumbent else None,
+                    right_score=option_score,
+                )
+                if chosen is None:
+                    continue
+                if chosen is option:
+                    stored_score = option_score
+                elif incumbent and chosen is incumbent[0]:
+                    stored_score = incumbent[1]
+                else:
+                    stored_score = sum(item.score.total for item in chosen)
+                previous[size + 1] = (chosen, stored_score)
         states.append(previous)
-    selected = states[-1].get(min(count, max(states[-1], default=0)), ())
+    selected = states[-1].get(min(count, max(states[-1], default=0)), ((), 0.0))[0]
     return sorted(selected, key=lambda item: (item.start, item.end))
 
 
