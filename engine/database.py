@@ -1072,10 +1072,18 @@ class Database:
         if origin:
             clauses.append("origin=?"); values.append(origin)
         if media_type:
-            clauses.append("lower(payload) LIKE ?"); values.append(f'%\"media_type\":\"{media_type.casefold()}%')
+            normalized_type = media_type.casefold()
+            if "/" in normalized_type:
+                clauses.append("lower(json_extract(payload, '$.mediaType'))=?")
+                values.append(normalized_type)
+            else:
+                escaped_type = normalized_type.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                clauses.append("(lower(json_extract(payload, '$.mediaType'))=? OR lower(json_extract(payload, '$.mediaType')) LIKE ? ESCAPE '\\')")
+                values.extend((normalized_type, f"{escaped_type}/%"))
         if search:
-            needle = search.casefold().replace("%", "\\%").replace("_", "\\_")
-            clauses.append("lower(payload) LIKE ? ESCAPE '\\\\'"); values.append(f"%{needle}%")
+            needle = search.casefold().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            clauses.append("lower(payload) LIKE ? ESCAPE '\\'")
+            values.append(f"%{needle}%")
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         offset = (page - 1) * page_size
         with self._connect() as db:

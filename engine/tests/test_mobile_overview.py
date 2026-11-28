@@ -27,7 +27,7 @@ from engine.database import Database
 from engine.jobs import JobManager
 from engine.library import LibraryRules
 from engine.media import download_youtube
-from engine.models import Clip, Job, ProcessingStep, Project, now_iso
+from engine.models import Asset, Clip, Job, ProcessingStep, Project, UNSORTED_LIBRARY_FOLDER_ID, now_iso
 from engine.providers import ProfileService
 from engine.security import MediaSigner, SecretVault
 from engine.video_downloads import VideoDownloadManager, VideoDownloadTask
@@ -364,3 +364,55 @@ def test_download_youtube_asks_for_a_poster_only_when_told_to(tmp_path, monkeypa
     assert with_poster.count("--write-thumbnail") == 1 and with_poster[-1] == url
     # Everything else about the command (format, clients, merge) is unchanged.
     assert [item for item in with_poster if item != "--write-thumbnail"] == plain
+
+
+def test_library_assets_page_supports_media_type_and_search_filters():
+    tmp_path = _tmpdir()
+    db, manager, _rules, settings = _cluster(tmp_path)
+    video = Asset(
+        id="asset-video", title="Launch Demo 100%_raw\\cut", media_type="video/mp4",
+        filename="launch.mp4", content_hash="h-video", blob_id="h-video",
+        origin="manual-import", folder_id=UNSORTED_LIBRARY_FOLDER_ID,
+        created_at="2026-10-18T10:00:00+00:00",
+    )
+    image = Asset(
+        id="asset-image", title="Launch Poster", media_type="image/png",
+        filename="poster.png", content_hash="h-image", blob_id="h-image",
+        origin="manual-import", folder_id=UNSORTED_LIBRARY_FOLDER_ID,
+        created_at="2026-10-18T11:00:00+00:00",
+    )
+    audio = Asset(
+        id="asset-audio", title="Theme Track", media_type="audio/mpeg",
+        filename="theme.mp3", content_hash="h-audio", blob_id="h-audio",
+        origin="manual-import", folder_id=UNSORTED_LIBRARY_FOLDER_ID,
+        created_at="2026-10-18T12:00:00+00:00",
+    )
+    for asset in (video, image, audio):
+        db.save_asset(asset)
+
+    with _Patched(db, manager, settings) as client:
+        video_res = client.get("/api/v1/library/assets/page", params={"media_type": "video"})
+        assert video_res.status_code == 200
+        assert [item["id"] for item in video_res.json()["items"]] == ["asset-video"]
+
+        exact_res = client.get("/api/v1/library/assets/page", params={"media_type": "image/png"})
+        assert exact_res.status_code == 200
+        assert [item["id"] for item in exact_res.json()["items"]] == ["asset-image"]
+
+        partial_prefix = client.get("/api/v1/library/assets/page", params={"media_type": "vid"})
+        assert partial_prefix.status_code == 200
+        assert partial_prefix.json()["items"] == []
+
+        search_res = client.get("/api/v1/library/assets/page", params={"search": "Launch", "page": 1, "page_size": 1})
+        assert search_res.status_code == 200
+        payload = search_res.json()
+        assert [item["id"] for item in payload["items"]] == ["asset-image"]
+        assert payload["hasMore"] is True
+
+        escaped_res = client.get("/api/v1/library/assets/page", params={"search": "100%_raw"})
+        assert escaped_res.status_code == 200
+        assert [item["id"] for item in escaped_res.json()["items"]] == ["asset-video"]
+
+        trailing_backslash = client.get("/api/v1/library/assets/page", params={"search": "cut\\"})
+        assert trailing_backslash.status_code == 200
+
