@@ -187,3 +187,28 @@ def test_repeated_unchanged_byte_counts_do_not_hide_a_stalled_download(tmp_path:
     """)
     with pytest.raises(DownloadStalled):
         _run_ytdlp_download([str(executable)], tmp_path, replace(settings, ytdlp_inactivity_timeout=.3))
+
+
+def test_fragment_restart_byte_regression_does_not_trigger_byte_stall(tmp_path: Path, settings: Settings) -> None:
+    """yt-dlp can report a lower downloaded_bytes after a fragment restart."""
+    executable = fake_downloader(
+        tmp_path,
+        """
+        print('download:downloading|900000|1000000|NA|500000|5|90.0%', flush=True)
+        progressed = 100000
+        for _ in range(40):
+            print(f'download:downloading|{progressed}|1000000|NA|200000|60|10.0%', flush=True)
+            progressed += 25000
+            time.sleep(.05)
+        Path('source-fixture.mp4').write_bytes(b'video')
+        """,
+    )
+    updates: list[dict[str, object]] = []
+    result = _run_ytdlp_download(
+        [str(executable)],
+        tmp_path,
+        replace(settings, ytdlp_connect_timeout=1, ytdlp_setup_timeout=5, ytdlp_inactivity_timeout=1),
+        progress_callback=updates.append,
+    )
+    assert result == [tmp_path / "source-fixture.mp4"]
+    assert not any(item.get("phase") == "stalled" for item in updates)

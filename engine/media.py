@@ -625,7 +625,7 @@ def _run_ytdlp_download(
                     if update:
                         if first_progress is None:
                             first_progress = now
-                        if update["downloaded_bytes"] > last_downloaded_bytes:
+                        if update["downloaded_bytes"] != last_downloaded_bytes:
                             last_byte_progress = now
                             last_downloaded_bytes = update["downloaded_bytes"]
                         _download_update(progress_callback, phase="downloading", **update)
