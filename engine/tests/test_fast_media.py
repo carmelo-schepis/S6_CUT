@@ -335,6 +335,12 @@ def test_plan_fast_windows_negative_input() -> None:
     assert plan_fast_windows(-1, 0, 10, 30, 0) == ([], "")
 
 
+def test_plan_fast_windows_rejects_non_finite_duration() -> None:
+    """Corrupt or missing probe duration must not crash the fast-cut planner."""
+    for duration in (float("nan"), float("inf"), float("-inf")):
+        assert plan_fast_windows(duration, 5, 10, 30, 0) == ([], "")
+
+
 def test_plan_fast_windows_warning_shape() -> None:
     """Warning must be a string (falsy when empty) for parent integration."""
     _, warning = plan_fast_windows(100.0, 4, 10, 30, 5)

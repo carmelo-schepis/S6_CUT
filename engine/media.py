@@ -3476,6 +3476,8 @@ def plan_fast_windows(
     list is shorter and the warning explains why.
     """
     warning = ""
+    if not all(math.isfinite(value) for value in (duration, min_duration, max_duration)):
+        return [], warning
     if duration <= 0 or count < 1:
         return [], warning
     min_duration = max(0.1, min_duration)
