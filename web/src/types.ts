@@ -334,6 +334,7 @@ export const projectSchema = z.object({
   latestJobId: z.string().nullable().optional(),
   libraryFolderId: z.string().optional(),
   sourceBlobId: z.string().nullable().optional(),
+  thumbnailUrl: z.string().nullable().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -421,6 +422,7 @@ export const libraryFolderSchema = z.object({
   description: z.string().default(""),
   color: z.string().nullable().optional(),
   archived: z.boolean().default(false),
+  deleted: z.boolean().optional(),
   system: z.boolean().default(false),
   createdAt: z.string(),
   updatedAt: z.string(),

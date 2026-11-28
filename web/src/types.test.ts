@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isOllamaOn, isOpenRouterOn, assetSchema, beatSchema, clipSchema, jobSchema, profileSchema, projectSchema, titleSuggestionResponseSchema, musicPresentationSchema, editingPresentationSchema, processingModeSchema, processingStepSchema, sourceProfileSchema, musicAudioModeSchema } from "./types";
+import { isOllamaOn, isOpenRouterOn, assetSchema, beatSchema, clipSchema, jobSchema, libraryFolderSchema, profileSchema, projectSchema, titleSuggestionResponseSchema, musicPresentationSchema, editingPresentationSchema, processingModeSchema, processingStepSchema, sourceProfileSchema, musicAudioModeSchema } from "./types";
 
 const score = {
   hook: 80, coherence: 82, ending: 79, energy: 70, practicalValue: 75,
@@ -205,6 +205,15 @@ describe("versioned UI contracts", () => {
     expect(clip.folderName).toBeUndefined();
     expect(clip.publishedAt).toBeUndefined();
     expect(clip.previewUrl).toBeUndefined();
+  });
+
+  it("mirrors Project.thumbnailUrl and LibraryFolder.deleted from engine JSON", () => {
+    const projectBase = { schemaVersion: 1, id: "p", name: "P", mode: "clip", style: "serious", state: "complete", sourceName: "s", sourceKind: "upload", requestedCount: 1, createdAt: "2026-01-01", updatedAt: "2026-01-01" };
+    expect(projectSchema.parse({ ...projectBase, thumbnailUrl: "/signed/poster.jpg?sig=1" }).thumbnailUrl).toBe("/signed/poster.jpg?sig=1");
+    expect(projectSchema.parse(projectBase).thumbnailUrl).toBeUndefined();
+    const folderBase = { id: "f1", name: "Folder", description: "", createdAt: "2026-01-01", updatedAt: "2026-01-01" };
+    expect(libraryFolderSchema.parse({ ...folderBase, deleted: true }).deleted).toBe(true);
+    expect(libraryFolderSchema.parse(folderBase).deleted).toBeUndefined();
   });
 
   it("parses SEO title fields while legacy payloads without them still parse", () => {
