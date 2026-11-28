@@ -760,3 +760,59 @@ def test_long_form_always_resolves_to_the_fast_pipeline() -> None:
     assert uses_fast_pipeline("fast", "short") is True
     assert uses_fast_pipeline("smart", "short") is False
     assert uses_fast_pipeline(None, None) is False
+
+
+@pytest.mark.parametrize(
+    ("filename", "content_type"),
+    [
+        ("vector.svg", "image/svg+xml"),
+        ("vector.svg", "image/svg+xml; charset=utf-8"),
+        ("vector.svg", "image/png"),
+        ("vector.svgz", "image/png"),
+        ("diagram.png", "image/svg+xml"),
+    ],
+)
+def test_library_upload_rejects_svg_media_types(filename: str, content_type: str) -> None:
+    upload = {"file": (filename, b'<svg xmlns="http://www.w3.org/2000/svg"></svg>', content_type)}
+    response = client.post("/api/v1/library/assets", files=upload, data={"title": "Vector graphic"})
+    assert response.status_code == 415
+
+
+def test_library_preview_sets_nosniff_and_forces_attachment_for_svg(monkeypatch, tmp_path: Path) -> None:
+    from engine import app as app_module
+    from engine.models import Asset
+
+    png_upload = {"file": ("card.png", b"small-png-bytes", "image/png")}
+    created = client.post("/api/v1/library/assets", files=png_upload, data={"title": "Card"})
+    assert created.status_code == 200
+    preview = client.get(created.json()["previewUrl"])
+    assert preview.status_code == 200
+    assert preview.headers.get("x-content-type-options") == "nosniff"
+    assert preview.headers["content-type"].startswith("image/png")
+
+    svg_blob = tmp_path / "blobs" / "legacy.svg"
+    svg_blob.parent.mkdir(parents=True)
+    svg_blob.write_bytes(b'<svg xmlns="http://www.w3.org/2000/svg"></svg>')
+    asset = Asset(
+        id="legacy-svg-asset",
+        title="Legacy vector",
+        filename="legacy.svg",
+        media_type="image/svg+xml",
+        content_hash="c" * 64,
+        blob_id="blob-legacy-svg",
+    )
+    monkeypatch.setattr(app_module, "settings", replace(settings, data_path=tmp_path))
+    monkeypatch.setattr(app_module.db, "get_asset", lambda asset_id: asset if asset_id == asset.id else None)
+    monkeypatch.setattr(app_module.db, "blob_relative_path", lambda blob_id: "blobs/legacy.svg" if blob_id == asset.blob_id else None)
+
+    expires, signature = signer.sign(f"library-asset:{asset.id}:{asset.blob_id}")
+    legacy_preview = client.get(
+        f"/api/v1/library/assets/{asset.id}/preview",
+        params={"expires": expires, "signature": signature},
+    )
+    assert legacy_preview.status_code == 200
+    assert legacy_preview.headers["content-type"] == "application/octet-stream"
+    assert "attachment" in legacy_preview.headers.get("content-disposition", "")
+    assert legacy_preview.headers.get("x-content-type-options") == "nosniff"
+    assert "sandbox" in legacy_preview.headers.get("content-security-policy", "")
+

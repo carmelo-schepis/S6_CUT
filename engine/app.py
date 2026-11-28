@@ -1780,6 +1780,24 @@ async def delete_library_assets(value: AssetDelete) -> AssetDeleteResult:
     return AssetDeleteResult(deleted=deleted, failed=failed)
 
 
+_BLOCKED_LIBRARY_MEDIA_SUBTYPES = {"svg+xml", "svg", "xml", "xhtml+xml", "html"}
+_BLOCKED_LIBRARY_SUFFIXES = {".svg", ".svgz", ".html", ".htm", ".xhtml", ".xml"}
+
+
+def _normalized_media_type(value: str | None) -> str:
+    return (value or "").split(";", 1)[0].strip().casefold()
+
+
+def _is_safe_library_media_type(media_type: str | None) -> bool:
+    normalized = _normalized_media_type(media_type)
+    if not normalized.startswith(("image/", "video/", "audio/")):
+        return False
+    subtype = normalized.split("/", 1)[1]
+    if not subtype or subtype in _BLOCKED_LIBRARY_MEDIA_SUBTYPES:
+        return False
+    return "+xml" not in subtype and "svg" not in subtype and "html" not in subtype and "script" not in subtype
+
+
 @app.post("/api/v1/library/assets", response_model=Asset)
 async def create_asset(
     file: Annotated[UploadFile, File()],
@@ -1796,21 +1814,22 @@ async def create_asset(
     if selected_folder.archived:
         raise HTTPException(409, "Archived folders cannot receive new assets")
     name = safe_filename(file.filename or "asset", "asset")
-    if not (file.content_type or "").startswith(("image/", "video/", "audio/")):
-        raise HTTPException(415, "Library files must be an image, video, or audio asset")
+    media_type = _normalized_media_type(file.content_type)
+    if not _is_safe_library_media_type(media_type) or Path(name).suffix.casefold() in _BLOCKED_LIBRARY_SUFFIXES:
+        raise HTTPException(415, "Library files must be a supported raster image, video, or audio asset")
     asset_id = str(uuid.uuid4())
     directory = settings.data_path / "temp" / "library-imports" / asset_id
     target = directory / name
     _, digest = await _stream_upload(file, target, min(settings.max_upload_bytes, 2_000_000_000))
     try:
         metadata = None
-        if (file.content_type or "").startswith("video/"):
+        if media_type.startswith("video/"):
             try:
                 metadata = await asyncio.to_thread(validate_video_upload, target, name, settings)
             except MediaError as exc:
                 raise HTTPException(422, str(exc)) from exc
         asset = await asyncio.to_thread(
-            rules.register_file, target, title=title, media_type=file.content_type or "application/octet-stream",
+            rules.register_file, target, title=title, media_type=media_type,
             origin="manual-import", folder_id=folder_id, metadata=metadata, content_hash=digest,
             filename=name, tags=_csv(tags), triggers=_csv(triggers), policy=policy, licence=licence,
         )
@@ -1837,7 +1856,7 @@ async def preview_clip_blob(blob_id: str, expires: int = Query(...), signature: 
         raise HTTPException(400, "Invalid media blob") from exc
     if not target.is_file():
         raise _not_found("Media blob")
-    return FileResponse(target, media_type="video/mp4")
+    return FileResponse(target, media_type="video/mp4", headers={"X-Content-Type-Options": "nosniff"})
 
 
 @app.get("/api/v1/library/assets/{asset_id}/preview")
@@ -1858,7 +1877,16 @@ async def preview_asset(asset_id: str, expires: int = Query(...), signature: str
         raise HTTPException(400, "Invalid media reference") from exc
     if not target.is_file():
         raise _not_found("Media blob")
-    return FileResponse(target, media_type=asset.media_type)
+    headers = {"X-Content-Type-Options": "nosniff"}
+    if not _is_safe_library_media_type(asset.media_type) or target.suffix.casefold() in _BLOCKED_LIBRARY_SUFFIXES:
+        headers["Content-Security-Policy"] = "default-src 'none'; sandbox"
+        return FileResponse(
+            target,
+            media_type="application/octet-stream",
+            filename=safe_filename(asset.filename, "asset"),
+            headers=headers,
+        )
+    return FileResponse(target, media_type=_normalized_media_type(asset.media_type), headers=headers)
 
 
 @app.get("/api/v1/library/assets/{asset_id}/thumbnail-url")
