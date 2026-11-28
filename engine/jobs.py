@@ -1165,6 +1165,8 @@ class JobManager:
                 return
             if job.state in {"complete", "cancelled_kept"}:
                 return
+            if job.state == "paused":
+                return
             # The retry override authorizes only the cancelled -> queued save.
             # Once a worker owns the queued checkpoint, later stops must win.
             if private.pop("retry_import", None):
