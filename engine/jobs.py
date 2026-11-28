@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import inspect
 import json
 import hashlib
@@ -3300,6 +3301,10 @@ class JobManager:
                 raise MediaError("This import is already queued or running")
             if not can_retry_import(job, private):
                 raise MediaError("This project has no YouTube import to retry")
+            if self.queue.full():
+                raise QueueFullError("The local render queue is full. Wait for an active job or raise S6_MAX_QUEUED_JOBS.")
+            previous_job = job.model_copy(deep=True)
+            previous_private = copy.deepcopy(private)
             private["retry_import"] = True
             retry_source = bool(private.get("url"))
             retry_stage = "source" if retry_source else "music_track"
@@ -3318,7 +3323,11 @@ class JobManager:
             # fast worker can observe the old cancelled checkpoint and _save() will
             # (correctly for ordinary work) restore cancelled_kept.
             self._save(job, private)
-            await self.enqueue(job.id)
+            try:
+                await self.enqueue(job.id)
+            except QueueFullError:
+                self._save(previous_job, previous_private)
+                raise
             return job
         if action == "switch-fast":
             with self._deletion_lock:

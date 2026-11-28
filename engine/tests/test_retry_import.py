@@ -17,7 +17,7 @@ import pytest
 from engine.app import settings
 from engine.config import Settings
 from engine.database import Database
-from engine.jobs import JobManager, can_retry_import
+from engine.jobs import JobManager, QueueFullError, can_retry_import
 from engine.library import LibraryRules
 from engine.media import MediaError
 from engine.models import Job, Project
@@ -73,3 +73,61 @@ def test_control_refuses_a_retry_the_workspace_would_not_offer(workspace: Path) 
     with pytest.raises(MediaError) as raised:
         asyncio.run(manager.control(job.id, "retry-import"))
     assert "no YouTube import" in str(raised.value)
+
+
+def test_retry_import_does_not_wedge_job_in_queued_when_queue_is_full(workspace: Path) -> None:
+    test_settings: Settings = replace(settings, data_path=workspace, max_queued_jobs=1)
+    db = Database(workspace / "s6-cut.sqlite3")
+    profiles = ProfileService(db, SecretVault(workspace / "secrets" / "instance.key"))
+    manager = JobManager(db, LibraryRules(db, workspace / "library"), profiles, test_settings)
+
+    db.save_project(Project(
+        id="p-stalled", name="Stalled YouTube", mode="clip", style="funny", state="stalled",
+        source_name="YouTube import", source_kind="youtube", requested_count=1, latest_job_id="j-stalled",
+    ))
+    job = _job("stalled").model_copy(update={"id": "j-stalled", "project_id": "p-stalled", "stage": "source", "error": "Download stalled"})
+    db.save_job(job, {"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"})
+
+    # Fill the render queue to capacity with another job.
+    db.save_job(_job("queued").model_copy(update={"id": "j-other", "project_id": "p-other"}), {})
+    asyncio.run(manager.enqueue("j-other"))
+    assert manager.queue.full()
+
+    with pytest.raises(QueueFullError):
+        asyncio.run(manager.control(job.id, "retry-import"))
+
+    saved_job = db.get_job(job.id)
+    saved_project = db.get_project("p-stalled")
+    saved_private = db.get_job_private(job.id)
+    assert saved_job is not None and saved_job.state == "stalled"
+    assert saved_job.error == "Download stalled"
+    assert saved_project is not None and saved_project.state == "stalled"
+    assert saved_private.get("retry_import") is None
+    assert can_retry_import(saved_job, saved_private) is True
+
+
+def test_retry_import_rolls_back_on_enqueue_race_queue_full(workspace: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    db, manager = _cluster(workspace)
+    db.save_project(Project(
+        id="p-stopped", name="Stopped YouTube", mode="clip", style="funny", state="cancelled_kept",
+        source_name="YouTube import", source_kind="youtube", requested_count=1, latest_job_id="j-stopped",
+    ))
+    job = _job("cancelled_kept").model_copy(update={"id": "j-stopped", "project_id": "p-stopped", "stage": "cancelled"})
+    db.save_job(job, {"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"})
+
+    async def fail_enqueue(_job_id: str, **_kwargs) -> None:
+        raise QueueFullError("The local render queue is full.")
+
+    monkeypatch.setattr(manager, "enqueue", fail_enqueue)
+
+    with pytest.raises(QueueFullError):
+        asyncio.run(manager.control(job.id, "retry-import"))
+
+    saved_job = db.get_job(job.id)
+    saved_project = db.get_project("p-stopped")
+    saved_private = db.get_job_private(job.id)
+    assert saved_job is not None and saved_job.state == "cancelled_kept"
+    assert saved_project is not None and saved_project.state == "cancelled_kept"
+    assert saved_private.get("retry_import") is None
+    assert can_retry_import(saved_job, saved_private) is True
+
