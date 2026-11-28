@@ -715,6 +715,33 @@ def test_pause_preserves_active_step(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     assert result.steps[0].status == "pending"
 
 
+def test_worker_skips_paused_queue_entry_without_starting_youtube_import(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A job paused while still queued must not be resurrected or failed by a worker."""
+    test_db, test_manager = _cluster(tmp_path)
+    _project(test_db, "pause-queue-proj")
+    job = Job(
+        id="pause-queue", project_id="pause-queue-proj", mode="clip", processing_mode="fast",
+        state="paused", stage="queued", stage_label="Paused after current safe checkpoint", progress=0,
+        style="educational", steps=test_manager._fast_steps(),
+    )
+    private = {
+        "url": "https://www.youtube.com/watch?v=fixture",
+        "processing_mode": "fast", "count": 3, "min_duration": 10, "max_duration": 30, "aspect_ratio": "9:16",
+    }
+    test_db.save_job(job, private)
+
+    def forbidden_download(*_args, **_kwargs):
+        raise AssertionError("YouTube import must not start while the job is paused")
+
+    monkeypatch.setattr("engine.jobs.download_youtube", forbidden_download)
+    test_manager._process("pause-queue")
+
+    saved = test_db.get_job("pause-queue")
+    assert saved is not None
+    assert saved.state == "paused"
+    assert all(step.status == "pending" for step in saved.steps)
+
+
 def test_stop_keep_skips_pending_and_preserves_terminal(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     test_db, test_manager = _cluster(tmp_path)
     _control_job(test_db, test_manager, "stop-keep-ck")
