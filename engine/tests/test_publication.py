@@ -614,6 +614,14 @@ def test_archive_title_fallback_and_traversal_are_safe() -> None:
     assert safe_archive_title("  Quarterly   review — 世界  ") == "Quarterly review — 世界"
 
 
+def test_archive_title_rejects_bidi_wrapped_reserved_names() -> None:
+    from engine.security import safe_archive_title
+
+    assert safe_archive_title("\u202dCON\u202c") == "s6-cut-videos"
+    assert safe_archive_title("\u202eCON") == "s6-cut-videos"
+    assert safe_archive_title("prn\u202a") == "s6-cut-videos"
+
+
 def test_relationship_validation_detects_orphaned_pairs(monkeypatch: pytest.MonkeyPatch) -> None:
     """The bidirectional validator reports broken Clip ↔ Asset pairs."""
     tmp_path = _tmpdir()
